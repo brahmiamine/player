@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Streamia" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowActionModeOverlay">true</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:colorAccent">@color/streamia_focus</item>
+        <item name="android:navigationBarColor">@color/streamia_night</item>
+        <item name="android:statusBarColor">@color/streamia_night</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+
+    <style name="Theme.Streamia.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/streamia_night</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_logo_mark</item>
+        <item name="windowSplashScreenIconBackgroundColor">@color/streamia_focus</item>
+        <item name="postSplashScreenTheme">@style/Theme.Streamia</item>
+    </style>
+</resources>
