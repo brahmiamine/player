@@ -16,10 +16,7 @@ import java.nio.charset.StandardCharsets
 /** Cache JSON écrit et lu en flux pour éviter de dupliquer un catalogue massif en mémoire. */
 class CatalogCache(context: Context) {
     private val filesDir = context.filesDir
-    private val legacyFiles = listOf(
-        File(filesDir, "catalog-v2.json"),
-        File(filesDir, "catalog-v1.json"),
-    )
+    private val legacyFiles = listOf(File(filesDir, "catalog-v2.json"), File(filesDir, "catalog-v1.json"))
 
     suspend fun save(profileId: String, catalog: Catalog) = withContext(Dispatchers.IO) {
         val file = fileFor(profileId)
@@ -52,6 +49,7 @@ class CatalogCache(context: Context) {
                     json.name("plot").nullableValue(entry.plot)
                     json.name("rating").nullableValue(entry.rating)
                     json.name("playable").value(entry.playable)
+                    json.name("added_at").nullableValue(entry.addedAtEpochSeconds)
                     json.endObject()
                 }
                 json.endArray()
@@ -88,13 +86,11 @@ class CatalogCache(context: Context) {
         }.getOrNull()
     }
 
-    suspend fun clear(profileId: String) = withContext(Dispatchers.IO) {
-        fileFor(profileId).delete()
-    }
+    suspend fun clear(profileId: String) = withContext(Dispatchers.IO) { fileFor(profileId).delete() }
 
     private fun fileFor(profileId: String): File {
         val safeId = profileId.replace(Regex("[^A-Za-z0-9._-]"), "_")
-        return File(filesDir, "catalog-v3-$safeId.json")
+        return File(filesDir, "catalog-v4-$safeId.json")
     }
 
     private fun readCategories(json: JsonReader, target: MutableList<MediaCategory>) {
@@ -133,6 +129,7 @@ class CatalogCache(context: Context) {
             var plot: String? = null
             var rating: Double? = null
             var playable: Boolean? = null
+            var addedAt: Long? = null
             json.beginObject()
             while (json.hasNext()) {
                 when (json.nextName()) {
@@ -148,6 +145,7 @@ class CatalogCache(context: Context) {
                     "plot" -> plot = json.nextNullableString()
                     "rating" -> rating = json.nextNullableDouble()
                     "playable" -> playable = json.nextBoolean()
+                    "added_at" -> addedAt = json.nextNullableLong()
                     else -> json.skipValue()
                 }
             }
@@ -166,26 +164,19 @@ class CatalogCache(context: Context) {
                     plot = plot,
                     rating = rating,
                     playable = playable ?: (type != MediaType.Series),
+                    addedAtEpochSeconds = addedAt,
                 )
             }
         }
         json.endArray()
     }
 
-    private fun String.toMediaType(): MediaType =
-        MediaType.entries.firstOrNull { it.name == this } ?: MediaType.Live
+    private fun String.toMediaType(): MediaType = MediaType.entries.firstOrNull { it.name == this } ?: MediaType.Live
 
-    private fun JsonWriter.nullableValue(value: String?) {
-        if (value == null) nullValue() else value(value)
-    }
-
-    private fun JsonWriter.nullableValue(value: Double?) {
-        if (value == null) nullValue() else value(value)
-    }
-
-    private fun JsonReader.nextNullableString(): String? =
-        if (peek() == JsonToken.NULL) { nextNull(); null } else nextString()
-
-    private fun JsonReader.nextNullableDouble(): Double? =
-        if (peek() == JsonToken.NULL) { nextNull(); null } else nextDouble()
+    private fun JsonWriter.nullableValue(value: String?) { if (value == null) nullValue() else value(value) }
+    private fun JsonWriter.nullableValue(value: Double?) { if (value == null) nullValue() else value(value) }
+    private fun JsonWriter.nullableValue(value: Long?) { if (value == null) nullValue() else value(value) }
+    private fun JsonReader.nextNullableString(): String? = if (peek() == JsonToken.NULL) { nextNull(); null } else nextString()
+    private fun JsonReader.nextNullableDouble(): Double? = if (peek() == JsonToken.NULL) { nextNull(); null } else nextDouble()
+    private fun JsonReader.nextNullableLong(): Long? = if (peek() == JsonToken.NULL) { nextNull(); null } else nextLong()
 }
