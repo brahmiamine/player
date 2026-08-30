@@ -47,9 +47,10 @@ class XtreamUrlBuilder(private val credentials: ServerCredentials) {
 
     companion object {
         fun normalizeServerUrl(raw: String): String {
-            val trimmed = raw.trim().trimEnd('/')
+            val trimmed = raw.trim()
             if (trimmed.isBlank()) return trimmed
-            return if (trimmed.contains("://")) trimmed else "https://$trimmed"
+            val withScheme = if (trimmed.contains("://")) trimmed else "https://$trimmed"
+            return if (withScheme.endsWith("://")) withScheme else withScheme.trimEnd('/')
         }
     }
 }
