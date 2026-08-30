@@ -1,0 +1,240 @@
+package fr.streamia.tv.ui
+
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.util.LruCache
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.tv.material3.MaterialTheme
+import androidx.tv.material3.Text
+import fr.streamia.tv.ui.theme.DeepSurface
+import fr.streamia.tv.ui.theme.FocusBlue
+import fr.streamia.tv.ui.theme.FocusBlueBright
+import fr.streamia.tv.ui.theme.Ink
+import fr.streamia.tv.ui.theme.MutedInk
+import fr.streamia.tv.ui.theme.Night
+import fr.streamia.tv.ui.theme.RaisedSurface
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.net.HttpURLConnection
+import java.net.URL
+
+@Composable
+fun FocusableSurface(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    selected: Boolean = false,
+    enabled: Boolean = true,
+    contentDescription: String? = null,
+    content: @Composable () -> Unit,
+) {
+    var focused by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(if (focused) 1.035f else 1f, label = "focus-scale")
+    val shape = RoundedCornerShape(12.dp)
+    val background = when {
+        focused -> FocusBlue
+        selected -> RaisedSurface
+        else -> DeepSurface
+    }
+    val border = when {
+        focused -> BorderStroke(3.dp, FocusBlueBright)
+        selected -> BorderStroke(2.dp, FocusBlue)
+        else -> BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
+    }
+
+    Box(
+        modifier = modifier
+            .scale(scale)
+            .clip(shape)
+            .background(background)
+            .border(border, shape)
+            .onFocusChanged { focused = it.isFocused }
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .focusable(enabled)
+            .then(
+                if (contentDescription == null) Modifier
+                else Modifier.semantics { this.contentDescription = contentDescription },
+            ),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        content()
+    }
+}
+
+@Composable
+fun TvTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    modifier: Modifier = Modifier,
+    visualTransformation: VisualTransformation = VisualTransformation.None,
+    supportingText: String? = null,
+) {
+    var focused by remember { mutableStateOf(false) }
+    val shape = RoundedCornerShape(10.dp)
+    androidx.compose.foundation.text.BasicTextField(
+        value = value,
+        onValueChange = onValueChange,
+        singleLine = true,
+        visualTransformation = visualTransformation,
+        textStyle = TextStyle(color = Ink, fontSize = 19.sp, fontWeight = FontWeight.Medium),
+        modifier = modifier
+            .height(if (supportingText == null) 68.dp else 88.dp)
+            .clip(shape)
+            .background(RaisedSurface)
+            .border(if (focused) 3.dp else 1.dp, if (focused) FocusBlueBright else Color.White.copy(0.12f), shape)
+            .onFocusChanged { focused = it.isFocused }
+            .padding(horizontal = 18.dp, vertical = 10.dp),
+        decorationBox = { input ->
+            androidx.compose.foundation.layout.Column(verticalArrangement = Arrangement.Center) {
+                Text(label, color = if (focused) FocusBlueBright else MutedInk, fontSize = 14.sp)
+                Spacer(Modifier.height(3.dp))
+                input()
+                if (supportingText != null) {
+                    Spacer(Modifier.height(2.dp))
+                    Text(supportingText, color = MutedInk, fontSize = 12.sp)
+                }
+            }
+        },
+    )
+}
+
+@Composable
+fun StreamiaLogo(modifier: Modifier = Modifier, compact: Boolean = false) {
+    Row(modifier, verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            Modifier
+                .size(if (compact) 42.dp else 58.dp)
+                .drawBehind {
+                    drawCircle(FocusBlue, radius = size.minDimension / 2)
+                    val w = size.width
+                    val h = size.height
+                    val path = androidx.compose.ui.graphics.Path().apply {
+                        moveTo(w * 0.40f, h * 0.29f)
+                        lineTo(w * 0.73f, h * 0.50f)
+                        lineTo(w * 0.40f, h * 0.71f)
+                        close()
+                    }
+                    drawPath(path, color = Ink)
+                    drawArc(
+                        color = FocusBlueBright,
+                        startAngle = -58f,
+                        sweepAngle = 116f,
+                        useCenter = false,
+                        topLeft = Offset(w * 0.10f, h * 0.10f),
+                        size = Size(w * 0.80f, h * 0.80f),
+                        style = Stroke(width = w * 0.055f),
+                    )
+                },
+        )
+        Spacer(Modifier.width(if (compact) 12.dp else 16.dp))
+        Text(
+            text = "Streamia TV",
+            style = if (compact) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineMedium,
+            color = Ink,
+            fontWeight = FontWeight.SemiBold,
+        )
+    }
+}
+
+@Composable
+fun ChannelLogo(url: String?, channelName: String, modifier: Modifier = Modifier) {
+    val bitmap by produceState<ImageBitmap?>(initialValue = LogoMemoryCache.get(url), key1 = url) {
+        if (url.isNullOrBlank() || value != null) return@produceState
+        value = withContext(Dispatchers.IO) { downloadLogo(url) }?.also { LogoMemoryCache.put(url, it) }
+    }
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(9.dp))
+            .background(Night.copy(alpha = 0.72f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap!!,
+                contentDescription = "Logo de $channelName",
+                modifier = Modifier.fillMaxSize().padding(8.dp),
+                contentScale = ContentScale.Fit,
+            )
+        } else {
+            Text(
+                text = channelName.trim().take(2).uppercase().ifBlank { "TV" },
+                color = FocusBlueBright,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+    }
+}
+
+private object LogoMemoryCache {
+    private val cache = LruCache<String, ImageBitmap>(96)
+    fun get(url: String?): ImageBitmap? = url?.let(cache::get)
+    fun put(url: String, bitmap: ImageBitmap) { cache.put(url, bitmap) }
+}
+
+private fun downloadLogo(url: String): ImageBitmap? = runCatching {
+    val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+        connectTimeout = 5_000
+        readTimeout = 7_000
+        useCaches = true
+        setRequestProperty("User-Agent", "Streamia-TV/1.0")
+    }
+    try {
+        if (connection.responseCode !in 200..299) return@runCatching null
+        val decoded = connection.inputStream.use { stream -> BitmapFactory.decodeStream(stream) }
+            ?: return@runCatching null
+        val largest = maxOf(decoded.width, decoded.height)
+        if (largest <= 320) decoded.asImageBitmap()
+        else {
+            val ratio = 320f / largest
+            Bitmap.createScaledBitmap(decoded, (decoded.width * ratio).toInt(), (decoded.height * ratio).toInt(), true)
+                .also { if (it !== decoded) decoded.recycle() }
+                .asImageBitmap()
+        }
+    } finally {
+        connection.disconnect()
+    }
+}.getOrNull()
