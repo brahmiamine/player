@@ -40,6 +40,12 @@ android {
         isCoreLibraryDesugaringEnabled = true
     }
 
+    lint {
+        // Media3 marque encore les API de sélection de pistes comme instables en 1.11.
+        // Leur usage est volontaire et isolé dans PlayerScreen.
+        disable += "UnsafeOptInUsageError"
+    }
+
     buildFeatures {
         compose = true
         buildConfig = true
