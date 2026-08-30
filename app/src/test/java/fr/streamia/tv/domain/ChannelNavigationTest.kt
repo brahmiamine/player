@@ -5,23 +5,23 @@ import org.junit.Test
 
 class ChannelNavigationTest {
     private val channels = listOf(
-        LiveChannel(1, "One", "news", null, 1),
-        LiveChannel(2, "Two", "news", null, 2),
-        LiveChannel(3, "Three", "news", null, 3),
+        MediaEntry(id = 1, name = "One", categoryId = "news", iconUrl = null, number = 1),
+        MediaEntry(id = 2, name = "Two", categoryId = "news", iconUrl = null, number = 2),
+        MediaEntry(id = 3, name = "Three", categoryId = "news", iconUrl = null, number = 3),
     )
 
     @Test
     fun `next channel wraps to the first channel`() {
-        assertEquals(1, channels.adjacentTo(currentId = 3, delta = 1)?.id)
+        assertEquals(1, channels.adjacentTo(currentKey = channels[2].key, delta = 1)?.id)
     }
 
     @Test
     fun `previous channel wraps to the last channel`() {
-        assertEquals(3, channels.adjacentTo(currentId = 1, delta = -1)?.id)
+        assertEquals(3, channels.adjacentTo(currentKey = channels[0].key, delta = -1)?.id)
     }
 
     @Test
     fun `empty list has no adjacent channel`() {
-        assertEquals(null, emptyList<LiveChannel>().adjacentTo(currentId = 1, delta = 1))
+        assertEquals(null, emptyList<MediaEntry>().adjacentTo(currentKey = "Live:1", delta = 1))
     }
 }

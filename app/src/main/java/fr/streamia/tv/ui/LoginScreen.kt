@@ -40,6 +40,7 @@ fun LoginScreen(
     busy: Boolean,
     message: String?,
     onSignIn: (String, String, String) -> Unit,
+    onImportM3u: () -> Unit,
     onDismissMessage: () -> Unit,
 ) {
     var server by remember { mutableStateOf("") }
@@ -74,7 +75,7 @@ fun LoginScreen(
                 )
                 Spacer(Modifier.height(18.dp))
                 Text(
-                    "Connectez votre propre abonnement compatible Xtream. Aucune chaîne ni aucun fournisseur n'est inclus.",
+                    "Connectez votre propre abonnement Xtream ou importez un fichier M3U. Aucun contenu n'est inclus.",
                     color = MutedInk,
                     fontSize = 19.sp,
                     lineHeight = 27.sp,
@@ -103,7 +104,7 @@ fun LoginScreen(
                     fontWeight = FontWeight.SemiBold,
                 )
                 Text(
-                    "Saisissez les trois informations fournies par votre service.",
+                    "Saisissez vos accès Xtream. Le protocole HTTPS est ajouté automatiquement s'il manque.",
                     color = MutedInk,
                     fontSize = 17.sp,
                 )
@@ -163,6 +164,25 @@ fun LoginScreen(
                         }
                     }
                 }
+                FocusableSurface(
+                    onClick = onImportM3u,
+                    enabled = !busy,
+                    contentDescription = "Importer un fichier M3U local",
+                    modifier = Modifier.fillMaxWidth().height(58.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 22.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("Importer un fichier M3U", color = Ink, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+                Text(
+                    "Le fichier est analysé localement. Les URL contenant vos accès ne sont ni journalisées ni publiées.",
+                    color = MutedInk,
+                    fontSize = 13.sp,
+                )
             }
         }
     }

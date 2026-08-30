@@ -48,7 +48,9 @@ import androidx.media3.ui.PlayerView
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import fr.streamia.tv.domain.Catalog
-import fr.streamia.tv.domain.LiveChannel
+import fr.streamia.tv.domain.EpgProgram
+import fr.streamia.tv.domain.MediaEntry
+import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.domain.ServerCredentials
 import fr.streamia.tv.domain.XtreamUrlBuilder
 import fr.streamia.tv.ui.theme.DeepSurface
@@ -64,10 +66,11 @@ import kotlinx.coroutines.yield
 fun PlayerScreen(
     catalog: Catalog,
     credentials: ServerCredentials,
-    channel: LiveChannel,
+    entry: MediaEntry,
+    epg: List<EpgProgram>,
     onBack: () -> Unit,
     onZap: (Int) -> Unit,
-    onChannelSelected: (LiveChannel) -> Unit,
+    onEntrySelected: (MediaEntry) -> Unit,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val player = remember { ExoPlayer.Builder(context).build().apply { playWhenReady = true } }
@@ -95,18 +98,18 @@ fun PlayerScreen(
         }
     }
 
-    LaunchedEffect(channel.id) {
+    LaunchedEffect(entry.key) {
         playbackError = null
         buffering = true
         hudVisible = true
-        val streamUrl = XtreamUrlBuilder(credentials).liveStream(channel.id)
+        val streamUrl = XtreamUrlBuilder(credentials).stream(entry)
         player.setMediaItem(MediaItem.fromUri(streamUrl))
         player.prepare()
         player.play()
     }
 
     LaunchedEffect(Unit) { rootFocus.requestFocus() }
-    LaunchedEffect(hudVisible, guideOpen, channel.id) {
+    LaunchedEffect(hudVisible, guideOpen, entry.key) {
         if (hudVisible && !guideOpen) {
             delay(4_000)
             hudVisible = false
@@ -128,15 +131,15 @@ fun PlayerScreen(
                 when (event.nativeKeyEvent.keyCode) {
                     AndroidKeyEvent.KEYCODE_CHANNEL_UP,
                     AndroidKeyEvent.KEYCODE_DPAD_UP,
-                    -> { onZap(-1); true }
+                    -> if (entry.type == MediaType.Live) { onZap(-1); true } else false
 
                     AndroidKeyEvent.KEYCODE_CHANNEL_DOWN,
                     AndroidKeyEvent.KEYCODE_DPAD_DOWN,
-                    -> { onZap(1); true }
+                    -> if (entry.type == MediaType.Live) { onZap(1); true } else false
 
                     AndroidKeyEvent.KEYCODE_DPAD_LEFT,
                     AndroidKeyEvent.KEYCODE_MENU,
-                    -> { guideOpen = true; hudVisible = true; true }
+                    -> if (entry.type == MediaType.Live) { guideOpen = true; hudVisible = true; true } else false
 
                     AndroidKeyEvent.KEYCODE_DPAD_CENTER,
                     AndroidKeyEvent.KEYCODE_ENTER,
@@ -169,7 +172,7 @@ fun PlayerScreen(
             Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("●", color = FocusBlueBright, fontSize = 34.sp)
                 Spacer(Modifier.height(12.dp))
-                Text("Chargement de ${channel.name}…", color = Ink, fontSize = 18.sp)
+                Text("Chargement de ${entry.displayName}…", color = Ink, fontSize = 18.sp)
             }
         }
 
@@ -185,21 +188,25 @@ fun PlayerScreen(
                 Column(Modifier.padding(horizontal = 24.dp)) {
                     Text(playbackError!!, color = MaterialTheme.colorScheme.error, fontSize = 18.sp)
                     Spacer(Modifier.height(7.dp))
-                    Text("OK pour réessayer · ↑ ↓ pour changer de chaîne", color = MutedInk, fontSize = 14.sp)
+                    Text(
+                        if (entry.type == MediaType.Live) "OK pour réessayer · ↑ ↓ pour changer de chaîne" else "OK pour réessayer",
+                        color = MutedInk,
+                        fontSize = 14.sp,
+                    )
                 }
             }
         }
 
         if (hudVisible && !guideOpen) {
-            PlayerHud(channel = channel, isPlaying = player.isPlaying, modifier = Modifier.fillMaxSize())
+            PlayerHud(entry = entry, epg = epg, isPlaying = player.isPlaying, modifier = Modifier.fillMaxSize())
         }
 
         if (guideOpen) {
             PlayerGuide(
                 catalog = catalog,
-                currentChannel = channel,
-                onChannelSelected = {
-                    onChannelSelected(it)
+                currentEntry = entry,
+                onEntrySelected = {
+                    onEntrySelected(it)
                     guideOpen = false
                     rootFocus.requestFocus()
                 },
@@ -213,7 +220,12 @@ fun PlayerScreen(
 }
 
 @Composable
-private fun PlayerHud(channel: LiveChannel, isPlaying: Boolean, modifier: Modifier = Modifier) {
+private fun PlayerHud(
+    entry: MediaEntry,
+    epg: List<EpgProgram>,
+    isPlaying: Boolean,
+    modifier: Modifier = Modifier,
+) {
     Box(modifier) {
         Row(
             Modifier
@@ -223,11 +235,16 @@ private fun PlayerHud(channel: LiveChannel, isPlaying: Boolean, modifier: Modifi
                 .padding(horizontal = 18.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            ChannelLogo(channel.iconUrl, channel.name, Modifier.size(58.dp))
+            ChannelLogo(entry.iconUrl, entry.displayName, Modifier.size(58.dp))
             Spacer(Modifier.width(15.dp))
             Column {
-                Text(channel.name, color = Ink, fontSize = 21.sp, fontWeight = FontWeight.Bold)
-                Text("Chaîne ${channel.number}", color = FocusBlueBright, fontSize = 14.sp)
+                Text(entry.displayName, color = Ink, fontSize = 21.sp, fontWeight = FontWeight.Bold)
+                val subtitle = if (entry.type == MediaType.Live) {
+                    epg.firstOrNull()?.title ?: "Chaîne ${entry.number}"
+                } else {
+                    entry.type.displayName
+                }
+                Text(subtitle, color = FocusBlueBright, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
 
@@ -241,10 +258,12 @@ private fun PlayerHud(channel: LiveChannel, isPlaying: Boolean, modifier: Modifi
         ) {
             Text(if (isPlaying) "⏸ Lecture" else "▶ Pause", color = Ink, fontSize = 15.sp)
             Spacer(Modifier.width(28.dp))
-            Text("↑ ↓ Changer de chaîne", color = MutedInk, fontSize = 15.sp)
-            Spacer(Modifier.width(28.dp))
-            Text("← Guide", color = MutedInk, fontSize = 15.sp)
-            Spacer(Modifier.width(28.dp))
+            if (entry.type == MediaType.Live) {
+                Text("↑ ↓ Changer de chaîne", color = MutedInk, fontSize = 15.sp)
+                Spacer(Modifier.width(28.dp))
+                Text("← Guide", color = MutedInk, fontSize = 15.sp)
+                Spacer(Modifier.width(28.dp))
+            }
             Text("Retour Quitter", color = MutedInk, fontSize = 15.sp)
         }
     }
@@ -253,13 +272,17 @@ private fun PlayerHud(channel: LiveChannel, isPlaying: Boolean, modifier: Modifi
 @Composable
 private fun PlayerGuide(
     catalog: Catalog,
-    currentChannel: LiveChannel,
-    onChannelSelected: (LiveChannel) -> Unit,
+    currentEntry: MediaEntry,
+    onEntrySelected: (MediaEntry) -> Unit,
     onClose: () -> Unit,
 ) {
-    val categories = remember(catalog) { listOf(Catalog.AllCategory) + catalog.categories }
-    var selectedCategoryId by remember(currentChannel.categoryId) { mutableStateOf(currentChannel.categoryId) }
-    val channels = remember(catalog, selectedCategoryId) { catalog.channelsIn(selectedCategoryId) }
+    val categories = remember(catalog) {
+        listOf(Catalog.allCategory(MediaType.Live)) + catalog.categoriesFor(MediaType.Live)
+    }
+    var selectedCategoryId by remember(currentEntry.categoryId) { mutableStateOf(currentEntry.categoryId) }
+    val channels = remember(catalog, selectedCategoryId) {
+        catalog.entriesIn(MediaType.Live, selectedCategoryId)
+    }
     val firstFocus = remember(selectedCategoryId) { FocusRequester() }
 
     LaunchedEffect(selectedCategoryId, channels.size) {
@@ -280,7 +303,7 @@ private fun PlayerGuide(
             Text("Catégories", color = Ink, fontSize = 23.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(16.dp))
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(categories, key = { it.id }) { category ->
+                items(categories, key = { it.key }) { category ->
                     FocusableSurface(
                         onClick = { selectedCategoryId = category.id },
                         selected = selectedCategoryId == category.id,
@@ -310,14 +333,14 @@ private fun PlayerGuide(
             }
             Spacer(Modifier.height(16.dp))
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(channels, key = { it.id }) { guideChannel ->
+                items(channels, key = { it.key }) { guideChannel ->
                     FocusableSurface(
-                        onClick = { onChannelSelected(guideChannel) },
-                        selected = guideChannel.id == currentChannel.id,
+                        onClick = { onEntrySelected(guideChannel) },
+                        selected = guideChannel.key == currentEntry.key,
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(70.dp)
-                            .then(if (guideChannel.id == channels.firstOrNull()?.id) Modifier.focusRequester(firstFocus) else Modifier),
+                            .then(if (guideChannel.key == channels.firstOrNull()?.key) Modifier.focusRequester(firstFocus) else Modifier),
                     ) {
                         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                             ChannelLogo(guideChannel.iconUrl, guideChannel.name, Modifier.size(48.dp))
@@ -326,7 +349,7 @@ private fun PlayerGuide(
                                 guideChannel.name,
                                 color = Ink,
                                 fontSize = 16.sp,
-                                fontWeight = if (guideChannel.id == currentChannel.id) FontWeight.Bold else FontWeight.Medium,
+                                fontWeight = if (guideChannel.key == currentEntry.key) FontWeight.Bold else FontWeight.Medium,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.weight(1f),
