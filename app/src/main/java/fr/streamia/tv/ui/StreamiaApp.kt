@@ -8,8 +8,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -24,18 +22,19 @@ import fr.streamia.tv.ui.theme.StreamiaTheme
 @Composable
 fun StreamiaApp(viewModel: StreamiaViewModel) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    val m3uPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) viewModel.importM3u(uri)
-    }
 
     StreamiaTheme {
         when {
             state.booting -> BootScreen()
             state.screen is StreamiaScreen.Login -> LoginScreen(
+                profiles = state.profiles,
                 busy = state.busy,
                 message = state.message,
+                onOpenProfile = viewModel::openProfile,
                 onSignIn = viewModel::signIn,
-                onImportM3u = { m3uPicker.launch(arrayOf("audio/x-mpegurl", "application/x-mpegURL", "text/plain", "*/*")) },
+                onImportM3u = viewModel::importM3u,
+                onRenameProfile = viewModel::renameProfile,
+                onDeleteProfile = viewModel::deleteProfile,
                 onDismissMessage = viewModel::dismissMessage,
             )
             state.screen is StreamiaScreen.Browser && state.catalog != null -> BrowserScreen(
