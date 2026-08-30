@@ -19,6 +19,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -49,14 +51,14 @@ fun SeriesScreen(
     details: SeriesDetails?,
     busy: Boolean,
     message: String?,
+    favorite: Boolean,
+    onToggleFavorite: () -> Unit,
     onEpisodeSelected: (SeriesEpisode) -> Unit,
     onBack: () -> Unit,
     onRetry: () -> Unit,
 ) {
     BackHandler(onBack = onBack)
-    var selectedSeason by remember(series.key, details) {
-        mutableIntStateOf(details?.seasons?.firstOrNull() ?: 1)
-    }
+    var selectedSeason by remember(series.key, details) { mutableIntStateOf(details?.seasons?.firstOrNull() ?: 1) }
     val episodes = remember(details, selectedSeason) { details?.episodesIn(selectedSeason).orEmpty() }
     val firstFocus = remember(selectedSeason) { FocusRequester() }
 
@@ -67,28 +69,48 @@ fun SeriesScreen(
         }
     }
 
-    Row(Modifier.fillMaxSize().background(Night).padding(34.dp)) {
-        Column(Modifier.width(360.dp).fillMaxHeight()) {
-            FocusableSurface(onClick = onBack, modifier = Modifier.width(130.dp).height(48.dp)) {
-                Text("← Retour", color = Ink, fontSize = 15.sp, modifier = Modifier.padding(horizontal = 15.dp))
+    Row(Modifier.fillMaxSize().background(Night).padding(30.dp)) {
+        Column(Modifier.width(365.dp).fillMaxHeight().verticalScroll(rememberScrollState())) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                FocusableSurface(onClick = onBack, modifier = Modifier.weight(1f).height(48.dp)) {
+                    Text("← Retour", color = Ink, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 15.dp))
+                }
+                FocusableSurface(onClick = onToggleFavorite, selected = favorite, modifier = Modifier.width(68.dp).height(48.dp)) {
+                    Text(if (favorite) "★" else "☆", color = FocusBlueBright, fontSize = 23.sp, modifier = Modifier.padding(start = 20.dp))
+                }
             }
-            Spacer(Modifier.height(24.dp))
-            ChannelLogo(series.iconUrl, series.name, Modifier.size(220.dp))
-            Spacer(Modifier.height(18.dp))
-            Text(series.name, color = Ink, fontSize = 28.sp, lineHeight = 34.sp, fontWeight = FontWeight.Bold)
-            if (series.rating != null) {
+            Spacer(Modifier.height(20.dp))
+            ChannelLogo(details?.details?.posterUrl ?: series.iconUrl, series.name, Modifier.size(230.dp))
+            Spacer(Modifier.height(16.dp))
+            Text(series.name, color = Ink, fontSize = 27.sp, lineHeight = 33.sp, fontWeight = FontWeight.Bold)
+            val info = details?.details
+            val meta = listOfNotNull(
+                info?.rating?.let { "★ ${"%.1f".format(it)}" } ?: series.rating?.let { "★ ${"%.1f".format(it)}" },
+                info?.releaseDate,
+                info?.genre,
+                details?.seasons?.size?.let { "$it saisons" },
+                details?.episodes?.size?.let { "$it épisodes" },
+            )
+            if (meta.isNotEmpty()) {
                 Spacer(Modifier.height(8.dp))
-                Text("★ ${"%.1f".format(series.rating)}", color = FocusBlueBright, fontSize = 16.sp)
+                Text(meta.joinToString(" · "), color = FocusBlueBright, fontSize = 13.sp, lineHeight = 19.sp)
             }
-            if (!series.plot.isNullOrBlank()) {
-                Spacer(Modifier.height(14.dp))
-                Text(series.plot, color = MutedInk, fontSize = 15.sp, lineHeight = 21.sp, maxLines = 8, overflow = TextOverflow.Ellipsis)
+            val plot = info?.plot ?: series.plot
+            if (!plot.isNullOrBlank()) {
+                Spacer(Modifier.height(12.dp))
+                Text(plot, color = MutedInk, fontSize = 14.sp, lineHeight = 20.sp, maxLines = 12, overflow = TextOverflow.Ellipsis)
             }
+            SeriesInfoLine("Réalisateur", info?.director)
+            SeriesInfoLine("Distribution", info?.cast)
+            SeriesInfoLine("Pays", info?.country)
+            SeriesInfoLine("Bande-annonce", info?.youtubeTrailer)
+            Spacer(Modifier.height(28.dp))
         }
-        Spacer(Modifier.width(34.dp))
+        Spacer(Modifier.width(28.dp))
+
         when {
             busy -> Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.Center) {
-                Text("Chargement des saisons et épisodes…", color = MutedInk, fontSize = 20.sp)
+                Text("Chargement des informations, saisons et épisodes…", color = MutedInk, fontSize = 19.sp)
             }
             details == null -> Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.Center) {
                 FocusableSurface(onClick = onRetry, modifier = Modifier.width(520.dp).height(110.dp)) {
@@ -102,67 +124,53 @@ fun SeriesScreen(
             details.episodes.isEmpty() -> Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.Center) {
                 Text("Aucun épisode fourni par ce serveur.", color = MutedInk, fontSize = 20.sp)
             }
-            else -> Column(Modifier.weight(1f).fillMaxHeight()) {
-                Text("Saisons", color = Ink, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(12.dp))
-                LazyColumn(
-                    modifier = Modifier.width(190.dp).fillMaxHeight(),
-                    verticalArrangement = Arrangement.spacedBy(9.dp),
-                ) {
-                    items(details.seasons, key = { it }) { season ->
-                        FocusableSurface(
-                            onClick = { selectedSeason = season },
-                            selected = selectedSeason == season,
-                            modifier = Modifier.fillMaxWidth().height(56.dp),
-                        ) {
-                            Text("Saison $season", color = Ink, fontSize = 16.sp, modifier = Modifier.padding(horizontal = 16.dp))
+            else -> {
+                Column(Modifier.width(185.dp).fillMaxHeight()) {
+                    Text("Saisons", color = Ink, fontSize = 21.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(11.dp))
+                    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(details.seasons, key = { it }) { season ->
+                            FocusableSurface(
+                                onClick = { selectedSeason = season },
+                                selected = selectedSeason == season,
+                                modifier = Modifier.fillMaxWidth().height(54.dp),
+                            ) {
+                                Text("Saison $season", color = Ink, fontSize = 15.sp, modifier = Modifier.padding(horizontal = 15.dp))
+                            }
                         }
                     }
                 }
-            }
-        }
-        if (details != null && details.episodes.isNotEmpty()) {
-            Spacer(Modifier.width(22.dp))
-            Column(Modifier.weight(1f).fillMaxHeight()) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
-                    Text("Saison $selectedSeason", color = Ink, fontSize = 25.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.width(12.dp))
-                    Text("${episodes.size} épisodes", color = MutedInk, fontSize = 15.sp)
-                }
-                Spacer(Modifier.height(14.dp))
-                LazyVerticalGrid(
-                    columns = GridCells.Adaptive(280.dp),
-                    horizontalArrangement = Arrangement.spacedBy(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp),
-                ) {
-                    items(episodes, key = { it.id }) { episode ->
-                        FocusableSurface(
-                            onClick = { onEpisodeSelected(episode) },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(120.dp)
-                                .then(if (episode.id == episodes.first().id) Modifier.focusRequester(firstFocus) else Modifier),
-                        ) {
-                            Column(Modifier.padding(15.dp)) {
-                                Text(
-                                    "Épisode ${episode.number}",
-                                    color = FocusBlueBright,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold,
-                                )
-                                Spacer(Modifier.height(5.dp))
-                                Text(
-                                    episode.title,
-                                    color = Ink,
-                                    fontSize = 17.sp,
-                                    lineHeight = 21.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                if (!episode.duration.isNullOrBlank()) {
+                Spacer(Modifier.width(20.dp))
+                Column(Modifier.weight(1f).fillMaxHeight()) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
+                        Text("Saison $selectedSeason", color = Ink, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.width(12.dp))
+                        Text("${episodes.size} épisodes", color = MutedInk, fontSize = 14.sp)
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    LazyVerticalGrid(
+                        columns = GridCells.Adaptive(285.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        items(episodes, key = { it.id }) { episode ->
+                            FocusableSurface(
+                                onClick = { onEpisodeSelected(episode) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(128.dp)
+                                    .then(if (episode.id == episodes.first().id) Modifier.focusRequester(firstFocus) else Modifier),
+                            ) {
+                                Column(Modifier.padding(14.dp)) {
+                                    Row(Modifier.fillMaxWidth()) {
+                                        Text("S${episode.season.toString().padStart(2, '0')}E${episode.number.toString().padStart(2, '0')}", color = FocusBlueBright, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                        Spacer(Modifier.weight(1f))
+                                        episode.rating?.let { Text("★ ${"%.1f".format(it)}", color = FocusBlueBright, fontSize = 11.sp) }
+                                    }
                                     Spacer(Modifier.height(5.dp))
-                                    Text(episode.duration, color = MutedInk, fontSize = 12.sp)
+                                    Text(episode.title, color = Ink, fontSize = 16.sp, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                    Spacer(Modifier.height(5.dp))
+                                    Text(listOfNotNull(episode.duration, episode.releaseDate).joinToString(" · "), color = MutedInk, fontSize = 11.sp, maxLines = 1)
                                 }
                             }
                         }
@@ -171,4 +179,12 @@ fun SeriesScreen(
             }
         }
     }
+}
+
+@Composable
+private fun SeriesInfoLine(label: String, value: String?) {
+    if (value.isNullOrBlank()) return
+    Spacer(Modifier.height(8.dp))
+    Text(label, color = MutedInk, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+    Text(value, color = Ink, fontSize = 13.sp, lineHeight = 18.sp, maxLines = 4, overflow = TextOverflow.Ellipsis)
 }
