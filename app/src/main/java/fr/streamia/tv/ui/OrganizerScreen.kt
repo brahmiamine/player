@@ -1,0 +1,252 @@
+package fr.streamia.tv.ui
+
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.tv.material3.Text
+import fr.streamia.tv.domain.Catalog
+import fr.streamia.tv.domain.MediaCategory
+import fr.streamia.tv.domain.MediaEntry
+import fr.streamia.tv.domain.MediaType
+import fr.streamia.tv.ui.theme.FocusBlueBright
+import fr.streamia.tv.ui.theme.Ink
+import fr.streamia.tv.ui.theme.MutedInk
+import fr.streamia.tv.ui.theme.Night
+
+@Composable
+fun OrganizerScreen(
+    catalog: Catalog,
+    onCategoryOrderChanged: (MediaType, List<String>) -> Unit,
+    onMoveEntries: (Set<String>, String) -> Unit,
+    onResetMoves: (Set<String>) -> Unit,
+    onBack: () -> Unit,
+) {
+    BackHandler(onBack = onBack)
+    var type by remember { mutableStateOf(MediaType.Live) }
+    var sourceCategoryId by remember(type) { mutableStateOf(catalog.categoriesFor(type).firstOrNull()?.id) }
+    var selectedCategoryKeys by remember(type) { mutableStateOf(emptySet<String>()) }
+    var selectedEntryKeys by remember(type, sourceCategoryId) { mutableStateOf(emptySet<String>()) }
+    var destinationCategoryId by remember(type) {
+        mutableStateOf(catalog.categoriesFor(type).drop(1).firstOrNull()?.id ?: catalog.categoriesFor(type).firstOrNull()?.id)
+    }
+    val categories = catalog.categoriesFor(type)
+    val sourceEntries = sourceCategoryId?.let { catalog.entriesIn(type, it) }.orEmpty()
+
+    Column(Modifier.fillMaxSize().background(Night).padding(24.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            FocusableSurface(onClick = onBack, modifier = Modifier.width(120.dp).height(50.dp)) {
+                Text("← Retour", color = Ink, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 14.dp))
+            }
+            Spacer(Modifier.width(16.dp))
+            Text("Organiser le catalogue", color = Ink, fontSize = 27.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.weight(1f))
+            MediaType.entries.forEach { mediaType ->
+                FocusableSurface(
+                    onClick = {
+                        type = mediaType
+                        sourceCategoryId = catalog.categoriesFor(mediaType).firstOrNull()?.id
+                        destinationCategoryId = catalog.categoriesFor(mediaType).drop(1).firstOrNull()?.id
+                        selectedCategoryKeys = emptySet()
+                        selectedEntryKeys = emptySet()
+                    },
+                    selected = type == mediaType,
+                    modifier = Modifier.width(115.dp).height(48.dp),
+                ) {
+                    Text(mediaType.displayName, color = Ink, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 12.dp))
+                }
+                Spacer(Modifier.width(7.dp))
+            }
+        }
+        Spacer(Modifier.height(14.dp))
+        Text(
+            "Sélection multiple : cochez plusieurs catégories pour les déplacer ensemble, ou plusieurs contenus pour les affecter à une autre catégorie.",
+            color = MutedInk,
+            fontSize = 13.sp,
+        )
+        Spacer(Modifier.height(14.dp))
+
+        Row(Modifier.fillMaxSize()) {
+            Column(Modifier.width(420.dp).fillMaxHeight()) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Catégories (${categories.size})", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.weight(1f))
+                    FocusableSurface(
+                        onClick = {
+                            val ordered = moveSelected(categories, selectedCategoryKeys, -1)
+                            onCategoryOrderChanged(type, ordered.map(MediaCategory::key))
+                        },
+                        enabled = selectedCategoryKeys.isNotEmpty(),
+                        modifier = Modifier.width(82.dp).height(44.dp),
+                    ) { Text("↑", color = Ink, fontSize = 19.sp, modifier = Modifier.padding(start = 31.dp)) }
+                    Spacer(Modifier.width(6.dp))
+                    FocusableSurface(
+                        onClick = {
+                            val ordered = moveSelected(categories, selectedCategoryKeys, 1)
+                            onCategoryOrderChanged(type, ordered.map(MediaCategory::key))
+                        },
+                        enabled = selectedCategoryKeys.isNotEmpty(),
+                        modifier = Modifier.width(82.dp).height(44.dp),
+                    ) { Text("↓", color = Ink, fontSize = 19.sp, modifier = Modifier.padding(start = 31.dp)) }
+                }
+                Spacer(Modifier.height(9.dp))
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    items(categories, key = MediaCategory::key) { category ->
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                            FocusableSurface(
+                                onClick = {
+                                    sourceCategoryId = category.id
+                                    selectedEntryKeys = emptySet()
+                                    if (destinationCategoryId == category.id) {
+                                        destinationCategoryId = categories.firstOrNull { it.id != category.id }?.id
+                                    }
+                                },
+                                selected = sourceCategoryId == category.id,
+                                modifier = Modifier.weight(1f).height(58.dp),
+                            ) {
+                                Column(Modifier.padding(horizontal = 13.dp)) {
+                                    Text(category.name, color = Ink, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text("${catalog.entriesIn(type, category.id).size} éléments", color = MutedInk, fontSize = 11.sp)
+                                }
+                            }
+                            FocusableSurface(
+                                onClick = {
+                                    selectedCategoryKeys = selectedCategoryKeys.toMutableSet().apply {
+                                        if (!add(category.key)) remove(category.key)
+                                    }
+                                },
+                                selected = category.key in selectedCategoryKeys,
+                                modifier = Modifier.width(58.dp).height(58.dp),
+                            ) {
+                                Text(if (category.key in selectedCategoryKeys) "☑" else "☐", color = FocusBlueBright, fontSize = 18.sp, modifier = Modifier.padding(start = 18.dp))
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.width(18.dp))
+            Column(Modifier.weight(1f).fillMaxHeight()) {
+                val sourceName = categories.firstOrNull { it.id == sourceCategoryId }?.name ?: "Catégorie"
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(sourceName, color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text("${selectedEntryKeys.size} sélectionné(s)", color = FocusBlueBright, fontSize = 13.sp)
+                }
+                Spacer(Modifier.height(9.dp))
+                LazyColumn(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    items(sourceEntries, key = MediaEntry::key) { entry ->
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                            FocusableSurface(
+                                onClick = {
+                                    selectedEntryKeys = selectedEntryKeys.toMutableSet().apply {
+                                        if (!add(entry.key)) remove(entry.key)
+                                    }
+                                },
+                                selected = entry.key in selectedEntryKeys,
+                                modifier = Modifier.weight(1f).height(62.dp),
+                            ) {
+                                Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    ChannelLogo(entry.iconUrl, entry.displayName, Modifier.size(42.dp))
+                                    Spacer(Modifier.width(10.dp))
+                                    Text(entry.displayName, color = Ink, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                                    Text(if (entry.key in selectedEntryKeys) "☑" else "☐", color = FocusBlueBright, fontSize = 16.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                val destination = categories.firstOrNull { it.id == destinationCategoryId }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    FocusableSurface(
+                        onClick = { destinationCategoryId = previousDestination(categories, destinationCategoryId, sourceCategoryId) },
+                        modifier = Modifier.width(62.dp).height(52.dp),
+                    ) { Text("←", color = Ink, fontSize = 18.sp, modifier = Modifier.padding(start = 22.dp)) }
+                    Column(Modifier.weight(1f)) {
+                        Text("Destination", color = MutedInk, fontSize = 11.sp)
+                        Text(destination?.name ?: "Choisir une catégorie", color = Ink, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    FocusableSurface(
+                        onClick = { destinationCategoryId = nextDestination(categories, destinationCategoryId, sourceCategoryId) },
+                        modifier = Modifier.width(62.dp).height(52.dp),
+                    ) { Text("→", color = Ink, fontSize = 18.sp, modifier = Modifier.padding(start = 22.dp)) }
+                    FocusableSurface(
+                        onClick = {
+                            destinationCategoryId?.let { onMoveEntries(selectedEntryKeys, it) }
+                            selectedEntryKeys = emptySet()
+                        },
+                        enabled = selectedEntryKeys.isNotEmpty() && destinationCategoryId != null,
+                        modifier = Modifier.width(190.dp).height(52.dp),
+                    ) {
+                        Text("Déplacer la sélection", color = Ink, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 14.dp))
+                    }
+                    FocusableSurface(
+                        onClick = { onResetMoves(selectedEntryKeys); selectedEntryKeys = emptySet() },
+                        enabled = selectedEntryKeys.isNotEmpty(),
+                        modifier = Modifier.width(150.dp).height(52.dp),
+                    ) {
+                        Text("Réinitialiser", color = Ink, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 14.dp))
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun moveSelected(categories: List<MediaCategory>, selected: Set<String>, delta: Int): List<MediaCategory> {
+    val result = categories.toMutableList()
+    if (delta < 0) {
+        for (index in 1 until result.size) {
+            if (result[index].key in selected && result[index - 1].key !in selected) {
+                val temp = result[index - 1]
+                result[index - 1] = result[index]
+                result[index] = temp
+            }
+        }
+    } else {
+        for (index in result.lastIndex - 1 downTo 0) {
+            if (result[index].key in selected && result[index + 1].key !in selected) {
+                val temp = result[index + 1]
+                result[index + 1] = result[index]
+                result[index] = temp
+            }
+        }
+    }
+    return result
+}
+
+private fun previousDestination(categories: List<MediaCategory>, current: String?, source: String?): String? {
+    val eligible = categories.filter { it.id != source }
+    if (eligible.isEmpty()) return null
+    val index = eligible.indexOfFirst { it.id == current }.takeIf { it >= 0 } ?: 0
+    return eligible[Math.floorMod(index - 1, eligible.size)].id
+}
+
+private fun nextDestination(categories: List<MediaCategory>, current: String?, source: String?): String? {
+    val eligible = categories.filter { it.id != source }
+    if (eligible.isEmpty()) return null
+    val index = eligible.indexOfFirst { it.id == current }.takeIf { it >= 0 } ?: -1
+    return eligible[Math.floorMod(index + 1, eligible.size)].id
+}

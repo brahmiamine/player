@@ -5,7 +5,10 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
 import fr.streamia.tv.domain.Catalog
+import fr.streamia.tv.domain.EpgGuide
 import fr.streamia.tv.domain.EpgProgram
+import fr.streamia.tv.domain.MediaCategory
+import fr.streamia.tv.domain.MediaDetails
 import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.domain.SeriesDetails
@@ -13,7 +16,11 @@ import fr.streamia.tv.domain.ServerCredentials
 import fr.streamia.tv.domain.XtreamUrlBuilder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.IOException
 import java.io.InputStreamReader
+import java.net.HttpURLConnection
+import java.net.URL
 import java.nio.charset.StandardCharsets
 import java.util.UUID
 
@@ -23,13 +30,17 @@ class XtreamRepository(context: Context) {
     private val cache = CatalogCache(context)
     private val credentialsStore = CredentialsStore(context)
     private val playlistStore = PlaylistStore(context)
+    private val libraryStore = UserLibraryStore(context)
+    private val xmlTvRepository = XmlTvRepository()
     private val m3uParser = M3uParser()
 
     fun profiles(): List<PlaylistProfile> = playlistStore.loadAll()
+    fun profile(profileId: String): PlaylistProfile? = playlistStore.find(profileId)
+    fun library(profileId: String): UserLibrarySnapshot = libraryStore.snapshot(profileId)
+    fun customizedCatalog(profileId: String, catalog: Catalog): Catalog = libraryStore.applyToCatalog(profileId, catalog)
 
     suspend fun openProfile(profileId: String): LoadedCatalog {
-        val profile = playlistStore.find(profileId)
-            ?: throw XtreamException("Cette liste n'existe plus.")
+        val profile = playlistStore.find(profileId) ?: throw XtreamException("Cette liste n'existe plus.")
         return when (profile.kind) {
             PlaylistKind.Xtream -> openXtreamProfile(profile)
             PlaylistKind.M3u -> openM3uProfile(profile)
@@ -44,6 +55,7 @@ class XtreamRepository(context: Context) {
         XtreamUrlBuilder(credentials)
         val catalog = client.loadCatalog(credentials)
         val id = profileId ?: UUID.randomUUID().toString()
+        val previous = profileId?.let(playlistStore::find)
         val profile = PlaylistProfile(
             id = id,
             name = profileName.cleanName(defaultValue = credentials.serverUrl),
@@ -51,6 +63,8 @@ class XtreamRepository(context: Context) {
             serverUrl = credentials.serverUrl,
             username = credentials.username,
             password = credentials.password,
+            xmlTvUrl = previous?.xmlTvUrl,
+            autoRefreshHours = previous?.autoRefreshHours ?: 6,
         )
         playlistStore.upsert(profile)
         credentialsStore.save(credentials)
@@ -58,10 +72,30 @@ class XtreamRepository(context: Context) {
         return LoadedCatalog(catalog, credentials, CatalogSource.Network, id)
     }
 
-    suspend fun refresh(credentials: ServerCredentials, profileId: String): LoadedCatalog {
-        val catalog = client.loadCatalog(credentials)
-        cache.save(profileId, catalog)
-        return LoadedCatalog(catalog, credentials, CatalogSource.Network, profileId)
+    suspend fun refreshProfile(profileId: String): LoadedCatalog {
+        val profile = playlistStore.find(profileId) ?: throw XtreamException("Cette liste n'existe plus.")
+        return when (profile.kind) {
+            PlaylistKind.Xtream -> {
+                val credentials = profile.credentialsOrNull() ?: throw XtreamException("Identifiants Xtream incomplets.")
+                val catalog = client.loadCatalog(credentials)
+                cache.save(profileId, catalog)
+                playlistStore.markRefreshed(profileId)
+                LoadedCatalog(catalog, credentials, CatalogSource.Network, profileId)
+            }
+            PlaylistKind.M3u -> if (profile.isRemoteM3u) {
+                importM3uUrl(
+                    url = profile.m3uUrl!!,
+                    profileId = profile.id,
+                    profileName = profile.name,
+                    xmlTvUrl = profile.xmlTvUrl,
+                    autoRefreshHours = profile.autoRefreshHours,
+                )
+            } else {
+                val uri = profile.m3uUri?.let(Uri::parse)
+                    ?: throw XtreamException("Le fichier M3U associé à cette liste est introuvable.")
+                importM3u(uri, profile.id, profile.name)
+            }
+        }
     }
 
     suspend fun importM3u(
@@ -70,58 +104,65 @@ class XtreamRepository(context: Context) {
         profileName: String? = null,
     ): LoadedCatalog = withContext(Dispatchers.IO) {
         runCatching {
-            appContext.contentResolver.takePersistableUriPermission(
-                uri,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION,
-            )
+            appContext.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         val input = appContext.contentResolver.openInputStream(uri)
             ?: throw XtreamException("Impossible d'ouvrir le fichier M3U sélectionné.")
-        val imported = input.use { stream ->
-            m3uParser.parse(InputStreamReader(stream, StandardCharsets.UTF_8))
-        }
+        val imported = input.use { m3uParser.parse(InputStreamReader(it, StandardCharsets.UTF_8)) }
         val id = profileId ?: UUID.randomUUID().toString()
-        val profile = PlaylistProfile(
+        val previous = playlistStore.find(id)
+        saveM3uImport(
             id = id,
             name = profileName.cleanName(defaultValue = queryDisplayName(uri) ?: "Playlist M3U"),
-            kind = PlaylistKind.M3u,
-            serverUrl = imported.credentials.serverUrl,
-            username = imported.credentials.username,
-            password = imported.credentials.password,
+            imported = imported,
             m3uUri = uri.toString(),
-        )
-        playlistStore.upsert(profile)
-        credentialsStore.save(imported.credentials)
-        cache.save(id, imported.catalog)
-
-        val catalog = imported.catalog
-        val summary = buildString {
-            append("${imported.parsedEntries} médias")
-            append(" · ${catalog.count(MediaType.Live)} chaînes")
-            append(" · ${catalog.count(MediaType.Movie)} films")
-            append(" · ${catalog.count(MediaType.Series)} séries")
-            append(" · ${catalog.categories.size} catégories")
-            if ("tvg-logo" in imported.detectedAttributes) append(" · logos")
-            if ("tvg-id" in imported.detectedAttributes) append(" · EPG/TVG")
-            if (imported.skippedEntries > 0) append(" · ${imported.skippedEntries} ignorés")
-        }
-
-        LoadedCatalog(
-            catalog = catalog,
-            credentials = imported.credentials,
-            source = CatalogSource.Import,
-            profileId = id,
-            importSummary = summary,
+            m3uUrl = null,
+            xmlTvUrl = previous?.xmlTvUrl,
+            autoRefreshHours = previous?.autoRefreshHours ?: 6,
         )
     }
 
-    fun renameProfile(profileId: String, name: String): PlaylistProfile? =
-        playlistStore.rename(profileId, name)
+    suspend fun importM3uUrl(
+        url: String,
+        profileId: String? = null,
+        profileName: String? = null,
+        xmlTvUrl: String? = null,
+        autoRefreshHours: Int = 6,
+    ): LoadedCatalog = withContext(Dispatchers.IO) {
+        val normalizedUrl = normalizeRemoteUrl(url)
+        val temporary = File.createTempFile("streamia-remote-", ".m3u", appContext.cacheDir)
+        try {
+            downloadToFile(normalizedUrl, temporary)
+            val imported = temporary.inputStream().use {
+                m3uParser.parse(InputStreamReader(it, StandardCharsets.UTF_8))
+            }
+            val id = profileId ?: UUID.randomUUID().toString()
+            saveM3uImport(
+                id = id,
+                name = profileName.cleanName(defaultValue = "Playlist M3U distante"),
+                imported = imported,
+                m3uUri = null,
+                m3uUrl = normalizedUrl,
+                xmlTvUrl = xmlTvUrl,
+                autoRefreshHours = autoRefreshHours,
+            )
+        } finally {
+            temporary.delete()
+        }
+    }
+
+    fun updateRemoteSettings(profileId: String, m3uUrl: String?, xmlTvUrl: String?, autoRefreshHours: Int): PlaylistProfile? =
+        playlistStore.updateRemoteSettings(profileId, m3uUrl, xmlTvUrl, autoRefreshHours)
+
+    fun renameProfile(profileId: String, name: String): PlaylistProfile? = playlistStore.rename(profileId, name)
 
     suspend fun deleteProfile(profileId: String) {
         playlistStore.delete(profileId)
         cache.clear(profileId)
     }
+
+    suspend fun movieDetails(credentials: ServerCredentials, movie: MediaEntry): MediaDetails =
+        client.loadMovieDetails(credentials, movie)
 
     suspend fun seriesDetails(credentials: ServerCredentials, series: MediaEntry): SeriesDetails =
         client.loadSeriesDetails(credentials, series)
@@ -129,9 +170,29 @@ class XtreamRepository(context: Context) {
     suspend fun shortEpg(credentials: ServerCredentials, streamId: Int): List<EpgProgram> =
         client.loadShortEpg(credentials, streamId)
 
-    suspend fun logout() {
-        credentialsStore.clear()
+    suspend fun fullEpg(profileId: String, credentials: ServerCredentials, catalog: Catalog): EpgGuide {
+        val profile = playlistStore.find(profileId)
+        val preferred = profile?.xmlTvUrl?.trim()?.takeIf(String::isNotBlank)
+        val provider = XtreamUrlBuilder(credentials).xmlTv()
+        if (preferred != null) {
+            runCatching { return xmlTvRepository.load(normalizeRemoteUrl(preferred), catalog.entriesFor(MediaType.Live)) }
+        }
+        return xmlTvRepository.load(provider, catalog.entriesFor(MediaType.Live))
     }
+
+    fun toggleEntryFavorite(profileId: String, entry: MediaEntry): Boolean = libraryStore.toggleEntryFavorite(profileId, entry)
+    fun toggleCategoryFavorite(profileId: String, category: MediaCategory): Boolean = libraryStore.toggleCategoryFavorite(profileId, category)
+    fun recordPlayback(profileId: String, entry: MediaEntry, positionMs: Long, durationMs: Long) =
+        libraryStore.recordPlayback(profileId, entry, positionMs, durationMs)
+    fun resumePosition(profileId: String, entryKey: String): Long = libraryStore.resumePosition(profileId, entryKey)
+    fun clearHistory(profileId: String) = libraryStore.clearHistory(profileId)
+    fun setCategoryOrder(profileId: String, type: MediaType, categoryKeys: List<String>) =
+        libraryStore.setCategoryOrder(profileId, type, categoryKeys)
+    fun moveEntries(profileId: String, entryKeys: Set<String>, targetCategoryId: String) =
+        libraryStore.moveEntries(profileId, entryKeys, targetCategoryId)
+    fun resetEntryMoves(profileId: String, entryKeys: Set<String>) = libraryStore.resetEntryMoves(profileId, entryKeys)
+
+    suspend fun logout() { credentialsStore.clear() }
 
     private suspend fun openXtreamProfile(profile: PlaylistProfile): LoadedCatalog {
         val credentials = profile.credentialsOrNull()
@@ -149,6 +210,31 @@ class XtreamRepository(context: Context) {
     }
 
     private suspend fun openM3uProfile(profile: PlaylistProfile): LoadedCatalog {
+        if (profile.isRemoteM3u) {
+            if (profile.shouldAutoRefresh() || cache.load(profile.id) == null) {
+                return try {
+                    importM3uUrl(
+                        url = profile.m3uUrl!!,
+                        profileId = profile.id,
+                        profileName = profile.name,
+                        xmlTvUrl = profile.xmlTvUrl,
+                        autoRefreshHours = profile.autoRefreshHours,
+                    )
+                } catch (error: Exception) {
+                    val credentials = profile.credentialsOrNull() ?: throw error
+                    val cached = cache.load(profile.id) ?: throw error
+                    credentialsStore.save(credentials)
+                    LoadedCatalog(cached, credentials, CatalogSource.Cache, profile.id)
+                }
+            }
+            val credentials = profile.credentialsOrNull()
+                ?: throw XtreamException("Les identifiants extraits de la liste distante sont incomplets.")
+            val cached = cache.load(profile.id)
+                ?: return importM3uUrl(profile.m3uUrl!!, profile.id, profile.name, profile.xmlTvUrl, profile.autoRefreshHours)
+            credentialsStore.save(credentials)
+            return LoadedCatalog(cached, credentials, CatalogSource.Cache, profile.id)
+        }
+
         val uri = profile.m3uUri?.let(Uri::parse)
             ?: throw XtreamException("Le fichier M3U associé à cette liste est introuvable.")
         return try {
@@ -161,21 +247,87 @@ class XtreamRepository(context: Context) {
         }
     }
 
+    private suspend fun saveM3uImport(
+        id: String,
+        name: String,
+        imported: M3uImport,
+        m3uUri: String?,
+        m3uUrl: String?,
+        xmlTvUrl: String?,
+        autoRefreshHours: Int,
+    ): LoadedCatalog {
+        val profile = PlaylistProfile(
+            id = id,
+            name = name,
+            kind = PlaylistKind.M3u,
+            serverUrl = imported.credentials.serverUrl,
+            username = imported.credentials.username,
+            password = imported.credentials.password,
+            m3uUri = m3uUri,
+            m3uUrl = m3uUrl,
+            xmlTvUrl = xmlTvUrl?.trim()?.takeIf(String::isNotBlank),
+            autoRefreshHours = autoRefreshHours.coerceIn(1, 168),
+            lastRefreshAt = System.currentTimeMillis(),
+        )
+        playlistStore.upsert(profile)
+        credentialsStore.save(imported.credentials)
+        cache.save(id, imported.catalog)
+        val catalog = imported.catalog
+        val summary = buildString {
+            append("${imported.parsedEntries} médias")
+            append(" · ${catalog.count(MediaType.Live)} chaînes")
+            append(" · ${catalog.count(MediaType.Movie)} films")
+            append(" · ${catalog.count(MediaType.Series)} séries")
+            append(" · ${catalog.categories.size} catégories")
+            if ("tvg-logo" in imported.detectedAttributes) append(" · logos")
+            if ("tvg-id" in imported.detectedAttributes) append(" · EPG/TVG")
+            if (imported.skippedEntries > 0) append(" · ${imported.skippedEntries} ignorés")
+        }
+        return LoadedCatalog(catalog, imported.credentials, CatalogSource.Import, id, summary)
+    }
+
+    private fun downloadToFile(url: String, target: File) {
+        try {
+            downloadOnce(url, target)
+        } catch (first: IOException) {
+            val alternate = XtreamUrlBuilder.alternateTransportUrl(url) ?: throw first
+            downloadOnce(alternate, target)
+        }
+    }
+
+    @Throws(IOException::class)
+    private fun downloadOnce(url: String, target: File) {
+        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 15_000
+            readTimeout = 90_000
+            instanceFollowRedirects = true
+            setRequestProperty("Accept", "application/x-mpegURL,text/plain,*/*")
+            setRequestProperty("User-Agent", "Streamia-TV/1.4")
+        }
+        try {
+            val code = connection.responseCode
+            if (code !in 200..299) throw XtreamException("Le serveur M3U a répondu avec le code $code.")
+            connection.inputStream.use { input -> target.outputStream().buffered().use { output -> input.copyTo(output, 128 * 1024) } }
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun normalizeRemoteUrl(raw: String): String {
+        val value = raw.trim()
+        require(value.isNotBlank()) { "L'URL ne peut pas être vide." }
+        return if (value.contains("://")) value else "http://$value"
+    }
+
     private fun queryDisplayName(uri: Uri): String? = runCatching {
-        appContext.contentResolver.query(
-            uri,
-            arrayOf(OpenableColumns.DISPLAY_NAME),
-            null,
-            null,
-            null,
-        )?.use { cursor ->
+        appContext.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
             if (!cursor.moveToFirst()) return@use null
             cursor.getString(0)?.takeIf(String::isNotBlank)
         }
     }.getOrNull()
 
-    private fun String?.cleanName(defaultValue: String): String =
-        this?.trim()?.takeIf(String::isNotBlank) ?: defaultValue
+    private fun String?.cleanName(defaultValue: String): String = this?.trim()?.takeIf(String::isNotBlank) ?: defaultValue
 }
 
 data class LoadedCatalog(

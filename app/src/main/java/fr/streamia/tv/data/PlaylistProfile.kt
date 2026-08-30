@@ -12,12 +12,24 @@ data class PlaylistProfile(
     val username: String? = null,
     val password: String? = null,
     val m3uUri: String? = null,
+    val m3uUrl: String? = null,
+    val xmlTvUrl: String? = null,
+    val autoRefreshHours: Int = 6,
+    val lastRefreshAt: Long = 0L,
     val updatedAt: Long = System.currentTimeMillis(),
 ) {
+    val isRemoteM3u: Boolean get() = kind == PlaylistKind.M3u && !m3uUrl.isNullOrBlank()
+
     fun credentialsOrNull(): ServerCredentials? {
         val server = serverUrl?.takeIf(String::isNotBlank) ?: return null
         val user = username?.takeIf(String::isNotBlank) ?: return null
         val pass = password ?: return null
         return ServerCredentials(server, user, pass)
+    }
+
+    fun shouldAutoRefresh(now: Long = System.currentTimeMillis()): Boolean {
+        if (!isRemoteM3u) return false
+        val interval = autoRefreshHours.coerceIn(1, 168) * 60L * 60L * 1000L
+        return lastRefreshAt <= 0L || now - lastRefreshAt >= interval
     }
 }

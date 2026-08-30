@@ -35,8 +35,12 @@ class XtreamUrlBuilder(private val credentials: ServerCredentials) {
 
     fun seriesInfo(seriesId: Int): String = "${api("get_series_info")}&series_id=$seriesId"
 
+    fun vodInfo(streamId: Int): String = "${api("get_vod_info")}&vod_id=$streamId"
+
     fun shortEpg(streamId: Int, limit: Int = 2): String =
         "${api("get_short_epg")}&stream_id=$streamId&limit=${limit.coerceIn(1, 10)}"
+
+    fun xmlTv(): String = "$baseUrl/xmltv.php?username=${query(credentials.username)}&password=${query(credentials.password)}"
 
     private fun query(value: String): String = encode(value)
 
@@ -53,10 +57,7 @@ class XtreamUrlBuilder(private val credentials: ServerCredentials) {
             return if (withScheme.endsWith("://")) withScheme else withScheme.trimEnd('/')
         }
 
-        /**
-         * Retourne la même URL avec l'autre transport HTTP/HTTPS.
-         * Utile pour les fournisseurs IPTV qui exposent un port atypique ou une playlist sans schéma.
-         */
+        /** Retourne la même URL avec l'autre transport HTTP/HTTPS. */
         fun alternateTransportUrl(url: String): String? {
             val uri = runCatching { URI(url) }.getOrNull() ?: return null
             val targetScheme = when (uri.scheme?.lowercase()) {

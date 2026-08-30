@@ -12,8 +12,8 @@ android {
         applicationId = "fr.streamia.tv"
         minSdk = 23
         targetSdk = 36
-        versionCode = 6
-        versionName = "1.3.0"
+        versionCode = 7
+        versionName = "1.4.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
@@ -37,6 +37,13 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        isCoreLibraryDesugaringEnabled = true
+    }
+
+    lint {
+        // Media3 marque encore les API de sélection de pistes comme instables en 1.11.
+        // Leur usage est volontaire et isolé dans PlayerScreen.
+        disable += "UnsafeOptInUsageError"
     }
 
     buildFeatures {
@@ -65,6 +72,7 @@ dependencies {
 
     implementation(composeBom)
     androidTestImplementation(composeBom)
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
 
     implementation("androidx.core:core-ktx:1.17.0")
     implementation("androidx.core:core-splashscreen:1.2.0")

@@ -14,7 +14,7 @@ import javax.crypto.spec.GCMParameterSpec
 
 /**
  * Persiste les profils de playlists dans un payload chiffré avec AndroidKeyStore.
- * Les identifiants Xtream restent donc chiffrés au repos.
+ * Les identifiants Xtream et les URL privées restent donc chiffrés au repos.
  */
 class PlaylistStore(context: Context) {
     private val preferences = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
@@ -43,6 +43,10 @@ class PlaylistStore(context: Context) {
                         username = json.optNullableString("username"),
                         password = json.optNullableString("password"),
                         m3uUri = json.optNullableString("m3u_uri"),
+                        m3uUrl = json.optNullableString("m3u_url"),
+                        xmlTvUrl = json.optNullableString("xmltv_url"),
+                        autoRefreshHours = json.optInt("auto_refresh_hours", 6).coerceIn(1, 168),
+                        lastRefreshAt = json.optLong("last_refresh_at", 0L),
                         updatedAt = json.optLong("updated_at", 0L),
                     ),
                 )
@@ -70,6 +74,37 @@ class PlaylistStore(context: Context) {
         return updated
     }
 
+    fun updateRemoteSettings(
+        id: String,
+        m3uUrl: String?,
+        xmlTvUrl: String?,
+        autoRefreshHours: Int,
+        lastRefreshAt: Long? = null,
+    ): PlaylistProfile? {
+        val profiles = loadAll().toMutableList()
+        val index = profiles.indexOfFirst { it.id == id }
+        if (index < 0) return null
+        val current = profiles[index]
+        val updated = current.copy(
+            m3uUrl = m3uUrl?.trim()?.takeIf(String::isNotBlank),
+            xmlTvUrl = xmlTvUrl?.trim()?.takeIf(String::isNotBlank),
+            autoRefreshHours = autoRefreshHours.coerceIn(1, 168),
+            lastRefreshAt = lastRefreshAt ?: current.lastRefreshAt,
+            updatedAt = System.currentTimeMillis(),
+        )
+        profiles[index] = updated
+        saveAll(profiles)
+        return updated
+    }
+
+    fun markRefreshed(id: String, at: Long = System.currentTimeMillis()) {
+        val profiles = loadAll().toMutableList()
+        val index = profiles.indexOfFirst { it.id == id }
+        if (index < 0) return
+        profiles[index] = profiles[index].copy(lastRefreshAt = at, updatedAt = System.currentTimeMillis())
+        saveAll(profiles)
+    }
+
     fun delete(id: String) {
         saveAll(loadAll().filterNot { it.id == id })
     }
@@ -90,6 +125,10 @@ class PlaylistStore(context: Context) {
                     putNullable("username", profile.username)
                     putNullable("password", profile.password)
                     putNullable("m3u_uri", profile.m3uUri)
+                    putNullable("m3u_url", profile.m3uUrl)
+                    putNullable("xmltv_url", profile.xmlTvUrl)
+                    put("auto_refresh_hours", profile.autoRefreshHours)
+                    put("last_refresh_at", profile.lastRefreshAt)
                     put("updated_at", profile.updatedAt)
                 },
             )
