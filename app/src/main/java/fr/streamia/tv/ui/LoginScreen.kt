@@ -1,5 +1,8 @@
 package fr.streamia.tv.ui
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -12,6 +15,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -28,6 +33,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
+import fr.streamia.tv.data.PlaylistKind
+import fr.streamia.tv.data.PlaylistProfile
 import fr.streamia.tv.ui.theme.DeepSurface
 import fr.streamia.tv.ui.theme.FocusBlueBright
 import fr.streamia.tv.ui.theme.Ink
@@ -35,21 +42,68 @@ import fr.streamia.tv.ui.theme.MutedInk
 import fr.streamia.tv.ui.theme.Night
 import fr.streamia.tv.ui.theme.WarmSignal
 
+private enum class LoginMode { Manager, Xtream, M3u }
+
 @Composable
 fun LoginScreen(
+    profiles: List<PlaylistProfile>,
     busy: Boolean,
     message: String?,
-    onSignIn: (String, String, String) -> Unit,
-    onImportM3u: () -> Unit,
+    onOpenProfile: (String) -> Unit,
+    onSignIn: (String?, String, String, String, String) -> Unit,
+    onImportM3u: (Uri, String?, String) -> Unit,
+    onRenameProfile: (String, String) -> Unit,
+    onDeleteProfile: (String) -> Unit,
     onDismissMessage: () -> Unit,
 ) {
+    var mode by remember { mutableStateOf(LoginMode.Manager) }
+    var editingProfile by remember { mutableStateOf<PlaylistProfile?>(null) }
+    var deleteCandidate by remember { mutableStateOf<PlaylistProfile?>(null) }
+    var profileName by remember { mutableStateOf("") }
     var server by remember { mutableStateOf("") }
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
-    val serverFocus = remember { FocusRequester() }
-    val canSubmit = server.isNotBlank() && username.isNotBlank() && password.isNotBlank() && !busy
+    var pendingM3uId by remember { mutableStateOf<String?>(null) }
+    var pendingM3uName by remember { mutableStateOf("") }
+    val primaryFocus = remember { FocusRequester() }
 
-    LaunchedEffect(Unit) { serverFocus.requestFocus() }
+    val m3uPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) onImportM3u(uri, pendingM3uId, pendingM3uName)
+    }
+
+    fun showManager() {
+        mode = LoginMode.Manager
+        editingProfile = null
+        deleteCandidate = null
+        profileName = ""
+        server = ""
+        username = ""
+        password = ""
+        onDismissMessage()
+    }
+
+    fun showXtream(profile: PlaylistProfile? = null) {
+        editingProfile = profile
+        mode = LoginMode.Xtream
+        profileName = profile?.name.orEmpty()
+        server = profile?.serverUrl.orEmpty()
+        username = profile?.username.orEmpty()
+        password = profile?.password.orEmpty()
+        deleteCandidate = null
+        onDismissMessage()
+    }
+
+    fun showM3u(profile: PlaylistProfile? = null) {
+        editingProfile = profile
+        mode = LoginMode.M3u
+        profileName = profile?.name.orEmpty()
+        deleteCandidate = null
+        onDismissMessage()
+    }
+
+    LaunchedEffect(mode, profiles.size) {
+        runCatching { primaryFocus.requestFocus() }
+    }
 
     Row(
         Modifier
@@ -59,131 +113,360 @@ fun LoginScreen(
         Column(
             modifier = Modifier
                 .fillMaxHeight()
-                .weight(0.43f)
+                .weight(0.36f)
                 .background(DeepSurface)
-                .padding(horizontal = 62.dp, vertical = 54.dp),
+                .padding(horizontal = 54.dp, vertical = 48.dp),
             verticalArrangement = Arrangement.SpaceBetween,
         ) {
             StreamiaLogo()
             Column {
                 Text(
-                    "Vos chaînes, sans détour.",
+                    "Vos chaînes, vos listes.",
                     color = Ink,
-                    fontSize = 38.sp,
-                    lineHeight = 43.sp,
+                    fontSize = 36.sp,
+                    lineHeight = 42.sp,
                     fontWeight = FontWeight.SemiBold,
                 )
-                Spacer(Modifier.height(18.dp))
+                Spacer(Modifier.height(16.dp))
                 Text(
-                    "Connectez votre propre abonnement Xtream ou importez un fichier M3U. Aucun contenu n'est inclus.",
+                    "Ajoutez plusieurs abonnements Xtream ou fichiers M3U, puis ouvrez, modifiez ou supprimez chaque liste depuis cet écran.",
                     color = MutedInk,
-                    fontSize = 19.sp,
-                    lineHeight = 27.sp,
-                    modifier = Modifier.fillMaxWidth(0.92f),
+                    fontSize = 18.sp,
+                    lineHeight = 26.sp,
                 )
             }
             Text(
-                "Pensé pour Android TV · Navigation 100 % télécommande",
+                "Données stockées localement · Identifiants Xtream chiffrés · Navigation télécommande",
                 color = MutedInk,
-                fontSize = 15.sp,
+                fontSize = 14.sp,
             )
         }
 
         Box(
             modifier = Modifier
                 .fillMaxHeight()
-                .weight(0.57f)
-                .padding(horizontal = 84.dp, vertical = 48.dp),
+                .weight(0.64f)
+                .padding(horizontal = 58.dp, vertical = 38.dp),
             contentAlignment = Alignment.Center,
         ) {
-            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(15.dp)) {
-                Text(
-                    "Connexion au service",
-                    style = MaterialTheme.typography.headlineMedium,
-                    color = Ink,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Text(
-                    "Saisissez vos accès Xtream. Le protocole HTTPS est ajouté automatiquement s'il manque.",
-                    color = MutedInk,
-                    fontSize = 17.sp,
-                )
-                Spacer(Modifier.height(8.dp))
-                TvTextField(
-                    value = server,
-                    onValueChange = { server = it; onDismissMessage() },
-                    label = "Adresse du serveur",
-                    supportingText = "Exemple : https://serveur.example:8080",
-                    modifier = Modifier.fillMaxWidth().focusRequester(serverFocus),
-                )
-                TvTextField(
-                    value = username,
-                    onValueChange = { username = it; onDismissMessage() },
-                    label = "Identifiant",
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                TvTextField(
-                    value = password,
-                    onValueChange = { password = it; onDismissMessage() },
-                    label = "Mot de passe",
-                    visualTransformation = PasswordVisualTransformation(),
-                    modifier = Modifier.fillMaxWidth(),
+            when (mode) {
+                LoginMode.Manager -> PlaylistManager(
+                    profiles = profiles,
+                    busy = busy,
+                    message = message,
+                    deleteCandidate = deleteCandidate,
+                    primaryFocus = primaryFocus,
+                    onOpenProfile = onOpenProfile,
+                    onAddXtream = { showXtream() },
+                    onAddM3u = { showM3u() },
+                    onEdit = { profile ->
+                        if (profile.kind == PlaylistKind.Xtream) showXtream(profile) else showM3u(profile)
+                    },
+                    onAskDelete = { deleteCandidate = it; onDismissMessage() },
+                    onCancelDelete = { deleteCandidate = null },
+                    onConfirmDelete = { profile ->
+                        deleteCandidate = null
+                        onDeleteProfile(profile.id)
+                    },
                 )
 
-                if (server.trim().startsWith("http://", ignoreCase = true)) {
-                    Text(
-                        "Attention : ce serveur utilise une connexion non chiffrée (HTTP).",
-                        color = WarmSignal,
-                        fontSize = 15.sp,
-                    )
-                }
-                if (message != null) {
-                    Text(message, color = MaterialTheme.colorScheme.error, fontSize = 16.sp)
-                }
+                LoginMode.Xtream -> XtreamForm(
+                    editingProfile = editingProfile,
+                    profileName = profileName,
+                    server = server,
+                    username = username,
+                    password = password,
+                    busy = busy,
+                    message = message,
+                    primaryFocus = primaryFocus,
+                    onNameChange = { profileName = it; onDismissMessage() },
+                    onServerChange = { server = it; onDismissMessage() },
+                    onUsernameChange = { username = it; onDismissMessage() },
+                    onPasswordChange = { password = it; onDismissMessage() },
+                    onSave = {
+                        onSignIn(editingProfile?.id, profileName, server, username, password)
+                    },
+                    onBack = ::showManager,
+                )
 
-                FocusableSurface(
-                    onClick = { onSignIn(server, username, password) },
-                    enabled = canSubmit,
-                    contentDescription = "Se connecter à Xtream",
-                    modifier = Modifier.fillMaxWidth().height(66.dp),
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 22.dp),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            if (busy) "Connexion en cours…" else "Ouvrir Streamia TV",
-                            color = if (canSubmit || busy) Ink else MutedInk,
-                            fontSize = 19.sp,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        if (!busy) {
-                            Spacer(Modifier.width(12.dp))
-                            Text("▶", color = FocusBlueBright, fontSize = 18.sp)
+                LoginMode.M3u -> M3uForm(
+                    editingProfile = editingProfile,
+                    profileName = profileName,
+                    busy = busy,
+                    message = message,
+                    primaryFocus = primaryFocus,
+                    onNameChange = { profileName = it; onDismissMessage() },
+                    onPickFile = {
+                        pendingM3uId = editingProfile?.id
+                        pendingM3uName = profileName
+                        m3uPicker.launch(M3U_MIME_TYPES)
+                    },
+                    onRename = {
+                        editingProfile?.let { profile ->
+                            onRenameProfile(profile.id, profileName)
+                            showManager()
                         }
-                    }
-                }
-                FocusableSurface(
-                    onClick = onImportM3u,
-                    enabled = !busy,
-                    contentDescription = "Importer un fichier M3U local",
-                    modifier = Modifier.fillMaxWidth().height(58.dp),
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 22.dp),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text("Importer un fichier M3U", color = Ink, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-                    }
-                }
-                Text(
-                    "Le fichier est analysé localement. Les URL contenant vos accès ne sont ni journalisées ni publiées.",
-                    color = MutedInk,
-                    fontSize = 13.sp,
+                    },
+                    onBack = ::showManager,
                 )
             }
         }
     }
 }
+
+@Composable
+private fun PlaylistManager(
+    profiles: List<PlaylistProfile>,
+    busy: Boolean,
+    message: String?,
+    deleteCandidate: PlaylistProfile?,
+    primaryFocus: FocusRequester,
+    onOpenProfile: (String) -> Unit,
+    onAddXtream: () -> Unit,
+    onAddM3u: () -> Unit,
+    onEdit: (PlaylistProfile) -> Unit,
+    onAskDelete: (PlaylistProfile) -> Unit,
+    onCancelDelete: () -> Unit,
+    onConfirmDelete: (PlaylistProfile) -> Unit,
+) {
+    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Text("Mes listes", style = MaterialTheme.typography.headlineMedium, color = Ink, fontWeight = FontWeight.SemiBold)
+        Text(
+            if (profiles.isEmpty()) "Aucune liste enregistrée. Ajoutez votre première source."
+            else "${profiles.size} liste${if (profiles.size > 1) "s" else ""} enregistrée${if (profiles.size > 1) "s" else ""}.",
+            color = MutedInk,
+            fontSize = 16.sp,
+        )
+
+        if (message != null) {
+            Text(message, color = if (message.contains("supprim", ignoreCase = true)) FocusBlueBright else MaterialTheme.colorScheme.error, fontSize = 15.sp)
+        }
+
+        if (deleteCandidate != null) {
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Supprimer « ${deleteCandidate.name} » ?", color = WarmSignal, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    SmallAction("Annuler", enabled = !busy, onClick = onCancelDelete, modifier = Modifier.weight(1f))
+                    SmallAction("Supprimer", enabled = !busy, onClick = { onConfirmDelete(deleteCandidate) }, modifier = Modifier.weight(1f))
+                }
+            }
+        }
+
+        LazyColumn(
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            items(profiles, key = PlaylistProfile::id) { profile ->
+                PlaylistRow(
+                    profile = profile,
+                    busy = busy,
+                    onOpen = { onOpenProfile(profile.id) },
+                    onEdit = { onEdit(profile) },
+                    onDelete = { onAskDelete(profile) },
+                )
+            }
+        }
+
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            FocusableSurface(
+                onClick = onAddXtream,
+                enabled = !busy,
+                contentDescription = "Ajouter une liste Xtream",
+                modifier = Modifier.weight(1f).height(62.dp).focusRequester(primaryFocus),
+            ) {
+                Text("＋ Ajouter Xtream", color = Ink, fontSize = 17.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 18.dp))
+            }
+            FocusableSurface(
+                onClick = onAddM3u,
+                enabled = !busy,
+                contentDescription = "Ajouter une liste M3U",
+                modifier = Modifier.weight(1f).height(62.dp),
+            ) {
+                Text("＋ Ajouter M3U", color = Ink, fontSize = 17.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 18.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlaylistRow(
+    profile: PlaylistProfile,
+    busy: Boolean,
+    onOpen: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().height(76.dp),
+        horizontalArrangement = Arrangement.spacedBy(9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        FocusableSurface(
+            onClick = onOpen,
+            enabled = !busy,
+            contentDescription = "Ouvrir ${profile.name}",
+            modifier = Modifier.weight(1f).fillMaxHeight(),
+        ) {
+            Column(Modifier.padding(horizontal = 18.dp)) {
+                Text(profile.name, color = Ink, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                Text(
+                    if (profile.kind == PlaylistKind.Xtream) "XTREAM" else "M3U",
+                    color = FocusBlueBright,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+        }
+        SmallAction("Modifier", enabled = !busy, onClick = onEdit, modifier = Modifier.width(110.dp).fillMaxHeight())
+        SmallAction("Supprimer", enabled = !busy, onClick = onDelete, modifier = Modifier.width(112.dp).fillMaxHeight())
+    }
+}
+
+@Composable
+private fun XtreamForm(
+    editingProfile: PlaylistProfile?,
+    profileName: String,
+    server: String,
+    username: String,
+    password: String,
+    busy: Boolean,
+    message: String?,
+    primaryFocus: FocusRequester,
+    onNameChange: (String) -> Unit,
+    onServerChange: (String) -> Unit,
+    onUsernameChange: (String) -> Unit,
+    onPasswordChange: (String) -> Unit,
+    onSave: () -> Unit,
+    onBack: () -> Unit,
+) {
+    val canSubmit = server.isNotBlank() && username.isNotBlank() && password.isNotBlank() && !busy
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text(
+            if (editingProfile == null) "Ajouter une liste Xtream" else "Modifier la liste Xtream",
+            style = MaterialTheme.typography.headlineMedium,
+            color = Ink,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text("Le nom est libre. L'adresse, l'identifiant et le mot de passe sont nécessaires pour ouvrir la liste.", color = MutedInk, fontSize = 15.sp)
+        TvTextField(
+            value = profileName,
+            onValueChange = onNameChange,
+            label = "Nom de la liste (facultatif)",
+            modifier = Modifier.fillMaxWidth().focusRequester(primaryFocus),
+        )
+        TvTextField(
+            value = server,
+            onValueChange = onServerChange,
+            label = "Adresse du serveur",
+            supportingText = "Exemple : https://serveur.example:8080",
+            modifier = Modifier.fillMaxWidth(),
+        )
+        TvTextField(value = username, onValueChange = onUsernameChange, label = "Identifiant", modifier = Modifier.fillMaxWidth())
+        TvTextField(
+            value = password,
+            onValueChange = onPasswordChange,
+            label = "Mot de passe",
+            visualTransformation = PasswordVisualTransformation(),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        if (server.trim().startsWith("http://", ignoreCase = true)) {
+            Text("Attention : ce serveur utilise une connexion non chiffrée (HTTP).", color = WarmSignal, fontSize = 14.sp)
+        }
+        if (message != null) Text(message, color = MaterialTheme.colorScheme.error, fontSize = 15.sp)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            SmallAction("Retour", enabled = !busy, onClick = onBack, modifier = Modifier.weight(0.34f).height(60.dp))
+            FocusableSurface(
+                onClick = onSave,
+                enabled = canSubmit,
+                contentDescription = "Enregistrer et ouvrir la liste Xtream",
+                modifier = Modifier.weight(0.66f).height(60.dp),
+            ) {
+                Text(
+                    if (busy) "Connexion en cours…" else "Enregistrer et ouvrir",
+                    color = if (canSubmit || busy) Ink else MutedInk,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 18.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun M3uForm(
+    editingProfile: PlaylistProfile?,
+    profileName: String,
+    busy: Boolean,
+    message: String?,
+    primaryFocus: FocusRequester,
+    onNameChange: (String) -> Unit,
+    onPickFile: () -> Unit,
+    onRename: () -> Unit,
+    onBack: () -> Unit,
+) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Text(
+            if (editingProfile == null) "Ajouter une liste M3U" else "Modifier la liste M3U",
+            style = MaterialTheme.typography.headlineMedium,
+            color = Ink,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            "Le fichier est lu localement et son accès est conservé pour pouvoir rouvrir cette liste après redémarrage.",
+            color = MutedInk,
+            fontSize = 15.sp,
+        )
+        TvTextField(
+            value = profileName,
+            onValueChange = onNameChange,
+            label = "Nom de la liste (facultatif)",
+            modifier = Modifier.fillMaxWidth().focusRequester(primaryFocus),
+        )
+        if (message != null) Text(message, color = MaterialTheme.colorScheme.error, fontSize = 15.sp)
+        FocusableSurface(
+            onClick = onPickFile,
+            enabled = !busy,
+            contentDescription = if (editingProfile == null) "Choisir un fichier M3U" else "Remplacer le fichier M3U",
+            modifier = Modifier.fillMaxWidth().height(64.dp),
+        ) {
+            Text(
+                if (editingProfile == null) "Choisir un fichier M3U" else "Remplacer le fichier M3U",
+                color = Ink,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(horizontal = 18.dp),
+            )
+        }
+        if (editingProfile != null) {
+            SmallAction("Enregistrer uniquement le nouveau nom", enabled = !busy && profileName.isNotBlank(), onClick = onRename, modifier = Modifier.fillMaxWidth().height(58.dp))
+        }
+        SmallAction("Retour aux listes", enabled = !busy, onClick = onBack, modifier = Modifier.fillMaxWidth().height(58.dp))
+    }
+}
+
+@Composable
+private fun SmallAction(
+    label: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    FocusableSurface(onClick = onClick, enabled = enabled, modifier = modifier) {
+        Text(
+            label,
+            color = if (enabled) Ink else MutedInk,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(horizontal = 14.dp),
+        )
+    }
+}
+
+private val M3U_MIME_TYPES = arrayOf(
+    "audio/x-mpegurl",
+    "application/x-mpegURL",
+    "application/vnd.apple.mpegurl",
+    "text/plain",
+    "*/*",
+)
