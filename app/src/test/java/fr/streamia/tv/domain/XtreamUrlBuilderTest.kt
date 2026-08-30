@@ -30,12 +30,36 @@ class XtreamUrlBuilderTest {
     }
 
     @Test
+    fun `adds https when the provider omits the scheme`() {
+        val builder = XtreamUrlBuilder(ServerCredentials("provider.test:443", "user", "pass"))
+
+        assertEquals(
+            "https://provider.test:443/live/user/pass/7.ts",
+            builder.liveStream(7),
+        )
+    }
+
+    @Test
+    fun `builds movie and series episode urls with their extensions`() {
+        val builder = XtreamUrlBuilder(ServerCredentials("https://provider.test", "user", "pass"))
+
+        assertEquals(
+            "https://provider.test/movie/user/pass/10.mkv",
+            builder.stream(MediaType.Movie, 10, "mkv"),
+        )
+        assertEquals(
+            "https://provider.test/series/user/pass/11.mp4",
+            builder.stream(MediaType.Series, 11, "mp4"),
+        )
+    }
+
+    @Test
     fun `rejects unsupported or incomplete server urls`() {
         assertThrows(IllegalArgumentException::class.java) {
             XtreamUrlBuilder(ServerCredentials("ftp://provider.test", "user", "pass"))
         }
         assertThrows(IllegalArgumentException::class.java) {
-            XtreamUrlBuilder(ServerCredentials("provider.test", "user", "pass"))
+            XtreamUrlBuilder(ServerCredentials("https://", "user", "pass"))
         }
     }
 }

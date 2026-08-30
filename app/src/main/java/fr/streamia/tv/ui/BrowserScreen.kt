@@ -36,8 +36,9 @@ import androidx.compose.ui.unit.sp
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import fr.streamia.tv.domain.Catalog
-import fr.streamia.tv.domain.LiveCategory
-import fr.streamia.tv.domain.LiveChannel
+import fr.streamia.tv.domain.MediaCategory
+import fr.streamia.tv.domain.MediaEntry
+import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.ui.theme.DeepSurface
 import fr.streamia.tv.ui.theme.FocusBlueBright
 import fr.streamia.tv.ui.theme.Ink
@@ -52,49 +53,63 @@ fun BrowserScreen(
     offline: Boolean,
     busy: Boolean,
     message: String?,
-    onChannelSelected: (LiveChannel) -> Unit,
+    onEntrySelected: (MediaEntry) -> Unit,
     onRefresh: () -> Unit,
     onLogout: () -> Unit,
     onDismissMessage: () -> Unit,
 ) {
-    val categories = remember(catalog) { listOf(Catalog.AllCategory) + catalog.categories }
-    var selectedCategoryId by remember(catalog) { mutableStateOf(categories.first().id) }
-    val channels = remember(catalog, selectedCategoryId) { catalog.channelsIn(selectedCategoryId) }
+    val initialType = remember(catalog) {
+        MediaType.entries.firstOrNull { catalog.count(it) > 0 } ?: MediaType.Live
+    }
+    var selectedType by remember(catalog) { mutableStateOf(initialType) }
+    var selectedCategoryId by remember(catalog) { mutableStateOf(Catalog.ALL_CATEGORY_ID) }
+    val categories = remember(catalog, selectedType) {
+        listOf(Catalog.allCategory(selectedType)) + catalog.categoriesFor(selectedType)
+    }
+    val entries = remember(catalog, selectedType, selectedCategoryId) {
+        catalog.entriesIn(selectedType, selectedCategoryId)
+    }
+
+    LaunchedEffect(selectedType) { selectedCategoryId = Catalog.ALL_CATEGORY_ID }
 
     Column(Modifier.fillMaxSize().background(Night)) {
         BrowserHeader(
-            channelCount = catalog.channels.size,
+            catalog = catalog,
+            selectedType = selectedType,
             offline = offline,
             busy = busy,
+            onTypeSelected = { selectedType = it },
             onRefresh = onRefresh,
             onLogout = onLogout,
         )
         if (message != null) {
             FocusableSurface(
                 onClick = onDismissMessage,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 28.dp, vertical = 6.dp).height(52.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 28.dp, vertical = 4.dp).height(48.dp),
             ) {
                 Text(
                     "$message  ·  OK pour fermer",
-                    color = MaterialTheme.colorScheme.error,
-                    fontSize = 16.sp,
+                    color = if (message.contains("import", ignoreCase = true)) FocusBlueBright else MaterialTheme.colorScheme.error,
+                    fontSize = 15.sp,
                     modifier = Modifier.padding(horizontal = 18.dp),
                 )
             }
         }
         Row(Modifier.fillMaxSize().padding(start = 26.dp, end = 26.dp, bottom = 24.dp)) {
             CategoryRail(
+                type = selectedType,
                 categories = categories,
                 selectedCategoryId = selectedCategoryId,
-                countFor = { catalog.channelsIn(it.id).size },
+                countFor = { catalog.entriesIn(selectedType, it.id).size },
                 onSelected = { selectedCategoryId = it.id },
                 modifier = Modifier.width(310.dp).fillMaxHeight(),
             )
             Spacer(Modifier.width(26.dp))
-            ChannelGrid(
+            MediaGrid(
+                type = selectedType,
                 categoryName = categories.firstOrNull { it.id == selectedCategoryId }?.name.orEmpty(),
-                channels = channels,
-                onChannelSelected = onChannelSelected,
+                entries = entries,
+                onEntrySelected = onEntrySelected,
                 modifier = Modifier.weight(1f).fillMaxHeight(),
             )
         }
@@ -103,9 +118,11 @@ fun BrowserScreen(
 
 @Composable
 private fun BrowserHeader(
-    channelCount: Int,
+    catalog: Catalog,
+    selectedType: MediaType,
     offline: Boolean,
     busy: Boolean,
+    onTypeSelected: (MediaType) -> Unit,
     onRefresh: () -> Unit,
     onLogout: () -> Unit,
 ) {
@@ -114,63 +131,63 @@ private fun BrowserHeader(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         StreamiaLogo(compact = true)
-        Spacer(Modifier.width(24.dp))
+        Spacer(Modifier.width(26.dp))
+        for (type in MediaType.entries) {
+            FocusableSurface(
+                onClick = { onTypeSelected(type) },
+                selected = selectedType == type,
+                enabled = catalog.count(type) > 0,
+                modifier = Modifier.width(128.dp).height(52.dp),
+                contentDescription = "${type.displayName}, ${catalog.count(type)} ${type.pluralName}",
+            ) {
+                Column(Modifier.padding(horizontal = 14.dp)) {
+                    Text(type.displayName, color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    Text(catalog.count(type).toString(), color = MutedInk, fontSize = 12.sp)
+                }
+            }
+            Spacer(Modifier.width(9.dp))
+        }
+        Spacer(Modifier.weight(1f))
         Box(Modifier.size(7.dp).background(if (offline) WarmSignal else Color(0xFF6CCB91)))
         Spacer(Modifier.width(9.dp))
-        Text(
-            if (offline) "Catalogue hors ligne" else "$channelCount chaînes disponibles",
-            color = if (offline) WarmSignal else MutedInk,
-            fontSize = 15.sp,
-        )
-        Spacer(Modifier.weight(1f))
-        FocusableSurface(
-            onClick = onRefresh,
-            enabled = !busy,
-            modifier = Modifier.width(164.dp).height(54.dp),
-        ) {
-            Text(
-                if (busy) "Actualisation…" else "↻  Actualiser",
-                color = Ink,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(horizontal = 18.dp),
-            )
+        Text(if (offline) "Hors ligne" else "Connecté", color = if (offline) WarmSignal else MutedInk, fontSize = 14.sp)
+        Spacer(Modifier.width(16.dp))
+        FocusableSurface(onClick = onRefresh, enabled = !busy, modifier = Modifier.width(138.dp).height(52.dp)) {
+            Text(if (busy) "Chargement…" else "↻ Actualiser", color = Ink, fontSize = 15.sp, modifier = Modifier.padding(horizontal = 15.dp))
         }
-        Spacer(Modifier.width(12.dp))
-        FocusableSurface(onClick = onLogout, modifier = Modifier.width(150.dp).height(54.dp)) {
-            Text("Changer de compte", color = Ink, fontSize = 15.sp, modifier = Modifier.padding(horizontal = 16.dp))
+        Spacer(Modifier.width(9.dp))
+        FocusableSurface(onClick = onLogout, modifier = Modifier.width(120.dp).height(52.dp)) {
+            Text("Compte", color = Ink, fontSize = 15.sp, modifier = Modifier.padding(horizontal = 15.dp))
         }
     }
 }
 
 @Composable
 private fun CategoryRail(
-    categories: List<LiveCategory>,
+    type: MediaType,
+    categories: List<MediaCategory>,
     selectedCategoryId: String,
-    countFor: (LiveCategory) -> Int,
-    onSelected: (LiveCategory) -> Unit,
+    countFor: (MediaCategory) -> Int,
+    onSelected: (MediaCategory) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier) {
         Text(
-            "Catégories",
+            "Catégories · ${type.displayName}",
             style = MaterialTheme.typography.titleLarge,
             color = Ink,
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier.padding(start = 4.dp, bottom = 14.dp),
         )
         LazyColumn(verticalArrangement = Arrangement.spacedBy(9.dp)) {
-            items(categories, key = { it.id }) { category ->
+            items(categories, key = MediaCategory::key) { category ->
                 FocusableSurface(
                     onClick = { onSelected(category) },
                     selected = selectedCategoryId == category.id,
                     modifier = Modifier.fillMaxWidth().height(62.dp),
-                    contentDescription = "Catégorie ${category.name}, ${countFor(category)} chaînes",
+                    contentDescription = "Catégorie ${category.name}, ${countFor(category)} éléments",
                 ) {
-                    Row(
-                        Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             category.name,
                             color = Ink,
@@ -189,52 +206,45 @@ private fun CategoryRail(
 }
 
 @Composable
-private fun ChannelGrid(
+private fun MediaGrid(
+    type: MediaType,
     categoryName: String,
-    channels: List<LiveChannel>,
-    onChannelSelected: (LiveChannel) -> Unit,
+    entries: List<MediaEntry>,
+    onEntrySelected: (MediaEntry) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val firstChannelFocus = remember(categoryName) { FocusRequester() }
-    LaunchedEffect(categoryName, channels.size) {
-        if (channels.isNotEmpty()) {
+    val firstEntryFocus = remember(type, categoryName) { FocusRequester() }
+    LaunchedEffect(type, categoryName, entries.size) {
+        if (entries.isNotEmpty()) {
             yield()
-            runCatching { firstChannelFocus.requestFocus() }
+            runCatching { firstEntryFocus.requestFocus() }
         }
     }
 
     Column(modifier) {
-        Row(
-            Modifier.fillMaxWidth().padding(bottom = 14.dp),
-            verticalAlignment = Alignment.Bottom,
-        ) {
-            Text(
-                categoryName,
-                style = MaterialTheme.typography.headlineSmall,
-                color = Ink,
-                fontWeight = FontWeight.SemiBold,
-            )
+        Row(Modifier.fillMaxWidth().padding(bottom = 14.dp), verticalAlignment = Alignment.Bottom) {
+            Text(categoryName, style = MaterialTheme.typography.headlineSmall, color = Ink, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.width(14.dp))
-            Text("${channels.size} chaînes", color = MutedInk, fontSize = 15.sp)
+            Text("${entries.size} ${type.pluralName}", color = MutedInk, fontSize = 15.sp)
             Spacer(Modifier.weight(1f))
-            Text("↑ ↓ ← → naviguer    OK regarder", color = MutedInk, fontSize = 14.sp)
+            Text("↑ ↓ ← → naviguer    OK ouvrir", color = MutedInk, fontSize = 14.sp)
         }
 
-        if (channels.isEmpty()) {
+        if (entries.isEmpty()) {
             Box(Modifier.fillMaxSize().background(DeepSurface), contentAlignment = Alignment.Center) {
-                Text("Aucune chaîne dans cette catégorie", color = MutedInk, fontSize = 19.sp)
+                Text("Aucun contenu dans cette catégorie", color = MutedInk, fontSize = 19.sp)
             }
         } else {
             LazyVerticalGrid(
-                columns = GridCells.Adaptive(238.dp),
+                columns = GridCells.Adaptive(if (type == MediaType.Live) 238.dp else 260.dp),
                 horizontalArrangement = Arrangement.spacedBy(14.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                items(channels, key = { it.id }) { channel ->
-                    ChannelCard(
-                        channel = channel,
-                        onClick = { onChannelSelected(channel) },
-                        modifier = if (channel.id == channels.first().id) Modifier.focusRequester(firstChannelFocus) else Modifier,
+                items(entries, key = MediaEntry::key) { entry ->
+                    MediaCard(
+                        entry = entry,
+                        onClick = { onEntrySelected(entry) },
+                        modifier = if (entry.key == entries.first().key) Modifier.focusRequester(firstEntryFocus) else Modifier,
                     )
                 }
             }
@@ -243,30 +253,32 @@ private fun ChannelGrid(
 }
 
 @Composable
-private fun ChannelCard(channel: LiveChannel, onClick: () -> Unit, modifier: Modifier = Modifier) {
+private fun MediaCard(entry: MediaEntry, onClick: () -> Unit, modifier: Modifier = Modifier) {
     FocusableSurface(
         onClick = onClick,
-        modifier = modifier.fillMaxWidth().height(116.dp),
-        contentDescription = "Regarder ${channel.name}",
+        modifier = modifier.fillMaxWidth().height(if (entry.type == MediaType.Live) 116.dp else 140.dp),
+        contentDescription = "Ouvrir ${entry.displayName}",
     ) {
-        Row(
-            Modifier.fillMaxWidth().padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            ChannelLogo(channel.iconUrl, channel.name, Modifier.size(82.dp))
+        Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            ChannelLogo(entry.iconUrl, entry.displayName, Modifier.size(if (entry.type == MediaType.Live) 82.dp else 108.dp))
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 Text(
-                    channel.name,
+                    entry.displayName,
                     color = Ink,
                     fontSize = 17.sp,
                     lineHeight = 21.sp,
                     fontWeight = FontWeight.SemiBold,
-                    maxLines = 2,
+                    maxLines = 3,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Spacer(Modifier.height(5.dp))
-                Text("CH ${channel.number}", color = FocusBlueBright, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                val detail = when (entry.type) {
+                    MediaType.Live -> "CH ${entry.number}"
+                    MediaType.Movie -> entry.rating?.let { "★ ${"%.1f".format(it)}" } ?: "Film"
+                    MediaType.Series -> entry.rating?.let { "★ ${"%.1f".format(it)}" } ?: "Voir les épisodes"
+                }
+                Text(detail, color = FocusBlueBright, fontSize = 13.sp, fontWeight = FontWeight.Bold)
             }
         }
     }
