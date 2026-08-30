@@ -7,6 +7,7 @@ import android.provider.OpenableColumns
 import fr.streamia.tv.domain.Catalog
 import fr.streamia.tv.domain.EpgProgram
 import fr.streamia.tv.domain.MediaEntry
+import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.domain.SeriesDetails
 import fr.streamia.tv.domain.ServerCredentials
 import fr.streamia.tv.domain.XtreamUrlBuilder
@@ -92,13 +93,25 @@ class XtreamRepository(context: Context) {
         playlistStore.upsert(profile)
         credentialsStore.save(imported.credentials)
         cache.save(id, imported.catalog)
+
+        val catalog = imported.catalog
+        val summary = buildString {
+            append("${imported.parsedEntries} médias")
+            append(" · ${catalog.count(MediaType.Live)} chaînes")
+            append(" · ${catalog.count(MediaType.Movie)} films")
+            append(" · ${catalog.count(MediaType.Series)} séries")
+            append(" · ${catalog.categories.size} catégories")
+            if ("tvg-logo" in imported.detectedAttributes) append(" · logos")
+            if ("tvg-id" in imported.detectedAttributes) append(" · EPG/TVG")
+            if (imported.skippedEntries > 0) append(" · ${imported.skippedEntries} ignorés")
+        }
+
         LoadedCatalog(
-            catalog = imported.catalog,
+            catalog = catalog,
             credentials = imported.credentials,
             source = CatalogSource.Import,
             profileId = id,
-            importSummary = "${imported.parsedEntries} médias importés" +
-                if (imported.skippedEntries > 0) " · ${imported.skippedEntries} ignorés" else "",
+            importSummary = summary,
         )
     }
 

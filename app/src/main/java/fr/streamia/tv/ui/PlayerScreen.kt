@@ -60,6 +60,9 @@ import fr.streamia.tv.ui.theme.MutedInk
 import fr.streamia.tv.ui.theme.Night
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.yield
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @androidx.annotation.OptIn(markerClass = [UnstableApi::class])
 @Composable
@@ -79,6 +82,8 @@ fun PlayerScreen(
     var hudVisible by remember { mutableStateOf(true) }
     var buffering by remember { mutableStateOf(true) }
     var playbackError by remember { mutableStateOf<String?>(null) }
+    var activeStreamUrl by remember { mutableStateOf("") }
+    var fallbackAttempted by remember { mutableStateOf(false) }
 
     DisposableEffect(player) {
         val listener = object : Player.Listener {
@@ -87,7 +92,20 @@ fun PlayerScreen(
             }
 
             override fun onPlayerError(error: PlaybackException) {
-                playbackError = "Cette chaîne ne peut pas être lue pour le moment."
+                if (!fallbackAttempted) {
+                    val alternate = XtreamUrlBuilder.alternateTransportUrl(activeStreamUrl)
+                    if (alternate != null) {
+                        fallbackAttempted = true
+                        activeStreamUrl = alternate
+                        playbackError = null
+                        buffering = true
+                        player.setMediaItem(MediaItem.fromUri(alternate))
+                        player.prepare()
+                        player.play()
+                        return
+                    }
+                }
+                playbackError = "Ce contenu ne peut pas être lu pour le moment."
                 buffering = false
             }
         }
@@ -102,8 +120,9 @@ fun PlayerScreen(
         playbackError = null
         buffering = true
         hudVisible = true
-        val streamUrl = XtreamUrlBuilder(credentials).stream(entry)
-        player.setMediaItem(MediaItem.fromUri(streamUrl))
+        fallbackAttempted = false
+        activeStreamUrl = XtreamUrlBuilder(credentials).stream(entry)
+        player.setMediaItem(MediaItem.fromUri(activeStreamUrl))
         player.prepare()
         player.play()
     }
@@ -180,6 +199,7 @@ fun PlayerScreen(
             FocusableSurface(
                 onClick = {
                     playbackError = null
+                    buffering = true
                     player.prepare()
                     player.play()
                 },
@@ -231,20 +251,64 @@ private fun PlayerHud(
             Modifier
                 .align(Alignment.TopStart)
                 .padding(36.dp)
+                .width(if (entry.type == MediaType.Live) 720.dp else 520.dp)
                 .background(Night.copy(alpha = 0.94f), androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
                 .padding(horizontal = 18.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
+            verticalAlignment = Alignment.Top,
         ) {
-            ChannelLogo(entry.iconUrl, entry.displayName, Modifier.size(58.dp))
-            Spacer(Modifier.width(15.dp))
-            Column {
-                Text(entry.displayName, color = Ink, fontSize = 21.sp, fontWeight = FontWeight.Bold)
-                val subtitle = if (entry.type == MediaType.Live) {
-                    epg.firstOrNull()?.title ?: "Chaîne ${entry.number}"
+            ChannelLogo(entry.iconUrl, entry.displayName, Modifier.size(72.dp))
+            Spacer(Modifier.width(16.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    entry.displayName,
+                    color = Ink,
+                    fontSize = 21.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.height(4.dp))
+                if (entry.type == MediaType.Live) {
+                    val current = epg.firstOrNull()
+                    if (current == null) {
+                        Text("Chaîne ${entry.number}", color = FocusBlueBright, fontSize = 14.sp)
+                    } else {
+                        Text(
+                            listOfNotNull(current.timeRange(), current.title).joinToString(" · "),
+                            color = FocusBlueBright,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        current.description?.takeIf(String::isNotBlank)?.let { description ->
+                            Spacer(Modifier.height(3.dp))
+                            Text(
+                                description,
+                                color = MutedInk,
+                                fontSize = 12.sp,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        epg.getOrNull(1)?.let { next ->
+                            Spacer(Modifier.height(5.dp))
+                            Text(
+                                "À suivre ${next.timeRange()?.let { "$it · " }.orEmpty()}${next.title}",
+                                color = MutedInk,
+                                fontSize = 12.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
                 } else {
-                    entry.type.displayName
+                    Text(
+                        "${entry.type.displayName} · ${entry.extension.uppercase()} · ID ${entry.tvgId ?: entry.id}",
+                        color = FocusBlueBright,
+                        fontSize = 13.sp,
+                    )
                 }
-                Text(subtitle, color = FocusBlueBright, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
 
@@ -345,15 +409,19 @@ private fun PlayerGuide(
                         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                             ChannelLogo(guideChannel.iconUrl, guideChannel.name, Modifier.size(48.dp))
                             Spacer(Modifier.width(12.dp))
-                            Text(
-                                guideChannel.name,
-                                color = Ink,
-                                fontSize = 16.sp,
-                                fontWeight = if (guideChannel.key == currentEntry.key) FontWeight.Bold else FontWeight.Medium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f),
-                            )
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    guideChannel.name,
+                                    color = Ink,
+                                    fontSize = 16.sp,
+                                    fontWeight = if (guideChannel.key == currentEntry.key) FontWeight.Bold else FontWeight.Medium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                guideChannel.tvgId?.let { id ->
+                                    Text("TVG $id", color = MutedInk, fontSize = 11.sp, maxLines = 1)
+                                }
+                            }
                             Text(guideChannel.number.toString(), color = MutedInk, fontSize = 13.sp)
                         }
                     }
@@ -361,4 +429,11 @@ private fun PlayerGuide(
             }
         }
     }
+}
+
+private fun EpgProgram.timeRange(): String? {
+    val start = startEpochSeconds ?: return null
+    val end = endEpochSeconds ?: return null
+    val format = SimpleDateFormat("HH:mm", Locale.getDefault())
+    return "${format.format(Date(start * 1000L))}–${format.format(Date(end * 1000L))}"
 }

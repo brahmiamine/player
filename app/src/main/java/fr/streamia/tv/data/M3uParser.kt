@@ -5,7 +5,6 @@ import fr.streamia.tv.domain.MediaCategory
 import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.domain.ServerCredentials
-import fr.streamia.tv.domain.XtreamUrlBuilder
 import java.io.BufferedReader
 import java.io.Reader
 import java.net.URI
@@ -14,15 +13,22 @@ import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 
 /**
- * Parse une playlist ligne par ligne : la taille du fichier n'est jamais chargée en bloc.
- * Seules les URL Xtream structurées /live/, /movie/ ou /series/ sont acceptées afin que les
- * identifiants puissent être stockés chiffrés une seule fois au lieu d'être copiés dans le cache.
+ * Parse une playlist M3U ligne par ligne afin de supporter les très gros fichiers sur Android TV.
+ *
+ * Les informations EXTINF utilisées sont notamment : tvg-id, tvg-name, tvg-logo et group-title.
+ * Le type de média est déterminé par le chemin Xtream /live/, /movie/ ou /series/.
+ *
+ * Certains fournisseurs produisent des URL sans schéma (host:port/live/...). Dans ce cas HTTP est
+ * utilisé comme transport initial, puis la couche réseau/lecteur peut basculer automatiquement vers
+ * HTTPS si le serveur l'exige. Les URL qui déclarent explicitement http:// ou https:// sont conservées.
  */
 class M3uParser {
     fun parse(reader: Reader): M3uImport {
         val categories = linkedMapOf<String, MediaCategory>()
         val entries = ArrayList<MediaEntry>()
         val seenEntries = HashSet<String>()
+        val typeNumbers = mutableMapOf<MediaType, Int>()
+        val detectedAttributes = linkedSetOf<String>()
         var credentials: ServerCredentials? = null
         var pending: ExtInf? = null
         var skipped = 0
@@ -31,7 +37,11 @@ class M3uParser {
             for (rawLine in lines) {
                 val line = rawLine.removePrefix("\uFEFF").trim()
                 when {
-                    line.startsWith("#EXTINF", ignoreCase = true) -> pending = parseExtInf(line)
+                    line.startsWith("#EXTINF", ignoreCase = true) -> {
+                        pending = parseExtInf(line)
+                        pending?.attributes?.keys?.let(detectedAttributes::addAll)
+                    }
+
                     line.isBlank() || line.startsWith("#") -> Unit
                     pending != null -> {
                         val metadata = pending
@@ -62,6 +72,12 @@ class M3uParser {
                         }
                         val entryKey = "${stream.type.name}:${stream.id}"
                         if (!seenEntries.add(entryKey)) continue
+
+                        val automaticNumber = (typeNumbers[stream.type] ?: 0) + 1
+                        typeNumbers[stream.type] = automaticNumber
+                        val suppliedNumber = metadata.attributes["tvg-chno"]?.toIntOrNull()
+                            ?: metadata.attributes["channel-number"]?.toIntOrNull()
+
                         entries += MediaEntry(
                             id = stream.id,
                             name = name,
@@ -69,10 +85,10 @@ class M3uParser {
                             type = stream.type,
                             categoryId = category.id,
                             iconUrl = metadata.attributes["tvg-logo"]?.takeIf(String::isNotBlank),
-                            number = entries.size + 1,
+                            number = suppliedNumber ?: automaticNumber,
                             extension = stream.extension,
                             tvgId = metadata.attributes["tvg-id"]?.takeIf(String::isNotBlank),
-                            playable = true,
+                            playable = stream.type != MediaType.Series,
                         )
                     }
                 }
@@ -88,6 +104,7 @@ class M3uParser {
             credentials = account,
             skippedEntries = skipped,
             parsedEntries = entries.size,
+            detectedAttributes = detectedAttributes,
         )
     }
 
@@ -114,9 +131,14 @@ class M3uParser {
     }
 
     private fun parseStream(rawUrl: String): ParsedStream? {
-        val normalized = XtreamUrlBuilder.normalizeServerUrl(rawUrl)
+        val raw = rawUrl.trim()
+        if (raw.isBlank()) return null
+        val hasExplicitScheme = SCHEME_PREFIX.containsMatchIn(raw)
+        val normalized = if (hasExplicitScheme) raw else "$DEFAULT_SCHEME://$raw"
         val uri = runCatching { URI(normalized) }.getOrNull() ?: return null
-        if (uri.scheme !in setOf("http", "https") || uri.host.isNullOrBlank()) return null
+        val scheme = uri.scheme?.lowercase() ?: return null
+        if (scheme !in setOf("http", "https") || uri.host.isNullOrBlank()) return null
+
         val rawSegments = uri.rawPath.orEmpty().split('/').filter(String::isNotBlank)
         val typeIndex = rawSegments.indexOfFirst { segment ->
             MediaType.entries.any { it.pathSegment.equals(segment, ignoreCase = true) }
@@ -125,14 +147,18 @@ class M3uParser {
         val type = MediaType.entries.first { it.pathSegment.equals(rawSegments[typeIndex], ignoreCase = true) }
         val username = decode(rawSegments[typeIndex + 1])
         val password = decode(rawSegments[typeIndex + 2])
+        if (username.isBlank() || password.isBlank()) return null
+
         val fileName = decode(rawSegments[typeIndex + 3])
-        val id = fileName.substringBeforeLast('.', fileName).toIntOrNull() ?: return null
+        val id = fileName.substringBeforeLast('.', fileName).toIntOrNull()
+            ?: fileName.toIntOrNull()
+            ?: return null
         val extension = fileName.substringAfterLast('.', type.defaultExtension)
             .takeIf { it.matches(Regex("[A-Za-z0-9]{1,8}")) }
             ?: type.defaultExtension
         val prefix = rawSegments.take(typeIndex).joinToString("/")
         val authority = buildString {
-            append(uri.scheme)
+            append(scheme)
             append("://")
             append(uri.host)
             if (uri.port >= 0) append(":${uri.port}")
@@ -170,6 +196,8 @@ class M3uParser {
 
     companion object {
         private const val BUFFER_SIZE = 64 * 1024
+        private const val DEFAULT_SCHEME = "http"
+        private val SCHEME_PREFIX = Regex("^[A-Za-z][A-Za-z0-9+.-]*://")
         private val ATTRIBUTE = Regex("([A-Za-z0-9_-]+)\\s*=\\s*\"([^\"]*)\"")
     }
 }
@@ -179,4 +207,5 @@ data class M3uImport(
     val credentials: ServerCredentials,
     val parsedEntries: Int,
     val skippedEntries: Int,
+    val detectedAttributes: Set<String> = emptySet(),
 )

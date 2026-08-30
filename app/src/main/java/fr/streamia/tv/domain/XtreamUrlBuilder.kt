@@ -52,5 +52,26 @@ class XtreamUrlBuilder(private val credentials: ServerCredentials) {
             val withScheme = if (trimmed.contains("://")) trimmed else "https://$trimmed"
             return if (withScheme.endsWith("://")) withScheme else withScheme.trimEnd('/')
         }
+
+        /**
+         * Retourne la même URL avec l'autre transport HTTP/HTTPS.
+         * Utile pour les fournisseurs IPTV qui exposent un port atypique ou une playlist sans schéma.
+         */
+        fun alternateTransportUrl(url: String): String? {
+            val uri = runCatching { URI(url) }.getOrNull() ?: return null
+            val targetScheme = when (uri.scheme?.lowercase()) {
+                "http" -> "https"
+                "https" -> "http"
+                else -> return null
+            }
+            return buildString {
+                append(targetScheme)
+                append("://")
+                append(uri.rawAuthority ?: return null)
+                append(uri.rawPath.orEmpty())
+                if (!uri.rawQuery.isNullOrBlank()) append("?${uri.rawQuery}")
+                if (!uri.rawFragment.isNullOrBlank()) append("#${uri.rawFragment}")
+            }
+        }
     }
 }

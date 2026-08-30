@@ -89,7 +89,7 @@ class XtreamClient {
         credentials: ServerCredentials,
         streamId: Int,
     ): List<EpgProgram> = withContext(Dispatchers.IO) {
-        val root = fetchObject(XtreamUrlBuilder(credentials).shortEpg(streamId))
+        val root = fetchObject(XtreamUrlBuilder(credentials).shortEpg(streamId, limit = 3))
         val listings = root.optJSONArray("epg_listings") ?: JSONArray()
         buildList {
             for (index in 0 until listings.length()) {
@@ -110,24 +110,41 @@ class XtreamClient {
 
     private fun fetchArray(url: String): JSONArray = JSONArray(fetch(url))
 
+    /**
+     * Essaie d'abord exactement le protocole fourni par l'utilisateur/la playlist.
+     * Si la connexion réseau échoue (par exemple HTTP sur un port TLS), une seule tentative est faite
+     * avec l'autre transport. Les erreurs HTTP/API ne sont jamais masquées par ce mécanisme.
+     */
     private fun fetch(url: String): String {
+        return try {
+            fetchOnce(url)
+        } catch (first: IOException) {
+            val alternate = XtreamUrlBuilder.alternateTransportUrl(url)
+                ?: throw XtreamException("Impossible de joindre le serveur. Vérifiez l'adresse et la connexion.")
+            try {
+                fetchOnce(alternate)
+            } catch (_: IOException) {
+                throw XtreamException("Impossible de joindre le serveur en HTTP ou HTTPS. Vérifiez l'adresse et la connexion.")
+            }
+        }
+    }
+
+    @Throws(IOException::class)
+    private fun fetchOnce(url: String): String {
         val connection = (URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
             connectTimeout = 12_000
             readTimeout = 30_000
             useCaches = false
+            instanceFollowRedirects = true
             setRequestProperty("Accept", "application/json")
             setRequestProperty("Accept-Charset", "utf-8")
-            setRequestProperty("User-Agent", "Streamia-TV/1.1")
+            setRequestProperty("User-Agent", "Streamia-TV/1.3")
         }
         return try {
             val code = connection.responseCode
             if (code !in 200..299) throw XtreamException("Le serveur a répondu avec le code $code.")
             connection.inputStream.bufferedReader(StandardCharsets.UTF_8).use { it.readText() }
-        } catch (error: XtreamException) {
-            throw error
-        } catch (_: IOException) {
-            throw XtreamException("Impossible de joindre le serveur. Vérifiez l'adresse et la connexion.")
         } finally {
             connection.disconnect()
         }
