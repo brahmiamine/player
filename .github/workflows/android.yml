@@ -38,7 +38,11 @@ jobs:
           gradle-version: "8.13"
 
       - name: Unit tests and lint
-        run: gradle --no-daemon testDebugUnitTest lintDebug
+        run: |
+          if ! gradle --no-daemon testDebugUnitTest lintDebug; then
+            test -f app/build/reports/lint-results-debug.txt && cat app/build/reports/lint-results-debug.txt
+            exit 1
+          fi
 
       - name: Build installable APK
         run: gradle --no-daemon assembleDebug
