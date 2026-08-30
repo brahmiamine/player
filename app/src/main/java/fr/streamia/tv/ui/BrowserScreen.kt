@@ -35,6 +35,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
+import fr.streamia.tv.data.PlaybackHistoryItem
+import fr.streamia.tv.data.UserLibrarySnapshot
 import fr.streamia.tv.domain.Catalog
 import fr.streamia.tv.domain.MediaCategory
 import fr.streamia.tv.domain.MediaEntry
@@ -47,30 +49,70 @@ import fr.streamia.tv.ui.theme.Night
 import fr.streamia.tv.ui.theme.WarmSignal
 import kotlinx.coroutines.yield
 
+private const val FAVORITES_CATEGORY_ID = "__favorites__"
+private const val HISTORY_CATEGORY_ID = "__history__"
+
 @Composable
 fun BrowserScreen(
     catalog: Catalog,
+    library: UserLibrarySnapshot,
     offline: Boolean,
     busy: Boolean,
     message: String?,
+    initialType: MediaType? = null,
+    initialCategoryId: String? = null,
     onEntrySelected: (MediaEntry) -> Unit,
+    onToggleEntryFavorite: (MediaEntry) -> Unit,
+    onToggleCategoryFavorite: (MediaCategory) -> Unit,
+    onSearch: () -> Unit,
+    onEpg: () -> Unit,
+    onOrganizer: () -> Unit,
     onRefresh: () -> Unit,
     onLogout: () -> Unit,
     onDismissMessage: () -> Unit,
 ) {
-    val initialType = remember(catalog) {
-        MediaType.entries.firstOrNull { catalog.count(it) > 0 } ?: MediaType.Live
-    }
-    var selectedType by remember(catalog) { mutableStateOf(initialType) }
-    var selectedCategoryId by remember(catalog) { mutableStateOf(Catalog.ALL_CATEGORY_ID) }
-    val categories = remember(catalog, selectedType) {
-        listOf(Catalog.allCategory(selectedType)) + catalog.categoriesFor(selectedType)
-    }
-    val entries = remember(catalog, selectedType, selectedCategoryId) {
-        catalog.entriesIn(selectedType, selectedCategoryId)
+    val defaultType = initialType ?: MediaType.entries.firstOrNull { catalog.count(it) > 0 } ?: MediaType.Live
+    var selectedType by remember(catalog, initialType) { mutableStateOf(defaultType) }
+    var selectedCategoryId by remember(catalog, initialCategoryId, selectedType) {
+        mutableStateOf(initialCategoryId ?: Catalog.ALL_CATEGORY_ID)
     }
 
-    LaunchedEffect(selectedType) { selectedCategoryId = Catalog.ALL_CATEGORY_ID }
+    val baseCategories = remember(catalog, selectedType, library.favoriteCategories) {
+        val raw = catalog.categoriesFor(selectedType)
+        val (favorite, other) = raw.partition { it.key in library.favoriteCategories }
+        favorite + other
+    }
+    val favoriteEntriesForType = remember(catalog, selectedType, library.favoriteEntries) {
+        catalog.entriesFor(selectedType).filter { it.key in library.favoriteEntries }
+    }
+    val historyForType = remember(catalog, selectedType, library.history) {
+        library.history.asSequence()
+            .map { item -> item to (catalog.entry(item.entry.key) ?: item.entry) }
+            .filter { (_, entry) -> entry.type == selectedType }
+            .toList()
+    }
+    val categories = remember(baseCategories, favoriteEntriesForType.size, historyForType.size, selectedType) {
+        buildList {
+            add(Catalog.allCategory(selectedType))
+            if (favoriteEntriesForType.isNotEmpty()) add(MediaCategory(FAVORITES_CATEGORY_ID, "★ Favoris", selectedType))
+            if (historyForType.isNotEmpty()) add(MediaCategory(HISTORY_CATEGORY_ID, "↺ Historique", selectedType))
+            addAll(baseCategories)
+        }
+    }
+    val entries = remember(catalog, selectedType, selectedCategoryId, favoriteEntriesForType, historyForType) {
+        when (selectedCategoryId) {
+            FAVORITES_CATEGORY_ID -> favoriteEntriesForType
+            HISTORY_CATEGORY_ID -> historyForType.map { it.second }
+            else -> catalog.entriesIn(selectedType, selectedCategoryId)
+        }
+    }
+    val historyByKey = remember(historyForType) { historyForType.associate { it.second.key to it.first } }
+
+    LaunchedEffect(selectedType) {
+        if (initialType != selectedType || categories.none { it.id == selectedCategoryId }) {
+            selectedCategoryId = Catalog.ALL_CATEGORY_ID
+        }
+    }
 
     Column(Modifier.fillMaxSize().background(Night)) {
         BrowserHeader(
@@ -78,7 +120,10 @@ fun BrowserScreen(
             selectedType = selectedType,
             offline = offline,
             busy = busy,
-            onTypeSelected = { selectedType = it },
+            onTypeSelected = { selectedType = it; selectedCategoryId = Catalog.ALL_CATEGORY_ID },
+            onSearch = onSearch,
+            onEpg = onEpg,
+            onOrganizer = onOrganizer,
             onRefresh = onRefresh,
             onLogout = onLogout,
         )
@@ -89,27 +134,38 @@ fun BrowserScreen(
             ) {
                 Text(
                     "$message  ·  OK pour fermer",
-                    color = if (message.contains("import", ignoreCase = true)) FocusBlueBright else MaterialTheme.colorScheme.error,
+                    color = if (message.contains("média", ignoreCase = true) || message.contains("import", ignoreCase = true)) FocusBlueBright else MaterialTheme.colorScheme.error,
                     fontSize = 15.sp,
                     modifier = Modifier.padding(horizontal = 18.dp),
                 )
             }
         }
-        Row(Modifier.fillMaxSize().padding(start = 26.dp, end = 26.dp, bottom = 24.dp)) {
+        Row(Modifier.fillMaxSize().padding(start = 24.dp, end = 24.dp, bottom = 22.dp)) {
             CategoryRail(
                 type = selectedType,
                 categories = categories,
                 selectedCategoryId = selectedCategoryId,
-                countFor = { catalog.entriesIn(selectedType, it.id).size },
+                favoriteCategories = library.favoriteCategories,
+                countFor = { category ->
+                    when (category.id) {
+                        FAVORITES_CATEGORY_ID -> favoriteEntriesForType.size
+                        HISTORY_CATEGORY_ID -> historyForType.size
+                        else -> catalog.entriesIn(selectedType, category.id).size
+                    }
+                },
                 onSelected = { selectedCategoryId = it.id },
-                modifier = Modifier.width(310.dp).fillMaxHeight(),
+                onToggleFavorite = onToggleCategoryFavorite,
+                modifier = Modifier.width(330.dp).fillMaxHeight(),
             )
-            Spacer(Modifier.width(26.dp))
+            Spacer(Modifier.width(22.dp))
             MediaGrid(
                 type = selectedType,
                 categoryName = categories.firstOrNull { it.id == selectedCategoryId }?.name.orEmpty(),
                 entries = entries,
+                favoriteEntries = library.favoriteEntries,
+                historyByKey = historyByKey,
                 onEntrySelected = onEntrySelected,
+                onToggleFavorite = onToggleEntryFavorite,
                 modifier = Modifier.weight(1f).fillMaxHeight(),
             )
         }
@@ -123,42 +179,53 @@ private fun BrowserHeader(
     offline: Boolean,
     busy: Boolean,
     onTypeSelected: (MediaType) -> Unit,
+    onSearch: () -> Unit,
+    onEpg: () -> Unit,
+    onOrganizer: () -> Unit,
     onRefresh: () -> Unit,
     onLogout: () -> Unit,
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth().height(98.dp).padding(horizontal = 30.dp),
+        modifier = Modifier.fillMaxWidth().height(92.dp).padding(horizontal = 26.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         StreamiaLogo(compact = true)
-        Spacer(Modifier.width(26.dp))
+        Spacer(Modifier.width(20.dp))
         for (type in MediaType.entries) {
             FocusableSurface(
                 onClick = { onTypeSelected(type) },
                 selected = selectedType == type,
                 enabled = catalog.count(type) > 0,
-                modifier = Modifier.width(128.dp).height(52.dp),
-                contentDescription = "${type.displayName}, ${catalog.count(type)} ${type.pluralName}",
+                modifier = Modifier.width(112.dp).height(50.dp),
             ) {
-                Column(Modifier.padding(horizontal = 14.dp)) {
-                    Text(type.displayName, color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                    Text(catalog.count(type).toString(), color = MutedInk, fontSize = 12.sp)
+                Column(Modifier.padding(horizontal = 12.dp)) {
+                    Text(type.displayName, color = Ink, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Text(catalog.count(type).toString(), color = MutedInk, fontSize = 11.sp)
                 }
             }
-            Spacer(Modifier.width(9.dp))
+            Spacer(Modifier.width(7.dp))
         }
         Spacer(Modifier.weight(1f))
+        HeaderAction("⌕ Rechercher", 126.dp, onSearch)
+        Spacer(Modifier.width(7.dp))
+        HeaderAction("EPG", 82.dp, onEpg)
+        Spacer(Modifier.width(7.dp))
+        HeaderAction("Organiser", 104.dp, onOrganizer)
+        Spacer(Modifier.width(10.dp))
         Box(Modifier.size(7.dp).background(if (offline) WarmSignal else Color(0xFF6CCB91)))
-        Spacer(Modifier.width(9.dp))
-        Text(if (offline) "Hors ligne" else "Connecté", color = if (offline) WarmSignal else MutedInk, fontSize = 14.sp)
-        Spacer(Modifier.width(16.dp))
-        FocusableSurface(onClick = onRefresh, enabled = !busy, modifier = Modifier.width(138.dp).height(52.dp)) {
-            Text(if (busy) "Chargement…" else "↻ Actualiser", color = Ink, fontSize = 15.sp, modifier = Modifier.padding(horizontal = 15.dp))
-        }
-        Spacer(Modifier.width(9.dp))
-        FocusableSurface(onClick = onLogout, modifier = Modifier.width(120.dp).height(52.dp)) {
-            Text("Compte", color = Ink, fontSize = 15.sp, modifier = Modifier.padding(horizontal = 15.dp))
-        }
+        Spacer(Modifier.width(7.dp))
+        Text(if (offline) "Cache" else "En ligne", color = if (offline) WarmSignal else MutedInk, fontSize = 12.sp)
+        Spacer(Modifier.width(10.dp))
+        HeaderAction(if (busy) "…" else "↻", 58.dp, onRefresh, !busy)
+        Spacer(Modifier.width(7.dp))
+        HeaderAction("Compte", 86.dp, onLogout)
+    }
+}
+
+@Composable
+private fun HeaderAction(label: String, width: androidx.compose.ui.unit.Dp, onClick: () -> Unit, enabled: Boolean = true) {
+    FocusableSurface(onClick = onClick, enabled = enabled, modifier = Modifier.width(width).height(50.dp)) {
+        Text(label, color = Ink, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 12.dp))
     }
 }
 
@@ -167,8 +234,10 @@ private fun CategoryRail(
     type: MediaType,
     categories: List<MediaCategory>,
     selectedCategoryId: String,
+    favoriteCategories: Set<String>,
     countFor: (MediaCategory) -> Int,
     onSelected: (MediaCategory) -> Unit,
+    onToggleFavorite: (MediaCategory) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier) {
@@ -177,27 +246,38 @@ private fun CategoryRail(
             style = MaterialTheme.typography.titleLarge,
             color = Ink,
             fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(start = 4.dp, bottom = 14.dp),
+            modifier = Modifier.padding(start = 4.dp, bottom = 12.dp),
         )
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(9.dp)) {
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(7.dp)) {
             items(categories, key = MediaCategory::key) { category ->
-                FocusableSurface(
-                    onClick = { onSelected(category) },
-                    selected = selectedCategoryId == category.id,
-                    modifier = Modifier.fillMaxWidth().height(62.dp),
-                    contentDescription = "Catégorie ${category.name}, ${countFor(category)} éléments",
-                ) {
-                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            category.name,
-                            color = Ink,
-                            fontSize = 17.sp,
-                            fontWeight = if (selectedCategoryId == category.id) FontWeight.Bold else FontWeight.Medium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f),
-                        )
-                        Text(countFor(category).toString(), color = MutedInk, fontSize = 14.sp)
+                val virtual = category.id in setOf(Catalog.ALL_CATEGORY_ID, FAVORITES_CATEGORY_ID, HISTORY_CATEGORY_ID)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    FocusableSurface(
+                        onClick = { onSelected(category) },
+                        selected = selectedCategoryId == category.id,
+                        modifier = Modifier.weight(1f).height(58.dp),
+                    ) {
+                        Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                category.name,
+                                color = Ink,
+                                fontSize = 15.sp,
+                                fontWeight = if (selectedCategoryId == category.id) FontWeight.Bold else FontWeight.Medium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Text(countFor(category).toString(), color = MutedInk, fontSize = 12.sp)
+                        }
+                    }
+                    if (!virtual) {
+                        FocusableSurface(
+                            onClick = { onToggleFavorite(category) },
+                            selected = category.key in favoriteCategories,
+                            modifier = Modifier.width(54.dp).height(58.dp),
+                        ) {
+                            Text(if (category.key in favoriteCategories) "★" else "☆", color = FocusBlueBright, fontSize = 20.sp, modifier = Modifier.padding(start = 16.dp))
+                        }
                     }
                 }
             }
@@ -210,7 +290,10 @@ private fun MediaGrid(
     type: MediaType,
     categoryName: String,
     entries: List<MediaEntry>,
+    favoriteEntries: Set<String>,
+    historyByKey: Map<String, PlaybackHistoryItem>,
     onEntrySelected: (MediaEntry) -> Unit,
+    onToggleFavorite: (MediaEntry) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val firstEntryFocus = remember(type, categoryName) { FocusRequester() }
@@ -222,12 +305,12 @@ private fun MediaGrid(
     }
 
     Column(modifier) {
-        Row(Modifier.fillMaxWidth().padding(bottom = 14.dp), verticalAlignment = Alignment.Bottom) {
+        Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), verticalAlignment = Alignment.Bottom) {
             Text(categoryName, style = MaterialTheme.typography.headlineSmall, color = Ink, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.width(14.dp))
-            Text("${entries.size} ${type.pluralName}", color = MutedInk, fontSize = 15.sp)
+            Spacer(Modifier.width(12.dp))
+            Text("${entries.size} ${type.pluralName}", color = MutedInk, fontSize = 14.sp)
             Spacer(Modifier.weight(1f))
-            Text("↑ ↓ ← → naviguer    OK ouvrir", color = MutedInk, fontSize = 14.sp)
+            Text("↑ ↓ ← → naviguer · OK ouvrir · ☆ favori", color = MutedInk, fontSize = 12.sp)
         }
 
         if (entries.isEmpty()) {
@@ -236,14 +319,17 @@ private fun MediaGrid(
             }
         } else {
             LazyVerticalGrid(
-                columns = GridCells.Adaptive(if (type == MediaType.Live) 238.dp else 260.dp),
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
+                columns = GridCells.Adaptive(if (type == MediaType.Live) 260.dp else 285.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 items(entries, key = MediaEntry::key) { entry ->
                     MediaCard(
                         entry = entry,
+                        favorite = entry.key in favoriteEntries,
+                        history = historyByKey[entry.key],
                         onClick = { onEntrySelected(entry) },
+                        onToggleFavorite = { onToggleFavorite(entry) },
                         modifier = if (entry.key == entries.first().key) Modifier.focusRequester(firstEntryFocus) else Modifier,
                     )
                 }
@@ -253,33 +339,54 @@ private fun MediaGrid(
 }
 
 @Composable
-private fun MediaCard(entry: MediaEntry, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    FocusableSurface(
-        onClick = onClick,
-        modifier = modifier.fillMaxWidth().height(if (entry.type == MediaType.Live) 116.dp else 140.dp),
-        contentDescription = "Ouvrir ${entry.displayName}",
-    ) {
-        Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            ChannelLogo(entry.iconUrl, entry.displayName, Modifier.size(if (entry.type == MediaType.Live) 82.dp else 108.dp))
-            Spacer(Modifier.width(14.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    entry.displayName,
-                    color = Ink,
-                    fontSize = 17.sp,
-                    lineHeight = 21.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 3,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Spacer(Modifier.height(5.dp))
-                val detail = when (entry.type) {
-                    MediaType.Live -> "CH ${entry.number}"
-                    MediaType.Movie -> entry.rating?.let { "★ ${"%.1f".format(it)}" } ?: "Film"
-                    MediaType.Series -> entry.rating?.let { "★ ${"%.1f".format(it)}" } ?: "Voir les épisodes"
+private fun MediaCard(
+    entry: MediaEntry,
+    favorite: Boolean,
+    history: PlaybackHistoryItem?,
+    onClick: () -> Unit,
+    onToggleFavorite: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        FocusableSurface(
+            onClick = onClick,
+            modifier = Modifier.weight(1f).height(if (entry.type == MediaType.Live) 112.dp else 142.dp),
+        ) {
+            Row(Modifier.fillMaxWidth().padding(11.dp), verticalAlignment = Alignment.CenterVertically) {
+                ChannelLogo(entry.iconUrl, entry.displayName, Modifier.size(if (entry.type == MediaType.Live) 78.dp else 105.dp))
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        entry.displayName,
+                        color = Ink,
+                        fontSize = 15.sp,
+                        lineHeight = 19.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    val detail = when (entry.type) {
+                        MediaType.Live -> "CH ${entry.number}"
+                        MediaType.Movie -> entry.rating?.let { "★ ${"%.1f".format(it)}" } ?: "Film"
+                        MediaType.Series -> entry.rating?.let { "★ ${"%.1f".format(it)}" } ?: if (entry.playable) "Épisode" else "Série"
+                    }
+                    Text(detail, color = FocusBlueBright, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    if (history != null && history.progress > 0.02f) {
+                        Spacer(Modifier.height(4.dp))
+                        Text("Reprise ${history.progressPercent()}%", color = MutedInk, fontSize = 11.sp)
+                    }
                 }
-                Text(detail, color = FocusBlueBright, fontSize = 13.sp, fontWeight = FontWeight.Bold)
             }
+        }
+        FocusableSurface(
+            onClick = onToggleFavorite,
+            selected = favorite,
+            modifier = Modifier.width(52.dp).height(if (entry.type == MediaType.Live) 112.dp else 142.dp),
+        ) {
+            Text(if (favorite) "★" else "☆", color = FocusBlueBright, fontSize = 20.sp, modifier = Modifier.padding(start = 15.dp))
         }
     }
 }
+
+private fun PlaybackHistoryItem.progressPercent(): Int = (progress * 100).toInt().coerceIn(0, 100)
