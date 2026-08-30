@@ -59,7 +59,7 @@ import fr.streamia.tv.ui.theme.Night
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.yield
 
-@UnstableApi
+@androidx.annotation.OptIn(markerClass = [UnstableApi::class])
 @Composable
 fun PlayerScreen(
     catalog: Catalog,
