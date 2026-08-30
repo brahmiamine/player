@@ -398,15 +398,6 @@ private fun XtreamForm(
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
-            if (server.trim().startsWith("http://", ignoreCase = true)) {
-                item {
-                    Text(
-                        "Attention : ce serveur utilise une connexion non chiffrée (HTTP).",
-                        color = WarmSignal,
-                        fontSize = 14.sp,
-                    )
-                }
-            }
             if (message != null) {
                 item { Text(message, color = MaterialTheme.colorScheme.error, fontSize = 15.sp) }
             }
