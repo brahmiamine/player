@@ -6,7 +6,7 @@
 
 **Architecture:** A single Kotlin/Compose application separates pure Xtream URL/domain logic, Android network and encrypted-storage adapters, a lifecycle ViewModel, and TV-focused composables. Media3 ExoPlayer owns playback; the catalogue is grouped once off the main thread and cached locally for resilient startup.
 
-**Tech Stack:** Kotlin 2.4.10, Android Gradle Plugin 8.13, Jetpack Compose BOM 2026.04.01, Compose for TV 1.1.0, Lifecycle 2.11.0, Media3 1.11.0, JUnit 4, GitHub Actions.
+**Tech Stack:** Kotlin 2.4.10, Android Gradle Plugin 8.13, Jetpack Compose BOM 2026.04.01, Compose for TV 1.1.0, Lifecycle 2.10.0, Media3 1.11.0, JUnit 4, GitHub Actions.
 
 ## Global Constraints
 
