@@ -17,7 +17,7 @@ class CatalogCache(context: Context) {
         val root = JSONObject().apply {
             put("saved_at", System.currentTimeMillis())
             put("categories", JSONArray().apply {
-                catalog.categories.forEach { category ->
+                for (category in catalog.categories) {
                     put(JSONObject().apply {
                         put("id", category.id)
                         put("name", category.name)
@@ -25,7 +25,7 @@ class CatalogCache(context: Context) {
                 }
             })
             put("channels", JSONArray().apply {
-                catalog.channels.forEach { channel ->
+                for (channel in catalog.channels) {
                     put(JSONObject().apply {
                         put("id", channel.id)
                         put("name", channel.name)
