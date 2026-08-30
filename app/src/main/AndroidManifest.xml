@@ -10,8 +10,7 @@
 
     <supports-screens
         android:largeScreens="true"
-        android:xlargeScreens="true"
-        android:requiresSmallestWidthDp="720" />
+        android:xlargeScreens="true" />
 
     <application
         android:allowBackup="false"
@@ -31,6 +30,7 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+                <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
     </application>
