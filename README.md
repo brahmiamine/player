@@ -1,16 +1,20 @@
 # Streamia TV
 
-Streamia TV est un lecteur Android TV natif, rapide et entièrement pilotable à la télécommande pour les comptes compatibles avec l'API Xtream.
+Streamia TV est un lecteur Android TV natif, rapide et entièrement pilotable à la télécommande pour les comptes Xtream et les playlists M3U étendues compatibles.
 
 ## Fonctionnalités
 
-- connexion par adresse du serveur, identifiant et mot de passe ;
-- catégories et chaînes en listes paresseuses adaptées aux grands catalogues ;
-- logos de chaînes mis en cache en mémoire ;
-- lecture plein écran avec Media3 ExoPlayer (flux TS et HLS) ;
+- connexion par serveur, identifiant et mot de passe, avec ajout automatique de `https://` si nécessaire ;
+- import local d'une playlist M3U étendue en UTF-8, analysée ligne par ligne ;
+- espaces séparés **Direct**, **Films** et **Séries**, avec catégories indépendantes ;
+- saisons et épisodes récupérés par l'API Xtream lorsqu'ils sont disponibles ;
+- programme en cours récupéré avec l'EPG court Xtream ;
+- catégories et médias en listes paresseuses adaptées aux grands catalogues ;
+- logos HTTP ou HTTPS redimensionnés et mis en cache en mémoire ;
+- lecture plein écran avec Media3 ExoPlayer (TS, HLS et formats VOD usuels) ;
 - zapping avec `CH+` / `CH-` ou `↑` / `↓` ;
 - guide catégories + chaînes avec `←` ou la touche Menu ;
-- reprise du dernier catalogue hors ligne si le fournisseur ne répond pas ;
+- cache catalogue JSON lu et écrit en flux, puis reprise hors ligne si le fournisseur ne répond pas ;
 - identifiants chiffrés localement avec Android Keystore ;
 - splash screen, icône adaptative et bannière Android TV ;
 - APK généré automatiquement par GitHub Actions.
@@ -20,7 +24,9 @@ Streamia TV est un lecteur Android TV natif, rapide et entièrement pilotable à
 | Écran | Touche | Action |
 |---|---|---|
 | Catalogue | Flèches | Naviguer entre catégories et chaînes |
-| Catalogue | OK | Ouvrir la catégorie ou lancer la chaîne |
+| Catalogue | OK | Ouvrir une catégorie, une chaîne, un film ou une série |
+| Série | Flèches | Choisir une saison et un épisode |
+| Série | OK | Lancer l'épisode |
 | Lecteur | `↑` / `CH+` | Chaîne précédente de la catégorie |
 | Lecteur | `↓` / `CH-` | Chaîne suivante de la catégorie |
 | Lecteur | `←` / Menu | Ouvrir le guide |
@@ -38,7 +44,15 @@ gradle testDebugUnitTest lintDebug assembleDebug
 
 L'APK installable est produit dans `app/build/outputs/apk/debug/app-debug.apk`.
 
-Sur GitHub, ouvrez l'onglet **Actions**, lancez **Android TV APK**, puis téléchargez l'artefact `streamia-tv-debug-apk`. Un tag `v1.0.0` crée également une Release contenant l'APK.
+Sur GitHub, ouvrez l'onglet **Actions**, lancez **Android TV APK**, puis téléchargez l'artefact `streamia-tv-debug-apk`. Un tag `v1.1.0` crée également une Release contenant l'APK.
+
+## Formats Xtream et M3U pris en charge
+
+L'import reconnaît les URL contenant `/live/`, `/movie/` et `/series/`. Les champs M3U utilisés sont `tvg-id`, `tvg-name`, `tvg-logo` et `group-title`. Une virgule située à l'intérieur d'un attribut entre guillemets ou dans le nom affiché est conservée correctement.
+
+Les données détaillées absentes du M3U — épisodes, saisons et EPG — sont demandées séparément à l'API Xtream. Un `tvg-id` numérique est conservé comme identifiant du fournisseur ; il n'est pas considéré automatiquement comme un identifiant XMLTV universel.
+
+Pour protéger les accès, l'import n'enregistre pas les URL complètes de la playlist dans le cache. Le serveur, l'identifiant et le mot de passe communs sont extraits une seule fois puis chiffrés avec Android Keystore. Les entrées provenant d'un second compte dans le même fichier sont ignorées.
 
 ## Installation sur Android TV
 
@@ -53,7 +67,7 @@ L'application vise uniquement Android TV (`android.software.leanback`) et n'appa
 
 ## Confidentialité et usage légal
 
-Streamia TV n'inclut aucune chaîne, playlist, adresse de serveur ou abonnement. Utilisez uniquement des flux que vous êtes autorisé à regarder. Les identifiants restent sur la TV et sont chiffrés avec Android Keystore. Les serveurs `http://` sont acceptés pour compatibilité, mais la connexion n'est alors pas chiffrée ; préférez toujours `https://`.
+Streamia TV n'inclut aucune chaîne, playlist, adresse de serveur ou abonnement. Utilisez uniquement des flux que vous êtes autorisé à regarder. Les identifiants restent sur la TV et sont chiffrés avec Android Keystore. Ils ne doivent jamais être ajoutés au dépôt, aux journaux ou à un outil d'analyse. Les serveurs `http://` sont acceptés pour compatibilité, mais la connexion n'est alors pas chiffrée ; préférez toujours `https://`.
 
 ## Sources techniques
 

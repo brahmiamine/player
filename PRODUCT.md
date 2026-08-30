@@ -10,11 +10,11 @@ android
 
 ## Users
 
-Viewers using an Android TV device from several metres away with a D-pad remote. They need to connect their own lawful Xtream-compatible service, find a category quickly, launch a live channel, and zap without reaching for a phone.
+Viewers using an Android TV device from several metres away with a D-pad remote. They need to connect their own lawful Xtream-compatible service or local M3U playlist, browse live TV, films and series, and start playback without reaching for a phone.
 
 ## Product Purpose
 
-Streamia TV provides a fast, TV-first live-stream browser for Xtream-compatible accounts. Success means reaching a channel in a few remote presses, keeping navigation predictable, and preserving useful access to the last downloaded catalogue when the provider is temporarily unavailable.
+Streamia TV provides a fast, TV-first media browser for Xtream-compatible accounts and extended M3U imports. Success means reaching live TV, a film or an episode in a few remote presses while preserving predictable navigation and offline catalogue access.
 
 ## Brand Personality
 

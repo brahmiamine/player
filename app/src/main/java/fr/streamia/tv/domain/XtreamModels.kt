@@ -22,7 +22,7 @@ data class MediaCategory(
     val name: String,
     val type: MediaType,
 ) {
-    val key: String = "${type.name}:$id"
+    val key: String get() = "${type.name}:$id"
 }
 
 data class MediaEntry(
@@ -39,7 +39,7 @@ data class MediaEntry(
     val rating: Double? = null,
     val playable: Boolean = type != MediaType.Series,
 ) {
-    val key: String = "${type.name}:$id"
+    val key: String get() = "${type.name}:$id"
 }
 
 data class SeriesEpisode(

@@ -51,15 +51,15 @@ class M3uParser {
                             ?.takeIf(String::isNotBlank)
                             ?: metadata.displayName.takeIf(String::isNotBlank)
                             ?: "Média ${stream.id}"
-                        val displayName = metadata.displayName.ifBlank { name }
+                        val rawDisplayName = metadata.displayName.ifBlank { name }
+                        val displayName = if (rawDisplayName == name) name else rawDisplayName
                         val group = metadata.attributes["group-title"]
                             ?.takeIf(String::isNotBlank)
                             ?: "Sans catégorie"
-                        val categoryId = categoryId(stream.type, group)
-                        categories.putIfAbsent(
-                            "${stream.type.name}:$categoryId",
-                            MediaCategory(categoryId, group, stream.type),
-                        )
+                        val groupKey = "${stream.type.name}:$group"
+                        val category = categories.getOrPut(groupKey) {
+                            MediaCategory(categoryId(stream.type, group), group, stream.type)
+                        }
                         val entryKey = "${stream.type.name}:${stream.id}"
                         if (!seenEntries.add(entryKey)) continue
                         entries += MediaEntry(
@@ -67,7 +67,7 @@ class M3uParser {
                             name = name,
                             displayName = displayName,
                             type = stream.type,
-                            categoryId = categoryId,
+                            categoryId = category.id,
                             iconUrl = metadata.attributes["tvg-logo"]?.takeIf(String::isNotBlank),
                             number = entries.size + 1,
                             extension = stream.extension,
