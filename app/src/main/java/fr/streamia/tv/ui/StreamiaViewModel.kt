@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import fr.streamia.tv.data.CatalogSource
 import fr.streamia.tv.data.LoadedCatalog
+import fr.streamia.tv.data.PlaylistProfile
 import fr.streamia.tv.data.XtreamRepository
 import fr.streamia.tv.domain.Catalog
 import fr.streamia.tv.domain.EpgProgram
@@ -26,36 +27,83 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     val uiState: StateFlow<StreamiaUiState> = _uiState.asStateFlow()
 
     init {
-        restoreSession()
+        showLogin()
     }
 
-    fun signIn(server: String, username: String, password: String) {
+    fun signIn(
+        profileId: String?,
+        profileName: String,
+        server: String,
+        username: String,
+        password: String,
+    ) {
         if (_uiState.value.busy) return
         val credentials = ServerCredentials(server.trim(), username.trim(), password)
         _uiState.update { it.copy(busy = true, message = null) }
         viewModelScope.launch {
-            runCatching { repository.signIn(credentials) }
+            runCatching { repository.signIn(credentials, profileId, profileName) }
                 .onSuccess(::showCatalog)
                 .onFailure(::showError)
         }
     }
 
-    fun importM3u(uri: Uri) {
+    fun openProfile(profileId: String) {
+        if (_uiState.value.busy) return
+        _uiState.update { it.copy(busy = true, message = "Ouverture de la liste…") }
+        viewModelScope.launch {
+            runCatching { repository.openProfile(profileId) }
+                .onSuccess(::showCatalog)
+                .onFailure(::showError)
+        }
+    }
+
+    fun importM3u(uri: Uri, profileId: String?, profileName: String) {
         if (_uiState.value.busy) return
         _uiState.update { it.copy(busy = true, message = "Analyse du fichier M3U…") }
         viewModelScope.launch {
-            runCatching { repository.importM3u(uri) }
+            runCatching { repository.importM3u(uri, profileId, profileName) }
                 .onSuccess(::showCatalog)
+                .onFailure(::showError)
+        }
+    }
+
+    fun renameProfile(profileId: String, name: String) {
+        val updated = repository.renameProfile(profileId, name) ?: return
+        _uiState.update { state ->
+            state.copy(
+                profiles = state.profiles.map { if (it.id == updated.id) updated else it }
+                    .sortedByDescending(PlaylistProfile::updatedAt),
+                message = null,
+            )
+        }
+    }
+
+    fun deleteProfile(profileId: String) {
+        if (_uiState.value.busy) return
+        _uiState.update { it.copy(busy = true, message = null) }
+        viewModelScope.launch {
+            runCatching { repository.deleteProfile(profileId) }
+                .onSuccess {
+                    _uiState.update {
+                        it.copy(
+                            busy = false,
+                            profiles = repository.profiles(),
+                            message = "Liste supprimée.",
+                        )
+                    }
+                }
                 .onFailure(::showError)
         }
     }
 
     fun refresh() {
-        val credentials = _uiState.value.credentials ?: return
-        if (_uiState.value.busy) return
+        val state = _uiState.value
+        val credentials = state.credentials ?: return
+        val profileId = state.activeProfileId ?: return
+        if (state.busy) return
         _uiState.update { it.copy(busy = true, message = null) }
         viewModelScope.launch {
-            runCatching { repository.refresh(credentials) }
+            runCatching { repository.refresh(credentials, profileId) }
                 .onSuccess(::showCatalog)
                 .onFailure(::showError)
         }
@@ -122,7 +170,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     fun logout() {
         viewModelScope.launch {
             repository.logout()
-            _uiState.value = StreamiaUiState(booting = false, screen = StreamiaScreen.Login)
+            showLogin()
         }
     }
 
@@ -169,24 +217,12 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         }
     }
 
-    private fun restoreSession() {
-        viewModelScope.launch {
-            runCatching { repository.restore() }
-                .onSuccess { loaded ->
-                    if (loaded == null) {
-                        _uiState.value = StreamiaUiState(booting = false, screen = StreamiaScreen.Login)
-                    } else {
-                        showCatalog(loaded)
-                    }
-                }
-                .onFailure { error ->
-                    _uiState.value = StreamiaUiState(
-                        booting = false,
-                        screen = StreamiaScreen.Login,
-                        message = error.safeMessage(),
-                    )
-                }
-        }
+    private fun showLogin() {
+        _uiState.value = StreamiaUiState(
+            booting = false,
+            screen = StreamiaScreen.Login,
+            profiles = repository.profiles(),
+        )
     }
 
     private fun showCatalog(loaded: LoadedCatalog) {
@@ -196,13 +232,15 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             screen = StreamiaScreen.Browser,
             catalog = loaded.catalog,
             credentials = loaded.credentials,
+            activeProfileId = loaded.profileId,
+            profiles = repository.profiles(),
             offline = loaded.source == CatalogSource.Cache,
             message = loaded.importSummary,
         )
     }
 
     private fun showError(error: Throwable) {
-        _uiState.update { it.copy(busy = false, message = error.safeMessage()) }
+        _uiState.update { it.copy(busy = false, message = error.safeMessage(), profiles = repository.profiles()) }
     }
 
     private fun Throwable.safeMessage(): String =
@@ -215,6 +253,8 @@ data class StreamiaUiState(
     val screen: StreamiaScreen = StreamiaScreen.Login,
     val catalog: Catalog? = null,
     val credentials: ServerCredentials? = null,
+    val activeProfileId: String? = null,
+    val profiles: List<PlaylistProfile> = emptyList(),
     val offline: Boolean = false,
     val message: String? = null,
     val seriesDetails: SeriesDetails? = null,
