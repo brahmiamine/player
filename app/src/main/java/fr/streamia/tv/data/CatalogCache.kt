@@ -15,10 +15,14 @@ import java.nio.charset.StandardCharsets
 
 /** Cache JSON écrit et lu en flux pour éviter de dupliquer un catalogue massif en mémoire. */
 class CatalogCache(context: Context) {
-    private val file = File(context.filesDir, "catalog-v2.json")
-    private val legacyFile = File(context.filesDir, "catalog-v1.json")
+    private val filesDir = context.filesDir
+    private val legacyFiles = listOf(
+        File(filesDir, "catalog-v2.json"),
+        File(filesDir, "catalog-v1.json"),
+    )
 
-    suspend fun save(catalog: Catalog) = withContext(Dispatchers.IO) {
+    suspend fun save(profileId: String, catalog: Catalog) = withContext(Dispatchers.IO) {
+        val file = fileFor(profileId)
         val temporary = File(file.parentFile, "${file.name}.tmp")
         temporary.outputStream().writer(StandardCharsets.UTF_8).buffered().use { output ->
             JsonWriter(output).use { json ->
@@ -58,10 +62,11 @@ class CatalogCache(context: Context) {
             temporary.copyTo(file, overwrite = true)
             temporary.delete()
         }
-        legacyFile.delete()
+        legacyFiles.forEach(File::delete)
     }
 
-    suspend fun load(): Catalog? = withContext(Dispatchers.IO) {
+    suspend fun load(profileId: String): Catalog? = withContext(Dispatchers.IO) {
+        val file = fileFor(profileId)
         if (!file.exists()) return@withContext null
         runCatching {
             val categories = ArrayList<MediaCategory>()
@@ -83,9 +88,13 @@ class CatalogCache(context: Context) {
         }.getOrNull()
     }
 
-    suspend fun clear() = withContext(Dispatchers.IO) {
-        file.delete()
-        legacyFile.delete()
+    suspend fun clear(profileId: String) = withContext(Dispatchers.IO) {
+        fileFor(profileId).delete()
+    }
+
+    private fun fileFor(profileId: String): File {
+        val safeId = profileId.replace(Regex("[^A-Za-z0-9._-]"), "_")
+        return File(filesDir, "catalog-v3-$safeId.json")
     }
 
     private fun readCategories(json: JsonReader, target: MutableList<MediaCategory>) {
