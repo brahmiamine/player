@@ -192,7 +192,12 @@ class XtreamClient {
         if (value.isBlank()) return ""
         return runCatching {
             String(Base64.decode(value, Base64.DEFAULT), StandardCharsets.UTF_8)
-                .takeIf { decoded -> decoded.none { it == '\u0000' } }
+                .takeIf { decoded ->
+                    decoded.isNotBlank() && decoded.none { character ->
+                        character == '\u0000' || character == '\uFFFD' ||
+                            (character.code < 32 && character !in setOf('\n', '\r', '\t'))
+                    }
+                }
                 ?: value
         }.getOrDefault(value)
     }
