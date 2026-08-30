@@ -7,7 +7,6 @@
         <item name="android:colorAccent">@color/streamia_focus</item>
         <item name="android:navigationBarColor">@color/streamia_night</item>
         <item name="android:statusBarColor">@color/streamia_night</item>
-        <item name="android:windowLightNavigationBar">false</item>
         <item name="android:windowLightStatusBar">false</item>
     </style>
 
