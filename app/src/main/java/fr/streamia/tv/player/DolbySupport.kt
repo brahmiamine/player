@@ -1,6 +1,7 @@
 package fr.streamia.tv.player
 
 import android.content.Context
+import android.hardware.display.DisplayManager
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.MediaCodecList
@@ -15,8 +16,8 @@ data class DolbyDeviceCapabilities(
 
 object DolbyCapabilityDetector {
     fun detect(context: Context): DolbyDeviceCapabilities = DolbyDeviceCapabilities(
-        dolbyVision = supportsDolbyVision(context),
-        dolbyAtmos = supportsDolbyAtmos(context),
+        dolbyVision = runCatching { supportsDolbyVision(context) }.getOrDefault(false),
+        dolbyAtmos = runCatching { supportsDolbyAtmos(context) }.getOrDefault(false),
     )
 
     private fun supportsDolbyVision(context: Context): Boolean {
@@ -42,12 +43,20 @@ object DolbyCapabilityDetector {
     }
 
     @Suppress("DEPRECATION")
-    private fun currentDisplay(context: Context): Display? =
+    private fun currentDisplay(context: Context): Display? {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            context.display
-        } else {
-            (context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager)?.defaultDisplay
+            // Context.display throws UnsupportedOperationException when the supplied Context is
+            // an application/background Context. Prefer the visual Context when available, then
+            // fall back to DisplayManager so player startup can never crash solely because Dolby
+            // capability probing cannot resolve a display.
+            runCatching { context.display }.getOrNull()?.let { return it }
+            val displayManager = context.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager
+            return runCatching { displayManager?.getDisplay(Display.DEFAULT_DISPLAY) }.getOrNull()
         }
+        return runCatching {
+            (context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager)?.defaultDisplay
+        }.getOrNull()
+    }
 
     private fun hasDecoder(mimeType: String): Boolean = runCatching {
         MediaCodecList(MediaCodecList.ALL_CODECS).codecInfos.any { info ->
