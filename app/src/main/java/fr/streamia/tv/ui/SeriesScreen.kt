@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -161,7 +162,14 @@ fun SeriesScreen(
                                     .height(128.dp)
                                     .then(if (episode.id == episodes.first().id) Modifier.focusRequester(firstFocus) else Modifier),
                             ) {
-                                Column(Modifier.padding(14.dp)) {
+                                Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    MediaArtwork(
+                                        episode.iconUrl ?: details.details?.posterUrl ?: series.iconUrl,
+                                        episode.title,
+                                        Modifier.width(150.dp).aspectRatio(16f / 9f),
+                                    )
+                                    Spacer(Modifier.width(12.dp))
+                                    Column(Modifier.weight(1f)) {
                                     Row(Modifier.fillMaxWidth()) {
                                         Text("S${episode.season.toString().padStart(2, '0')}E${episode.number.toString().padStart(2, '0')}", color = FocusBlueBright, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                         Spacer(Modifier.weight(1f))
@@ -171,6 +179,7 @@ fun SeriesScreen(
                                     Text(episode.title, color = Ink, fontSize = 16.sp, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                                     Spacer(Modifier.height(5.dp))
                                     Text(listOfNotNull(episode.duration, episode.releaseDate).joinToString(" · "), color = MutedInk, fontSize = 11.sp, maxLines = 1)
+                                    }
                                 }
                             }
                         }

@@ -14,6 +14,7 @@ import org.json.JSONObject
  */
 class UserLibraryStore(context: Context) {
     private val preferences = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+    private val mutationLock = Any()
 
     fun snapshot(profileId: String): UserLibrarySnapshot {
         val root = loadRoot(profileId)
@@ -126,10 +127,12 @@ class UserLibraryStore(context: Context) {
     }.getOrDefault(JSONObject())
 
     private inline fun <T> mutate(profileId: String, block: (JSONObject) -> T): T {
-        val root = loadRoot(profileId)
-        val result = block(root)
-        preferences.edit().putString(key(profileId), root.toString()).apply()
-        return result
+        return synchronized(mutationLock) {
+            val root = loadRoot(profileId)
+            val result = block(root)
+            preferences.edit().putString(key(profileId), root.toString()).apply()
+            result
+        }
     }
 
     private fun key(profileId: String): String = "profile_${profileId.replace(Regex("[^A-Za-z0-9._-]"), "_")}" 

@@ -18,6 +18,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
@@ -32,6 +34,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
@@ -135,6 +138,8 @@ fun PlayerScreen(
     var dolbyVisionDetected by remember { mutableStateOf(false) }
     var dolbyAtmosDetected by remember { mutableStateOf(false) }
     var seekFeedback by remember(entry.key) { mutableStateOf<String?>(null) }
+    var positionMs by remember(entry.key) { mutableStateOf(0L) }
+    var durationMs by remember(entry.key) { mutableStateOf(0L) }
 
     fun startCandidate(url: String, positionMs: Long = 0L) {
         activeStreamUrl = url
@@ -259,10 +264,17 @@ fun PlayerScreen(
             delay(2_500)
             onProgress(entry, 0L, 0L)
         } else {
+            var lastSavedAt = 0L
             while (true) {
-                delay(5_000)
+                delay(500)
                 val duration = player.duration.takeIf { it > 0 && it != C.TIME_UNSET } ?: 0L
-                if (player.currentPosition > 0) onProgress(entry, player.currentPosition, duration)
+                positionMs = player.currentPosition.coerceAtLeast(0L)
+                durationMs = duration
+                val now = SystemClock.elapsedRealtime()
+                if (positionMs > 0 && now - lastSavedAt >= 5_000) {
+                    lastSavedAt = now
+                    onProgress(entry, positionMs, duration)
+                }
             }
         }
     }
@@ -361,6 +373,7 @@ fun PlayerScreen(
                         val duration = player.duration.takeIf { it > 0L && it != C.TIME_UNSET } ?: 0L
                         val target = resolveSeekPosition(player.currentPosition, duration, delta)
                         player.seekTo(target)
+                        positionMs = target
                         seekFeedback = if (delta < 0L) "−10 s" else "+10 s"
                         hudVisible = true
                         true
@@ -433,6 +446,8 @@ fun PlayerScreen(
                 dolbyVisionLabel = dolbyPlaybackLabel("Dolby Vision", dolbyVisionDetected, dolbyCapabilities.dolbyVision),
                 dolbyAtmosLabel = dolbyPlaybackLabel("Dolby Atmos", dolbyAtmosDetected, dolbyCapabilities.dolbyAtmos),
                 resumePositionMs = resumePositionMs,
+                positionMs = positionMs,
+                durationMs = durationMs,
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
         }
@@ -450,13 +465,16 @@ fun PlayerScreen(
         }
 
         seekFeedback?.let { feedback ->
-            Box(
+            Column(
                 Modifier
                     .align(Alignment.Center)
                     .background(Night.copy(alpha = 0.94f), androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
-                    .padding(horizontal = 28.dp, vertical = 16.dp),
+                    .padding(12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Text(feedback, color = Ink, fontSize = 26.sp, fontWeight = FontWeight.Bold)
+                MediaArtwork(entry.iconUrl, entry.displayName, Modifier.width(260.dp).aspectRatio(16f / 9f))
+                Spacer(Modifier.height(8.dp))
+                Text("$feedback · ${formatDuration(positionMs)}", color = Ink, fontSize = 22.sp, fontWeight = FontWeight.Bold)
             }
         }
 
@@ -516,6 +534,8 @@ private fun PlayerInfoBand(
     dolbyVisionLabel: String?,
     dolbyAtmosLabel: String?,
     resumePositionMs: Long,
+    positionMs: Long,
+    durationMs: Long,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -619,6 +639,11 @@ private fun PlayerInfoBand(
             }
         }
 
+        if (entry.type != MediaType.Live && durationMs > 0L) {
+            Spacer(Modifier.height(12.dp))
+            PlaybackTimeline(positionMs, durationMs)
+        }
+
         Spacer(Modifier.height(12.dp))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(if (isPlaying) "⏸ Lecture" else "▶ Pause", color = Ink, fontSize = 13.sp)
@@ -636,6 +661,21 @@ private fun PlayerInfoBand(
                 Text("CH $numberBuffer", color = FocusBlueBright, fontSize = 14.sp, fontWeight = FontWeight.Bold)
             }
         }
+    }
+}
+
+@Composable
+private fun PlaybackTimeline(positionMs: Long, durationMs: Long) {
+    val progress = (positionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(formatDuration(positionMs), color = Ink, fontSize = 12.sp)
+        Spacer(Modifier.width(12.dp))
+        Canvas(Modifier.weight(1f).height(8.dp)) {
+            drawRoundRect(Color.White.copy(alpha = 0.22f), cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.height / 2))
+            drawRoundRect(FocusBlueBright, size = Size(size.width * progress, size.height), cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.height / 2))
+        }
+        Spacer(Modifier.width(12.dp))
+        Text(formatDuration(durationMs), color = Ink, fontSize = 12.sp)
     }
 }
 
