@@ -37,6 +37,7 @@ fun HomeScreen(
     profileName: String?,
     offline: Boolean,
     busy: Boolean,
+    catalogLoading: Boolean = false,
     onOpenSection: (MediaType) -> Unit,
     onSettings: () -> Unit,
     onSearch: () -> Unit,
@@ -64,6 +65,7 @@ fun HomeScreen(
                 Text(
                     buildString {
                         append(if (offline) "Mode cache" else "Liste connectée")
+                        if (catalogLoading) append(" · chargement du catalogue…")
                         if (expiry != null) append(" · expire le $expiry")
                     },
                     color = if (offline) FocusBlueBright else MutedInk,
@@ -80,14 +82,14 @@ fun HomeScreen(
         ) {
             HomeTile(
                 title = "TV en direct",
-                subtitle = "${catalog.count(MediaType.Live)} chaînes",
+                subtitle = if (catalogLoading) "Chargement…" else "${catalog.count(MediaType.Live)} chaînes",
                 symbol = "▣",
                 modifier = Modifier
-                    .focusRequester(firstFocus)
+                    .then(if (!catalogLoading) Modifier.focusRequester(firstFocus) else Modifier)
                     .width(360.dp)
                     .fillMaxSize(),
                 onClick = { onOpenSection(MediaType.Live) },
-                enabled = catalog.count(MediaType.Live) > 0,
+                enabled = !catalogLoading && catalog.count(MediaType.Live) > 0,
                 prominent = true,
             )
 
@@ -98,19 +100,19 @@ fun HomeScreen(
                 Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
                     HomeTile(
                         title = "Films",
-                        subtitle = "${catalog.count(MediaType.Movie)} contenus",
+                        subtitle = if (catalogLoading) "Chargement…" else "${catalog.count(MediaType.Movie)} contenus",
                         symbol = "▶",
                         modifier = Modifier.weight(1f).fillMaxSize(),
                         onClick = { onOpenSection(MediaType.Movie) },
-                        enabled = catalog.count(MediaType.Movie) > 0,
+                        enabled = !catalogLoading && catalog.count(MediaType.Movie) > 0,
                     )
                     HomeTile(
                         title = "Séries",
-                        subtitle = "${catalog.count(MediaType.Series)} contenus",
+                        subtitle = if (catalogLoading) "Chargement…" else "${catalog.count(MediaType.Series)} contenus",
                         symbol = "▤",
                         modifier = Modifier.weight(1f).fillMaxSize(),
                         onClick = { onOpenSection(MediaType.Series) },
-                        enabled = catalog.count(MediaType.Series) > 0,
+                        enabled = !catalogLoading && catalog.count(MediaType.Series) > 0,
                     )
                 }
                 Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
@@ -120,6 +122,7 @@ fun HomeScreen(
                         symbol = "⌕",
                         modifier = Modifier.weight(1f).fillMaxSize(),
                         onClick = onSearch,
+                        enabled = !catalogLoading,
                     )
                     HomeTile(
                         title = "Guide TV",
@@ -127,7 +130,7 @@ fun HomeScreen(
                         symbol = "≡",
                         modifier = Modifier.weight(1f).fillMaxSize(),
                         onClick = onEpg,
-                        enabled = catalog.count(MediaType.Live) > 0,
+                        enabled = !catalogLoading && catalog.count(MediaType.Live) > 0,
                     )
                 }
             }
@@ -136,8 +139,13 @@ fun HomeScreen(
                 Modifier.weight(1f).fillMaxSize(),
                 verticalArrangement = Arrangement.spacedBy(18.dp),
             ) {
-                HomeAction("⚙", "Paramètres", onSettings, Modifier.weight(1f))
-                HomeAction("↻", if (busy) "Actualisation…" else "Actualiser", onRefresh, Modifier.weight(1f), enabled = !busy)
+                HomeAction(
+                    "⚙",
+                    "Paramètres",
+                    onSettings,
+                    Modifier.weight(1f).then(if (catalogLoading) Modifier.focusRequester(firstFocus) else Modifier),
+                )
+                HomeAction("↻", if (busy || catalogLoading) "Chargement…" else "Actualiser", onRefresh, Modifier.weight(1f), enabled = !busy && !catalogLoading)
                 HomeAction("⇄", "Changer de liste", onChangePlaylist, Modifier.weight(1f))
             }
         }

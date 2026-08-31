@@ -345,9 +345,11 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         val player = _uiState.value.screen as? StreamiaScreen.Player
         _uiState.update {
             it.copy(
-                screen = if (player?.returnToSeries == true && it.seriesDetails != null) {
-                    StreamiaScreen.Series(it.seriesDetails.series)
-                } else StreamiaScreen.Browser,
+                screen = when {
+                    it.catalogHydrating -> StreamiaScreen.Home
+                    player?.returnToSeries == true && it.seriesDetails != null -> StreamiaScreen.Series(it.seriesDetails.series)
+                    else -> StreamiaScreen.Browser
+                },
                 epg = emptyList(),
                 resumePositionMs = 0,
             )
