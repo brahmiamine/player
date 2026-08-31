@@ -40,8 +40,21 @@ class XtreamRepository(context: Context) {
     fun customizedCatalog(profileId: String, catalog: Catalog): Catalog = libraryStore.applyToCatalog(profileId, catalog)
 
     /**
+     * Indique si une vraie synchronisation fournisseur est nécessaire.
+     * Xtream utilise le même intervalle configurable que la playlist distante, mais un M3U local
+     * n'est jamais relu automatiquement : le bouton Actualiser reste disponible pour le forcer.
+     */
+    fun shouldRefreshProfile(profileId: String): Boolean {
+        val profile = playlistStore.find(profileId) ?: return false
+        return when (profile.kind) {
+            PlaylistKind.Xtream -> profile.isCatalogRefreshDue()
+            PlaylistKind.M3u -> profile.isRemoteM3u && profile.isCatalogRefreshDue()
+        }
+    }
+
+    /**
      * Ouvre d'abord le cache local afin que l'interface soit disponible immédiatement.
-     * Le ViewModel déclenche ensuite un refresh silencieux quand la source est Cache.
+     * Une synchronisation réseau n'est déclenchée ensuite que si l'intervalle du profil a expiré.
      */
     suspend fun openProfile(profileId: String): LoadedCatalog {
         val profile = playlistStore.find(profileId) ?: throw XtreamException("Cette liste n'existe plus.")
@@ -75,6 +88,7 @@ class XtreamRepository(context: Context) {
             password = credentials.password,
             xmlTvUrl = previous?.xmlTvUrl,
             autoRefreshHours = previous?.autoRefreshHours ?: 6,
+            lastRefreshAt = System.currentTimeMillis(),
         )
         playlistStore.upsert(profile)
         credentialsStore.save(credentials)
@@ -211,6 +225,7 @@ class XtreamRepository(context: Context) {
             val catalog = client.loadCatalog(credentials)
             credentialsStore.save(credentials)
             cache.save(profile.id, catalog)
+            playlistStore.markRefreshed(profile.id)
             LoadedCatalog(catalog, credentials, CatalogSource.Network, profile.id)
         } catch (error: Exception) {
             val cached = cache.load(profile.id) ?: throw error
