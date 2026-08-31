@@ -75,6 +75,30 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      - name: Publish direct APK in latest release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp app/build/outputs/apk/optimized/app-optimized.apk streamia-tv.apk
+
+          # Keep a stable `latest` tag so the direct APK download URL never changes.
+          git tag -f latest "$GITHUB_SHA"
+          git push --force origin refs/tags/latest
+
+          if gh release view latest >/dev/null 2>&1; then
+            gh release upload latest streamia-tv.apk --clobber
+            gh release edit latest \
+              --title "Streamia TV - Dernier build" \
+              --notes "APK Android TV généré automatiquement depuis main (${GITHUB_SHA::7}). Téléchargez directement streamia-tv.apk." \
+              --latest
+          else
+            gh release create latest streamia-tv.apk \
+              --title "Streamia TV - Dernier build" \
+              --notes "APK Android TV généré automatiquement depuis main (${GITHUB_SHA::7}). Téléchargez directement streamia-tv.apk." \
+              --latest
+          fi
+
       - name: Publish tagged APK
         if: startsWith(github.ref, 'refs/tags/v')
         env:
