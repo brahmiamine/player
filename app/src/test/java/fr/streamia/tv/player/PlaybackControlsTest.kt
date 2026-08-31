@@ -26,6 +26,12 @@ class PlaybackControlsTest {
     }
 
     @Test
+    fun `live up zaps to next channel and down zaps to previous channel`() {
+        assertEquals(PlaybackRemoteAction.ZapNext, playbackRemoteAction(MediaType.Live, PlaybackRemoteButton.Up))
+        assertEquals(PlaybackRemoteAction.ZapPrevious, playbackRemoteAction(MediaType.Live, PlaybackRemoteButton.Down))
+    }
+
+    @Test
     fun `info displays the player information band`() {
         assertEquals(PlaybackRemoteAction.ToggleHud, playbackRemoteAction(MediaType.Live, PlaybackRemoteButton.Info))
         assertEquals(PlaybackRemoteAction.OpenSettings, playbackRemoteAction(MediaType.Movie, PlaybackRemoteButton.Info))
