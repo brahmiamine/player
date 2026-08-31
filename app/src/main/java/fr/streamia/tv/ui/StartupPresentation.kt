@@ -8,3 +8,13 @@ package fr.streamia.tv.ui
  */
 internal fun shouldShowStartupGate(state: StreamiaUiState): Boolean =
     state.booting || (state.catalogHydrating && state.screen is StreamiaScreen.Home)
+
+/**
+ * La vidéo Live restaurée doit rester visible pendant la lecture du catalogue local. Une demande
+ * OK / gauche / menu est mémorisée puis exécutée dès que le catalogue complet est prêt, plutôt que
+ * d'envoyer l'utilisateur vers l'écran de démarrage.
+ */
+internal fun shouldDeferLiveBrowserReturn(state: StreamiaUiState): Boolean {
+    val player = state.screen as? StreamiaScreen.Player ?: return false
+    return state.catalogHydrating && player.entry.type == fr.streamia.tv.domain.MediaType.Live
+}
