@@ -132,9 +132,15 @@ internal fun sanitizeStreamUrl(rawUrl: String): String {
 }
 
 internal fun sanitizeFreeText(value: String): String = value
-    .replace(Regex("(?i)/(live|movie|series)/[^/\\s?]+/[^/\\s?]+/"), "/$1/***/***/")
-    .replace(Regex("(?i)(username|user|password|pass)=([^&\\s]+)"), "$1=***")
-    .replace(Regex("(?i)(token|auth|key)=([^&\\s]+)"), "$1=***")
+    .replace(Regex("(?i)/(live|movie|series)/[^/\\s?]+/[^/\\s?]+/")) { match ->
+        "/${match.groupValues[1]}/***/***/"
+    }
+    .replace(Regex("(?i)(username|user|password|pass)=([^&\\s]+)")) { match ->
+        "${match.groupValues[1]}=***"
+    }
+    .replace(Regex("(?i)(token|auth|key)=([^&\\s]+)")) { match ->
+        "${match.groupValues[1]}=***"
+    }
 
 private class StreamiaPlayerFailureException(message: String) : RuntimeException(message)
 private class StreamiaNonFatalException(message: String) : RuntimeException(message)
