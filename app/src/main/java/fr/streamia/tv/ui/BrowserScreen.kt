@@ -349,6 +349,7 @@ private fun LiveCatalogLayout(
     var controlsVisible by remember { mutableStateOf(false) }
     var fullscreenTarget by remember { mutableStateOf<MediaEntry?>(null) }
     var focusCategoryAfterChange by remember { mutableStateOf(false) }
+    var initialChannelFocusPending by remember { mutableStateOf(true) }
     val categoryFocus = remember { FocusRequester() }
     val channelFocus = remember { FocusRequester() }
     val hiddenOffset = with(LocalDensity.current) { (-620).dp.toPx() }
@@ -429,6 +430,8 @@ private fun LiveCatalogLayout(
                 fullscreenPending = fullscreenTarget != null,
                 initialListPosition = initialListPosition,
                 selectedFocusRequester = channelFocus,
+                autoFocus = initialChannelFocusPending,
+                onAutoFocusConsumed = { initialChannelFocusPending = false },
                 onLeft = { channel ->
                     val exactCategory = categories.firstOrNull { it.id == channel.categoryId }
                     if (exactCategory != null && exactCategory.id != selectedCategoryId) {
@@ -468,6 +471,8 @@ private fun LiveChannelList(
     fullscreenPending: Boolean,
     initialListPosition: NavigationListPosition,
     selectedFocusRequester: FocusRequester,
+    autoFocus: Boolean,
+    onAutoFocusConsumed: () -> Unit,
     onLeft: (MediaEntry) -> Unit,
     onListPositionChanged: (NavigationListPosition) -> Unit,
     onConfirm: (MediaEntry) -> Unit,
@@ -480,6 +485,10 @@ private fun LiveChannelList(
         initialFirstVisibleItemScrollOffset = initialListPosition.offset.coerceAtLeast(0),
     )
     val channelFocus = selectedFocusRequester
+    val previewIndex = remember(entries, previewKey) { entries.indexOfFirst { it.key == previewKey } }
+    val focusTargetIndex = previewIndex.takeIf { it >= 0 }
+        ?: listState.firstVisibleItemIndex.coerceIn(0, lastIndex)
+    val focusTargetKey = entries.getOrNull(focusTargetIndex)?.key
 
     LaunchedEffect(listState) {
         snapshotFlow {
@@ -487,16 +496,19 @@ private fun LiveChannelList(
         }.distinctUntilChanged().collect(onListPositionChanged)
     }
 
-    androidx.compose.runtime.LaunchedEffect(entries, previewKey, fullscreenPending) {
+    androidx.compose.runtime.LaunchedEffect(entries, focusTargetKey, fullscreenPending, autoFocus) {
         if (fullscreenPending) return@LaunchedEffect
-        val index = entries.indexOfFirst { it.key == previewKey }
+        val index = focusTargetIndex
         if (index >= 0) {
             yield()
             if (listState.layoutInfo.visibleItemsInfo.none { it.index == index }) {
                 listState.scrollToItem(index)
                 yield()
             }
-            runCatching { channelFocus.requestFocus() }
+            if (autoFocus) {
+                runCatching { channelFocus.requestFocus() }
+                onAutoFocusConsumed()
+            }
         }
     }
 
@@ -533,7 +545,7 @@ private fun LiveChannelList(
                                     true
                                 } else false
                             }
-                            .then(if (previewKey == entry.key) Modifier.focusRequester(channelFocus) else Modifier),
+                            .then(if (focusTargetKey == entry.key) Modifier.focusRequester(channelFocus) else Modifier),
                     ) {
                         Row(
                             Modifier.fillMaxWidth().padding(horizontal = 8.dp),
