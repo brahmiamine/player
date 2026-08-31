@@ -32,7 +32,7 @@ class StartupPresentationTest {
     }
 
     @Test
-    fun `background hydration does not hide an active player`() {
+    fun `background hydration does not hide non home screens`() {
         assertFalse(
             shouldShowStartupGate(
                 StreamiaUiState(
