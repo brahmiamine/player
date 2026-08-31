@@ -19,6 +19,13 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
+
+        // L'app est distribuée en APK direct (pas de Play Store pour découper par appareil) ; les
+        // boîtiers/clés Android TV sont quasi exclusivement ARM, donc on n'embarque pas les .so
+        // x86/x86_64 (ExoPlayer, Crashlytics NDK) pour réduire la taille de l'APK.
+        ndk {
+            abiFilters += listOf("armeabi-v7a", "arm64-v8a")
+        }
     }
 
     buildTypes {

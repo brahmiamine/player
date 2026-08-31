@@ -104,8 +104,16 @@ class UserLibraryStore(context: Context) {
     }
 
     fun applyToCatalog(catalog: Catalog, snapshot: UserLibrarySnapshot): Catalog {
-        val movedEntries = catalog.entries.map { entry ->
-            snapshot.movedEntries[entry.key]?.let { destination -> entry.copy(categoryId = destination) } ?: entry
+        // Rien à personnaliser : éviter de reconstruire un Catalog (et de refaire tous ses index
+        // internes) quand ni le tri des catégories ni le déplacement d'entrées n'ont été utilisés.
+        if (snapshot.movedEntries.isEmpty() && snapshot.categoryOrder.isEmpty()) return catalog
+
+        val movedEntries = if (snapshot.movedEntries.isEmpty()) {
+            catalog.entries
+        } else {
+            catalog.entries.map { entry ->
+                snapshot.movedEntries[entry.key]?.let { destination -> entry.copy(categoryId = destination) } ?: entry
+            }
         }
         val orderedCategories = MediaType.entries.flatMap { type ->
             val categories = catalog.categoriesFor(type)

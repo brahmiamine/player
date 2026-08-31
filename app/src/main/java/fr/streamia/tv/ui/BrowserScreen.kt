@@ -489,7 +489,8 @@ private fun LiveChannelList(
         initialFirstVisibleItemScrollOffset = initialListPosition.offset.coerceAtLeast(0),
     )
     val channelFocus = selectedFocusRequester
-    val previewIndex = remember(entries, previewKey) { entries.indexOfFirst { it.key == previewKey } }
+    val entryIndexByKey = remember(entries) { entries.withIndex().associate { (index, entry) -> entry.key to index } }
+    val previewIndex = previewKey?.let { entryIndexByKey[it] } ?: -1
     val focusTargetIndex = previewIndex.takeIf { it >= 0 }
         ?: listState.firstVisibleItemIndex.coerceIn(0, lastIndex)
     val focusTargetKey = entries.getOrNull(focusTargetIndex)?.key
