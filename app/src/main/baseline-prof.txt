@@ -1,6 +1,6 @@
-HSPLfr/streamia/tv/MainActivity;
-HSPLfr/streamia/tv/StreamiaApplication;
-HSPLfr/streamia/tv/ui/**;
-HSPLfr/streamia/tv/domain/**;
-HSPLfr/streamia/tv/data/**;
-HSPLfr/streamia/tv/player/**;
+Lfr/streamia/tv/MainActivity;
+Lfr/streamia/tv/StreamiaApplication;
+Lfr/streamia/tv/ui/**;
+Lfr/streamia/tv/domain/**;
+Lfr/streamia/tv/data/**;
+Lfr/streamia/tv/player/**;
