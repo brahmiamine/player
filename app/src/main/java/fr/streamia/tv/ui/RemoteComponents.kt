@@ -3,6 +3,7 @@ package fr.streamia.tv.ui
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.LruCache
+import android.view.KeyEvent as AndroidKeyEvent
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
@@ -38,6 +39,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -68,9 +70,12 @@ fun FocusableSurface(
     selected: Boolean = false,
     enabled: Boolean = true,
     contentDescription: String? = null,
+    onLongClick: (() -> Unit)? = null,
+    onFocused: (() -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
+    var longPressConsumed by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(if (focused) 1.035f else 1f, label = "focus-scale")
     val shape = RoundedCornerShape(12.dp)
     val background = when {
@@ -90,7 +95,34 @@ fun FocusableSurface(
             .clip(shape)
             .background(background)
             .border(border, shape)
-            .onFocusChanged { focused = it.isFocused }
+            .onFocusChanged {
+                focused = it.isFocused
+                if (it.isFocused) onFocused?.invoke()
+            }
+            .onPreviewKeyEvent { composeEvent ->
+                val longAction = onLongClick ?: return@onPreviewKeyEvent false
+                if (!enabled) return@onPreviewKeyEvent false
+                val event = composeEvent.nativeKeyEvent
+                if (!event.isTvSelectKey()) return@onPreviewKeyEvent false
+
+                when {
+                    event.action == AndroidKeyEvent.ACTION_DOWN && event.repeatCount > 0 && !longPressConsumed -> {
+                        longPressConsumed = true
+                        longAction()
+                        true
+                    }
+                    event.action == AndroidKeyEvent.ACTION_DOWN && longPressConsumed -> true
+                    event.action == AndroidKeyEvent.ACTION_UP && longPressConsumed -> {
+                        longPressConsumed = false
+                        true
+                    }
+                    event.action == AndroidKeyEvent.ACTION_UP -> {
+                        longPressConsumed = false
+                        false
+                    }
+                    else -> false
+                }
+            }
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
             .focusable(enabled)
             .then(
@@ -101,6 +133,15 @@ fun FocusableSurface(
     ) {
         content()
     }
+}
+
+private fun AndroidKeyEvent.isTvSelectKey(): Boolean = when (keyCode) {
+    AndroidKeyEvent.KEYCODE_DPAD_CENTER,
+    AndroidKeyEvent.KEYCODE_ENTER,
+    AndroidKeyEvent.KEYCODE_NUMPAD_ENTER,
+    AndroidKeyEvent.KEYCODE_BUTTON_A,
+    -> true
+    else -> false
 }
 
 @Composable
@@ -181,6 +222,34 @@ fun StreamiaLogo(modifier: Modifier = Modifier, compact: Boolean = false) {
 
 @Composable
 fun ChannelLogo(url: String?, channelName: String, modifier: Modifier = Modifier) {
+    RemoteArtwork(
+        url = url,
+        name = channelName,
+        modifier = modifier,
+        contentScale = ContentScale.Fit,
+        imagePadding = 8,
+    )
+}
+
+@Composable
+fun MediaArtwork(url: String?, name: String, modifier: Modifier = Modifier) {
+    RemoteArtwork(
+        url = url,
+        name = name,
+        modifier = modifier,
+        contentScale = ContentScale.Crop,
+        imagePadding = 0,
+    )
+}
+
+@Composable
+private fun RemoteArtwork(
+    url: String?,
+    name: String,
+    modifier: Modifier,
+    contentScale: ContentScale,
+    imagePadding: Int,
+) {
     val bitmap by produceState<ImageBitmap?>(initialValue = LogoMemoryCache.get(url), key1 = url) {
         if (url.isNullOrBlank() || value != null) return@produceState
         value = withContext(Dispatchers.IO) { downloadLogo(url) }?.also { LogoMemoryCache.put(url, it) }
@@ -194,13 +263,13 @@ fun ChannelLogo(url: String?, channelName: String, modifier: Modifier = Modifier
         if (bitmap != null) {
             Image(
                 bitmap = bitmap!!,
-                contentDescription = "Logo de $channelName",
-                modifier = Modifier.fillMaxSize().padding(8.dp),
-                contentScale = ContentScale.Fit,
+                contentDescription = "Illustration de $name",
+                modifier = Modifier.fillMaxSize().padding(imagePadding.dp),
+                contentScale = contentScale,
             )
         } else {
             Text(
-                text = channelName.trim().take(2).uppercase().ifBlank { "TV" },
+                text = name.trim().take(2).uppercase().ifBlank { "TV" },
                 color = FocusBlueBright,
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Bold,
@@ -210,7 +279,7 @@ fun ChannelLogo(url: String?, channelName: String, modifier: Modifier = Modifier
 }
 
 private object LogoMemoryCache {
-    private val cache = LruCache<String, ImageBitmap>(96)
+    private val cache = LruCache<String, ImageBitmap>(128)
     fun get(url: String?): ImageBitmap? = url?.let(cache::get)
     fun put(url: String, bitmap: ImageBitmap) { cache.put(url, bitmap) }
 }
@@ -220,16 +289,16 @@ private fun downloadLogo(url: String): ImageBitmap? = runCatching {
         connectTimeout = 5_000
         readTimeout = 7_000
         useCaches = true
-        setRequestProperty("User-Agent", "Streamia-TV/1.0")
+        setRequestProperty("User-Agent", "Streamia-TV/1.5")
     }
     try {
         if (connection.responseCode !in 200..299) return@runCatching null
         val decoded = connection.inputStream.use { stream -> BitmapFactory.decodeStream(stream) }
             ?: return@runCatching null
         val largest = maxOf(decoded.width, decoded.height)
-        if (largest <= 320) decoded.asImageBitmap()
+        if (largest <= 480) decoded.asImageBitmap()
         else {
-            val ratio = 320f / largest
+            val ratio = 480f / largest
             Bitmap.createScaledBitmap(decoded, (decoded.width * ratio).toInt(), (decoded.height * ratio).toInt(), true)
                 .also { if (it !== decoded) decoded.recycle() }
                 .asImageBitmap()

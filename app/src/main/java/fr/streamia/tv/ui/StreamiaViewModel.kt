@@ -150,9 +150,26 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         openPlayer(playable, returnToSeries = true)
     }
 
+    fun showHome() { _uiState.update { it.copy(screen = StreamiaScreen.Home, message = null) } }
+    fun showSettings() { _uiState.update { it.copy(screen = StreamiaScreen.Settings, message = null) } }
     fun showSearch() { _uiState.update { it.copy(screen = StreamiaScreen.Search, message = null) } }
     fun showOrganizer() { _uiState.update { it.copy(screen = StreamiaScreen.Organizer, message = null) } }
     fun showBrowser() { _uiState.update { it.copy(screen = StreamiaScreen.Browser, message = null) } }
+
+    fun openSection(type: MediaType) {
+        _uiState.update {
+            it.copy(
+                screen = StreamiaScreen.Browser,
+                browserType = type,
+                browserCategoryId = null,
+                message = null,
+            )
+        }
+    }
+
+    fun rememberBrowserLocation(type: MediaType, categoryId: String?) {
+        _uiState.update { it.copy(browserType = type, browserCategoryId = categoryId) }
+    }
 
     fun openCategory(category: MediaCategory) {
         _uiState.update {
@@ -350,7 +367,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         _uiState.value = StreamiaUiState(
             booting = false,
             busy = false,
-            screen = StreamiaScreen.Browser,
+            screen = StreamiaScreen.Home,
             rawCatalog = loaded.catalog,
             catalog = customized,
             credentials = loaded.credentials,
@@ -393,7 +410,9 @@ data class StreamiaUiState(
 
 sealed interface StreamiaScreen {
     data object Login : StreamiaScreen
+    data object Home : StreamiaScreen
     data object Browser : StreamiaScreen
+    data object Settings : StreamiaScreen
     data object Search : StreamiaScreen
     data object Epg : StreamiaScreen
     data object Organizer : StreamiaScreen

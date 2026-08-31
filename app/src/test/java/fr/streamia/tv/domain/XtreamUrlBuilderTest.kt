@@ -19,6 +19,18 @@ class XtreamUrlBuilderTest {
     }
 
     @Test
+    fun `builds encoded M3U fallback url`() {
+        val builder = XtreamUrlBuilder(
+            ServerCredentials("https://demo.example.com", "amine tv", "p@ss&word"),
+        )
+
+        assertEquals(
+            "https://demo.example.com/get.php?username=amine%20tv&password=p%40ss%26word&type=m3u_plus&output=ts",
+            builder.playlist(),
+        )
+    }
+
+    @Test
     fun `builds a transport stream url with safe path segments`() {
         val builder = XtreamUrlBuilder(
             ServerCredentials("http://provider.test:8080", "a/b", "secret value"),

@@ -18,12 +18,24 @@ import java.security.MessageDigest
  * Les informations EXTINF utilisées sont notamment : tvg-id, tvg-name, tvg-logo et group-title.
  * Le type de média est déterminé par le chemin Xtream /live/, /movie/ ou /series/.
  *
+ * Important : dans une playlist M3U Xtream, une URL /series/... pointe déjà vers un épisode
+ * directement lisible. Elle ne doit donc pas être traitée comme un identifiant de série de
+ * l'API get_series_info. Les entrées M3U /series/ sont marquées playable=true.
+ *
  * Certains fournisseurs produisent des URL sans schéma (host:port/live/...). Dans ce cas HTTP est
  * utilisé comme transport initial, puis la couche réseau/lecteur peut basculer automatiquement vers
  * HTTPS si le serveur l'exige. Les URL qui déclarent explicitement http:// ou https:// sont conservées.
  */
 class M3uParser {
-    fun parse(reader: Reader): M3uImport {
+    fun parse(reader: Reader): M3uImport = parse(reader, MediaType.entries.toSet())
+
+    /**
+     * Variante utilisée en secours par XtreamClient : elle peut ne conserver que VOD/Séries
+     * lorsque les énormes endpoints JSON correspondants sont absents, tout en parcourant le fichier
+     * M3U en flux et sans charger les centaines de milliers d'autres entrées en mémoire.
+     */
+    fun parse(reader: Reader, includeTypes: Set<MediaType>): M3uImport {
+        require(includeTypes.isNotEmpty()) { "Au moins un type de média doit être demandé." }
         val categories = linkedMapOf<String, MediaCategory>()
         val entries = ArrayList<MediaEntry>()
         val seenEntries = HashSet<String>()
@@ -56,6 +68,7 @@ class M3uParser {
                             skipped += 1
                             continue
                         }
+                        if (stream.type !in includeTypes) continue
 
                         val name = metadata.attributes["tvg-name"]
                             ?.takeIf(String::isNotBlank)
@@ -88,7 +101,7 @@ class M3uParser {
                             number = suppliedNumber ?: automaticNumber,
                             extension = stream.extension,
                             tvgId = metadata.attributes["tvg-id"]?.takeIf(String::isNotBlank),
-                            playable = stream.type != MediaType.Series,
+                            playable = true,
                         )
                     }
                 }
@@ -98,7 +111,7 @@ class M3uParser {
         val account = credentials ?: throw XtreamException(
             "Aucune URL Xtream compatible n'a été trouvée dans le fichier M3U.",
         )
-        if (entries.isEmpty()) throw XtreamException("La playlist M3U ne contient aucun média exploitable.")
+        if (entries.isEmpty()) throw XtreamException("La playlist M3U ne contient aucun média exploitable pour les sections demandées.")
         return M3uImport(
             catalog = Catalog(categories.values.toList(), entries),
             credentials = account,

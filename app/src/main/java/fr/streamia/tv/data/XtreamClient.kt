@@ -1,6 +1,8 @@
 package fr.streamia.tv.data
 
 import android.util.Base64
+import android.util.JsonReader
+import android.util.JsonToken
 import fr.streamia.tv.domain.AccountInfo
 import fr.streamia.tv.domain.Catalog
 import fr.streamia.tv.domain.EpgProgram
@@ -17,6 +19,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
+import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.charset.StandardCharsets
@@ -33,14 +36,41 @@ class XtreamClient {
             addAll(parseCategories(fetchArray(urls.api("get_live_categories")), MediaType.Live))
             addAll(runCatching { parseCategories(fetchArray(urls.api("get_vod_categories")), MediaType.Movie) }.getOrDefault(emptyList()))
             addAll(runCatching { parseCategories(fetchArray(urls.api("get_series_categories")), MediaType.Series) }.getOrDefault(emptyList()))
+        }.toMutableList()
+
+        // Les catalogues de certains fournisseurs dépassent largement 200 000 entrées.
+        // JsonReader traite le tableau objet par objet et évite de conserver une énorme chaîne JSON
+        // + JSONArray + tous les JSONObject simultanément en mémoire sur la TV.
+        val entries = buildList {
+            addAll(fetchEntriesStreaming(urls.api("get_live_streams"), MediaType.Live))
+            addAll(runCatching { fetchEntriesStreaming(urls.api("get_vod_streams"), MediaType.Movie) }.getOrDefault(emptyList()))
+            addAll(runCatching { fetchEntriesStreaming(urls.api("get_series"), MediaType.Series) }.getOrDefault(emptyList()))
+        }.toMutableList()
+
+        // Certains serveurs authentifient correctement player_api.php mais renvoient [] pour VOD
+        // ou Séries alors que leur get.php contient bien ces médias. Dans ce cas uniquement, on lit
+        // le M3U en flux et seulement pour les sections manquantes afin de ne pas doubler la mémoire.
+        val missingTypes = setOf(MediaType.Movie, MediaType.Series).filterTo(linkedSetOf()) { type ->
+            entries.none { it.type == type }
+        }
+        if (missingTypes.isNotEmpty()) {
+            runCatching { fetchM3uFallback(urls.playlist(), missingTypes) }
+                .getOrNull()
+                ?.let { fallback ->
+                    for (type in missingTypes) {
+                        categories.removeAll { it.type == type }
+                        entries.removeAll { it.type == type }
+                        categories += fallback.catalog.categoriesFor(type)
+                        entries += fallback.catalog.entriesFor(type)
+                    }
+                }
         }
 
-        val entries = buildList {
-            addAll(parseEntries(fetchArray(urls.api("get_live_streams")), MediaType.Live))
-            addAll(runCatching { parseEntries(fetchArray(urls.api("get_vod_streams")), MediaType.Movie) }.getOrDefault(emptyList()))
-            addAll(runCatching { parseEntries(fetchArray(urls.api("get_series")), MediaType.Series) }.getOrDefault(emptyList()))
-        }
-        Catalog(categories = categories, entries = entries, account = account)
+        Catalog(
+            categories = categories.distinctBy(MediaCategory::key),
+            entries = entries.distinctBy(MediaEntry::key),
+            account = account,
+        )
     }
 
     suspend fun loadMovieDetails(
@@ -146,6 +176,155 @@ class XtreamClient {
     private fun fetchObject(url: String): JSONObject = JSONObject(fetch(url))
     private fun fetchArray(url: String): JSONArray = JSONArray(fetch(url))
 
+    private fun fetchEntriesStreaming(url: String, type: MediaType): List<MediaEntry> {
+        return try {
+            fetchEntriesStreamingOnce(url, type)
+        } catch (first: IOException) {
+            val alternate = XtreamUrlBuilder.alternateTransportUrl(url)
+                ?: throw XtreamException("Impossible de joindre le serveur. Vérifiez l'adresse et la connexion.")
+            try {
+                fetchEntriesStreamingOnce(alternate, type)
+            } catch (_: IOException) {
+                throw XtreamException("Impossible de joindre le serveur en HTTP ou HTTPS. Vérifiez l'adresse et la connexion.")
+            }
+        }
+    }
+
+    @Throws(IOException::class)
+    private fun fetchEntriesStreamingOnce(url: String, type: MediaType): List<MediaEntry> {
+        val connection = openConnection(url, "application/json")
+        return try {
+            val code = connection.responseCode
+            if (code !in 200..299) throw XtreamException("Le serveur a répondu avec le code $code.")
+            JsonReader(InputStreamReader(connection.inputStream, StandardCharsets.UTF_8)).use { reader ->
+                parseEntriesStreaming(reader, type)
+            }
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun fetchM3uFallback(url: String, includeTypes: Set<MediaType>): M3uImport {
+        val first = runCatching { fetchM3uFallbackOnce(url, includeTypes) }
+        first.getOrNull()?.let { return it }
+        val alternate = XtreamUrlBuilder.alternateTransportUrl(url) ?: throw first.exceptionOrNull()!!
+        return fetchM3uFallbackOnce(alternate, includeTypes)
+    }
+
+    private fun fetchM3uFallbackOnce(url: String, includeTypes: Set<MediaType>): M3uImport {
+        val connection = openConnection(url, "audio/x-mpegurl, application/vnd.apple.mpegurl, text/plain, */*")
+        return try {
+            val code = connection.responseCode
+            if (code !in 200..299) throw XtreamException("Le serveur a répondu avec le code $code pour la playlist de secours.")
+            connection.inputStream.use { input ->
+                M3uParser().parse(InputStreamReader(input, StandardCharsets.UTF_8), includeTypes)
+            }
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun parseEntriesStreaming(reader: JsonReader, type: MediaType): List<MediaEntry> {
+        val entries = ArrayList<MediaEntry>()
+        if (reader.peek() != JsonToken.BEGIN_ARRAY) {
+            reader.skipValue()
+            return emptyList()
+        }
+        reader.beginArray()
+        var index = 0
+        while (reader.hasNext()) {
+            if (reader.peek() != JsonToken.BEGIN_OBJECT) {
+                reader.skipValue()
+                continue
+            }
+
+            var id: Int? = null
+            var name: String? = null
+            var categoryId = "0"
+            var streamIcon: String? = null
+            var cover: String? = null
+            var coverBig: String? = null
+            var number: Int? = null
+            var extension: String? = null
+            var tvgId: String? = null
+            var plot: String? = null
+            var rating: Double? = null
+            var added: Long? = null
+
+            reader.beginObject()
+            while (reader.hasNext()) {
+                when (reader.nextName()) {
+                    "stream_id" -> if (type != MediaType.Series) id = reader.scalarString()?.toIntOrNull() else reader.skipValue()
+                    "series_id" -> if (type == MediaType.Series) id = reader.scalarString()?.toIntOrNull() else reader.skipValue()
+                    "name" -> name = reader.scalarString()
+                    "category_id" -> categoryId = reader.scalarString()?.ifBlank { "0" } ?: "0"
+                    "stream_icon" -> streamIcon = reader.scalarString()?.takeIf(String::isNotBlank)
+                    "cover" -> cover = reader.scalarString()?.takeIf(String::isNotBlank)
+                    "cover_big" -> coverBig = reader.scalarString()?.takeIf(String::isNotBlank)
+                    "num" -> number = reader.scalarString()?.toIntOrNull()
+                    "container_extension" -> extension = reader.scalarString()?.takeIf(String::isNotBlank)
+                    "epg_channel_id" -> tvgId = reader.scalarString()?.takeIf(String::isNotBlank)
+                    "plot", "description" -> {
+                        val candidate = reader.scalarString()?.takeIf(String::isNotBlank)
+                        if (plot.isNullOrBlank()) plot = candidate
+                    }
+                    "rating_5based", "rating" -> {
+                        val candidate = reader.scalarString()?.toDoubleOrNull()
+                        if (rating == null) rating = candidate
+                    }
+                    "added", "last_modified" -> {
+                        val candidate = reader.scalarString()?.toLongOrNull()?.takeIf { it > 0 }
+                        if (added == null) added = candidate
+                    }
+                    else -> reader.skipValue()
+                }
+            }
+            reader.endObject()
+
+            val safeId = id
+            val safeName = name?.takeIf(String::isNotBlank)
+            if (safeId != null && safeId > 0 && safeName != null) {
+                val icon = when (type) {
+                    MediaType.Series -> coverBig ?: cover ?: streamIcon
+                    else -> streamIcon
+                }
+                entries += MediaEntry(
+                    id = safeId,
+                    name = safeName,
+                    displayName = safeName,
+                    type = type,
+                    categoryId = categoryId,
+                    iconUrl = icon,
+                    number = number ?: index + 1,
+                    extension = extension ?: type.defaultExtension,
+                    tvgId = tvgId,
+                    plot = plot,
+                    rating = rating,
+                    playable = type != MediaType.Series,
+                    addedAtEpochSeconds = added,
+                )
+            }
+            index += 1
+        }
+        reader.endArray()
+        return entries.sortedWith(compareBy<MediaEntry> { it.number }.thenBy { it.name.lowercase() })
+    }
+
+    private fun JsonReader.scalarString(): String? = when (peek()) {
+        JsonToken.NULL -> {
+            nextNull()
+            null
+        }
+        JsonToken.STRING,
+        JsonToken.NUMBER,
+        -> nextString()
+        JsonToken.BOOLEAN -> nextBoolean().toString()
+        else -> {
+            skipValue()
+            null
+        }
+    }
+
     private fun fetch(url: String): String {
         return try {
             fetchOnce(url)
@@ -162,16 +341,7 @@ class XtreamClient {
 
     @Throws(IOException::class)
     private fun fetchOnce(url: String): String {
-        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            connectTimeout = 12_000
-            readTimeout = 30_000
-            useCaches = false
-            instanceFollowRedirects = true
-            setRequestProperty("Accept", "application/json")
-            setRequestProperty("Accept-Charset", "utf-8")
-            setRequestProperty("User-Agent", "Streamia-TV/1.4")
-        }
+        val connection = openConnection(url, "application/json")
         return try {
             val code = connection.responseCode
             if (code !in 200..299) throw XtreamException("Le serveur a répondu avec le code $code.")
@@ -180,6 +350,18 @@ class XtreamClient {
             connection.disconnect()
         }
     }
+
+    private fun openConnection(url: String, accept: String): HttpURLConnection =
+        (URL(url).openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 12_000
+            readTimeout = 30_000
+            useCaches = false
+            instanceFollowRedirects = true
+            setRequestProperty("Accept", accept)
+            setRequestProperty("Accept-Charset", "utf-8")
+            setRequestProperty("User-Agent", "Streamia-TV/1.5")
+        }
 
     private fun parseAccount(root: JSONObject): AccountInfo {
         val user = root.optJSONObject("user_info")
@@ -202,37 +384,6 @@ class XtreamClient {
             if (id.isNotBlank() && name.isNotBlank()) add(MediaCategory(id, name, type))
         }
     }.distinctBy(MediaCategory::key)
-
-    private fun parseEntries(array: JSONArray, type: MediaType): List<MediaEntry> = buildList {
-        for (index in 0 until array.length()) {
-            val item = array.optJSONObject(index) ?: continue
-            val idKey = if (type == MediaType.Series) "series_id" else "stream_id"
-            val id = item.optString(idKey).toIntOrNull() ?: item.optInt(idKey, -1)
-            val name = item.optString("name")
-            if (id <= 0 || name.isBlank()) continue
-            val icon = when (type) {
-                MediaType.Series -> item.firstNonBlank("cover", "cover_big")
-                else -> item.optString("stream_icon").takeIf(String::isNotBlank)
-            }
-            add(
-                MediaEntry(
-                    id = id,
-                    name = name,
-                    displayName = name,
-                    type = type,
-                    categoryId = item.optString("category_id", "0"),
-                    iconUrl = icon,
-                    number = item.optInt("num", index + 1),
-                    extension = item.optString("container_extension", type.defaultExtension).ifBlank { type.defaultExtension },
-                    tvgId = item.optString("epg_channel_id").takeIf(String::isNotBlank),
-                    plot = item.firstNonBlank("plot", "description"),
-                    rating = item.firstNonBlank("rating_5based", "rating")?.toDoubleOrNull(),
-                    playable = type != MediaType.Series,
-                    addedAtEpochSeconds = item.optionalLong("added") ?: item.optionalLong("last_modified"),
-                ),
-            )
-        }
-    }.sortedWith(compareBy<MediaEntry> { it.number }.thenBy { it.name.lowercase() })
 
     private fun decodeMaybeBase64(value: String): String {
         if (value.isBlank()) return ""
