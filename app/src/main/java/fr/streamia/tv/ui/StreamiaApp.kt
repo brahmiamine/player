@@ -20,6 +20,8 @@ import androidx.compose.ui.unit.dp
 import fr.streamia.tv.ui.theme.FocusBlueBright
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.movableContentOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.sp
@@ -29,10 +31,30 @@ import fr.streamia.tv.ui.theme.MutedInk
 import fr.streamia.tv.ui.theme.Night
 import fr.streamia.tv.ui.theme.StreamiaTheme
 import fr.streamia.tv.player.LivePlaybackSession
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.ui.PlayerView
 
 @Composable
 fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackSession) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val liveVideoSurface = remember(livePlaybackSession) {
+        movableContentOf<LiveVideoSurfacePlacement> { placement ->
+            AndroidView(
+                factory = { viewContext ->
+                    PlayerView(viewContext).apply {
+                        useController = false
+                        keepScreenOn = true
+                        player = livePlaybackSession.player
+                    }
+                },
+                update = { view ->
+                    view.player = livePlaybackSession.player
+                    view.resizeMode = placement.resizeMode
+                },
+                modifier = placement.modifier,
+            )
+        }
+    }
 
     StreamiaTheme {
         ResponsiveTvViewport {
@@ -70,6 +92,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     catalog = state.catalog!!,
                     credentials = state.credentials!!,
                     livePlaybackSession = livePlaybackSession,
+                    liveVideoSurface = liveVideoSurface,
                     library = state.library,
                     offline = state.offline,
                     busy = state.busy,
@@ -168,6 +191,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                         epg = state.epg,
                         resumePositionMs = state.resumePositionMs,
                         livePlaybackSession = livePlaybackSession,
+                        liveVideoSurface = liveVideoSurface,
                         onBack = {
                             LiveBrowserReturnState.remember(playerScreen.entry)
                             viewModel.closePlayer()

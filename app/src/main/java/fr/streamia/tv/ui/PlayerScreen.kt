@@ -107,6 +107,7 @@ fun PlayerScreen(
     epg: List<EpgProgram>,
     resumePositionMs: Long,
     livePlaybackSession: LivePlaybackSession,
+    liveVideoSurface: @Composable (LiveVideoSurfacePlacement) -> Unit,
     onBack: () -> Unit,
     onZap: (Int) -> Unit,
     onEntrySelected: (MediaEntry) -> Unit,
@@ -399,20 +400,24 @@ fun PlayerScreen(
                 }
             },
     ) {
-        AndroidView(
-            factory = { viewContext ->
-                PlayerView(viewContext).apply {
-                    useController = false
-                    keepScreenOn = true
-                    this.player = player
-                }
-            },
-            update = {
-                it.player = player
-                it.resizeMode = aspect.resizeMode
-            },
-            modifier = Modifier.fillMaxSize(),
-        )
+        if (sharedLivePlayer) {
+            liveVideoSurface(LiveVideoSurfacePlacement(Modifier.fillMaxSize(), aspect.resizeMode))
+        } else {
+            AndroidView(
+                factory = { viewContext ->
+                    PlayerView(viewContext).apply {
+                        useController = false
+                        keepScreenOn = true
+                        this.player = player
+                    }
+                },
+                update = {
+                    it.player = player
+                    it.resizeMode = aspect.resizeMode
+                },
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
 
         if (buffering) {
             Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
