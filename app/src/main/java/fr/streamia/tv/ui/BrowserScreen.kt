@@ -69,6 +69,7 @@ import fr.streamia.tv.ui.theme.MutedInk
 import fr.streamia.tv.ui.theme.Night
 import fr.streamia.tv.ui.theme.WarmSignal
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.yield
 
@@ -498,7 +499,7 @@ private fun LiveChannelList(
     LaunchedEffect(listState) {
         snapshotFlow {
             NavigationListPosition(listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
-        }.distinctUntilChanged().collect(onListPositionChanged)
+        }.debounce(300).distinctUntilChanged().collect(onListPositionChanged)
     }
 
     androidx.compose.runtime.LaunchedEffect(entries, focusTargetKey, fullscreenPending, autoFocus) {
