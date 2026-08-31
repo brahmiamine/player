@@ -21,7 +21,6 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -65,8 +64,8 @@ private const val FAVORITES_CATEGORY_ID = "__favorites__"
 private const val HISTORY_CATEGORY_ID = "__history__"
 
 /**
- * Le preview Live doit libérer sa connexion AVANT de démarrer le plein écran.
- * Beaucoup de fournisseurs Xtream limitent le compte à une seule connexion simultanée.
+ * Permet de fermer explicitement l'aperçu Live avant de lancer le lecteur plein écran.
+ * C'est important pour les abonnements Xtream limités à une seule connexion simultanée.
  */
 private class LivePreviewHandle {
     var stop: () -> Unit = {}
@@ -119,12 +118,8 @@ fun BrowserScreen(
     }
     val categories = remember(baseCategories, favoriteEntriesForType.size, historyForType.size, selectedType) {
         buildList {
-            if (favoriteEntriesForType.isNotEmpty()) {
-                add(MediaCategory(FAVORITES_CATEGORY_ID, "★ Favoris", selectedType))
-            }
-            if (historyForType.isNotEmpty()) {
-                add(MediaCategory(HISTORY_CATEGORY_ID, "↺ Historique", selectedType))
-            }
+            if (favoriteEntriesForType.isNotEmpty()) add(MediaCategory(FAVORITES_CATEGORY_ID, "★ Favoris", selectedType))
+            if (historyForType.isNotEmpty()) add(MediaCategory(HISTORY_CATEGORY_ID, "↺ Historique", selectedType))
             addAll(baseCategories)
             add(Catalog.allCategory(selectedType))
         }
@@ -138,12 +133,12 @@ fun BrowserScreen(
     }
     val historyByKey = remember(historyForType) { historyForType.associate { it.second.key to it.first } }
 
-    LaunchedEffect(selectedType, categories) {
+    androidx.compose.runtime.LaunchedEffect(selectedType, categories) {
         if (categories.none { it.id == selectedCategoryId }) {
             selectedCategoryId = defaultCategoryId(catalog, selectedType)
         }
     }
-    LaunchedEffect(selectedType, selectedCategoryId) {
+    androidx.compose.runtime.LaunchedEffect(selectedType, selectedCategoryId) {
         onLocationChanged(selectedType, selectedCategoryId)
     }
 
@@ -170,10 +165,7 @@ fun BrowserScreen(
             ) {
                 Text(
                     "$message  ·  OK fermer",
-                    color = if (
-                        message.contains("média", ignoreCase = true) ||
-                        message.contains("import", ignoreCase = true)
-                    ) FocusBlueBright else MaterialTheme.colorScheme.error,
+                    color = if (message.contains("média", ignoreCase = true) || message.contains("import", ignoreCase = true)) FocusBlueBright else MaterialTheme.colorScheme.error,
                     fontSize = 12.sp,
                     modifier = Modifier.padding(horizontal = 16.dp),
                     maxLines = 1,
@@ -277,12 +269,7 @@ private fun BrowserHeader(
 }
 
 @Composable
-private fun HeaderAction(
-    label: String,
-    width: androidx.compose.ui.unit.Dp,
-    onClick: () -> Unit,
-    enabled: Boolean = true,
-) {
+private fun HeaderAction(label: String, width: androidx.compose.ui.unit.Dp, onClick: () -> Unit, enabled: Boolean = true) {
     FocusableSurface(onClick = onClick, enabled = enabled, modifier = Modifier.width(width).height(44.dp)) {
         Text(label, color = Ink, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 10.dp))
     }
@@ -304,24 +291,21 @@ private fun LiveCatalogLayout(
     onToggleEntryFavorite: (MediaEntry) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var previewKey by remember(catalog) { mutableStateOf<String?>(null) }
+    var previewEntry by remember(catalog) { mutableStateOf(entries.firstOrNull()) }
     var pendingFullscreen by remember { mutableStateOf<MediaEntry?>(null) }
     val previewHandle = remember { LivePreviewHandle() }
 
-    LaunchedEffect(selectedCategoryId, entries) {
-        if (entries.none { it.key == previewKey }) previewKey = entries.firstOrNull()?.key
+    if (previewEntry != null && catalog.entry(previewEntry!!.key) == null) {
+        previewEntry = entries.firstOrNull()
     }
 
-    LaunchedEffect(pendingFullscreen) {
+    androidx.compose.runtime.LaunchedEffect(pendingFullscreen) {
         val target = pendingFullscreen ?: return@LaunchedEffect
-        // Ferme immédiatement le socket du preview. Un très court délai laisse au serveur Xtream
-        // le temps de libérer le slot de connexion avant que le Player plein écran se connecte.
         previewHandle.stop()
         delay(140)
         onEntrySelected(target)
+        pendingFullscreen = null
     }
-
-    val previewEntry = entries.firstOrNull { it.key == previewKey } ?: entries.firstOrNull()
 
     Row(modifier, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         CategoryRail(
@@ -345,8 +329,12 @@ private fun LiveCatalogLayout(
             entries = entries,
             previewKey = previewEntry?.key,
             favoriteEntries = favoriteEntries,
-            onPreview = { previewKey = it.key },
-            onOpen = { pendingFullscreen = it },
+            onConfirm = { channel ->
+                when (liveChannelConfirmAction(previewEntry?.key, channel.key)) {
+                    LiveChannelConfirmAction.Preview -> previewEntry = channel
+                    LiveChannelConfirmAction.Fullscreen -> pendingFullscreen = channel
+                }
+            },
             onToggleFavorite = onToggleEntryFavorite,
             modifier = Modifier.width(340.dp).fillMaxHeight(),
         )
@@ -366,19 +354,15 @@ private fun LiveChannelList(
     entries: List<MediaEntry>,
     previewKey: String?,
     favoriteEntries: Set<String>,
-    onPreview: (MediaEntry) -> Unit,
-    onOpen: (MediaEntry) -> Unit,
+    onConfirm: (MediaEntry) -> Unit,
     onToggleFavorite: (MediaEntry) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier) {
-        Row(
-            Modifier.fillMaxWidth().padding(start = 3.dp, bottom = 7.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+        Row(Modifier.fillMaxWidth().padding(start = 3.dp, bottom = 7.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("Chaînes", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.weight(1f))
-            Text(entries.size.toString(), color = MutedInk, fontSize = 10.sp)
+            Text("OK aperçu · OK encore plein écran", color = MutedInk, fontSize = 9.sp)
         }
         if (entries.isEmpty()) {
             Box(Modifier.fillMaxSize().background(DeepSurface), contentAlignment = Alignment.Center) {
@@ -388,9 +372,8 @@ private fun LiveChannelList(
             LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 items(entries, key = MediaEntry::key) { entry ->
                     FocusableSurface(
-                        onClick = { onOpen(entry) },
+                        onClick = { onConfirm(entry) },
                         onLongClick = { onToggleFavorite(entry) },
-                        onFocused = { onPreview(entry) },
                         selected = previewKey == entry.key,
                         modifier = Modifier.fillMaxWidth().height(48.dp),
                     ) {
@@ -438,8 +421,6 @@ private fun LivePreview(
     modifier: Modifier = Modifier,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    // Même pile réseau/buffer que le plein écran : cela évite deux comportements de lecture
-    // différents et permet au pool HTTP d'être réutilisé après la fermeture du preview.
     val player = remember { StreamiaPlayerFactory.create(context.applicationContext, MediaType.Live) }
     var buffering by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf(false) }
@@ -481,7 +462,7 @@ private fun LivePreview(
         }
     }
 
-    LaunchedEffect(entry?.key, credentials) {
+    androidx.compose.runtime.LaunchedEffect(entry?.key, credentials) {
         val target = entry
         if (target == null) {
             stopPreviewPlayer(player)
@@ -499,13 +480,7 @@ private fun LivePreview(
     }
 
     Column(modifier) {
-        Text(
-            "Aperçu en direct",
-            color = Ink,
-            fontSize = 15.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(start = 3.dp, bottom = 7.dp),
-        )
+        Text("Aperçu en direct", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 3.dp, bottom = 7.dp))
         Box(Modifier.fillMaxWidth().weight(1f).background(Color.Black)) {
             if (entry != null) {
                 AndroidView(
@@ -532,24 +507,17 @@ private fun LivePreview(
                         .background(Night.copy(alpha = 0.90f))
                         .padding(horizontal = 14.dp, vertical = 10.dp),
                 ) {
-                    Text(
-                        entry.displayName,
-                        color = Ink,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    Text(entry.displayName, color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Spacer(Modifier.height(3.dp))
                     Text(
-                        "CH ${entry.number}${if (favorite) " · ★ Favori" else ""}  ·  OK plein écran · OK long favori",
+                        "CH ${entry.number}${if (favorite) " · ★ Favori" else ""} · OK encore = plein écran · OK long = favori",
                         color = FocusBlueBright,
                         fontSize = 10.sp,
                         maxLines = 1,
                     )
                 }
             } else {
-                Text("Sélectionnez une chaîne", color = MutedInk, fontSize = 16.sp, modifier = Modifier.align(Alignment.Center))
+                Text("Sélectionnez une chaîne puis appuyez sur OK", color = MutedInk, fontSize = 16.sp, modifier = Modifier.align(Alignment.Center))
             }
         }
     }
@@ -615,25 +583,21 @@ private fun CategoryRail(
     modifier: Modifier = Modifier,
 ) {
     val firstFocus = remember(type) { FocusRequester() }
-    LaunchedEffect(type, categories.size) {
+    androidx.compose.runtime.LaunchedEffect(type, categories.size) {
         if (categories.isNotEmpty()) runCatching { firstFocus.requestFocus() }
     }
 
     Column(modifier) {
-        Row(
-            Modifier.fillMaxWidth().padding(start = 3.dp, bottom = 7.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+        Row(Modifier.fillMaxWidth().padding(start = 3.dp, bottom = 7.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("Catégories", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.weight(1f))
-            Text("OK long = favori", color = MutedInk, fontSize = 9.sp)
+            Text("OK choisir · OK long favori", color = MutedInk, fontSize = 9.sp)
         }
         LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             items(categories, key = MediaCategory::key) { category ->
                 val virtual = category.id in setOf(Catalog.ALL_CATEGORY_ID, FAVORITES_CATEGORY_ID, HISTORY_CATEGORY_ID)
                 FocusableSurface(
                     onClick = { onSelected(category) },
-                    onFocused = { onSelected(category) },
                     onLongClick = if (virtual) null else ({ onToggleFavorite(category) }),
                     selected = selectedCategoryId == category.id,
                     modifier = Modifier
@@ -641,10 +605,7 @@ private fun CategoryRail(
                         .height(46.dp)
                         .then(if (category == categories.first()) Modifier.focusRequester(firstFocus) else Modifier),
                 ) {
-                    Row(
-                        Modifier.fillMaxWidth().padding(horizontal = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                         if (!virtual && category.key in favoriteCategories) {
                             Text("★", color = FocusBlueBright, fontSize = 10.sp)
                             Spacer(Modifier.width(5.dp))
@@ -679,14 +640,7 @@ private fun PosterGrid(
 ) {
     Column(modifier) {
         Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                categoryName.ifBlank { type.displayName },
-                color = Ink,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Text(categoryName.ifBlank { type.displayName }, color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Spacer(Modifier.width(10.dp))
             Text("${entries.size} ${type.pluralName}", color = MutedInk, fontSize = 10.sp)
             Spacer(Modifier.weight(1f))

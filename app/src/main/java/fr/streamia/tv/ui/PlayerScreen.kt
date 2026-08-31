@@ -40,6 +40,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
@@ -57,6 +58,7 @@ import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.domain.ServerCredentials
 import fr.streamia.tv.domain.XtreamUrlBuilder
+import fr.streamia.tv.player.DolbyCapabilityDetector
 import fr.streamia.tv.player.PlaybackDiagnostics
 import fr.streamia.tv.player.PlaybackDiagnosticsTracker
 import fr.streamia.tv.player.PlaybackTransportStore
@@ -64,7 +66,10 @@ import fr.streamia.tv.player.PlaybackUrlStrategy
 import fr.streamia.tv.player.StreamTechnicalInfo
 import fr.streamia.tv.player.StreamiaPlayerFactory
 import fr.streamia.tv.player.codecLabel
+import fr.streamia.tv.player.dolbyPlaybackLabel
 import fr.streamia.tv.player.hdrLabel
+import fr.streamia.tv.player.isDolbyAtmosFormat
+import fr.streamia.tv.player.isDolbyVisionFormat
 import fr.streamia.tv.ui.theme.FocusBlueBright
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
@@ -100,6 +105,8 @@ fun PlayerScreen(
     val player = remember(entry.type) { StreamiaPlayerFactory.create(context.applicationContext, entry.type) }
     val transportStore = remember { PlaybackTransportStore(context.applicationContext) }
     val diagnosticsTracker = remember { PlaybackDiagnosticsTracker() }
+    val dolbyCapabilities = remember { DolbyCapabilityDetector.detect(context.applicationContext) }
+    val livePickerOpen by PlayerOverlayController.livePickerOpen.collectAsStateWithLifecycle()
     val rootFocus = remember { FocusRequester() }
     val settingsFocus = remember { FocusRequester() }
 
@@ -119,6 +126,8 @@ fun PlayerScreen(
     var subtitleIndex by remember { mutableStateOf(0) }
     var technicalInfo by remember { mutableStateOf(StreamTechnicalInfo()) }
     var diagnostics by remember { mutableStateOf(PlaybackDiagnostics()) }
+    var dolbyVisionDetected by remember { mutableStateOf(false) }
+    var dolbyAtmosDetected by remember { mutableStateOf(false) }
 
     fun startCandidate(url: String, positionMs: Long = 0L) {
         activeStreamUrl = url
@@ -177,15 +186,21 @@ fun PlayerScreen(
                 subtitleIndex = subtitleIndex.coerceIn(0, subtitleTracks.lastIndex.coerceAtLeast(0))
 
                 selectedVideoFormat(tracks)?.let { format ->
+                    val isDolbyVision = isDolbyVisionFormat(format.sampleMimeType, format.codecs)
+                    dolbyVisionDetected = isDolbyVision
                     technicalInfo = technicalInfo.copy(
                         width = format.width.takeIf { it > 0 } ?: technicalInfo.width,
                         height = format.height.takeIf { it > 0 } ?: technicalInfo.height,
                         frameRate = format.frameRate.takeIf { it > 0f },
-                        codec = codecLabel(format.sampleMimeType, format.codecs),
+                        codec = if (isDolbyVision) "Dolby Vision" else codecLabel(format.sampleMimeType, format.codecs),
                         bitrate = format.bitrate.takeIf { it > 0 },
-                        hdr = hdrLabel(format.sampleMimeType, format.colorInfo?.colorTransfer),
+                        hdr = if (isDolbyVision) "Dolby Vision" else hdrLabel(format.sampleMimeType, format.colorInfo?.colorTransfer),
                     )
-                }
+                } ?: run { dolbyVisionDetected = false }
+
+                selectedAudioFormat(tracks)?.let { format ->
+                    dolbyAtmosDetected = isDolbyAtmosFormat(format.sampleMimeType)
+                } ?: run { dolbyAtmosDetected = false }
             }
 
             override fun onPlayerError(error: PlaybackException) {
@@ -217,6 +232,8 @@ fun PlayerScreen(
         hudVisible = true
         numberBuffer = ""
         technicalInfo = StreamTechnicalInfo()
+        dolbyVisionDetected = false
+        dolbyAtmosDetected = false
         diagnosticsTracker.reset(SystemClock.elapsedRealtime())
         diagnostics = diagnosticsTracker.snapshot(SystemClock.elapsedRealtime())
 
@@ -260,8 +277,8 @@ fun PlayerScreen(
             runCatching { settingsFocus.requestFocus() }
         }
     }
-    LaunchedEffect(hudVisible, guideOpen, settingsOpen, entry.key) {
-        if (hudVisible && !guideOpen && !settingsOpen) {
+    LaunchedEffect(hudVisible, guideOpen, settingsOpen, entry.key, livePickerOpen) {
+        if (hudVisible && !guideOpen && !settingsOpen && !livePickerOpen) {
             delay(6_000)
             hudVisible = false
         }
@@ -300,7 +317,7 @@ fun PlayerScreen(
             .focusRequester(rootFocus)
             .focusable()
             .onPreviewKeyEvent { event ->
-                if (event.type != KeyEventType.KeyDown || guideOpen || settingsOpen) return@onPreviewKeyEvent false
+                if (event.type != KeyEventType.KeyDown || guideOpen || settingsOpen || livePickerOpen) return@onPreviewKeyEvent false
                 val keyCode = event.nativeKeyEvent.keyCode
                 val digit = keyCode.toTvDigit()
                 if (digit != null && entry.type == MediaType.Live) {
@@ -319,7 +336,11 @@ fun PlayerScreen(
 
                     AndroidKeyEvent.KEYCODE_DPAD_LEFT,
                     AndroidKeyEvent.KEYCODE_MENU,
-                    -> if (entry.type == MediaType.Live) { guideOpen = true; hudVisible = true; true } else false
+                    -> if (entry.type == MediaType.Live) {
+                        PlayerOverlayController.openLivePicker()
+                        hudVisible = false
+                        true
+                    } else false
 
                     AndroidKeyEvent.KEYCODE_DPAD_RIGHT,
                     AndroidKeyEvent.KEYCODE_SETTINGS,
@@ -388,7 +409,7 @@ fun PlayerScreen(
             }
         }
 
-        if (hudVisible && !guideOpen && !settingsOpen) {
+        if (hudVisible && !guideOpen && !settingsOpen && !livePickerOpen) {
             PlayerInfoBand(
                 entry = entry,
                 categoryName = catalog.categoriesFor(entry.type).firstOrNull { it.id == entry.categoryId }?.name,
@@ -400,6 +421,8 @@ fun PlayerScreen(
                 transport = streamTransportLabel(activeStreamUrl),
                 audioLabel = audioTracks.getOrNull(audioIndex)?.label ?: "Auto",
                 subtitleLabel = subtitleTracks.getOrNull(subtitleIndex)?.label ?: "Désactivés",
+                dolbyVisionLabel = dolbyPlaybackLabel("Dolby Vision", dolbyVisionDetected, dolbyCapabilities.dolbyVision),
+                dolbyAtmosLabel = dolbyPlaybackLabel("Dolby Atmos", dolbyAtmosDetected, dolbyCapabilities.dolbyAtmos),
                 resumePositionMs = resumePositionMs,
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
@@ -440,6 +463,8 @@ fun PlayerScreen(
                 subtitleTracks = subtitleTracks,
                 subtitleIndex = subtitleIndex,
                 aspect = aspect,
+                dolbyVisionLabel = dolbyPlaybackLabel("Dolby Vision", dolbyVisionDetected, dolbyCapabilities.dolbyVision),
+                dolbyAtmosLabel = dolbyPlaybackLabel("Dolby Atmos", dolbyAtmosDetected, dolbyCapabilities.dolbyAtmos),
                 firstFocus = settingsFocus,
                 onNextAudio = {
                     audioIndex = (audioIndex + 1) % audioTracks.size.coerceAtLeast(1)
@@ -468,6 +493,8 @@ private fun PlayerInfoBand(
     transport: String,
     audioLabel: String,
     subtitleLabel: String,
+    dolbyVisionLabel: String?,
+    dolbyAtmosLabel: String?,
     resumePositionMs: Long,
     modifier: Modifier = Modifier,
 ) {
@@ -531,7 +558,7 @@ private fun PlayerInfoBand(
             }
 
             Spacer(Modifier.width(20.dp))
-            Column(Modifier.width(470.dp), horizontalAlignment = Alignment.End) {
+            Column(Modifier.width(500.dp), horizontalAlignment = Alignment.End) {
                 Text(
                     "${technicalInfo.qualityLabel} · ${technicalInfo.resolutionText} · ${technicalInfo.fpsText}",
                     color = Ink,
@@ -545,6 +572,17 @@ private fun PlayerInfoBand(
                     fontSize = 13.sp,
                     maxLines = 1,
                 )
+                val dolbyText = listOfNotNull(dolbyVisionLabel, dolbyAtmosLabel).joinToString(" · ")
+                if (dolbyText.isNotBlank()) {
+                    Text(
+                        dolbyText,
+                        color = FocusBlueBright,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
                 Text(
                     "$transport · Audio $audioLabel · ST $subtitleLabel",
                     color = MutedInk,
@@ -566,7 +604,7 @@ private fun PlayerInfoBand(
             Text(if (isPlaying) "⏸ Lecture" else "▶ Pause", color = Ink, fontSize = 13.sp)
             Spacer(Modifier.width(20.dp))
             if (entry.type == MediaType.Live) {
-                Text("OK liste · ↑ ↓ zap · 0–9 chaîne · ← guide", color = MutedInk, fontSize = 13.sp)
+                Text("OK / ← liste · ↑ ↓ zap · 0–9 chaîne", color = MutedInk, fontSize = 13.sp)
                 Spacer(Modifier.width(20.dp))
             }
             Text("→ audio / sous-titres / écran", color = MutedInk, fontSize = 13.sp)
@@ -585,6 +623,8 @@ private fun BoxScope.PlayerSettings(
     subtitleTracks: List<TrackChoice>,
     subtitleIndex: Int,
     aspect: VideoAspect,
+    dolbyVisionLabel: String?,
+    dolbyAtmosLabel: String?,
     firstFocus: FocusRequester,
     onNextAudio: () -> Unit,
     onNextSubtitle: () -> Unit,
@@ -620,6 +660,14 @@ private fun BoxScope.PlayerSettings(
             onClick = onNextSubtitle,
         )
         SettingButton(title = "Format vidéo", value = aspect.label, onClick = onNextAspect)
+        val dolbyText = listOfNotNull(dolbyVisionLabel, dolbyAtmosLabel).joinToString(" · ")
+        Text(
+            if (dolbyText.isBlank()) "Dolby : aucun format Dolby sélectionné" else dolbyText,
+            color = if (dolbyText.isBlank()) MutedInk else FocusBlueBright,
+            fontSize = 13.sp,
+            fontWeight = if (dolbyText.isBlank()) FontWeight.Normal else FontWeight.Bold,
+            lineHeight = 18.sp,
+        )
         Text("OK fait défiler les options disponibles. Retour ou Fermer revient à la vidéo.", color = MutedInk, fontSize = 13.sp, lineHeight = 19.sp)
     }
 }
@@ -719,6 +767,15 @@ private fun selectedVideoFormat(tracks: Tracks): androidx.media3.common.Format? 
     return null
 }
 
+private fun selectedAudioFormat(tracks: Tracks): androidx.media3.common.Format? {
+    tracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }.forEach { group ->
+        for (index in 0 until group.length) {
+            if (group.isTrackSelected(index)) return group.getTrackFormat(index)
+        }
+    }
+    return null
+}
+
 private fun extractChoices(tracks: Tracks, type: Int): List<TrackChoice> = buildList {
     val seen = mutableSetOf<String>()
     tracks.groups.filter { it.type == type }.forEach { group ->
@@ -726,9 +783,14 @@ private fun extractChoices(tracks: Tracks, type: Int): List<TrackChoice> = build
             if (!group.isTrackSupported(index)) continue
             val format = group.getTrackFormat(index)
             val language = format.language?.takeIf(String::isNotBlank) ?: continue
-            val label = format.label?.takeIf(String::isNotBlank)
+            val baseLabel = format.label?.takeIf(String::isNotBlank)
                 ?: Locale.forLanguageTag(language).displayLanguage.takeIf(String::isNotBlank)
                 ?: language
+            val label = if (type == C.TRACK_TYPE_AUDIO && isDolbyAtmosFormat(format.sampleMimeType)) {
+                "Dolby Atmos · $baseLabel"
+            } else {
+                baseLabel
+            }
             val key = "$label:$language"
             if (seen.add(key)) add(TrackChoice(label, language))
         }

@@ -17,9 +17,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -41,6 +43,7 @@ import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
 import fr.streamia.tv.ui.theme.Night
 import fr.streamia.tv.ui.theme.WarmSignal
+import kotlinx.coroutines.delay
 
 private enum class LoginMode { Manager, Xtream, M3u }
 
@@ -301,21 +304,48 @@ private fun XtreamForm(
     onBack: () -> Unit,
 ) {
     val canSubmit = server.isNotBlank() && username.isNotBlank() && password.isNotBlank() && !busy
+    var loaderStep by remember { mutableIntStateOf(0) }
+    LaunchedEffect(busy) {
+        loaderStep = 0
+        while (busy) {
+            delay(320)
+            loaderStep = (loaderStep + 1) % 4
+        }
+    }
+
     Column(Modifier.fillMaxSize()) {
         LazyColumn(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(9.dp)) {
             item { Text(if (editingProfile == null) "Ajouter une liste Xtream" else "Modifier la liste Xtream", style = MaterialTheme.typography.headlineMedium, color = Ink, fontWeight = FontWeight.SemiBold) }
             item { Text("HTTP et HTTPS sont acceptés. L'adresse est utilisée exactement comme fournie.", color = MutedInk, fontSize = 14.sp) }
-            item { TvTextField(profileName, onNameChange, "Nom de la liste (facultatif)", Modifier.fillMaxWidth().focusRequester(primaryFocus)) }
-            item { TvTextField(server, onServerChange, "Adresse du serveur", Modifier.fillMaxWidth(), supportingText = "Exemple : http://serveur.example:8080") }
-            item { TvTextField(username, onUsernameChange, "Identifiant", Modifier.fillMaxWidth()) }
-            item { TvTextField(password, onPasswordChange, "Mot de passe", Modifier.fillMaxWidth(), PasswordVisualTransformation()) }
+            item { TvTextField(profileName, onNameChange, "Nom de la liste (facultatif)", Modifier.fillMaxWidth().focusRequester(primaryFocus), enabled = !busy) }
+            item { TvTextField(server, onServerChange, "Adresse du serveur", Modifier.fillMaxWidth(), supportingText = "Exemple : http://serveur.example:8080", enabled = !busy) }
+            item { TvTextField(username, onUsernameChange, "Identifiant", Modifier.fillMaxWidth(), enabled = !busy) }
+            item { TvTextField(password, onPasswordChange, "Mot de passe", Modifier.fillMaxWidth(), PasswordVisualTransformation(), enabled = !busy) }
+            if (busy) {
+                item {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .background(DeepSurface, RoundedCornerShape(12.dp))
+                            .padding(horizontal = 18.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("●", color = FocusBlueBright, fontSize = 22.sp)
+                        Spacer(Modifier.width(12.dp))
+                        Column {
+                            Text("Connexion au serveur${".".repeat(loaderStep)}", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                            Text("Vérification du compte et chargement de la liste Xtream", color = MutedInk, fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
             if (message != null) item { Text(message, color = MaterialTheme.colorScheme.error, fontSize = 14.sp) }
         }
         Spacer(Modifier.height(10.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(11.dp)) {
             SmallAction("Retour", !busy, onBack, Modifier.weight(0.34f).height(60.dp))
             FocusableSurface(onClick = onSave, enabled = canSubmit, modifier = Modifier.weight(0.66f).height(60.dp)) {
-                Text(if (busy) "Connexion…" else "Enregistrer et ouvrir", color = if (canSubmit || busy) Ink else MutedInk, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 18.dp))
+                Text(if (busy) "Connexion en cours…" else "Enregistrer et ouvrir", color = if (canSubmit || busy) Ink else MutedInk, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 18.dp))
             }
         }
     }
