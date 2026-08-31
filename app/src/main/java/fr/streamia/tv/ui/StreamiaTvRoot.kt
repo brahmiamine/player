@@ -1,15 +1,17 @@
 package fr.streamia.tv.ui
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.streamia.tv.data.PlaybackSessionStore
 import fr.streamia.tv.data.resolveStartupProfileId
 import fr.streamia.tv.domain.MediaType
@@ -55,6 +57,7 @@ fun StreamiaTvRoot(viewModel: StreamiaViewModel) {
     val sessionStore = remember { PlaybackSessionStore(context.applicationContext) }
     val livePlaybackSession = remember { LivePlaybackSession(context.applicationContext) }
     val lifecycleOwner = LocalLifecycleOwner.current
+    var pendingLiveBrowserReturn by remember { mutableStateOf(false) }
 
     DisposableEffect(livePlaybackSession, lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -141,11 +144,31 @@ fun StreamiaTvRoot(viewModel: StreamiaViewModel) {
 
     LaunchedEffect(Unit) {
         PlayerOverlayController.returnToBrowser.collect {
-            val playerScreen = viewModel.uiState.value.screen as? StreamiaScreen.Player
+            val current = viewModel.uiState.value
+            val playerScreen = current.screen as? StreamiaScreen.Player
             if (playerScreen?.entry?.type == MediaType.Live) {
                 LiveBrowserReturnState.remember(playerScreen.entry.key)
-                viewModel.closePlayer()
+                if (shouldDeferLiveBrowserReturn(current)) {
+                    pendingLiveBrowserReturn = true
+                } else {
+                    pendingLiveBrowserReturn = false
+                    viewModel.closePlayer()
+                }
             }
+        }
+    }
+
+    LaunchedEffect(state.catalogHydrating, state.screen, pendingLiveBrowserReturn) {
+        if (!pendingLiveBrowserReturn) return@LaunchedEffect
+        val playerScreen = state.screen as? StreamiaScreen.Player
+        if (playerScreen?.entry?.type != MediaType.Live) {
+            pendingLiveBrowserReturn = false
+            return@LaunchedEffect
+        }
+        if (!state.catalogHydrating) {
+            pendingLiveBrowserReturn = false
+            LiveBrowserReturnState.remember(playerScreen.entry.key)
+            viewModel.closePlayer()
         }
     }
 
