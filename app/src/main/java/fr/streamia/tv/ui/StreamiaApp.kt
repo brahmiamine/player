@@ -88,6 +88,8 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onChangePlaylist = viewModel::logout,
                 )
 
+                state.screen is StreamiaScreen.Browser && state.catalogHydrating -> BootScreen()
+
                 state.screen is StreamiaScreen.Browser && state.catalog != null && state.credentials != null -> BrowserScreen(
                     catalog = state.catalog!!,
                     credentials = state.credentials!!,
