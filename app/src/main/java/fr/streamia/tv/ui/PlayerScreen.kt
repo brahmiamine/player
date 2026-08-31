@@ -61,6 +61,8 @@ import fr.streamia.tv.domain.XtreamUrlBuilder
 import fr.streamia.tv.player.DolbyCapabilityDetector
 import fr.streamia.tv.player.PlaybackDiagnostics
 import fr.streamia.tv.player.PlaybackDiagnosticsTracker
+import fr.streamia.tv.player.PlaybackRemoteAction
+import fr.streamia.tv.player.PlaybackRemoteButton
 import fr.streamia.tv.player.PlaybackTransportStore
 import fr.streamia.tv.player.PlaybackUrlStrategy
 import fr.streamia.tv.player.StreamTechnicalInfo
@@ -70,6 +72,8 @@ import fr.streamia.tv.player.dolbyPlaybackLabel
 import fr.streamia.tv.player.hdrLabel
 import fr.streamia.tv.player.isDolbyAtmosFormat
 import fr.streamia.tv.player.isDolbyVisionFormat
+import fr.streamia.tv.player.playbackRemoteAction
+import fr.streamia.tv.player.resolveSeekPosition
 import fr.streamia.tv.ui.theme.FocusBlueBright
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
@@ -87,6 +91,8 @@ private enum class VideoAspect(val label: String, val resizeMode: Int) {
 }
 
 private data class TrackChoice(val label: String, val language: String?)
+
+private const val VOD_SEEK_STEP_MS = 10_000L
 
 @androidx.annotation.OptIn(markerClass = [UnstableApi::class])
 @Composable
@@ -128,6 +134,7 @@ fun PlayerScreen(
     var diagnostics by remember { mutableStateOf(PlaybackDiagnostics()) }
     var dolbyVisionDetected by remember { mutableStateOf(false) }
     var dolbyAtmosDetected by remember { mutableStateOf(false) }
+    var seekFeedback by remember(entry.key) { mutableStateOf<String?>(null) }
 
     fun startCandidate(url: String, positionMs: Long = 0L) {
         activeStreamUrl = url
@@ -270,6 +277,12 @@ fun PlayerScreen(
         }
     }
 
+    LaunchedEffect(seekFeedback) {
+        if (seekFeedback == null) return@LaunchedEffect
+        delay(1_100)
+        seekFeedback = null
+    }
+
     LaunchedEffect(Unit) { rootFocus.requestFocus() }
     LaunchedEffect(settingsOpen) {
         if (settingsOpen) {
@@ -325,38 +338,34 @@ fun PlayerScreen(
                     hudVisible = true
                     return@onPreviewKeyEvent true
                 }
-                when (keyCode) {
-                    AndroidKeyEvent.KEYCODE_CHANNEL_UP,
-                    AndroidKeyEvent.KEYCODE_DPAD_UP,
-                    -> if (entry.type == MediaType.Live) { onZap(-1); true } else false
-
-                    AndroidKeyEvent.KEYCODE_CHANNEL_DOWN,
-                    AndroidKeyEvent.KEYCODE_DPAD_DOWN,
-                    -> if (entry.type == MediaType.Live) { onZap(1); true } else false
-
-                    AndroidKeyEvent.KEYCODE_DPAD_LEFT,
-                    AndroidKeyEvent.KEYCODE_MENU,
-                    -> if (entry.type == MediaType.Live) {
+                val remoteAction = playbackRemoteAction(entry.type, keyCode.toPlaybackRemoteButton())
+                when (remoteAction) {
+                    PlaybackRemoteAction.ZapPrevious -> { onZap(-1); true }
+                    PlaybackRemoteAction.ZapNext -> { onZap(1); true }
+                    PlaybackRemoteAction.OpenLivePicker -> {
                         PlayerOverlayController.openLivePicker()
                         hudVisible = false
                         true
-                    } else false
-
-                    AndroidKeyEvent.KEYCODE_DPAD_RIGHT,
-                    AndroidKeyEvent.KEYCODE_SETTINGS,
-                    -> { settingsOpen = true; hudVisible = true; true }
-
-                    AndroidKeyEvent.KEYCODE_DPAD_CENTER,
-                    AndroidKeyEvent.KEYCODE_ENTER,
-                    -> { hudVisible = !hudVisible; true }
-
-                    AndroidKeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
+                    }
+                    PlaybackRemoteAction.OpenSettings -> { settingsOpen = true; hudVisible = true; true }
+                    PlaybackRemoteAction.ToggleHud -> { hudVisible = !hudVisible; true }
+                    PlaybackRemoteAction.TogglePlayback -> {
                         if (player.isPlaying) player.pause() else player.play()
                         hudVisible = true
                         true
                     }
-
-                    else -> false
+                    PlaybackRemoteAction.SeekBackward,
+                    PlaybackRemoteAction.SeekForward,
+                    -> {
+                        val delta = if (remoteAction == PlaybackRemoteAction.SeekBackward) -VOD_SEEK_STEP_MS else VOD_SEEK_STEP_MS
+                        val duration = player.duration.takeIf { it > 0L && it != C.TIME_UNSET } ?: 0L
+                        val target = resolveSeekPosition(player.currentPosition, duration, delta)
+                        player.seekTo(target)
+                        seekFeedback = if (delta < 0L) "−10 s" else "+10 s"
+                        hudVisible = true
+                        true
+                    }
+                    PlaybackRemoteAction.None -> false
                 }
             },
     ) {
@@ -437,6 +446,17 @@ fun PlayerScreen(
                     .padding(horizontal = 22.dp, vertical = 14.dp),
             ) {
                 Text(numberBuffer, color = FocusBlueBright, fontSize = 32.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+
+        seekFeedback?.let { feedback ->
+            Box(
+                Modifier
+                    .align(Alignment.Center)
+                    .background(Night.copy(alpha = 0.94f), androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                    .padding(horizontal = 28.dp, vertical = 16.dp),
+            ) {
+                Text(feedback, color = Ink, fontSize = 26.sp, fontWeight = FontWeight.Bold)
             }
         }
 
@@ -604,10 +624,13 @@ private fun PlayerInfoBand(
             Text(if (isPlaying) "⏸ Lecture" else "▶ Pause", color = Ink, fontSize = 13.sp)
             Spacer(Modifier.width(20.dp))
             if (entry.type == MediaType.Live) {
-                Text("OK / ← liste · ↑ ↓ zap · 0–9 chaîne", color = MutedInk, fontSize = 13.sp)
+                Text("OK infos · ← liste · ↑ ↓ zap · 0–9 chaîne", color = MutedInk, fontSize = 13.sp)
+                Spacer(Modifier.width(20.dp))
+            } else {
+                Text("← −10 s · +10 s → · Lecture/Pause", color = MutedInk, fontSize = 13.sp)
                 Spacer(Modifier.width(20.dp))
             }
-            Text("→ audio / sous-titres / écran", color = MutedInk, fontSize = 13.sp)
+            Text("⚙ audio / sous-titres / écran", color = MutedInk, fontSize = 13.sp)
             if (numberBuffer.isNotBlank()) {
                 Spacer(Modifier.weight(1f))
                 Text("CH $numberBuffer", color = FocusBlueBright, fontSize = 14.sp, fontWeight = FontWeight.Bold)
@@ -801,6 +824,32 @@ private fun Int.toTvDigit(): Int? = when {
     this in AndroidKeyEvent.KEYCODE_0..AndroidKeyEvent.KEYCODE_9 -> this - AndroidKeyEvent.KEYCODE_0
     this in AndroidKeyEvent.KEYCODE_NUMPAD_0..AndroidKeyEvent.KEYCODE_NUMPAD_9 -> this - AndroidKeyEvent.KEYCODE_NUMPAD_0
     else -> null
+}
+
+private fun Int.toPlaybackRemoteButton(): PlaybackRemoteButton = when (this) {
+    AndroidKeyEvent.KEYCODE_CHANNEL_UP,
+    AndroidKeyEvent.KEYCODE_DPAD_UP,
+    -> PlaybackRemoteButton.Up
+
+    AndroidKeyEvent.KEYCODE_CHANNEL_DOWN,
+    AndroidKeyEvent.KEYCODE_DPAD_DOWN,
+    -> PlaybackRemoteButton.Down
+
+    AndroidKeyEvent.KEYCODE_DPAD_LEFT -> PlaybackRemoteButton.Left
+    AndroidKeyEvent.KEYCODE_DPAD_RIGHT -> PlaybackRemoteButton.Right
+    AndroidKeyEvent.KEYCODE_MENU -> PlaybackRemoteButton.Menu
+    AndroidKeyEvent.KEYCODE_SETTINGS -> PlaybackRemoteButton.Settings
+    AndroidKeyEvent.KEYCODE_DPAD_CENTER,
+    AndroidKeyEvent.KEYCODE_ENTER,
+    AndroidKeyEvent.KEYCODE_NUMPAD_ENTER,
+    AndroidKeyEvent.KEYCODE_BUTTON_A,
+    -> PlaybackRemoteButton.Ok
+
+    AndroidKeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> PlaybackRemoteButton.PlayPause
+
+    AndroidKeyEvent.KEYCODE_MEDIA_REWIND -> PlaybackRemoteButton.Rewind
+    AndroidKeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> PlaybackRemoteButton.FastForward
+    else -> PlaybackRemoteButton.Other
 }
 
 private fun EpgProgram.timeRange(): String? {

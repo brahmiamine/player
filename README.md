@@ -33,6 +33,8 @@ Streamia TV est un lecteur Android TV natif, rapide et entièrement pilotable à
 | Lecteur | OK | Afficher ou masquer les informations |
 | Lecteur | Lecture/Pause | Mettre en pause ou reprendre |
 | Lecteur | Retour | Fermer le guide puis quitter le lecteur |
+| Film / épisode | `←` / Retour rapide | Reculer de 10 secondes |
+| Film / épisode | `→` / Avance rapide | Avancer de 10 secondes |
 
 ## Construire l'APK
 

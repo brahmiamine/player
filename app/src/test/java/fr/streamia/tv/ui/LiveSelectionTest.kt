@@ -19,4 +19,16 @@ class LiveSelectionTest {
             liveChannelConfirmAction(previewKey = "Live:11", channelKey = "Live:11"),
         )
     }
+
+    @Test
+    fun `extra OK is ignored while fullscreen handoff is pending`() {
+        assertEquals(
+            LiveChannelConfirmAction.Ignore,
+            liveChannelConfirmAction(
+                previewKey = "Live:11",
+                channelKey = "Live:11",
+                fullscreenPending = true,
+            ),
+        )
+    }
 }

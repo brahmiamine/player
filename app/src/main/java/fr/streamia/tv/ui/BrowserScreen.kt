@@ -329,10 +329,18 @@ private fun LiveCatalogLayout(
             entries = entries,
             previewKey = previewEntry?.key,
             favoriteEntries = favoriteEntries,
+            fullscreenPending = pendingFullscreen != null,
             onConfirm = { channel ->
-                when (liveChannelConfirmAction(previewEntry?.key, channel.key)) {
+                when (
+                    liveChannelConfirmAction(
+                        previewKey = previewEntry?.key,
+                        channelKey = channel.key,
+                        fullscreenPending = pendingFullscreen != null,
+                    )
+                ) {
                     LiveChannelConfirmAction.Preview -> previewEntry = channel
                     LiveChannelConfirmAction.Fullscreen -> pendingFullscreen = channel
+                    LiveChannelConfirmAction.Ignore -> Unit
                 }
             },
             onToggleFavorite = onToggleEntryFavorite,
@@ -354,6 +362,7 @@ private fun LiveChannelList(
     entries: List<MediaEntry>,
     previewKey: String?,
     favoriteEntries: Set<String>,
+    fullscreenPending: Boolean,
     onConfirm: (MediaEntry) -> Unit,
     onToggleFavorite: (MediaEntry) -> Unit,
     modifier: Modifier = Modifier,
@@ -375,6 +384,7 @@ private fun LiveChannelList(
                         onClick = { onConfirm(entry) },
                         onLongClick = { onToggleFavorite(entry) },
                         selected = previewKey == entry.key,
+                        enabled = !fullscreenPending,
                         modifier = Modifier.fillMaxWidth().height(48.dp),
                     ) {
                         Row(

@@ -156,6 +156,7 @@ fun StreamiaTvRoot(viewModel: StreamiaViewModel) {
                     when (liveChannelConfirmAction(playerScreen.entry.key, channel.key)) {
                         LiveChannelConfirmAction.Preview -> viewModel.openEntry(channel)
                         LiveChannelConfirmAction.Fullscreen -> PlayerOverlayController.closeLivePicker()
+                        LiveChannelConfirmAction.Ignore -> Unit
                     }
                 },
                 onClose = PlayerOverlayController::closeLivePicker,
