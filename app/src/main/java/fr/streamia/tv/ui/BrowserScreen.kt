@@ -27,7 +27,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.ui.Alignment
@@ -36,6 +35,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -302,15 +302,11 @@ private fun LiveCatalogLayout(
     }
     var controlsVisible by remember { mutableStateOf(false) }
     var fullscreenTarget by remember { mutableStateOf<MediaEntry?>(null) }
-    val categoryWidth by animateDpAsState(
-        if (controlsVisible) 250.dp else 0.dp,
+    val hiddenOffset = with(LocalDensity.current) { (-620).dp.toPx() }
+    val controlsOffset by animateFloatAsState(
+        if (controlsVisible) 0f else hiddenOffset,
         animationSpec = tween(220),
-        label = "live-category-width",
-    )
-    val channelWidth by animateDpAsState(
-        if (controlsVisible) 340.dp else 0.dp,
-        animationSpec = tween(220),
-        label = "live-channel-width",
+        label = "live-controls-offset",
     )
     val controlsAlpha by animateFloatAsState(
         if (controlsVisible) 1f else 0f,
@@ -332,8 +328,23 @@ private fun LiveCatalogLayout(
         previewEntry = entries.firstOrNull()
     }
 
-    Row(modifier, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        CategoryRail(
+    Box(modifier) {
+        LivePreview(
+            credentials = credentials,
+            livePlaybackSession = livePlaybackSession,
+            liveVideoSurface = liveVideoSurface,
+            entry = previewEntry,
+            favorite = previewEntry?.key in favoriteEntries,
+            modifier = Modifier.fillMaxSize(),
+        )
+        Row(
+            Modifier.fillMaxHeight().graphicsLayer {
+                translationX = controlsOffset
+                alpha = controlsAlpha
+            },
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+          CategoryRail(
             type = MediaType.Live,
             categories = categories,
             selectedCategoryId = selectedCategoryId,
@@ -348,7 +359,7 @@ private fun LiveCatalogLayout(
             onSelected = onCategorySelected,
             onToggleFavorite = onToggleCategoryFavorite,
             requestInitialFocus = false,
-            modifier = Modifier.width(categoryWidth).fillMaxHeight().graphicsLayer { alpha = controlsAlpha },
+            modifier = Modifier.width(250.dp).fillMaxHeight(),
         )
 
         LiveChannelList(
@@ -370,17 +381,9 @@ private fun LiveCatalogLayout(
                 }
             },
             onToggleFavorite = onToggleEntryFavorite,
-            modifier = Modifier.width(channelWidth).fillMaxHeight().graphicsLayer { alpha = controlsAlpha },
+            modifier = Modifier.width(340.dp).fillMaxHeight(),
         )
-
-        LivePreview(
-            credentials = credentials,
-            livePlaybackSession = livePlaybackSession,
-            liveVideoSurface = liveVideoSurface,
-            entry = previewEntry,
-            favorite = previewEntry?.key in favoriteEntries,
-            modifier = Modifier.weight(1f).fillMaxHeight(),
-        )
+        }
     }
 }
 

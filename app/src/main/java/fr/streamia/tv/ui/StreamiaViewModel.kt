@@ -264,23 +264,37 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
 
     fun toggleEntryFavorite(entry: MediaEntry) {
         val profileId = _uiState.value.activeProfileId ?: return
-        viewModelScope.launch {
-            val presentation = withContext(Dispatchers.IO) {
-                repository.toggleEntryFavorite(profileId, entry)
-                libraryPresentation(profileId)
+        _uiState.update { state ->
+            val favorites = state.library.favoriteEntries.toMutableSet().apply {
+                if (!add(entry.key)) remove(entry.key)
             }
-            applyLibraryPresentation(profileId, presentation)
+            state.copy(library = state.library.copy(favoriteEntries = favorites))
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                repository.toggleEntryFavorite(profileId, entry)
+                repository.library(profileId)
+            }.onSuccess { library ->
+                _uiState.update { state -> if (state.activeProfileId == profileId) state.copy(library = library) else state }
+            }
         }
     }
 
     fun toggleCategoryFavorite(category: MediaCategory) {
         val profileId = _uiState.value.activeProfileId ?: return
-        viewModelScope.launch {
-            val presentation = withContext(Dispatchers.IO) {
-                repository.toggleCategoryFavorite(profileId, category)
-                libraryPresentation(profileId)
+        _uiState.update { state ->
+            val favorites = state.library.favoriteCategories.toMutableSet().apply {
+                if (!add(category.key)) remove(category.key)
             }
-            applyLibraryPresentation(profileId, presentation)
+            state.copy(library = state.library.copy(favoriteCategories = favorites))
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                repository.toggleCategoryFavorite(profileId, category)
+                repository.library(profileId)
+            }.onSuccess { library ->
+                _uiState.update { state -> if (state.activeProfileId == profileId) state.copy(library = library) else state }
+            }
         }
     }
 
@@ -288,10 +302,6 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         val profileId = _uiState.value.activeProfileId ?: return
         viewModelScope.launch(Dispatchers.IO) {
             repository.recordPlayback(profileId, entry, positionMs, durationMs)
-            val library = repository.library(profileId)
-            _uiState.update { state ->
-                if (state.activeProfileId == profileId) state.copy(library = library) else state
-            }
         }
     }
 
@@ -320,6 +330,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     }
 
     fun closePlayer() {
+        val profileId = _uiState.value.activeProfileId
         val player = _uiState.value.screen as? StreamiaScreen.Player
         _uiState.update {
             it.copy(
@@ -330,6 +341,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 resumePositionMs = 0,
             )
         }
+        if (profileId != null) refreshLibrarySnapshot(profileId)
     }
 
     fun closeDetails() { _uiState.update { it.copy(screen = StreamiaScreen.Browser, mediaDetails = null, message = null) } }
@@ -427,6 +439,13 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         viewModelScope.launch {
             val presentation = withContext(Dispatchers.IO) { libraryPresentation(profileId) }
             applyLibraryPresentation(profileId, presentation)
+        }
+    }
+
+    private fun refreshLibrarySnapshot(profileId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val library = repository.library(profileId)
+            _uiState.update { state -> if (state.activeProfileId == profileId) state.copy(library = library) else state }
         }
     }
 

@@ -1,0 +1,5 @@
+Lfr/streamia/tv/MainActivity;
+Lfr/streamia/tv/StreamiaApplication;
+Lfr/streamia/tv/ui/StreamiaAppKt;
+Lfr/streamia/tv/ui/StreamiaViewModel;
+Lfr/streamia/tv/data/XtreamRepository;

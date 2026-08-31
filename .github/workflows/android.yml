@@ -44,8 +44,13 @@ jobs:
             exit 1
           fi
 
-      - name: Build installable APK
-        run: gradle --no-daemon assembleDebug
+      - name: Build debug and optimized APKs
+        run: gradle --no-daemon assembleDebug assembleOptimized
+
+      - name: Report APK sizes
+        run: |
+          du -h app/build/outputs/apk/debug/app-debug.apk
+          du -h app/build/outputs/apk/optimized/app-optimized.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -55,10 +60,18 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      - name: Upload optimized APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: streamia-tv-optimized-apk
+          path: app/build/outputs/apk/optimized/app-optimized.apk
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Publish tagged APK
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cp app/build/outputs/apk/debug/app-debug.apk "streamia-tv-${GITHUB_REF_NAME}.apk"
+          cp app/build/outputs/apk/optimized/app-optimized.apk "streamia-tv-${GITHUB_REF_NAME}.apk"
           gh release create "$GITHUB_REF_NAME" "streamia-tv-${GITHUB_REF_NAME}.apk" --generate-notes --title "Streamia TV ${GITHUB_REF_NAME}"

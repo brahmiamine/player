@@ -1,0 +1,6 @@
+Lfr/streamia/tv/MainActivity;
+Lfr/streamia/tv/StreamiaApplication;
+Lfr/streamia/tv/ui/**;
+Lfr/streamia/tv/domain/**;
+Lfr/streamia/tv/data/**;
+Lfr/streamia/tv/player/**;

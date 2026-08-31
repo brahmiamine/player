@@ -34,6 +34,12 @@ android {
                 "proguard-rules.pro",
             )
         }
+        create("optimized") {
+            initWith(getByName("release"))
+            versionNameSuffix = "-optimized"
+            signingConfig = signingConfigs.getByName("debug")
+            matchingFallbacks += listOf("release")
+        }
     }
 
     compileOptions {
@@ -49,6 +55,10 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+    }
+
+    androidResources {
+        localeFilters += listOf("fr")
     }
 
     packaging {
@@ -80,7 +90,6 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
     implementation("androidx.compose.ui:ui")
-    implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.animation:animation")
     implementation("androidx.tv:tv-material:1.1.0")
