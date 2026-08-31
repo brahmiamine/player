@@ -36,11 +36,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
@@ -52,7 +50,7 @@ import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.domain.ServerCredentials
 import fr.streamia.tv.domain.XtreamUrlBuilder
-import fr.streamia.tv.player.StreamiaPlayerFactory
+import fr.streamia.tv.player.LivePlaybackSession
 import fr.streamia.tv.ui.theme.DeepSurface
 import fr.streamia.tv.ui.theme.FocusBlueBright
 import fr.streamia.tv.ui.theme.Ink
@@ -69,14 +67,11 @@ private const val HISTORY_CATEGORY_ID = "__history__"
  * Permet de fermer explicitement l'aperçu Live avant de lancer le lecteur plein écran.
  * C'est important pour les abonnements Xtream limités à une seule connexion simultanée.
  */
-private class LivePreviewHandle {
-    var stop: () -> Unit = {}
-}
-
 @Composable
 fun BrowserScreen(
     catalog: Catalog,
     credentials: ServerCredentials,
+    livePlaybackSession: LivePlaybackSession,
     library: UserLibrarySnapshot,
     offline: Boolean,
     busy: Boolean,
@@ -183,6 +178,7 @@ fun BrowserScreen(
             LiveCatalogLayout(
                 catalog = catalog,
                 credentials = credentials,
+                livePlaybackSession = livePlaybackSession,
                 categories = categories,
                 selectedCategoryId = selectedCategoryId,
                 entries = entries,
@@ -285,6 +281,7 @@ private fun HeaderAction(label: String, width: androidx.compose.ui.unit.Dp, onCl
 private fun LiveCatalogLayout(
     catalog: Catalog,
     credentials: ServerCredentials,
+    livePlaybackSession: LivePlaybackSession,
     categories: List<MediaCategory>,
     selectedCategoryId: String,
     entries: List<MediaEntry>,
@@ -301,19 +298,8 @@ private fun LiveCatalogLayout(
     var previewEntry by remember(catalog, initialPreviewKey) {
         mutableStateOf(entries.firstOrNull { it.key == initialPreviewKey } ?: entries.firstOrNull())
     }
-    var pendingFullscreen by remember { mutableStateOf<MediaEntry?>(null) }
-    val previewHandle = remember { LivePreviewHandle() }
-
     if (previewEntry != null && catalog.entry(previewEntry!!.key) == null) {
         previewEntry = entries.firstOrNull()
-    }
-
-    androidx.compose.runtime.LaunchedEffect(pendingFullscreen) {
-        val target = pendingFullscreen ?: return@LaunchedEffect
-        previewHandle.stop()
-        delay(140)
-        onEntrySelected(target)
-        pendingFullscreen = null
     }
 
     Row(modifier, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -339,17 +325,17 @@ private fun LiveCatalogLayout(
             entries = entries,
             previewKey = previewEntry?.key,
             favoriteEntries = favoriteEntries,
-            fullscreenPending = pendingFullscreen != null,
+            fullscreenPending = false,
             onConfirm = { channel ->
                 when (
                     liveChannelConfirmAction(
                         previewKey = previewEntry?.key,
                         channelKey = channel.key,
-                        fullscreenPending = pendingFullscreen != null,
+                        fullscreenPending = false,
                     )
                 ) {
                     LiveChannelConfirmAction.Preview -> previewEntry = channel
-                    LiveChannelConfirmAction.Fullscreen -> pendingFullscreen = channel
+                    LiveChannelConfirmAction.Fullscreen -> onEntrySelected(channel)
                     LiveChannelConfirmAction.Ignore -> Unit
                 }
             },
@@ -359,9 +345,9 @@ private fun LiveCatalogLayout(
 
         LivePreview(
             credentials = credentials,
+            livePlaybackSession = livePlaybackSession,
             entry = previewEntry,
             favorite = previewEntry?.key in favoriteEntries,
-            handle = previewHandle,
             modifier = Modifier.weight(1f).fillMaxHeight(),
         )
     }
@@ -444,30 +430,22 @@ private fun LiveChannelList(
     }
 }
 
-private fun stopPreviewPlayer(player: ExoPlayer) {
-    player.pause()
-    player.stop()
-    player.clearMediaItems()
-}
-
 @androidx.annotation.OptIn(markerClass = [UnstableApi::class])
 @Composable
 private fun LivePreview(
     credentials: ServerCredentials,
+    livePlaybackSession: LivePlaybackSession,
     entry: MediaEntry?,
     favorite: Boolean,
-    handle: LivePreviewHandle,
     modifier: Modifier = Modifier,
 ) {
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val player = remember { StreamiaPlayerFactory.create(context.applicationContext, MediaType.Live) }
+    val player = livePlaybackSession.player
     var buffering by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf(false) }
     var activeUrl by remember { mutableStateOf("") }
     var fallbackAttempted by remember { mutableStateOf(false) }
 
     DisposableEffect(player) {
-        handle.stop = { stopPreviewPlayer(player) }
         val listener = object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
                 buffering = playbackState == Player.STATE_BUFFERING
@@ -481,41 +459,33 @@ private fun LivePreview(
                         activeUrl = alternate
                         error = false
                         buffering = true
-                        stopPreviewPlayer(player)
-                        player.setMediaItem(MediaItem.fromUri(alternate))
-                        player.prepare()
-                        player.play()
+                        entry?.let { livePlaybackSession.playUrl(it.key, alternate) }
                         return
                     }
                 }
                 error = true
                 buffering = false
             }
+
+            override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
+                livePlaybackSession.recoverAudio(tracks)
+            }
         }
         player.addListener(listener)
         onDispose {
-            handle.stop = {}
             player.removeListener(listener)
-            stopPreviewPlayer(player)
-            player.release()
         }
     }
 
     androidx.compose.runtime.LaunchedEffect(entry?.key, credentials) {
         val target = entry
-        if (target == null) {
-            stopPreviewPlayer(player)
-            return@LaunchedEffect
-        }
+        if (target == null) return@LaunchedEffect
         delay(240)
         error = false
         buffering = true
         fallbackAttempted = false
-        activeUrl = XtreamUrlBuilder(credentials).stream(target)
-        stopPreviewPlayer(player)
-        player.setMediaItem(MediaItem.fromUri(activeUrl))
-        player.prepare()
-        player.play()
+        livePlaybackSession.play(target, credentials)
+        activeUrl = livePlaybackSession.activeUrl
     }
 
     Column(modifier) {

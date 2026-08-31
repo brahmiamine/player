@@ -26,6 +26,12 @@ class PlaybackControlsTest {
     }
 
     @Test
+    fun `info displays the player information band`() {
+        assertEquals(PlaybackRemoteAction.ToggleHud, playbackRemoteAction(MediaType.Live, PlaybackRemoteButton.Info))
+        assertEquals(PlaybackRemoteAction.ToggleHud, playbackRemoteAction(MediaType.Movie, PlaybackRemoteButton.Info))
+    }
+
+    @Test
     fun `seek position is clamped to media boundaries`() {
         assertEquals(0L, resolveSeekPosition(currentPositionMs = 4_000L, durationMs = 60_000L, deltaMs = -10_000L))
         assertEquals(60_000L, resolveSeekPosition(currentPositionMs = 57_000L, durationMs = 60_000L, deltaMs = 10_000L))
