@@ -51,6 +51,30 @@ class M3uParserTest {
     }
 
     @Test
+    fun `can retain only missing VOD sections for Xtream fallback`() {
+        val playlist = """
+            #EXTM3U
+            #EXTINF:-1 tvg-name="Live One" group-title="Live",Live One
+            https://provider.test/live/u/p/1.ts
+            #EXTINF:-1 tvg-name="Movie One" group-title="Movies",Movie One
+            https://provider.test/movie/u/p/2.ts
+            #EXTINF:-1 tvg-name="Episode One" group-title="Series",Episode One
+            https://provider.test/series/u/p/3.ts
+        """.trimIndent()
+
+        val result = M3uParser().parse(
+            StringReader(playlist),
+            setOf(MediaType.Movie, MediaType.Series),
+        )
+
+        assertEquals(2, result.parsedEntries)
+        assertEquals(0, result.catalog.count(MediaType.Live))
+        assertEquals(1, result.catalog.count(MediaType.Movie))
+        assertEquals(1, result.catalog.count(MediaType.Series))
+        assertTrue(result.catalog.entriesFor(MediaType.Series).single().playable)
+    }
+
+    @Test
     fun `preserves explicit HTTPS transport`() {
         val playlist = """
             #EXTM3U
