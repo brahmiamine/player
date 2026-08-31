@@ -153,8 +153,10 @@ fun StreamiaTvRoot(viewModel: StreamiaViewModel) {
                 catalog = state.catalog!!,
                 currentEntry = playerScreen.entry,
                 onEntrySelected = { channel ->
-                    PlayerOverlayController.closeLivePicker()
-                    viewModel.openEntry(channel)
+                    when (liveChannelConfirmAction(playerScreen.entry.key, channel.key)) {
+                        LiveChannelConfirmAction.Preview -> viewModel.openEntry(channel)
+                        LiveChannelConfirmAction.Fullscreen -> PlayerOverlayController.closeLivePicker()
+                    }
                 },
                 onClose = PlayerOverlayController::closeLivePicker,
             )
@@ -204,62 +206,71 @@ private fun LiveChannelPickerOverlay(
 
     Row(
         Modifier
-            .fillMaxHeight()
-            .width(900.dp)
-            .background(Night.copy(alpha = 0.985f))
-            .padding(24.dp),
+            .fillMaxSize()
+            .padding(18.dp),
+        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp),
     ) {
-        Column(Modifier.width(315.dp).fillMaxHeight()) {
-            Text("Catégories", color = Ink, fontSize = 23.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(6.dp))
-            Text("OK pour choisir", color = MutedInk, fontSize = 12.sp)
-            Spacer(Modifier.height(12.dp))
+        Column(
+            Modifier
+                .width(250.dp)
+                .fillMaxHeight()
+                .background(Night.copy(alpha = 0.985f))
+                .padding(14.dp),
+        ) {
+            Text("Catégories", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(4.dp))
+            Text("Déplacement = aucun changement · OK choisir", color = MutedInk, fontSize = 9.sp)
+            Spacer(Modifier.height(10.dp))
             LazyColumn(
                 state = categoryListState,
-                verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(7.dp),
+                verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(5.dp),
             ) {
                 items(categories, key = MediaCategory::key) { category ->
                     FocusableSurface(
                         onClick = { selectedCategoryId = category.id },
                         selected = selectedCategoryId == category.id,
-                        modifier = Modifier.fillMaxWidth().height(56.dp),
+                        modifier = Modifier.fillMaxWidth().height(48.dp),
                     ) {
                         Row(
-                            Modifier.fillMaxWidth().padding(horizontal = 13.dp),
+                            Modifier.fillMaxWidth().padding(horizontal = 10.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
                                 category.name,
                                 color = Ink,
-                                fontSize = 15.sp,
+                                fontSize = 12.sp,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.weight(1f),
                             )
                             val count = catalog.entriesIn(MediaType.Live, category.id).size
-                            Text(count.toString(), color = MutedInk, fontSize = 11.sp)
+                            Text(count.toString(), color = MutedInk, fontSize = 9.sp)
                         }
                     }
                 }
             }
         }
 
-        Spacer(Modifier.width(20.dp))
-
-        Column(Modifier.weight(1f).fillMaxHeight()) {
+        Column(
+            Modifier
+                .width(340.dp)
+                .fillMaxHeight()
+                .background(Night.copy(alpha = 0.985f))
+                .padding(14.dp),
+        ) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("Chaînes", color = Ink, fontSize = 23.sp, fontWeight = FontWeight.Bold)
-                    Text("${channels.size} chaînes", color = MutedInk, fontSize = 12.sp)
+                    Text("Chaînes", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    Text("OK aperçu · OK encore plein écran", color = MutedInk, fontSize = 9.sp)
                 }
-                FocusableSurface(onClick = onClose, modifier = Modifier.width(110.dp).height(48.dp)) {
-                    Text("Fermer", color = Ink, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 15.dp))
+                FocusableSurface(onClick = onClose, modifier = Modifier.width(82.dp).height(42.dp)) {
+                    Text("Fermer", color = Ink, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 10.dp))
                 }
             }
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(10.dp))
             LazyColumn(
                 state = channelListState,
-                verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(7.dp),
+                verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(5.dp),
             ) {
                 items(channels, key = MediaEntry::key) { channel ->
                     val isFocusTarget = channel.key == focusTargetKey
@@ -268,37 +279,68 @@ private fun LiveChannelPickerOverlay(
                         selected = channel.key == currentEntry.key,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(70.dp)
+                            .height(54.dp)
                             .then(if (isFocusTarget) Modifier.focusRequester(channelFocus) else Modifier),
                     ) {
                         Row(
-                            Modifier.fillMaxWidth().padding(horizontal = 11.dp),
+                            Modifier.fillMaxWidth().padding(horizontal = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            ChannelLogo(channel.iconUrl, channel.displayName, Modifier.size(48.dp))
-                            Spacer(Modifier.width(11.dp))
+                            Text(channel.number.toString(), color = MutedInk, fontSize = 9.sp, modifier = Modifier.width(34.dp))
+                            ChannelLogo(channel.iconUrl, channel.displayName, Modifier.size(35.dp))
+                            Spacer(Modifier.width(8.dp))
                             Column(Modifier.weight(1f)) {
                                 Text(
                                     channel.displayName,
                                     color = Ink,
-                                    fontSize = 15.sp,
+                                    fontSize = 12.sp,
                                     fontWeight = if (channel.key == currentEntry.key) FontWeight.Bold else FontWeight.Medium,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
                                 if (channel.key == currentEntry.key) {
-                                    Text("En cours", color = FocusBlueBright, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    Text("Aperçu actif", color = FocusBlueBright, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
-                            Text(
-                                channel.number.toString(),
-                                color = FocusBlueBright,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold,
-                            )
                         }
                     }
                 }
+            }
+        }
+
+        Column(Modifier.weight(1f).fillMaxHeight()) {
+            Text(
+                "Aperçu en direct",
+                color = Ink,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .background(Night.copy(alpha = 0.90f))
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+            )
+            Spacer(Modifier.weight(1f))
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .background(Night.copy(alpha = 0.92f))
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+            ) {
+                Text(
+                    currentEntry.displayName,
+                    color = Ink,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    "CH ${currentEntry.number} · l’aperçu reste actif pendant la navigation · OK sur cette chaîne = plein écran",
+                    color = FocusBlueBright,
+                    fontSize = 10.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
         }
     }
