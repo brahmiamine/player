@@ -71,6 +71,7 @@ import fr.streamia.tv.ui.theme.WarmSignal
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.yield
 
 private const val FAVORITES_CATEGORY_ID = "__favorites__"
@@ -497,9 +498,22 @@ private fun LiveChannelList(
     val focusTargetKey = entries.getOrNull(focusTargetIndex)?.key
 
     LaunchedEffect(listState) {
-        snapshotFlow {
-            NavigationListPosition(listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
-        }.debounce(300).distinctUntilChanged().collect(onListPositionChanged)
+        // Le debounce évite d'écrire en préférences à chaque frame pendant un défilement rapide,
+        // mais ne doit jamais faire perdre la position atteinte si l'écran est quitté avant la fin
+        // de la fenêtre de 300 ms : on garde la dernière valeur brute non encore sauvegardée et on
+        // la vide explicitement si la coroutine est annulée pendant qu'elle est en attente.
+        var pendingPosition: NavigationListPosition? = null
+        try {
+            snapshotFlow {
+                NavigationListPosition(listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
+            }
+                .onEach { pendingPosition = it }
+                .debounce(300)
+                .distinctUntilChanged()
+                .collect { pendingPosition = null; onListPositionChanged(it) }
+        } finally {
+            pendingPosition?.let(onListPositionChanged)
+        }
     }
 
     androidx.compose.runtime.LaunchedEffect(entries, focusTargetKey, fullscreenPending, autoFocus) {
