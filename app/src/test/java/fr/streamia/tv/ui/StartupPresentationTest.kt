@@ -1,37 +1,45 @@
 package fr.streamia.tv.ui
 
-import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class StartupPresentationTest {
     @Test
-    fun `leaving restored player while local catalog hydrates keeps home behind startup gate`() {
-        assertEquals(
-            PlayerExitDestination.StartupGate,
-            resolvePlayerExitDestination(
-                catalogHydrating = true,
-                returnToSeries = false,
-                hasSeriesDetails = false,
+    fun `home stays behind startup gate while local catalog is hydrating`() {
+        assertTrue(
+            shouldShowStartupGate(
+                StreamiaUiState(
+                    booting = false,
+                    catalogHydrating = true,
+                    screen = StreamiaScreen.Home,
+                ),
             ),
         )
     }
 
     @Test
-    fun `leaving player after catalog is ready returns to normal destinations`() {
-        assertEquals(
-            PlayerExitDestination.Series,
-            resolvePlayerExitDestination(
-                catalogHydrating = false,
-                returnToSeries = true,
-                hasSeriesDetails = true,
+    fun `startup gate disappears as soon as local catalog is ready`() {
+        assertFalse(
+            shouldShowStartupGate(
+                StreamiaUiState(
+                    booting = false,
+                    catalogHydrating = false,
+                    screen = StreamiaScreen.Home,
+                ),
             ),
         )
-        assertEquals(
-            PlayerExitDestination.Browser,
-            resolvePlayerExitDestination(
-                catalogHydrating = false,
-                returnToSeries = false,
-                hasSeriesDetails = false,
+    }
+
+    @Test
+    fun `background hydration does not hide an active player`() {
+        assertFalse(
+            shouldShowStartupGate(
+                StreamiaUiState(
+                    booting = false,
+                    catalogHydrating = true,
+                    screen = StreamiaScreen.Login,
+                ),
             ),
         )
     }
