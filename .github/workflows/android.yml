@@ -2,7 +2,7 @@ name: Android TV APK
 
 on:
   push:
-    branches: [main, "codex/**"]
+    branches: [main]
     tags: ["v*"]
   pull_request:
     branches: [main]
@@ -44,13 +44,19 @@ jobs:
             exit 1
           fi
 
-      - name: Build debug and optimized APKs
-        run: gradle --no-daemon assembleDebug assembleOptimized
+      - name: Build debug APK
+        run: gradle --no-daemon assembleDebug
+
+      - name: Build optimized APK
+        if: github.event_name != 'pull_request'
+        run: gradle --no-daemon assembleOptimized
 
       - name: Report APK sizes
-        run: |
-          du -h app/build/outputs/apk/debug/app-debug.apk
-          du -h app/build/outputs/apk/optimized/app-optimized.apk
+        run: du -h app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Report optimized APK size
+        if: github.event_name != 'pull_request'
+        run: du -h app/build/outputs/apk/optimized/app-optimized.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v7
@@ -61,6 +67,7 @@ jobs:
           retention-days: 30
 
       - name: Upload optimized APK artifact
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v7
         with:
           name: streamia-tv-optimized-apk

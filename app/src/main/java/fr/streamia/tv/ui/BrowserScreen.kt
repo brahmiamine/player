@@ -27,6 +27,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.key
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.ui.Alignment
@@ -48,6 +50,7 @@ import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import fr.streamia.tv.data.PlaybackHistoryItem
 import fr.streamia.tv.data.BrowserNavigationStore
+import fr.streamia.tv.data.NavigationListPosition
 import fr.streamia.tv.data.UserLibrarySnapshot
 import fr.streamia.tv.domain.Catalog
 import fr.streamia.tv.domain.MediaCategory
@@ -64,6 +67,7 @@ import fr.streamia.tv.ui.theme.MutedInk
 import fr.streamia.tv.ui.theme.Night
 import fr.streamia.tv.ui.theme.WarmSignal
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.yield
 
 private const val FAVORITES_CATEGORY_ID = "__favorites__"
@@ -104,8 +108,8 @@ fun BrowserScreen(
     var selectedCategoryId by remember(catalog, initialCategoryId) {
         mutableStateOf(initialCategoryId ?: navigationStore.category(selectedType) ?: defaultCategoryId(catalog, selectedType))
     }
-    val restoredLiveEntryKey = remember(catalog, initialType, initialCategoryId) {
-        if (defaultType == MediaType.Live) LiveBrowserReturnState.consume() ?: navigationStore.entry(MediaType.Live) else null
+    val restoredLiveEntryKey = remember(catalog, credentials) {
+        LiveBrowserReturnState.consume() ?: navigationStore.entry(MediaType.Live)
     }
 
     val baseCategories = remember(catalog, selectedType) { catalog.categoriesFor(selectedType) }
@@ -189,6 +193,7 @@ fun BrowserScreen(
                 selectedCategoryId = selectedCategoryId,
                 entries = entries,
                 initialPreviewKey = restoredLiveEntryKey,
+                initialListPosition = navigationStore.listPosition(MediaType.Live, selectedCategoryId),
                 favoriteCategories = library.favoriteCategories,
                 favoriteEntries = library.favoriteEntries,
                 historyCount = historyForType.size,
@@ -196,6 +201,9 @@ fun BrowserScreen(
                 onPreviewChanged = {
                     navigationStore.saveEntry(MediaType.Live, it.key)
                     onRememberContent(it)
+                },
+                onListPositionChanged = {
+                    navigationStore.saveListPosition(MediaType.Live, selectedCategoryId, it)
                 },
                 onToggleCategoryFavorite = onToggleCategoryFavorite,
                 onEntrySelected = onEntrySelected,
@@ -298,11 +306,13 @@ private fun LiveCatalogLayout(
     selectedCategoryId: String,
     entries: List<MediaEntry>,
     initialPreviewKey: String?,
+    initialListPosition: NavigationListPosition,
     favoriteCategories: Set<String>,
     favoriteEntries: Set<String>,
     historyCount: Int,
     onCategorySelected: (MediaCategory) -> Unit,
     onPreviewChanged: (MediaEntry) -> Unit,
+    onListPositionChanged: (NavigationListPosition) -> Unit,
     onToggleCategoryFavorite: (MediaCategory) -> Unit,
     onEntrySelected: (MediaEntry) -> Unit,
     onToggleEntryFavorite: (MediaEntry) -> Unit,
@@ -374,27 +384,31 @@ private fun LiveCatalogLayout(
             modifier = Modifier.width(250.dp).fillMaxHeight(),
         )
 
-        LiveChannelList(
-            entries = entries,
-            previewKey = previewEntry?.key,
-            favoriteEntries = favoriteEntries,
-            fullscreenPending = fullscreenTarget != null,
-            onConfirm = { channel ->
-                when (
-                    liveChannelConfirmAction(
-                        previewKey = previewEntry?.key,
-                        channelKey = channel.key,
-                        fullscreenPending = fullscreenTarget != null,
-                    )
-                ) {
-                    LiveChannelConfirmAction.Preview -> previewEntry = channel
-                    LiveChannelConfirmAction.Fullscreen -> fullscreenTarget = channel
-                    LiveChannelConfirmAction.Ignore -> Unit
-                }
-            },
-            onToggleFavorite = onToggleEntryFavorite,
-            modifier = Modifier.width(340.dp).fillMaxHeight(),
-        )
+        key(selectedCategoryId) {
+            LiveChannelList(
+                entries = entries,
+                previewKey = previewEntry?.key,
+                favoriteEntries = favoriteEntries,
+                fullscreenPending = fullscreenTarget != null,
+                initialListPosition = initialListPosition,
+                onListPositionChanged = onListPositionChanged,
+                onConfirm = { channel ->
+                    when (
+                        liveChannelConfirmAction(
+                            previewKey = previewEntry?.key,
+                            channelKey = channel.key,
+                            fullscreenPending = fullscreenTarget != null,
+                        )
+                    ) {
+                        LiveChannelConfirmAction.Preview -> previewEntry = channel
+                        LiveChannelConfirmAction.Fullscreen -> fullscreenTarget = channel
+                        LiveChannelConfirmAction.Ignore -> Unit
+                    }
+                },
+                onToggleFavorite = onToggleEntryFavorite,
+                modifier = Modifier.width(340.dp).fillMaxHeight(),
+            )
+        }
         }
     }
 }
@@ -405,12 +419,24 @@ private fun LiveChannelList(
     previewKey: String?,
     favoriteEntries: Set<String>,
     fullscreenPending: Boolean,
+    initialListPosition: NavigationListPosition,
+    onListPositionChanged: (NavigationListPosition) -> Unit,
     onConfirm: (MediaEntry) -> Unit,
     onToggleFavorite: (MediaEntry) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val listState = rememberLazyListState()
+    val lastIndex = entries.lastIndex.coerceAtLeast(0)
+    val listState = rememberLazyListState(
+        initialFirstVisibleItemIndex = initialListPosition.index.coerceIn(0, lastIndex),
+        initialFirstVisibleItemScrollOffset = initialListPosition.offset.coerceAtLeast(0),
+    )
     val channelFocus = remember(previewKey) { FocusRequester() }
+
+    LaunchedEffect(listState) {
+        snapshotFlow {
+            NavigationListPosition(listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
+        }.distinctUntilChanged().collect(onListPositionChanged)
+    }
 
     androidx.compose.runtime.LaunchedEffect(entries, previewKey, fullscreenPending) {
         if (fullscreenPending) return@LaunchedEffect
@@ -491,13 +517,22 @@ private fun LivePreview(
     var activeUrl by remember { mutableStateOf("") }
     var fallbackAttempted by remember { mutableStateOf(false) }
 
-    DisposableEffect(player) {
+    DisposableEffect(player, entry?.key) {
         val listener = object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
+                if (entry?.key != livePlaybackSession.entryKey) return
                 buffering = playbackState == Player.STATE_BUFFERING
             }
 
+            override fun onRenderedFirstFrame() {
+                if (entry?.key == livePlaybackSession.entryKey) {
+                    buffering = false
+                    error = false
+                }
+            }
+
             override fun onPlayerError(playbackException: PlaybackException) {
+                if (entry?.key != livePlaybackSession.entryKey) return
                 if (!fallbackAttempted) {
                     val alternate = XtreamUrlBuilder.alternateTransportUrl(activeUrl)
                     if (alternate != null) {
@@ -532,6 +567,12 @@ private fun LivePreview(
         fallbackAttempted = false
         livePlaybackSession.play(target, credentials)
         activeUrl = livePlaybackSession.activeUrl
+    }
+
+    LaunchedEffect(entry?.key, buffering) {
+        if (!buffering) return@LaunchedEffect
+        delay(12_000)
+        if (player.isPlaying || player.playbackState == Player.STATE_READY) buffering = false
     }
 
     Box(modifier.background(Color.Black)) {
