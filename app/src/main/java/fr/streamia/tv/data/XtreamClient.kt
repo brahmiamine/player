@@ -36,7 +36,7 @@ class XtreamClient {
             addAll(parseCategories(fetchArray(urls.api("get_live_categories")), MediaType.Live))
             addAll(runCatching { parseCategories(fetchArray(urls.api("get_vod_categories")), MediaType.Movie) }.getOrDefault(emptyList()))
             addAll(runCatching { parseCategories(fetchArray(urls.api("get_series_categories")), MediaType.Series) }.getOrDefault(emptyList()))
-        }
+        }.toMutableList()
 
         // Les catalogues de certains fournisseurs dépassent largement 200 000 entrées.
         // JsonReader traite le tableau objet par objet et évite de conserver une énorme chaîne JSON
@@ -45,8 +45,32 @@ class XtreamClient {
             addAll(fetchEntriesStreaming(urls.api("get_live_streams"), MediaType.Live))
             addAll(runCatching { fetchEntriesStreaming(urls.api("get_vod_streams"), MediaType.Movie) }.getOrDefault(emptyList()))
             addAll(runCatching { fetchEntriesStreaming(urls.api("get_series"), MediaType.Series) }.getOrDefault(emptyList()))
+        }.toMutableList()
+
+        // Certains serveurs authentifient correctement player_api.php mais renvoient [] pour VOD
+        // ou Séries alors que leur get.php contient bien ces médias. Dans ce cas uniquement, on lit
+        // le M3U en flux et seulement pour les sections manquantes afin de ne pas doubler la mémoire.
+        val missingTypes = setOf(MediaType.Movie, MediaType.Series).filterTo(linkedSetOf()) { type ->
+            entries.none { it.type == type }
         }
-        Catalog(categories = categories, entries = entries, account = account)
+        if (missingTypes.isNotEmpty()) {
+            runCatching { fetchM3uFallback(urls.playlist(), missingTypes) }
+                .getOrNull()
+                ?.let { fallback ->
+                    for (type in missingTypes) {
+                        categories.removeAll { it.type == type }
+                        entries.removeAll { it.type == type }
+                        categories += fallback.catalog.categoriesFor(type)
+                        entries += fallback.catalog.entriesFor(type)
+                    }
+                }
+        }
+
+        Catalog(
+            categories = categories.distinctBy(MediaCategory::key),
+            entries = entries.distinctBy(MediaEntry::key),
+            account = account,
+        )
     }
 
     suspend fun loadMovieDetails(
@@ -180,6 +204,26 @@ class XtreamClient {
         }
     }
 
+    private fun fetchM3uFallback(url: String, includeTypes: Set<MediaType>): M3uImport {
+        val first = runCatching { fetchM3uFallbackOnce(url, includeTypes) }
+        first.getOrNull()?.let { return it }
+        val alternate = XtreamUrlBuilder.alternateTransportUrl(url) ?: throw first.exceptionOrNull()!!
+        return fetchM3uFallbackOnce(alternate, includeTypes)
+    }
+
+    private fun fetchM3uFallbackOnce(url: String, includeTypes: Set<MediaType>): M3uImport {
+        val connection = openConnection(url, "audio/x-mpegurl, application/vnd.apple.mpegurl, text/plain, */*")
+        return try {
+            val code = connection.responseCode
+            if (code !in 200..299) throw XtreamException("Le serveur a répondu avec le code $code pour la playlist de secours.")
+            connection.inputStream.use { input ->
+                M3uParser().parse(InputStreamReader(input, StandardCharsets.UTF_8), includeTypes)
+            }
+        } finally {
+            connection.disconnect()
+        }
+    }
+
     private fun parseEntriesStreaming(reader: JsonReader, type: MediaType): List<MediaEntry> {
         val entries = ArrayList<MediaEntry>()
         if (reader.peek() != JsonToken.BEGIN_ARRAY) {
@@ -209,7 +253,7 @@ class XtreamClient {
 
             reader.beginObject()
             while (reader.hasNext()) {
-                when (val field = reader.nextName()) {
+                when (reader.nextName()) {
                     "stream_id" -> if (type != MediaType.Series) id = reader.scalarString()?.toIntOrNull() else reader.skipValue()
                     "series_id" -> if (type == MediaType.Series) id = reader.scalarString()?.toIntOrNull() else reader.skipValue()
                     "name" -> name = reader.scalarString()
@@ -232,11 +276,7 @@ class XtreamClient {
                         val candidate = reader.scalarString()?.toLongOrNull()?.takeIf { it > 0 }
                         if (added == null) added = candidate
                     }
-                    else -> {
-                        @Suppress("UNUSED_VARIABLE")
-                        val ignored = field
-                        reader.skipValue()
-                    }
+                    else -> reader.skipValue()
                 }
             }
             reader.endObject()
