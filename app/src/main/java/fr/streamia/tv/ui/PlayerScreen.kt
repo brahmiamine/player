@@ -532,15 +532,13 @@ fun PlayerScreen(
         }
 
         seekFeedback?.let { feedback ->
-            Column(
+            Box(
                 Modifier
                     .align(Alignment.Center)
                     .background(Night.copy(alpha = 0.94f), androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
-                    .padding(12.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
+                    .padding(horizontal = 22.dp, vertical = 14.dp),
+                contentAlignment = Alignment.Center,
             ) {
-                MediaArtwork(entry.iconUrl, entry.displayName, Modifier.width(260.dp).aspectRatio(16f / 9f))
-                Spacer(Modifier.height(8.dp))
                 Text("$feedback · ${formatDuration(positionMs)}", color = Ink, fontSize = 22.sp, fontWeight = FontWeight.Bold)
             }
         }
