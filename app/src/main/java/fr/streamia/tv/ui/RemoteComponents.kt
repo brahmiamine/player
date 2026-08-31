@@ -38,6 +38,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.key.onPreviewKeyEvent
@@ -302,7 +303,11 @@ private fun RemoteArtwork(
 }
 
 private object ArtworkLoader {
-    private val cache = LruCache<String, ImageBitmap>(128)
+    // Dimensionné en octets réels (⅛ du tas max) plutôt qu'en nombre d'entrées : un compte fixe
+    // provoquait un rechargement/redécodage constant (thrash) lors du parcours de gros catalogues.
+    private val cache = object : LruCache<String, ImageBitmap>(cacheSizeBytes()) {
+        override fun sizeOf(key: String, value: ImageBitmap): Int = value.asAndroidBitmap().byteCount
+    }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val inFlight = ConcurrentHashMap<String, Deferred<ImageBitmap?>>()
     @Volatile private var client: OkHttpClient? = null
@@ -344,4 +349,6 @@ private object ArtworkLoader {
             )?.asImageBitmap()
         }
     }.getOrNull()
+
+    private fun cacheSizeBytes(): Int = (Runtime.getRuntime().maxMemory() / 8).coerceIn(4L * 1024 * 1024, Int.MAX_VALUE.toLong()).toInt()
 }

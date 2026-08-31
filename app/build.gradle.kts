@@ -70,6 +70,19 @@ android {
     }
 }
 
+androidComponents {
+    // L'app est distribuée en APK direct (pas de Play Store pour découper par appareil) ; les
+    // boîtiers/clés Android TV sont quasi exclusivement ARM, donc on n'embarque pas les .so
+    // x86/x86_64 (ExoPlayer, Crashlytics NDK) dans l'APK diffusé, pour en réduire la taille.
+    // Limité aux variantes distribuées : le debug garde toutes les ABI pour rester installable
+    // sur les émulateurs x86/x86_64 courants sur poste Intel/AMD.
+    onVariants { variant ->
+        if (variant.buildType == "optimized" || variant.buildType == "release") {
+            variant.packaging.jniLibs.excludes.addAll(setOf("**/x86/**", "**/x86_64/**"))
+        }
+    }
+}
+
 kotlin {
     compilerOptions {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)

@@ -29,6 +29,14 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
 
+      - name: Cache Android SDK packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.ANDROID_HOME }}/platforms
+            ${{ env.ANDROID_HOME }}/build-tools
+          key: android-sdk-platforms-36-build-tools-35.0.0
+
       - name: Install Android 36 platform
         run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
 
