@@ -53,6 +53,7 @@ import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.domain.ServerCredentials
 import fr.streamia.tv.domain.XtreamUrlBuilder
+import fr.streamia.tv.domain.isVisualSeparator
 import fr.streamia.tv.player.LivePlaybackSession
 import fr.streamia.tv.ui.theme.DeepSurface
 import fr.streamia.tv.ui.theme.FocusBlueBright
@@ -129,7 +130,7 @@ fun BrowserScreen(
             FAVORITES_CATEGORY_ID -> favoriteEntriesForType
             HISTORY_CATEGORY_ID -> historyForType.map { it.second }
             else -> catalog.entriesIn(selectedType, selectedCategoryId)
-        }
+        }.filterNot(MediaEntry::isVisualSeparator)
     }
     val historyByKey = remember(historyForType) { historyForType.associate { it.second.key to it.first } }
 
@@ -150,6 +151,7 @@ fun BrowserScreen(
             busy = busy,
             onHome = onHome,
             onTypeSelected = {
+                if (it != MediaType.Live) livePlaybackSession.stop(clearSession = true)
                 selectedType = it
                 selectedCategoryId = defaultCategoryId(catalog, it)
             },
@@ -404,7 +406,6 @@ private fun LiveChannelList(
         if (fullscreenPending) return@LaunchedEffect
         val index = entries.indexOfFirst { it.key == previewKey }
         if (index >= 0) {
-            listState.scrollToItem(index)
             yield()
             runCatching { channelFocus.requestFocus() }
         }
@@ -623,7 +624,6 @@ private fun CategoryRail(
     androidx.compose.runtime.LaunchedEffect(type, categories.size, selectedCategoryId, requestInitialFocus) {
         val index = categories.indexOfFirst { it.id == selectedCategoryId }
         if (index >= 0) {
-            listState.scrollToItem(index)
             if (requestInitialFocus) {
                 yield()
                 runCatching { selectedFocus.requestFocus() }
