@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "36196904003",
+    "project_id": "streamia-86c32",
+    "storage_bucket": "streamia-86c32.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:36196904003:android:c975094c7bec562beff8f6",
+        "android_client_info": {
+          "package_name": "fr.streamia.tv"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBJgQGBkAXM__BAo3TvvcxjohuhHZOBYlY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:36196904003:android:d5067789e91acd4ceff8f6",
+        "android_client_info": {
+          "package_name": "fr.streamia.tv.debug"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBJgQGBkAXM__BAo3TvvcxjohuhHZOBYlY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
