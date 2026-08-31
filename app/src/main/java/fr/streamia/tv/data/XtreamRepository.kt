@@ -54,32 +54,30 @@ class XtreamRepository(context: Context) {
             )
         }
 
-    /**
-     * Indique si une vraie synchronisation fournisseur est nécessaire.
-     * Xtream utilise le même intervalle configurable que la playlist distante, mais un M3U local
-     * n'est jamais relu automatiquement : le bouton Actualiser reste disponible pour le forcer.
-     */
+    /** Xtream est permanent en cache : seul le bouton Actualiser contacte de nouveau le fournisseur. */
     fun shouldRefreshProfile(profileId: String): Boolean {
         val profile = playlistStore.find(profileId) ?: return false
         return when (profile.kind) {
-            PlaylistKind.Xtream -> profile.isCatalogRefreshDue()
-            PlaylistKind.M3u -> profile.isRemoteM3u && profile.isCatalogRefreshDue()
+            PlaylistKind.Xtream -> profile.shouldAutoRefresh()
+            PlaylistKind.M3u -> profile.shouldAutoRefresh()
         }
     }
 
     /**
      * Ouvre d'abord le cache local afin que l'interface soit disponible immédiatement.
-     * Un cache encore valide est renvoyé comme Local : le ViewModel ne déclenche alors aucune
-     * connexion fournisseur. Quand il est expiré il est renvoyé comme Cache, ce qui autorise le
-     * refresh silencieux déjà existant sans bloquer l'écran ni la lecture.
+     * Un cache Xtream est toujours renvoyé comme Local, sans date d'expiration.
      */
     suspend fun openProfile(profileId: String): LoadedCatalog {
         val profile = playlistStore.find(profileId) ?: throw XtreamException("Cette liste n'existe plus.")
         val credentials = profile.credentialsOrNull()
-        val cached = cache.load(profile.id)
+        val cached = cache.load(profile.id)?.takeIf { profile.kind != PlaylistKind.Xtream || it.hasPlayableContent() }
         if (credentials != null && cached != null) {
             credentialsStore.save(credentials)
-            val source = if (shouldRefreshProfile(profile.id)) CatalogSource.Cache else CatalogSource.Local
+            val source = if (profile.kind == PlaylistKind.M3u && shouldRefreshProfile(profile.id)) {
+                CatalogSource.Cache
+            } else {
+                CatalogSource.Local
+            }
             return LoadedCatalog(cached, credentials, source, profile.id)
         }
         return when (profile.kind) {
@@ -94,7 +92,7 @@ class XtreamRepository(context: Context) {
         profileName: String? = null,
     ): LoadedCatalog {
         XtreamUrlBuilder(credentials)
-        val catalog = client.loadCatalog(credentials)
+        val catalog = client.loadCatalog(credentials).requirePlayableContent()
         val id = profileId ?: UUID.randomUUID().toString()
         val previous = profileId?.let(playlistStore::find)
         val profile = PlaylistProfile(
@@ -119,7 +117,7 @@ class XtreamRepository(context: Context) {
         when (profile.kind) {
             PlaylistKind.Xtream -> {
                 val credentials = profile.credentialsOrNull() ?: throw XtreamException("Identifiants Xtream incomplets.")
-                val catalog = client.loadCatalog(credentials)
+                val catalog = client.loadCatalog(credentials).requirePlayableContent()
                 cache.save(profileId, catalog)
                 playlistStore.markRefreshed(profileId)
                 LoadedCatalog(catalog, credentials, CatalogSource.Network, profileId)
@@ -240,13 +238,13 @@ class XtreamRepository(context: Context) {
         val credentials = profile.credentialsOrNull()
             ?: throw XtreamException("Les identifiants de cette liste Xtream sont incomplets.")
         return try {
-            val catalog = client.loadCatalog(credentials)
+            val catalog = client.loadCatalog(credentials).requirePlayableContent()
             credentialsStore.save(credentials)
             cache.save(profile.id, catalog)
             playlistStore.markRefreshed(profile.id)
             LoadedCatalog(catalog, credentials, CatalogSource.Network, profile.id)
         } catch (error: Exception) {
-            val cached = cache.load(profile.id) ?: throw error
+            val cached = cache.load(profile.id)?.takeIf { it.hasPlayableContent() } ?: throw error
             credentialsStore.save(credentials)
             LoadedCatalog(cached, credentials, CatalogSource.Cache, profile.id)
         }
@@ -371,6 +369,13 @@ class XtreamRepository(context: Context) {
     }.getOrNull()
 
     private fun String?.cleanName(defaultValue: String): String = this?.trim()?.takeIf(String::isNotBlank) ?: defaultValue
+
+    private fun Catalog.hasPlayableContent(): Boolean = MediaType.entries.any { count(it) > 0 }
+
+    private fun Catalog.requirePlayableContent(): Catalog {
+        if (!hasPlayableContent()) throw XtreamException("Le fournisseur a renvoyé un catalogue vide. Le cache existant est conservé.")
+        return this
+    }
 }
 
 data class CatalogPresentation(

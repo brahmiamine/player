@@ -98,7 +98,11 @@ fun BrowserScreen(
     onSettings: () -> Unit,
     onDismissMessage: () -> Unit,
 ) {
-    BackHandler(onBack = onHome)
+    fun leaveBrowserForHome() {
+        livePlaybackSession.stop(clearSession = true)
+        onHome()
+    }
+    BackHandler(onBack = ::leaveBrowserForHome)
     val context = LocalContext.current.applicationContext
     val navigationStore = remember(credentials) { BrowserNavigationStore(context, credentials) }
     val restoredLiveSelection = remember(catalog, credentials) {
@@ -180,7 +184,7 @@ fun BrowserScreen(
             selectedType = selectedType,
             offline = offline,
             busy = busy,
-            onHome = onHome,
+            onHome = ::leaveBrowserForHome,
             onTypeSelected = {
                 if (it != MediaType.Live) livePlaybackSession.stop(clearSession = true)
                 selectedType = it

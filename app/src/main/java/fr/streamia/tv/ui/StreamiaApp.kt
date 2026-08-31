@@ -150,7 +150,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onCategoryOrderChanged = viewModel::setCategoryOrder,
                     onMoveEntries = viewModel::moveEntries,
                     onResetMoves = viewModel::resetEntryMoves,
-                    onBack = viewModel::showSettings,
+                    onBack = viewModel::closeOrganizer,
                 )
 
                 state.screen is StreamiaScreen.MovieDetails -> {
