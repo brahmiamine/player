@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -59,6 +60,7 @@ import fr.streamia.tv.ui.theme.MutedInk
 import fr.streamia.tv.ui.theme.Night
 import fr.streamia.tv.ui.theme.WarmSignal
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.yield
 
 private const val FAVORITES_CATEGORY_ID = "__favorites__"
 private const val HISTORY_CATEGORY_ID = "__history__"
@@ -100,6 +102,9 @@ fun BrowserScreen(
     var selectedType by remember(catalog, initialType) { mutableStateOf(defaultType) }
     var selectedCategoryId by remember(catalog, initialCategoryId, selectedType) {
         mutableStateOf(initialCategoryId ?: defaultCategoryId(catalog, selectedType))
+    }
+    val restoredLiveEntryKey = remember(catalog, initialType, initialCategoryId) {
+        if (defaultType == MediaType.Live) LiveBrowserReturnState.consume() else null
     }
 
     val baseCategories = remember(catalog, selectedType, library.favoriteCategories) {
@@ -181,6 +186,7 @@ fun BrowserScreen(
                 categories = categories,
                 selectedCategoryId = selectedCategoryId,
                 entries = entries,
+                initialPreviewKey = restoredLiveEntryKey,
                 favoriteCategories = library.favoriteCategories,
                 favoriteEntries = library.favoriteEntries,
                 historyCount = historyForType.size,
@@ -282,6 +288,7 @@ private fun LiveCatalogLayout(
     categories: List<MediaCategory>,
     selectedCategoryId: String,
     entries: List<MediaEntry>,
+    initialPreviewKey: String?,
     favoriteCategories: Set<String>,
     favoriteEntries: Set<String>,
     historyCount: Int,
@@ -291,7 +298,9 @@ private fun LiveCatalogLayout(
     onToggleEntryFavorite: (MediaEntry) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var previewEntry by remember(catalog) { mutableStateOf(entries.firstOrNull()) }
+    var previewEntry by remember(catalog, initialPreviewKey) {
+        mutableStateOf(entries.firstOrNull { it.key == initialPreviewKey } ?: entries.firstOrNull())
+    }
     var pendingFullscreen by remember { mutableStateOf<MediaEntry?>(null) }
     val previewHandle = remember { LivePreviewHandle() }
 
@@ -322,6 +331,7 @@ private fun LiveCatalogLayout(
             },
             onSelected = onCategorySelected,
             onToggleFavorite = onToggleCategoryFavorite,
+            requestInitialFocus = false,
             modifier = Modifier.width(250.dp).fillMaxHeight(),
         )
 
@@ -367,6 +377,19 @@ private fun LiveChannelList(
     onToggleFavorite: (MediaEntry) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val listState = rememberLazyListState()
+    val channelFocus = remember(previewKey) { FocusRequester() }
+
+    androidx.compose.runtime.LaunchedEffect(entries, previewKey, fullscreenPending) {
+        if (fullscreenPending) return@LaunchedEffect
+        val index = entries.indexOfFirst { it.key == previewKey }
+        if (index >= 0) {
+            listState.scrollToItem(index)
+            yield()
+            runCatching { channelFocus.requestFocus() }
+        }
+    }
+
     Column(modifier) {
         Row(Modifier.fillMaxWidth().padding(start = 3.dp, bottom = 7.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("Chaînes", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Bold)
@@ -378,14 +401,20 @@ private fun LiveChannelList(
                 Text("Aucune chaîne", color = MutedInk, fontSize = 14.sp)
             }
         } else {
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            LazyColumn(
+                state = listState,
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
                 items(entries, key = MediaEntry::key) { entry ->
                     FocusableSurface(
                         onClick = { onConfirm(entry) },
                         onLongClick = { onToggleFavorite(entry) },
                         selected = previewKey == entry.key,
                         enabled = !fullscreenPending,
-                        modifier = Modifier.fillMaxWidth().height(48.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .then(if (previewKey == entry.key) Modifier.focusRequester(channelFocus) else Modifier),
                     ) {
                         Row(
                             Modifier.fillMaxWidth().padding(horizontal = 8.dp),
@@ -590,11 +619,21 @@ private fun CategoryRail(
     countFor: (MediaCategory) -> Int,
     onSelected: (MediaCategory) -> Unit,
     onToggleFavorite: (MediaCategory) -> Unit,
+    requestInitialFocus: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
-    val firstFocus = remember(type) { FocusRequester() }
-    androidx.compose.runtime.LaunchedEffect(type, categories.size) {
-        if (categories.isNotEmpty()) runCatching { firstFocus.requestFocus() }
+    val listState = rememberLazyListState()
+    val selectedFocus = remember(selectedCategoryId, type) { FocusRequester() }
+
+    androidx.compose.runtime.LaunchedEffect(type, categories.size, selectedCategoryId, requestInitialFocus) {
+        val index = categories.indexOfFirst { it.id == selectedCategoryId }
+        if (index >= 0) {
+            listState.scrollToItem(index)
+            if (requestInitialFocus) {
+                yield()
+                runCatching { selectedFocus.requestFocus() }
+            }
+        }
     }
 
     Column(modifier) {
@@ -603,7 +642,10 @@ private fun CategoryRail(
             Spacer(Modifier.weight(1f))
             Text("OK choisir · OK long favori", color = MutedInk, fontSize = 9.sp)
         }
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        LazyColumn(
+            state = listState,
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
             items(categories, key = MediaCategory::key) { category ->
                 val virtual = category.id in setOf(Catalog.ALL_CATEGORY_ID, FAVORITES_CATEGORY_ID, HISTORY_CATEGORY_ID)
                 FocusableSurface(
@@ -613,7 +655,7 @@ private fun CategoryRail(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(46.dp)
-                        .then(if (category == categories.first()) Modifier.focusRequester(firstFocus) else Modifier),
+                        .then(if (category.id == selectedCategoryId) Modifier.focusRequester(selectedFocus) else Modifier),
                 ) {
                     Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                         if (!virtual && category.key in favoriteCategories) {

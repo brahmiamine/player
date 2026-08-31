@@ -20,8 +20,9 @@ class PlaybackControlsTest {
     }
 
     @Test
-    fun `live OK belongs to the fullscreen player HUD`() {
-        assertEquals(PlaybackRemoteAction.ToggleHud, playbackRemoteAction(MediaType.Live, PlaybackRemoteButton.Ok))
+    fun `live OK and left return to the main live browser`() {
+        assertEquals(PlaybackRemoteAction.OpenLivePicker, playbackRemoteAction(MediaType.Live, PlaybackRemoteButton.Ok))
+        assertEquals(PlaybackRemoteAction.OpenLivePicker, playbackRemoteAction(MediaType.Live, PlaybackRemoteButton.Left))
     }
 
     @Test

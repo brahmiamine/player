@@ -146,17 +146,23 @@ fun StreamiaApp(viewModel: StreamiaViewModel) {
                     )
                 }
 
-                state.screen is StreamiaScreen.Player && state.catalog != null && state.credentials != null -> PlayerScreen(
-                    catalog = state.catalog!!,
-                    credentials = state.credentials!!,
-                    entry = (state.screen as StreamiaScreen.Player).entry,
-                    epg = state.epg,
-                    resumePositionMs = state.resumePositionMs,
-                    onBack = viewModel::closePlayer,
-                    onZap = viewModel::zap,
-                    onEntrySelected = viewModel::openEntry,
-                    onProgress = viewModel::recordPlayback,
-                )
+                state.screen is StreamiaScreen.Player && state.catalog != null && state.credentials != null -> {
+                    val playerScreen = state.screen as StreamiaScreen.Player
+                    PlayerScreen(
+                        catalog = state.catalog!!,
+                        credentials = state.credentials!!,
+                        entry = playerScreen.entry,
+                        epg = state.epg,
+                        resumePositionMs = state.resumePositionMs,
+                        onBack = {
+                            LiveBrowserReturnState.remember(playerScreen.entry)
+                            viewModel.closePlayer()
+                        },
+                        onZap = viewModel::zap,
+                        onEntrySelected = viewModel::openEntry,
+                        onProgress = viewModel::recordPlayback,
+                    )
+                }
 
                 else -> BootScreen()
             }
