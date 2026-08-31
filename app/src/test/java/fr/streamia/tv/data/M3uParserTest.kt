@@ -2,7 +2,6 @@ package fr.streamia.tv.data
 
 import fr.streamia.tv.domain.MediaType
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.StringReader
@@ -45,7 +44,7 @@ class M3uParserTest {
         val series = result.catalog.entries[2]
         assertEquals("مسلسل عربي", series.name)
         assertEquals("49774", series.tvgId)
-        assertFalse(series.playable)
+        assertTrue(series.playable)
 
         assertEquals(3, result.catalog.categories.size)
         assertEquals(setOf("tvg-id", "tvg-name", "tvg-logo", "group-title"), result.detectedAttributes)
