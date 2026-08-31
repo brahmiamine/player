@@ -18,6 +18,10 @@ import java.security.MessageDigest
  * Les informations EXTINF utilisées sont notamment : tvg-id, tvg-name, tvg-logo et group-title.
  * Le type de média est déterminé par le chemin Xtream /live/, /movie/ ou /series/.
  *
+ * Important : dans une playlist M3U Xtream, une URL /series/... pointe déjà vers un épisode
+ * directement lisible. Elle ne doit donc pas être traitée comme un identifiant de série de
+ * l'API get_series_info. Les entrées M3U /series/ sont marquées playable=true.
+ *
  * Certains fournisseurs produisent des URL sans schéma (host:port/live/...). Dans ce cas HTTP est
  * utilisé comme transport initial, puis la couche réseau/lecteur peut basculer automatiquement vers
  * HTTPS si le serveur l'exige. Les URL qui déclarent explicitement http:// ou https:// sont conservées.
@@ -88,7 +92,7 @@ class M3uParser {
                             number = suppliedNumber ?: automaticNumber,
                             extension = stream.extension,
                             tvgId = metadata.attributes["tvg-id"]?.takeIf(String::isNotBlank),
-                            playable = stream.type != MediaType.Series,
+                            playable = true,
                         )
                     }
                 }
