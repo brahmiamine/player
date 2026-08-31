@@ -39,8 +39,18 @@ class XtreamRepository(context: Context) {
     fun library(profileId: String): UserLibrarySnapshot = libraryStore.snapshot(profileId)
     fun customizedCatalog(profileId: String, catalog: Catalog): Catalog = libraryStore.applyToCatalog(profileId, catalog)
 
+    /**
+     * Ouvre d'abord le cache local afin que l'interface soit disponible immédiatement.
+     * Le ViewModel déclenche ensuite un refresh silencieux quand la source est Cache.
+     */
     suspend fun openProfile(profileId: String): LoadedCatalog {
         val profile = playlistStore.find(profileId) ?: throw XtreamException("Cette liste n'existe plus.")
+        val credentials = profile.credentialsOrNull()
+        val cached = cache.load(profile.id)
+        if (credentials != null && cached != null) {
+            credentialsStore.save(credentials)
+            return LoadedCatalog(cached, credentials, CatalogSource.Cache, profile.id)
+        }
         return when (profile.kind) {
             PlaylistKind.Xtream -> openXtreamProfile(profile)
             PlaylistKind.M3u -> openM3uProfile(profile)
@@ -303,7 +313,7 @@ class XtreamRepository(context: Context) {
             readTimeout = 90_000
             instanceFollowRedirects = true
             setRequestProperty("Accept", "application/x-mpegURL,text/plain,*/*")
-            setRequestProperty("User-Agent", "Streamia-TV/1.4")
+            setRequestProperty("User-Agent", "Streamia-TV/1.5")
         }
         try {
             val code = connection.responseCode

@@ -48,7 +48,10 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         _uiState.update { it.copy(busy = true, message = "Ouverture de la liste…") }
         viewModelScope.launch {
             runCatching { repository.openProfile(profileId) }
-                .onSuccess(::showCatalog)
+                .onSuccess { loaded ->
+                    showCatalog(loaded)
+                    if (loaded.source == CatalogSource.Cache) refreshSilently(profileId)
+                }
                 .onFailure(::showError)
         }
     }
@@ -117,7 +120,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         _uiState.update { it.copy(busy = true, message = null) }
         viewModelScope.launch {
             runCatching { repository.refreshProfile(profileId) }
-                .onSuccess(::showCatalog)
+                .onSuccess(::mergeCatalog)
                 .onFailure(::showError)
         }
     }
@@ -353,6 +356,37 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             it.copy(
                 catalog = repository.customizedCatalog(profileId, raw),
                 library = repository.library(profileId),
+            )
+        }
+    }
+
+    private suspend fun refreshSilently(profileId: String) {
+        runCatching { repository.refreshProfile(profileId) }
+            .onSuccess(::mergeCatalog)
+            .onFailure {
+                if (_uiState.value.activeProfileId == profileId) {
+                    _uiState.update { state -> state.copy(offline = true, busy = false) }
+                }
+            }
+    }
+
+    private fun mergeCatalog(loaded: LoadedCatalog) {
+        val current = _uiState.value
+        if (current.activeProfileId != loaded.profileId) return
+        val library = repository.library(loaded.profileId)
+        val customized = repository.customizedCatalog(loaded.profileId, loaded.catalog)
+        _uiState.update { state ->
+            state.copy(
+                booting = false,
+                busy = false,
+                rawCatalog = loaded.catalog,
+                catalog = customized,
+                credentials = loaded.credentials,
+                profiles = repository.profiles(),
+                library = library,
+                offline = loaded.source == CatalogSource.Cache,
+                epgGuide = null,
+                message = loaded.importSummary ?: state.message,
             )
         }
     }
