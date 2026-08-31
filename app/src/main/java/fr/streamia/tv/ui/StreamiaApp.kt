@@ -136,11 +136,8 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                 state.screen is StreamiaScreen.Search && state.catalog != null -> SearchScreen(
                     catalog = state.catalog!!,
                     favoriteEntries = state.library.favoriteEntries,
-                    favoriteCategories = state.library.favoriteCategories,
                     onOpenEntry = viewModel::openEntry,
-                    onOpenCategory = viewModel::openCategory,
                     onToggleEntryFavorite = viewModel::toggleEntryFavorite,
-                    onToggleCategoryFavorite = viewModel::toggleCategoryFavorite,
                     onBack = viewModel::showHome,
                 )
 

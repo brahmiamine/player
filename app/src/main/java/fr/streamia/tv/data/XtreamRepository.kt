@@ -39,6 +39,14 @@ class XtreamRepository(context: Context) {
     fun library(profileId: String): UserLibrarySnapshot = libraryStore.snapshot(profileId)
     fun customizedCatalog(profileId: String, catalog: Catalog): Catalog = libraryStore.applyToCatalog(profileId, catalog)
 
+    /**
+     * Lecture rapide du cache disque, sans jamais contacter le fournisseur. Sert à afficher la
+     * liste déjà connue dès la relance de l'application pendant qu'[openProfile] confirme/actualise
+     * en arrière-plan.
+     */
+    suspend fun cachedCatalog(profileId: String): Catalog? =
+        cache.load(profileId)?.takeIf { it.hasPlayableContent() }
+
     /** Prépare les index d'un catalogue massif hors du thread d'interface. */
     suspend fun prepareCatalogPresentation(
         profileId: String,
