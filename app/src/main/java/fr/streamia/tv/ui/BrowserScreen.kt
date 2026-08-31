@@ -69,7 +69,9 @@ import fr.streamia.tv.ui.theme.MutedInk
 import fr.streamia.tv.ui.theme.Night
 import fr.streamia.tv.ui.theme.WarmSignal
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.yield
 
 private const val FAVORITES_CATEGORY_ID = "__favorites__"
@@ -231,8 +233,8 @@ fun BrowserScreen(
                     navigationStore.saveLiveSelection(selectedCategoryId, it.key)
                     onRememberContent(it)
                 },
-                onListPositionChanged = {
-                    navigationStore.saveListPosition(MediaType.Live, selectedCategoryId, it)
+                onListPositionChanged = { categoryId, position ->
+                    navigationStore.saveListPosition(MediaType.Live, categoryId, position)
                 },
                 onToggleCategoryFavorite = onToggleCategoryFavorite,
                 onEntrySelected = onEntrySelected,
@@ -341,7 +343,7 @@ private fun LiveCatalogLayout(
     historyCount: Int,
     onCategorySelected: (MediaCategory) -> Unit,
     onPreviewChanged: (MediaEntry) -> Unit,
-    onListPositionChanged: (NavigationListPosition) -> Unit,
+    onListPositionChanged: (String, NavigationListPosition) -> Unit,
     onToggleCategoryFavorite: (MediaCategory) -> Unit,
     onEntrySelected: (MediaEntry) -> Unit,
     onToggleEntryFavorite: (MediaEntry) -> Unit,
@@ -427,6 +429,11 @@ private fun LiveCatalogLayout(
         )
 
         key(selectedCategoryId) {
+            // Fige la catégorie associée à cette instance de LiveChannelList : le flush de
+            // position en fin de debounce peut s'exécuter après que selectedCategoryId ait déjà
+            // changé (catégorie suivante sélectionnée pendant la fenêtre de 300 ms), et lire l'état
+            // mutable à ce moment-là sauverait la position de l'ancienne catégorie sous la nouvelle.
+            val categoryIdForPosition = selectedCategoryId
             LiveChannelList(
                 entries = entries,
                 previewKey = previewEntry?.key,
@@ -445,7 +452,7 @@ private fun LiveCatalogLayout(
                         runCatching { categoryFocus.requestFocus() }
                     }
                 },
-                onListPositionChanged = onListPositionChanged,
+                onListPositionChanged = { onListPositionChanged(categoryIdForPosition, it) },
                 onConfirm = { channel ->
                     when (
                         liveChannelConfirmAction(
@@ -496,9 +503,22 @@ private fun LiveChannelList(
     val focusTargetKey = entries.getOrNull(focusTargetIndex)?.key
 
     LaunchedEffect(listState) {
-        snapshotFlow {
-            NavigationListPosition(listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
-        }.distinctUntilChanged().collect(onListPositionChanged)
+        // Le debounce évite d'écrire en préférences à chaque frame pendant un défilement rapide,
+        // mais ne doit jamais faire perdre la position atteinte si l'écran est quitté avant la fin
+        // de la fenêtre de 300 ms : on garde la dernière valeur brute non encore sauvegardée et on
+        // la vide explicitement si la coroutine est annulée pendant qu'elle est en attente.
+        var pendingPosition: NavigationListPosition? = null
+        try {
+            snapshotFlow {
+                NavigationListPosition(listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
+            }
+                .onEach { pendingPosition = it }
+                .debounce(300)
+                .distinctUntilChanged()
+                .collect { pendingPosition = null; onListPositionChanged(it) }
+        } finally {
+            pendingPosition?.let(onListPositionChanged)
+        }
     }
 
     androidx.compose.runtime.LaunchedEffect(entries, focusTargetKey, fullscreenPending, autoFocus) {
