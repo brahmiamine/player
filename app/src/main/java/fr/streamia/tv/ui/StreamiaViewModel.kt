@@ -278,17 +278,6 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         }
     }
 
-    fun openCategory(category: MediaCategory) {
-        _uiState.update {
-            it.copy(
-                screen = StreamiaScreen.Browser,
-                browserType = category.type,
-                browserCategoryId = category.id,
-                message = null,
-            )
-        }
-    }
-
     fun showEpg() {
         val state = _uiState.value
         val profileId = state.activeProfileId ?: return
