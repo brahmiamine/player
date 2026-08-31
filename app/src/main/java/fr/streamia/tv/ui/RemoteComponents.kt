@@ -272,7 +272,8 @@ private fun RemoteArtwork(
     imagePadding: Int,
 ) {
     val context = LocalContext.current.applicationContext
-    val bitmap by produceState<ImageBitmap?>(initialValue = ArtworkLoader.get(url), key1 = url) {
+    val bitmap by produceState<ImageBitmap?>(initialValue = null, key1 = url) {
+        value = ArtworkLoader.get(url)
         if (url.isNullOrBlank() || value != null) return@produceState
         value = ArtworkLoader.load(context, url)
     }
