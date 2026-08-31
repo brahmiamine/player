@@ -179,6 +179,12 @@ data class Catalog(
 
 private data class IndexedEntry(val entry: MediaEntry, val text: String)
 
+private val VISUAL_SEPARATOR_NAME = Regex("^\\s*#{2,}.*#{2,}\\s*$")
+
+/** Les fournisseurs utilisent parfois de fausses chaînes ### ... ### comme séparateurs visuels. */
+fun MediaEntry.isVisualSeparator(): Boolean = VISUAL_SEPARATOR_NAME.matches(displayName) ||
+    VISUAL_SEPARATOR_NAME.matches(name)
+
 fun List<MediaEntry>.adjacentTo(currentKey: String, delta: Int): MediaEntry? {
     if (isEmpty()) return null
     val currentIndex = indexOfFirst { it.key == currentKey }.takeIf { it >= 0 } ?: 0

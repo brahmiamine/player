@@ -50,5 +50,22 @@ class LivePlaybackSession(context: Context) {
         }
     }
 
+    /** Coupe immédiatement le réseau tout en permettant une reprise au retour de l'application. */
+    fun stop(clearSession: Boolean = false) {
+        player.stop()
+        if (clearSession) {
+            player.clearMediaItems()
+            entryKey = null
+            activeUrl = ""
+        }
+    }
+
+    fun resume() {
+        if (entryKey != null && player.mediaItemCount > 0) {
+            player.prepare()
+            player.play()
+        }
+    }
+
     fun release() = player.release()
 }

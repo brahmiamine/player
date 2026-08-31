@@ -22,6 +22,12 @@ class CatalogIndexTest {
         assertEquals(listOf(program), guide.forEntry(entry(1, "tf1 hd", MediaType.Live)))
     }
 
+    @Test
+    fun providerVisualSeparatorsAreDetectedButNormalChannelsRemain() {
+        assertEquals(true, entry(1, "### MUSIC LOW INTERNET ###", MediaType.Live).isVisualSeparator())
+        assertEquals(false, entry(2, "AR: MAZZIKA LQ", MediaType.Live).isVisualSeparator())
+    }
+
     private fun entry(id: Int, name: String, type: MediaType) = MediaEntry(
         id = id,
         name = name,

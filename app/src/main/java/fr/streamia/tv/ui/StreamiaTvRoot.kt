@@ -7,6 +7,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import fr.streamia.tv.data.PlaybackSessionStore
 import fr.streamia.tv.data.resolveStartupProfileId
 import fr.streamia.tv.domain.MediaType
@@ -51,9 +54,21 @@ fun StreamiaTvRoot(viewModel: StreamiaViewModel) {
     val context = LocalContext.current
     val sessionStore = remember { PlaybackSessionStore(context.applicationContext) }
     val livePlaybackSession = remember { LivePlaybackSession(context.applicationContext) }
+    val lifecycleOwner = LocalLifecycleOwner.current
 
-    DisposableEffect(livePlaybackSession) {
-        onDispose(livePlaybackSession::release)
+    DisposableEffect(livePlaybackSession, lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> livePlaybackSession.resume()
+                Lifecycle.Event.ON_STOP -> livePlaybackSession.stop(clearSession = false)
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            livePlaybackSession.release()
+        }
     }
 
     LaunchedEffect(Unit) {
