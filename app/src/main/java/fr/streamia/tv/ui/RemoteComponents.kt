@@ -333,7 +333,7 @@ private object ArtworkLoader {
         val request = Request.Builder().url(url).header("User-Agent", "Streamia-TV/1.5").build()
         client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) return@runCatching null
-            val bytes = response.body.bytes()
+            val bytes = response.body?.bytes() ?: return@runCatching null
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
             var sample = 1
