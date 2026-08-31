@@ -35,6 +35,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     private val _uiState = MutableStateFlow(StreamiaUiState())
     private val catalogLayoutMutation = Mutex()
     private val libraryMutation = Mutex()
+    private var libraryMutationSequence = 0L
     val uiState: StateFlow<StreamiaUiState> = _uiState.asStateFlow()
 
     init {
@@ -311,6 +312,13 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
      * que celle du premier appui se termine avant celle du second, et celle qui arrive en dernier
      * écrase l'état affiché même si elle correspond à un instantané antérieur, ce qui fait
      * clignoter l'icône vers une valeur déjà obsolète.
+     *
+     * [libraryMutationSequence] complète la sérialisation : sans lui, la relecture du *premier*
+     * appui (encore en file quand le second optimiste s'applique déjà) écraserait brièvement l'état
+     * affiché avec un instantané qui ne contient pas encore le second changement — un retour en
+     * arrière visible avant que la relecture du second appui ne corrige. Seule la relecture dont le
+     * numéro de séquence est encore le plus récent au moment où elle se termine est appliquée ; les
+     * relectures intermédiaires, déjà dépassées par un appui plus récent, sont ignorées.
      */
     fun toggleEntryFavorite(entry: MediaEntry) {
         val profileId = _uiState.value.activeProfileId ?: return
@@ -320,6 +328,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             }
             state.copy(library = state.library.copy(favoriteEntries = favorites))
         }
+        val sequence = ++libraryMutationSequence
         viewModelScope.launch {
             libraryMutation.withLock {
                 runCatching {
@@ -328,6 +337,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                         repository.library(profileId)
                     }
                 }.onSuccess { library ->
+                    if (sequence != libraryMutationSequence) return@onSuccess
                     _uiState.update { state -> if (state.activeProfileId == profileId) state.copy(library = library) else state }
                 }
             }
@@ -342,6 +352,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             }
             state.copy(library = state.library.copy(favoriteCategories = favorites))
         }
+        val sequence = ++libraryMutationSequence
         viewModelScope.launch {
             libraryMutation.withLock {
                 runCatching {
@@ -350,6 +361,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                         repository.library(profileId)
                     }
                 }.onSuccess { library ->
+                    if (sequence != libraryMutationSequence) return@onSuccess
                     _uiState.update { state -> if (state.activeProfileId == profileId) state.copy(library = library) else state }
                 }
             }
