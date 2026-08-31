@@ -328,15 +328,26 @@ fun PlayerScreen(
             delay(5_000)
             val currentPosition = player.currentPosition.coerceAtLeast(0L)
             val shouldAdvance = player.isPlaying && player.playbackState == Player.STATE_READY
-            val stalled = shouldAdvance && previousPosition >= 0L && currentPosition - previousPosition < 500L
+            // abs(): a manual backward seek (the −10 s remote button) drops currentPosition below
+            // previousPosition, which a plain subtraction misreads as a stall and can force an
+            // unwanted full stream restart on perfectly healthy playback.
+            val stalled = shouldAdvance && previousPosition >= 0L && kotlin.math.abs(currentPosition - previousPosition) < 500L
             stalledChecks = if (stalled) stalledChecks + 1 else 0
             if (!stalled) watchdogRecoveryCount = 0
 
-            if (stalledChecks >= 2 && watchdogRecoveryCount < 2) {
-                watchdogRecoveryCount += 1
-                stalledChecks = 0
-                buffering = true
-                startCandidate(activeStreamUrl, currentPosition)
+            if (stalledChecks >= 2) {
+                if (watchdogRecoveryCount < 2) {
+                    watchdogRecoveryCount += 1
+                    stalledChecks = 0
+                    buffering = true
+                    startCandidate(activeStreamUrl, currentPosition)
+                } else if (playbackError == null) {
+                    // Both automatic recovery attempts already failed to unstick this stream.
+                    // Without this branch the loop keeps silently doing nothing forever: the
+                    // screen stays frozen with no error and no visible sign anything is wrong.
+                    playbackError = "La lecture semble bloquée."
+                    buffering = false
+                }
             }
             previousPosition = currentPosition
         }
@@ -481,6 +492,7 @@ fun PlayerScreen(
                 onClick = {
                     playbackError = null
                     candidateIndex = 0
+                    watchdogRecoveryCount = 0
                     val retryUrl = streamCandidates.firstOrNull() ?: activeStreamUrl
                     startCandidate(retryUrl, if (entry.type == MediaType.Live) 0L else player.currentPosition.coerceAtLeast(0L))
                 },
