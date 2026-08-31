@@ -21,7 +21,6 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -125,12 +124,12 @@ fun BrowserScreen(
     }
     val historyByKey = remember(historyForType) { historyForType.associate { it.second.key to it.first } }
 
-    LaunchedEffect(selectedType, categories) {
+    androidx.compose.runtime.LaunchedEffect(selectedType, categories) {
         if (categories.none { it.id == selectedCategoryId }) {
             selectedCategoryId = defaultCategoryId(catalog, selectedType)
         }
     }
-    LaunchedEffect(selectedType, selectedCategoryId) {
+    androidx.compose.runtime.LaunchedEffect(selectedType, selectedCategoryId) {
         onLocationChanged(selectedType, selectedCategoryId)
     }
 
@@ -283,11 +282,10 @@ private fun LiveCatalogLayout(
     onToggleEntryFavorite: (MediaEntry) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var previewKey by remember(catalog) { mutableStateOf<String?>(null) }
-    LaunchedEffect(selectedCategoryId, entries) {
-        if (entries.none { it.key == previewKey }) previewKey = entries.firstOrNull()?.key
+    var previewEntry by remember(catalog) { mutableStateOf(entries.firstOrNull()) }
+    if (previewEntry != null && catalog.entry(previewEntry!!.key) == null) {
+        previewEntry = entries.firstOrNull()
     }
-    val previewEntry = entries.firstOrNull { it.key == previewKey } ?: entries.firstOrNull()
 
     Row(modifier, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         CategoryRail(
@@ -311,8 +309,12 @@ private fun LiveCatalogLayout(
             entries = entries,
             previewKey = previewEntry?.key,
             favoriteEntries = favoriteEntries,
-            onPreview = { previewKey = it.key },
-            onOpen = onEntrySelected,
+            onConfirm = { channel ->
+                when (liveChannelConfirmAction(previewEntry?.key, channel.key)) {
+                    LiveChannelConfirmAction.Preview -> previewEntry = channel
+                    LiveChannelConfirmAction.Fullscreen -> onEntrySelected(channel)
+                }
+            },
             onToggleFavorite = onToggleEntryFavorite,
             modifier = Modifier.width(340.dp).fillMaxHeight(),
         )
@@ -331,8 +333,7 @@ private fun LiveChannelList(
     entries: List<MediaEntry>,
     previewKey: String?,
     favoriteEntries: Set<String>,
-    onPreview: (MediaEntry) -> Unit,
-    onOpen: (MediaEntry) -> Unit,
+    onConfirm: (MediaEntry) -> Unit,
     onToggleFavorite: (MediaEntry) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -340,7 +341,7 @@ private fun LiveChannelList(
         Row(Modifier.fillMaxWidth().padding(start = 3.dp, bottom = 7.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("Chaînes", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.weight(1f))
-            Text(entries.size.toString(), color = MutedInk, fontSize = 10.sp)
+            Text("OK aperçu · OK encore plein écran", color = MutedInk, fontSize = 9.sp)
         }
         if (entries.isEmpty()) {
             Box(Modifier.fillMaxSize().background(DeepSurface), contentAlignment = Alignment.Center) {
@@ -350,9 +351,8 @@ private fun LiveChannelList(
             LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 items(entries, key = MediaEntry::key) { entry ->
                     FocusableSurface(
-                        onClick = { onOpen(entry) },
+                        onClick = { onConfirm(entry) },
                         onLongClick = { onToggleFavorite(entry) },
-                        onFocused = { onPreview(entry) },
                         selected = previewKey == entry.key,
                         modifier = Modifier.fillMaxWidth().height(48.dp),
                     ) {
@@ -430,7 +430,7 @@ private fun LivePreview(
         }
     }
 
-    LaunchedEffect(entry?.key) {
+    androidx.compose.runtime.LaunchedEffect(entry?.key) {
         val target = entry ?: return@LaunchedEffect
         delay(280)
         error = false
@@ -473,14 +473,14 @@ private fun LivePreview(
                     Text(entry.displayName, color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Spacer(Modifier.height(3.dp))
                     Text(
-                        "CH ${entry.number}${if (favorite) " · ★ Favori" else ""}  ·  OK plein écran · OK long favori",
+                        "CH ${entry.number}${if (favorite) " · ★ Favori" else ""} · OK encore = plein écran · OK long = favori",
                         color = FocusBlueBright,
                         fontSize = 10.sp,
                         maxLines = 1,
                     )
                 }
             } else {
-                Text("Sélectionnez une chaîne", color = MutedInk, fontSize = 16.sp, modifier = Modifier.align(Alignment.Center))
+                Text("Sélectionnez une chaîne puis appuyez sur OK", color = MutedInk, fontSize = 16.sp, modifier = Modifier.align(Alignment.Center))
             }
         }
     }
@@ -546,7 +546,7 @@ private fun CategoryRail(
     modifier: Modifier = Modifier,
 ) {
     val firstFocus = remember(type) { FocusRequester() }
-    LaunchedEffect(type, categories.size) {
+    androidx.compose.runtime.LaunchedEffect(type, categories.size) {
         if (categories.isNotEmpty()) runCatching { firstFocus.requestFocus() }
     }
 
@@ -554,14 +554,13 @@ private fun CategoryRail(
         Row(Modifier.fillMaxWidth().padding(start = 3.dp, bottom = 7.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("Catégories", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.weight(1f))
-            Text("OK long = favori", color = MutedInk, fontSize = 9.sp)
+            Text("OK choisir · OK long favori", color = MutedInk, fontSize = 9.sp)
         }
         LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             items(categories, key = MediaCategory::key) { category ->
                 val virtual = category.id in setOf(Catalog.ALL_CATEGORY_ID, FAVORITES_CATEGORY_ID, HISTORY_CATEGORY_ID)
                 FocusableSurface(
                     onClick = { onSelected(category) },
-                    onFocused = { onSelected(category) },
                     onLongClick = if (virtual) null else ({ onToggleFavorite(category) }),
                     selected = selectedCategoryId == category.id,
                     modifier = Modifier
