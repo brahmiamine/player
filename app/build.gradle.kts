@@ -36,7 +36,6 @@ android {
         }
         create("optimized") {
             initWith(getByName("release"))
-            applicationIdSuffix = ".optimized"
             versionNameSuffix = "-optimized"
             signingConfig = signingConfigs.getByName("debug")
             matchingFallbacks += listOf("release")
