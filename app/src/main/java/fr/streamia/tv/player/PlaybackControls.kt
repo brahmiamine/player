@@ -31,7 +31,7 @@ enum class PlaybackRemoteAction {
 
 fun playbackRemoteAction(type: MediaType, button: PlaybackRemoteButton): PlaybackRemoteAction =
     when (button) {
-        PlaybackRemoteButton.Ok -> if (type == MediaType.Live) PlaybackRemoteAction.OpenLivePicker else PlaybackRemoteAction.ToggleHud
+        PlaybackRemoteButton.Ok -> if (type == MediaType.Live) PlaybackRemoteAction.OpenLivePicker else PlaybackRemoteAction.TogglePlayback
         PlaybackRemoteButton.PlayPause -> PlaybackRemoteAction.TogglePlayback
         PlaybackRemoteButton.Settings -> PlaybackRemoteAction.OpenSettings
         PlaybackRemoteButton.Menu -> if (type == MediaType.Live) PlaybackRemoteAction.OpenLivePicker else PlaybackRemoteAction.None
@@ -41,7 +41,7 @@ fun playbackRemoteAction(type: MediaType, button: PlaybackRemoteButton): Playbac
         PlaybackRemoteButton.Right -> if (type == MediaType.Live) PlaybackRemoteAction.OpenSettings else PlaybackRemoteAction.SeekForward
         PlaybackRemoteButton.Rewind -> if (type == MediaType.Live) PlaybackRemoteAction.None else PlaybackRemoteAction.SeekBackward
         PlaybackRemoteButton.FastForward -> if (type == MediaType.Live) PlaybackRemoteAction.None else PlaybackRemoteAction.SeekForward
-        PlaybackRemoteButton.Info -> PlaybackRemoteAction.ToggleHud
+        PlaybackRemoteButton.Info -> if (type == MediaType.Live) PlaybackRemoteAction.ToggleHud else PlaybackRemoteAction.OpenSettings
         PlaybackRemoteButton.Other -> PlaybackRemoteAction.None
     }
 

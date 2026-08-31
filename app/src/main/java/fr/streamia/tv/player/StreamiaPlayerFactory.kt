@@ -8,6 +8,7 @@ import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.logging.CrashReporter
 import okhttp3.ConnectionPool
@@ -40,6 +41,7 @@ object StreamiaPlayerFactory {
             .setUserAgent("Streamia-TV/1.5")
         val mediaSourceFactory = DefaultMediaSourceFactory(context)
             .setDataSourceFactory(dataSourceFactory)
+            .setLoadErrorHandlingPolicy(DefaultLoadErrorHandlingPolicy(5))
         val renderersFactory = DefaultRenderersFactory(context)
             .setEnableDecoderFallback(true)
 

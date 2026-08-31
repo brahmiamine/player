@@ -524,9 +524,7 @@ private fun LivePreview(
         activeUrl = livePlaybackSession.activeUrl
     }
 
-    Column(modifier) {
-        Text("Aperçu en direct", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 3.dp, bottom = 7.dp))
-        Box(Modifier.fillMaxWidth().weight(1f).background(Color.Black)) {
+    Box(modifier.background(Color.Black)) {
             if (entry != null) {
                 liveVideoSurface(LiveVideoSurfacePlacement(Modifier.fillMaxSize()))
                 if (buffering) {
@@ -554,7 +552,16 @@ private fun LivePreview(
             } else {
                 Text("Sélectionnez une chaîne puis appuyez sur OK", color = MutedInk, fontSize = 16.sp, modifier = Modifier.align(Alignment.Center))
             }
-        }
+        Text(
+            "Aperçu en direct",
+            color = Ink,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .background(Night.copy(alpha = 0.82f))
+                .padding(horizontal = 12.dp, vertical = 7.dp),
+        )
     }
 }
 

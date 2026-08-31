@@ -20,10 +20,10 @@ class PlaybackTuningTest {
     fun `vod keeps a larger stability-oriented buffer`() {
         listOf(MediaType.Movie, MediaType.Series).forEach { type ->
             val profile = PlaybackTuning.forType(type)
-            assertEquals(15_000, profile.minBufferMs)
-            assertEquals(50_000, profile.maxBufferMs)
-            assertEquals(800, profile.bufferForPlaybackMs)
-            assertEquals(2_000, profile.bufferForPlaybackAfterRebufferMs)
+            assertEquals(25_000, profile.minBufferMs)
+            assertEquals(90_000, profile.maxBufferMs)
+            assertEquals(650, profile.bufferForPlaybackMs)
+            assertEquals(3_000, profile.bufferForPlaybackAfterRebufferMs)
             assertTrue(profile.maxBufferMs > PlaybackTuning.forType(MediaType.Live).maxBufferMs)
         }
     }
