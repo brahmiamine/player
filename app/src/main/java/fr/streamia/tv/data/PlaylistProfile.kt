@@ -27,9 +27,15 @@ data class PlaylistProfile(
         return ServerCredentials(server, user, pass)
     }
 
-    fun shouldAutoRefresh(now: Long = System.currentTimeMillis()): Boolean {
-        if (!isRemoteM3u) return false
+    /**
+     * Le même intervalle sert au catalogue Xtream et aux playlists M3U distantes.
+     * Tant qu'il n'est pas expiré, l'application reste entièrement sur le catalogue local.
+     */
+    fun isCatalogRefreshDue(now: Long = System.currentTimeMillis()): Boolean {
         val interval = autoRefreshHours.coerceIn(1, 168) * 60L * 60L * 1000L
         return lastRefreshAt <= 0L || now - lastRefreshAt >= interval
     }
+
+    fun shouldAutoRefresh(now: Long = System.currentTimeMillis()): Boolean =
+        isRemoteM3u && isCatalogRefreshDue(now)
 }
