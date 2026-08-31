@@ -35,8 +35,8 @@ fun playbackRemoteAction(type: MediaType, button: PlaybackRemoteButton): Playbac
         PlaybackRemoteButton.PlayPause -> PlaybackRemoteAction.TogglePlayback
         PlaybackRemoteButton.Settings -> PlaybackRemoteAction.OpenSettings
         PlaybackRemoteButton.Menu -> if (type == MediaType.Live) PlaybackRemoteAction.OpenLivePicker else PlaybackRemoteAction.None
-        PlaybackRemoteButton.Up -> if (type == MediaType.Live) PlaybackRemoteAction.ZapPrevious else PlaybackRemoteAction.None
-        PlaybackRemoteButton.Down -> if (type == MediaType.Live) PlaybackRemoteAction.ZapNext else PlaybackRemoteAction.None
+        PlaybackRemoteButton.Up -> if (type == MediaType.Live) PlaybackRemoteAction.ZapNext else PlaybackRemoteAction.None
+        PlaybackRemoteButton.Down -> if (type == MediaType.Live) PlaybackRemoteAction.ZapPrevious else PlaybackRemoteAction.None
         PlaybackRemoteButton.Left -> if (type == MediaType.Live) PlaybackRemoteAction.OpenLivePicker else PlaybackRemoteAction.SeekBackward
         PlaybackRemoteButton.Right -> if (type == MediaType.Live) PlaybackRemoteAction.OpenSettings else PlaybackRemoteAction.SeekForward
         PlaybackRemoteButton.Rewind -> if (type == MediaType.Live) PlaybackRemoteAction.None else PlaybackRemoteAction.SeekBackward
