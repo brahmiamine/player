@@ -152,30 +152,43 @@ fun TvTextField(
     modifier: Modifier = Modifier,
     visualTransformation: VisualTransformation = VisualTransformation.None,
     supportingText: String? = null,
+    enabled: Boolean = true,
 ) {
     var focused by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(10.dp)
+    val fieldBackground = if (enabled) RaisedSurface else DeepSurface.copy(alpha = 0.72f)
+    val textColor = if (enabled) Ink else MutedInk.copy(alpha = 0.66f)
+    val labelColor = when {
+        !enabled -> MutedInk.copy(alpha = 0.55f)
+        focused -> FocusBlueBright
+        else -> MutedInk
+    }
     androidx.compose.foundation.text.BasicTextField(
         value = value,
         onValueChange = onValueChange,
+        enabled = enabled,
         singleLine = true,
         visualTransformation = visualTransformation,
-        textStyle = TextStyle(color = Ink, fontSize = 19.sp, fontWeight = FontWeight.Medium),
+        textStyle = TextStyle(color = textColor, fontSize = 19.sp, fontWeight = FontWeight.Medium),
         modifier = modifier
             .height(if (supportingText == null) 68.dp else 88.dp)
             .clip(shape)
-            .background(RaisedSurface)
-            .border(if (focused) 3.dp else 1.dp, if (focused) FocusBlueBright else Color.White.copy(0.12f), shape)
-            .onFocusChanged { focused = it.isFocused }
+            .background(fieldBackground)
+            .border(
+                if (focused && enabled) 3.dp else 1.dp,
+                if (focused && enabled) FocusBlueBright else Color.White.copy(if (enabled) 0.12f else 0.05f),
+                shape,
+            )
+            .onFocusChanged { focused = enabled && it.isFocused }
             .padding(horizontal = 18.dp, vertical = 10.dp),
         decorationBox = { input ->
             androidx.compose.foundation.layout.Column(verticalArrangement = Arrangement.Center) {
-                Text(label, color = if (focused) FocusBlueBright else MutedInk, fontSize = 14.sp)
+                Text(label, color = labelColor, fontSize = 14.sp)
                 Spacer(Modifier.height(3.dp))
                 input()
                 if (supportingText != null) {
                     Spacer(Modifier.height(2.dp))
-                    Text(supportingText, color = MutedInk, fontSize = 12.sp)
+                    Text(supportingText, color = if (enabled) MutedInk else MutedInk.copy(alpha = 0.55f), fontSize = 12.sp)
                 }
             }
         },
