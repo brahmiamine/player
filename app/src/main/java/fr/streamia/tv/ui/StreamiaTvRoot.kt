@@ -2,6 +2,7 @@ package fr.streamia.tv.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -24,6 +25,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -32,6 +34,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.tv.material3.Text
 import fr.streamia.tv.data.PlaybackSessionStore
+import fr.streamia.tv.data.UserLibrarySnapshot
 import fr.streamia.tv.data.resolveStartupProfileId
 import fr.streamia.tv.domain.Catalog
 import fr.streamia.tv.domain.MediaCategory
@@ -41,10 +44,14 @@ import fr.streamia.tv.ui.theme.FocusBlueBright
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
 import fr.streamia.tv.ui.theme.Night
+import fr.streamia.tv.ui.theme.WarmSignal
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.yield
+
+private const val LIVE_PICKER_FAVORITES_CATEGORY_ID = "__favorites__"
+private const val LIVE_PICKER_HISTORY_CATEGORY_ID = "__history__"
 
 /** État très léger utilisé par MainActivity pour ouvrir le sélecteur Live avec la touche OK. */
 object PlayerOverlayController {
@@ -140,7 +147,7 @@ fun StreamiaTvRoot(viewModel: StreamiaViewModel) {
         }
     }
 
-    androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
+    Box(Modifier.fillMaxSize()) {
         StreamiaApp(viewModel)
 
         val playerScreen = state.screen as? StreamiaScreen.Player
@@ -151,13 +158,42 @@ fun StreamiaTvRoot(viewModel: StreamiaViewModel) {
         ) {
             LiveChannelPickerOverlay(
                 catalog = state.catalog!!,
+                library = state.library,
                 currentEntry = playerScreen.entry,
+                initialCategoryId = state.browserCategoryId,
+                offline = state.offline,
+                busy = state.busy,
                 onEntrySelected = { channel ->
                     when (liveChannelConfirmAction(playerScreen.entry.key, channel.key)) {
                         LiveChannelConfirmAction.Preview -> viewModel.openEntry(channel)
                         LiveChannelConfirmAction.Fullscreen -> PlayerOverlayController.closeLivePicker()
                         LiveChannelConfirmAction.Ignore -> Unit
                     }
+                },
+                onCategorySelected = { categoryId ->
+                    viewModel.rememberBrowserLocation(MediaType.Live, categoryId)
+                },
+                onToggleEntryFavorite = viewModel::toggleEntryFavorite,
+                onToggleCategoryFavorite = viewModel::toggleCategoryFavorite,
+                onHome = {
+                    PlayerOverlayController.closeLivePicker()
+                    viewModel.showHome()
+                },
+                onOpenSection = { type ->
+                    PlayerOverlayController.closeLivePicker()
+                    viewModel.openSection(type)
+                },
+                onSearch = {
+                    PlayerOverlayController.closeLivePicker()
+                    viewModel.showSearch()
+                },
+                onEpg = {
+                    PlayerOverlayController.closeLivePicker()
+                    viewModel.showEpg()
+                },
+                onSettings = {
+                    PlayerOverlayController.closeLivePicker()
+                    viewModel.showSettings()
                 },
                 onClose = PlayerOverlayController::closeLivePicker,
             )
@@ -168,23 +204,59 @@ fun StreamiaTvRoot(viewModel: StreamiaViewModel) {
 @Composable
 private fun LiveChannelPickerOverlay(
     catalog: Catalog,
+    library: UserLibrarySnapshot,
     currentEntry: MediaEntry,
+    initialCategoryId: String?,
+    offline: Boolean,
+    busy: Boolean,
     onEntrySelected: (MediaEntry) -> Unit,
+    onCategorySelected: (String) -> Unit,
+    onToggleEntryFavorite: (MediaEntry) -> Unit,
+    onToggleCategoryFavorite: (MediaCategory) -> Unit,
+    onHome: () -> Unit,
+    onOpenSection: (MediaType) -> Unit,
+    onSearch: () -> Unit,
+    onEpg: () -> Unit,
+    onSettings: () -> Unit,
     onClose: () -> Unit,
 ) {
     BackHandler(onBack = onClose)
 
-    val categories = remember(catalog) {
-        listOf(Catalog.allCategory(MediaType.Live)) + catalog.categoriesFor(MediaType.Live)
+    val favoriteLiveEntries = remember(catalog, library.favoriteEntries) {
+        catalog.entriesFor(MediaType.Live).filter { it.key in library.favoriteEntries }
     }
-    var selectedCategoryId by androidx.compose.runtime.remember(currentEntry.categoryId) {
+    val historyLiveEntries = remember(catalog, library.history) {
+        library.history.asSequence()
+            .map { item -> catalog.entry(item.entry.key) ?: item.entry }
+            .filter { it.type == MediaType.Live }
+            .distinctBy(MediaEntry::key)
+            .toList()
+    }
+    val categories = remember(catalog, favoriteLiveEntries.size, historyLiveEntries.size) {
+        buildList {
+            if (historyLiveEntries.isNotEmpty()) {
+                add(MediaCategory(LIVE_PICKER_HISTORY_CATEGORY_ID, "↺ Historique", MediaType.Live))
+            }
+            if (favoriteLiveEntries.isNotEmpty()) {
+                add(MediaCategory(LIVE_PICKER_FAVORITES_CATEGORY_ID, "★ Favoris", MediaType.Live))
+            }
+            addAll(catalog.categoriesFor(MediaType.Live))
+            add(Catalog.allCategory(MediaType.Live))
+        }
+    }
+    var selectedCategoryId by androidx.compose.runtime.remember(initialCategoryId, currentEntry.categoryId, categories.size) {
         androidx.compose.runtime.mutableStateOf(
-            currentEntry.categoryId.takeIf { id -> categories.any { it.id == id } }
+            initialCategoryId?.takeIf { id -> categories.any { it.id == id } }
+                ?: currentEntry.categoryId.takeIf { id -> categories.any { it.id == id } }
                 ?: Catalog.ALL_CATEGORY_ID,
         )
     }
-    val channels = remember(catalog, selectedCategoryId) {
-        catalog.entriesIn(MediaType.Live, selectedCategoryId)
+    val channels = remember(catalog, selectedCategoryId, favoriteLiveEntries, historyLiveEntries) {
+        when (selectedCategoryId) {
+            LIVE_PICKER_FAVORITES_CATEGORY_ID -> favoriteLiveEntries
+            LIVE_PICKER_HISTORY_CATEGORY_ID -> historyLiveEntries
+            else -> catalog.entriesIn(MediaType.Live, selectedCategoryId)
+        }
     }
     val categoryListState = rememberLazyListState()
     val channelListState = rememberLazyListState()
@@ -205,92 +277,123 @@ private fun LiveChannelPickerOverlay(
         }
     }
 
-    Row(
-        Modifier
-            .fillMaxSize()
-            .padding(18.dp),
-        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp),
-    ) {
-        Column(
+    Column(Modifier.fillMaxSize()) {
+        LivePickerHeader(
+            catalog = catalog,
+            offline = offline,
+            busy = busy,
+            onHome = onHome,
+            onOpenSection = onOpenSection,
+            onSearch = onSearch,
+            onEpg = onEpg,
+            onSettings = onSettings,
+        )
+
+        Row(
             Modifier
-                .width(250.dp)
-                .fillMaxHeight()
-                .background(Night.copy(alpha = 0.985f))
-                .padding(14.dp),
+                .fillMaxSize()
+                .padding(start = 18.dp, end = 18.dp, bottom = 18.dp),
+            horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp),
         ) {
-            Text("Catégories", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(4.dp))
-            Text("Déplacement = aucun changement · OK choisir", color = MutedInk, fontSize = 9.sp)
-            Spacer(Modifier.height(10.dp))
-            LazyColumn(
-                state = categoryListState,
-                verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(5.dp),
+            Column(
+                Modifier
+                    .width(250.dp)
+                    .fillMaxHeight()
+                    .background(Night.copy(alpha = 0.985f))
+                    .padding(14.dp),
             ) {
-                items(categories, key = MediaCategory::key) { category ->
-                    FocusableSurface(
-                        onClick = { selectedCategoryId = category.id },
-                        selected = selectedCategoryId == category.id,
-                        modifier = Modifier.fillMaxWidth().height(48.dp),
-                    ) {
-                        Row(
-                            Modifier.fillMaxWidth().padding(horizontal = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Catégories", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                        Text("OK choisir · OK long favori", color = MutedInk, fontSize = 9.sp)
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                LazyColumn(
+                    state = categoryListState,
+                    verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(4.dp),
+                ) {
+                    items(categories, key = MediaCategory::key) { category ->
+                        val isVirtual = category.id == LIVE_PICKER_FAVORITES_CATEGORY_ID ||
+                            category.id == LIVE_PICKER_HISTORY_CATEGORY_ID ||
+                            category.id == Catalog.ALL_CATEGORY_ID
+                        FocusableSurface(
+                            onClick = {
+                                selectedCategoryId = category.id
+                                onCategorySelected(category.id)
+                            },
+                            onLongClick = if (isVirtual) null else { { onToggleCategoryFavorite(category) } },
+                            selected = selectedCategoryId == category.id,
+                            modifier = Modifier.fillMaxWidth().height(48.dp),
                         ) {
-                            Text(
-                                category.name,
-                                color = Ink,
-                                fontSize = 12.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f),
-                            )
-                            val count = catalog.entriesIn(MediaType.Live, category.id).size
-                            Text(count.toString(), color = MutedInk, fontSize = 9.sp)
+                            Row(
+                                Modifier.fillMaxWidth().padding(horizontal = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    category.name,
+                                    color = Ink,
+                                    fontSize = 12.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                if (!isVirtual && category.key in library.favoriteCategories) {
+                                    Spacer(Modifier.width(5.dp))
+                                    Text("★", color = FocusBlueBright, fontSize = 11.sp)
+                                }
+                                Spacer(Modifier.width(6.dp))
+                                val count = when (category.id) {
+                                    LIVE_PICKER_FAVORITES_CATEGORY_ID -> favoriteLiveEntries.size
+                                    LIVE_PICKER_HISTORY_CATEGORY_ID -> historyLiveEntries.size
+                                    else -> catalog.entriesIn(MediaType.Live, category.id).size
+                                }
+                                Text(count.toString(), color = MutedInk, fontSize = 9.sp)
+                            }
                         }
                     }
                 }
             }
-        }
 
-        Column(
-            Modifier
-                .width(340.dp)
-                .fillMaxHeight()
-                .background(Night.copy(alpha = 0.985f))
-                .padding(14.dp),
-        ) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("Chaînes", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                    Text("OK aperçu · OK encore plein écran", color = MutedInk, fontSize = 9.sp)
-                }
-                FocusableSurface(onClick = onClose, modifier = Modifier.width(82.dp).height(42.dp)) {
-                    Text("Fermer", color = Ink, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 10.dp))
-                }
-            }
-            Spacer(Modifier.height(10.dp))
-            LazyColumn(
-                state = channelListState,
-                verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(5.dp),
+            Column(
+                Modifier
+                    .width(340.dp)
+                    .fillMaxHeight()
+                    .background(Night.copy(alpha = 0.985f))
+                    .padding(14.dp),
             ) {
-                items(channels, key = MediaEntry::key) { channel ->
-                    val isFocusTarget = channel.key == focusTargetKey
-                    FocusableSurface(
-                        onClick = { onEntrySelected(channel) },
-                        selected = channel.key == currentEntry.key,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(54.dp)
-                            .then(if (isFocusTarget) Modifier.focusRequester(channelFocus) else Modifier),
-                    ) {
-                        Row(
-                            Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Chaînes", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                        Text("OK aperçu · OK encore plein écran · OK long favori", color = MutedInk, fontSize = 9.sp)
+                    }
+                    FocusableSurface(onClick = onClose, modifier = Modifier.width(72.dp).height(38.dp)) {
+                        Text("Fermer", color = Ink, fontSize = 10.sp, modifier = Modifier.padding(horizontal = 8.dp))
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                LazyColumn(
+                    state = channelListState,
+                    verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(4.dp),
+                ) {
+                    items(channels, key = MediaEntry::key) { channel ->
+                        val isFocusTarget = channel.key == focusTargetKey
+                        FocusableSurface(
+                            onClick = { onEntrySelected(channel) },
+                            onLongClick = { onToggleEntryFavorite(channel) },
+                            selected = channel.key == currentEntry.key,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp)
+                                .then(if (isFocusTarget) Modifier.focusRequester(channelFocus) else Modifier),
                         ) {
-                            Text(channel.number.toString(), color = MutedInk, fontSize = 9.sp, modifier = Modifier.width(34.dp))
-                            ChannelLogo(channel.iconUrl, channel.displayName, Modifier.size(35.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Column(Modifier.weight(1f)) {
+                            Row(
+                                Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(channel.number.toString(), color = MutedInk, fontSize = 9.sp, modifier = Modifier.width(38.dp))
+                                ChannelLogo(channel.iconUrl, channel.displayName, Modifier.size(31.dp))
+                                Spacer(Modifier.width(8.dp))
                                 Text(
                                     channel.displayName,
                                     color = Ink,
@@ -298,50 +401,133 @@ private fun LiveChannelPickerOverlay(
                                     fontWeight = if (channel.key == currentEntry.key) FontWeight.Bold else FontWeight.Medium,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f),
                                 )
-                                if (channel.key == currentEntry.key) {
-                                    Text("Aperçu actif", color = FocusBlueBright, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                if (channel.key in library.favoriteEntries) {
+                                    Spacer(Modifier.width(5.dp))
+                                    Text("★", color = FocusBlueBright, fontSize = 12.sp)
                                 }
                             }
                         }
                     }
                 }
             }
-        }
 
-        Column(Modifier.weight(1f).fillMaxHeight()) {
-            Text(
-                "Aperçu en direct",
-                color = Ink,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier
-                    .background(Night.copy(alpha = 0.90f))
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
-            )
-            Spacer(Modifier.weight(1f))
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .background(Night.copy(alpha = 0.92f))
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-            ) {
+            Column(Modifier.weight(1f).fillMaxHeight()) {
                 Text(
-                    currentEntry.displayName,
+                    "Aperçu en direct",
                     color = Ink,
-                    fontSize = 17.sp,
+                    fontSize = 15.sp,
                     fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .background(Night.copy(alpha = 0.90f))
+                        .padding(horizontal = 14.dp, vertical = 9.dp),
                 )
-                Spacer(Modifier.height(3.dp))
-                Text(
-                    "CH ${currentEntry.number} · l’aperçu reste actif pendant la navigation · OK sur cette chaîne = plein écran",
-                    color = FocusBlueBright,
-                    fontSize = 10.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                Spacer(Modifier.weight(1f))
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .background(Night.copy(alpha = 0.92f))
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                ) {
+                    Text(
+                        currentEntry.displayName,
+                        color = Ink,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(Modifier.height(3.dp))
+                    Text(
+                        "CH ${currentEntry.number} · chaîne déjà en lecture · OK sur cette chaîne = plein écran",
+                        color = FocusBlueBright,
+                        fontSize = 10.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LivePickerHeader(
+    catalog: Catalog,
+    offline: Boolean,
+    busy: Boolean,
+    onHome: () -> Unit,
+    onOpenSection: (MediaType) -> Unit,
+    onSearch: () -> Unit,
+    onEpg: () -> Unit,
+    onSettings: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(74.dp)
+            .background(Night.copy(alpha = 0.985f))
+            .padding(horizontal = 20.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        StreamiaLogo(compact = true)
+        Spacer(Modifier.width(16.dp))
+        LivePickerHeaderAction("Accueil", 90.dp, selected = false, onClick = onHome)
+        Spacer(Modifier.width(6.dp))
+        for (type in MediaType.entries) {
+            LivePickerHeaderAction(
+                label = type.displayName,
+                width = 104.dp,
+                selected = type == MediaType.Live,
+                enabled = catalog.count(type) > 0,
+                subtitle = catalog.count(type).toString(),
+                onClick = { onOpenSection(type) },
+            )
+            Spacer(Modifier.width(6.dp))
+        }
+        Spacer(Modifier.weight(1f))
+        LivePickerHeaderAction("⌕", 52.dp, selected = false, onClick = onSearch)
+        Spacer(Modifier.width(6.dp))
+        LivePickerHeaderAction("EPG", 68.dp, selected = false, enabled = catalog.count(MediaType.Live) > 0, onClick = onEpg)
+        Spacer(Modifier.width(6.dp))
+        LivePickerHeaderAction("⚙", 52.dp, selected = false, onClick = onSettings)
+        Spacer(Modifier.width(10.dp))
+        Box(Modifier.size(6.dp).background(if (offline) WarmSignal else Color(0xFF6CCB91)))
+        Spacer(Modifier.width(5.dp))
+        Text(
+            when {
+                busy -> "Chargement…"
+                offline -> "Cache"
+                else -> "Local / en ligne"
+            },
+            color = if (offline) WarmSignal else MutedInk,
+            fontSize = 10.sp,
+        )
+    }
+}
+
+@Composable
+private fun LivePickerHeaderAction(
+    label: String,
+    width: androidx.compose.ui.unit.Dp,
+    selected: Boolean,
+    enabled: Boolean = true,
+    subtitle: String? = null,
+    onClick: () -> Unit,
+) {
+    FocusableSurface(
+        onClick = onClick,
+        selected = selected,
+        enabled = enabled,
+        modifier = Modifier.width(width).height(44.dp),
+    ) {
+        if (subtitle == null) {
+            Text(label, color = Ink, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 10.dp))
+        } else {
+            Column(Modifier.padding(horizontal = 10.dp)) {
+                Text(label, color = Ink, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Text(subtitle, color = MutedInk, fontSize = 9.sp)
             }
         }
     }
