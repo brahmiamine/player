@@ -552,7 +552,16 @@ private fun LivePreview(
             } else {
                 Text("Sélectionnez une chaîne puis appuyez sur OK", color = MutedInk, fontSize = 16.sp, modifier = Modifier.align(Alignment.Center))
             }
-        }
+        Text(
+            "Aperçu en direct",
+            color = Ink,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .background(Night.copy(alpha = 0.82f))
+                .padding(horizontal = 12.dp, vertical = 7.dp),
+        )
     }
 }
 
@@ -668,13 +677,7 @@ private fun CategoryRail(
                     }
                 }
             }
-            Text(
-                "Aperçu en direct",
-                color = Ink,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.align(Alignment.TopEnd).background(Night.copy(alpha = 0.82f)).padding(horizontal = 12.dp, vertical = 7.dp),
-            )
+        }
     }
 }
 
