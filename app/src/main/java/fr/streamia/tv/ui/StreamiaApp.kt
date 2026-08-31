@@ -66,6 +66,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel) {
                     onEntrySelected = viewModel::openEntry,
                     onToggleEntryFavorite = viewModel::toggleEntryFavorite,
                     onToggleCategoryFavorite = viewModel::toggleCategoryFavorite,
+                    onLocationChanged = viewModel::rememberBrowserLocation,
                     onHome = viewModel::showHome,
                     onSearch = viewModel::showSearch,
                     onEpg = viewModel::showEpg,
