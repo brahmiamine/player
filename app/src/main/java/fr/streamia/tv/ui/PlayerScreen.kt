@@ -548,13 +548,13 @@ fun PlayerScreen(
                 dolbyVisionLabel = dolbyPlaybackLabel("Dolby Vision", dolbyVisionDetected, dolbyCapabilities.dolbyVision),
                 dolbyAtmosLabel = dolbyPlaybackLabel("Dolby Atmos", dolbyAtmosDetected, dolbyCapabilities.dolbyAtmos),
                 firstFocus = settingsFocus,
-                onNextAudio = {
-                    audioIndex = (audioIndex + 1) % audioTracks.size.coerceAtLeast(1)
+                onAudioSelected = { selectedIndex ->
+                    audioIndex = selectedIndex.coerceIn(audioTracks.indices)
                     applyAudio(audioTracks[audioIndex])
                     trackPreferenceStore.saveAudio(audioTracks[audioIndex].language)
                 },
-                onNextSubtitle = {
-                    subtitleIndex = (subtitleIndex + 1) % subtitleTracks.size.coerceAtLeast(1)
+                onSubtitleSelected = { selectedIndex ->
+                    subtitleIndex = selectedIndex.coerceIn(subtitleTracks.indices)
                     applySubtitle(subtitleTracks[subtitleIndex])
                     trackPreferenceStore.saveSubtitle(subtitleTracks[subtitleIndex].language)
                 },
