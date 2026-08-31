@@ -1,5 +1,7 @@
 package fr.streamia.tv.ui
 
+import fr.streamia.tv.domain.MediaEntry
+import fr.streamia.tv.domain.MediaType
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -43,4 +45,40 @@ class StartupPresentationTest {
             ),
         )
     }
+
+    @Test
+    fun `live browser return waits while restored catalog is hydrating`() {
+        assertTrue(
+            shouldDeferLiveBrowserReturn(
+                StreamiaUiState(
+                    booting = false,
+                    catalogHydrating = true,
+                    screen = StreamiaScreen.Player(liveEntry()),
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun `live browser return is immediate once local catalog is ready`() {
+        assertFalse(
+            shouldDeferLiveBrowserReturn(
+                StreamiaUiState(
+                    booting = false,
+                    catalogHydrating = false,
+                    screen = StreamiaScreen.Player(liveEntry()),
+                ),
+            ),
+        )
+    }
+
+    private fun liveEntry() = MediaEntry(
+        id = 1,
+        name = "Live",
+        displayName = "Live",
+        type = MediaType.Live,
+        categoryId = "1",
+        number = 1,
+        extension = "ts",
+    )
 }
