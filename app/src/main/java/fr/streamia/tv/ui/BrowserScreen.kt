@@ -99,17 +99,32 @@ fun BrowserScreen(
     BackHandler(onBack = onHome)
     val context = LocalContext.current.applicationContext
     val navigationStore = remember(credentials) { BrowserNavigationStore(context, credentials) }
+    val restoredLiveSelection = remember(catalog, credentials) {
+        val stored = navigationStore.liveSelection()
+        val returnedEntryKey = LiveBrowserReturnState.consume()
+        val entryKey = returnedEntryKey ?: stored?.entryKey
+        val categoryId = when {
+            entryKey == null -> stored?.categoryId
+            returnedEntryKey == null || returnedEntryKey == stored?.entryKey -> stored?.categoryId
+            else -> catalog.entry(entryKey)?.categoryId
+        }
+        categoryId to entryKey
+    }
 
     val defaultType = initialType
         ?.takeIf { catalog.count(it) > 0 }
         ?: MediaType.entries.firstOrNull { catalog.count(it) > 0 }
         ?: MediaType.Live
     var selectedType by remember(catalog, initialType) { mutableStateOf(defaultType) }
+    var lastLiveEntryKey by remember(catalog, credentials) { mutableStateOf(restoredLiveSelection.second) }
     var selectedCategoryId by remember(catalog, initialCategoryId) {
-        mutableStateOf(initialCategoryId ?: navigationStore.category(selectedType) ?: defaultCategoryId(catalog, selectedType))
-    }
-    val restoredLiveEntryKey = remember(catalog, credentials) {
-        LiveBrowserReturnState.consume() ?: navigationStore.entry(MediaType.Live)
+        mutableStateOf(
+            if (defaultType == MediaType.Live) {
+                restoredLiveSelection.first ?: initialCategoryId ?: defaultCategoryId(catalog, MediaType.Live)
+            } else {
+                initialCategoryId ?: navigationStore.category(defaultType) ?: defaultCategoryId(catalog, defaultType)
+            },
+        )
     }
 
     val baseCategories = remember(catalog, selectedType) { catalog.categoriesFor(selectedType) }
@@ -147,7 +162,9 @@ fun BrowserScreen(
     }
     androidx.compose.runtime.LaunchedEffect(selectedType, selectedCategoryId) {
         onLocationChanged(selectedType, selectedCategoryId)
-        navigationStore.saveCategory(selectedType, selectedCategoryId)
+        if (selectedType != MediaType.Live) {
+            navigationStore.saveCategory(selectedType, selectedCategoryId)
+        }
     }
 
     Column(Modifier.fillMaxSize().background(Night)) {
@@ -192,14 +209,15 @@ fun BrowserScreen(
                 categories = categories,
                 selectedCategoryId = selectedCategoryId,
                 entries = entries,
-                initialPreviewKey = restoredLiveEntryKey,
+                initialPreviewKey = lastLiveEntryKey,
                 initialListPosition = navigationStore.listPosition(MediaType.Live, selectedCategoryId),
                 favoriteCategories = library.favoriteCategories,
                 favoriteEntries = library.favoriteEntries,
                 historyCount = historyForType.size,
                 onCategorySelected = { selectedCategoryId = it.id },
                 onPreviewChanged = {
-                    navigationStore.saveEntry(MediaType.Live, it.key)
+                    lastLiveEntryKey = it.key
+                    navigationStore.saveLiveSelection(selectedCategoryId, it.key)
                     onRememberContent(it)
                 },
                 onListPositionChanged = {
@@ -443,6 +461,10 @@ private fun LiveChannelList(
         val index = entries.indexOfFirst { it.key == previewKey }
         if (index >= 0) {
             yield()
+            if (listState.layoutInfo.visibleItemsInfo.none { it.index == index }) {
+                listState.scrollToItem(index)
+                yield()
+            }
             runCatching { channelFocus.requestFocus() }
         }
     }
@@ -684,8 +706,12 @@ private fun CategoryRail(
     androidx.compose.runtime.LaunchedEffect(type, categories.size, selectedCategoryId, requestInitialFocus) {
         val index = categories.indexOfFirst { it.id == selectedCategoryId }
         if (index >= 0) {
-            if (requestInitialFocus) {
+            yield()
+            if (listState.layoutInfo.visibleItemsInfo.none { it.index == index }) {
+                listState.scrollToItem(index)
                 yield()
+            }
+            if (requestInitialFocus) {
                 runCatching { selectedFocus.requestFocus() }
             }
         }
