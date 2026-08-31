@@ -213,6 +213,9 @@ data class UserLibrarySnapshot(
     val history: List<PlaybackHistoryItem> = emptyList(),
 )
 
+fun UserLibrarySnapshot.hasSameCatalogLayoutAs(other: UserLibrarySnapshot): Boolean =
+    categoryOrder == other.categoryOrder && movedEntries == other.movedEntries
+
 data class PlaybackHistoryItem(
     val entry: MediaEntry,
     val positionMs: Long,

@@ -40,9 +40,13 @@ class XtreamRepository(context: Context) {
     fun customizedCatalog(profileId: String, catalog: Catalog): Catalog = libraryStore.applyToCatalog(profileId, catalog)
 
     /** Prépare les index d'un catalogue massif hors du thread d'interface. */
-    suspend fun prepareCatalogPresentation(profileId: String, catalog: Catalog): CatalogPresentation =
+    suspend fun prepareCatalogPresentation(
+        profileId: String,
+        catalog: Catalog,
+        librarySnapshot: UserLibrarySnapshot? = null,
+    ): CatalogPresentation =
         withContext(Dispatchers.Default) {
-            val library = libraryStore.snapshot(profileId)
+            val library = librarySnapshot ?: libraryStore.snapshot(profileId)
             CatalogPresentation(
                 catalog = libraryStore.applyToCatalog(catalog, library),
                 library = library,

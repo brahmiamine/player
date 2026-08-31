@@ -8,6 +8,7 @@ import fr.streamia.tv.data.CatalogSource
 import fr.streamia.tv.data.LoadedCatalog
 import fr.streamia.tv.data.PlaylistProfile
 import fr.streamia.tv.data.UserLibrarySnapshot
+import fr.streamia.tv.data.hasSameCatalogLayoutAs
 import fr.streamia.tv.data.XtreamRepository
 import fr.streamia.tv.domain.Catalog
 import fr.streamia.tv.domain.EpgGuide
@@ -380,22 +381,48 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     }
 
     private suspend fun mergeCatalog(loaded: LoadedCatalog) {
-        val current = _uiState.value
-        if (current.activeProfileId != loaded.profileId) return
-        val presentation = repository.prepareCatalogPresentation(loaded.profileId, loaded.catalog)
         if (_uiState.value.activeProfileId != loaded.profileId) return
-        _uiState.update { state ->
-            state.copy(
-                booting = false,
-                busy = false,
-                rawCatalog = loaded.catalog,
-                catalog = presentation.catalog,
-                credentials = loaded.credentials,
-                profiles = presentation.profiles,
-                library = presentation.library,
-                offline = loaded.source == CatalogSource.Cache,
-                epgGuide = null,
-                message = loaded.importSummary ?: state.message,
+        var presentation = repository.prepareCatalogPresentation(loaded.profileId, loaded.catalog)
+
+        while (true) {
+            var committed = false
+            var layoutChanged = false
+            _uiState.update { state ->
+                committed = false
+                layoutChanged = false
+                when {
+                    state.activeProfileId != loaded.profileId -> state
+                    !state.library.hasSameCatalogLayoutAs(presentation.library) -> {
+                        layoutChanged = true
+                        state
+                    }
+                    else -> {
+                        committed = true
+                        state.copy(
+                            booting = false,
+                            busy = false,
+                            rawCatalog = loaded.catalog,
+                            catalog = presentation.catalog,
+                            credentials = loaded.credentials,
+                            profiles = presentation.profiles,
+                            // Favoris et progression peuvent changer pendant le calcul : conserver
+                            // l'instantané courant empêche l'actualisation de les faire régresser.
+                            library = state.library,
+                            offline = loaded.source == CatalogSource.Cache,
+                            epgGuide = null,
+                            message = loaded.importSummary ?: state.message,
+                        )
+                    }
+                }
+            }
+            if (committed || !layoutChanged) return
+
+            val latest = _uiState.value
+            if (latest.activeProfileId != loaded.profileId) return
+            presentation = repository.prepareCatalogPresentation(
+                profileId = loaded.profileId,
+                catalog = loaded.catalog,
+                librarySnapshot = latest.library,
             )
         }
     }
