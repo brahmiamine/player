@@ -34,6 +34,7 @@ import kotlinx.coroutines.sync.withLock
 class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() {
     private val _uiState = MutableStateFlow(StreamiaUiState())
     private val catalogLayoutMutation = Mutex()
+    private val libraryMutation = Mutex()
     val uiState: StateFlow<StreamiaUiState> = _uiState.asStateFlow()
 
     init {
@@ -111,6 +112,11 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
      */
     fun openProfile(profileId: String) {
         if (_uiState.value.busy) return
+        // Marquer busy dès l'entrée, avant même la lecture du cache : repository.cachedCatalog()
+        // suspend sur Dispatchers.IO, ce qui laisse une fenêtre où un second appui (rebond
+        // télécommande, ou simple impatience) repasserait le garde busy ci-dessus et déclencherait
+        // un second openProfile() concurrent pour le même profil.
+        _uiState.update { it.copy(busy = true) }
         viewModelScope.launch {
             val profile = repository.profile(profileId)
             val credentials = profile?.credentialsOrNull()
@@ -297,6 +303,15 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         showEpg()
     }
 
+    /**
+     * Bascule optimiste : l'état local change tout de suite, la persistance est confirmée ensuite
+     * en arrière-plan puis la bibliothèque est relue pour rester source de vérité. [libraryMutation]
+     * sérialise cette confirmation — sans elle, deux appuis rapprochés sur le même favori (double
+     * appui télécommande) lancent deux relectures concurrentes sur Dispatchers.IO ; rien ne garantit
+     * que celle du premier appui se termine avant celle du second, et celle qui arrive en dernier
+     * écrase l'état affiché même si elle correspond à un instantané antérieur, ce qui fait
+     * clignoter l'icône vers une valeur déjà obsolète.
+     */
     fun toggleEntryFavorite(entry: MediaEntry) {
         val profileId = _uiState.value.activeProfileId ?: return
         _uiState.update { state ->
@@ -305,12 +320,16 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             }
             state.copy(library = state.library.copy(favoriteEntries = favorites))
         }
-        viewModelScope.launch(Dispatchers.IO) {
-            runCatching {
-                repository.toggleEntryFavorite(profileId, entry)
-                repository.library(profileId)
-            }.onSuccess { library ->
-                _uiState.update { state -> if (state.activeProfileId == profileId) state.copy(library = library) else state }
+        viewModelScope.launch {
+            libraryMutation.withLock {
+                runCatching {
+                    withContext(Dispatchers.IO) {
+                        repository.toggleEntryFavorite(profileId, entry)
+                        repository.library(profileId)
+                    }
+                }.onSuccess { library ->
+                    _uiState.update { state -> if (state.activeProfileId == profileId) state.copy(library = library) else state }
+                }
             }
         }
     }
@@ -323,12 +342,16 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             }
             state.copy(library = state.library.copy(favoriteCategories = favorites))
         }
-        viewModelScope.launch(Dispatchers.IO) {
-            runCatching {
-                repository.toggleCategoryFavorite(profileId, category)
-                repository.library(profileId)
-            }.onSuccess { library ->
-                _uiState.update { state -> if (state.activeProfileId == profileId) state.copy(library = library) else state }
+        viewModelScope.launch {
+            libraryMutation.withLock {
+                runCatching {
+                    withContext(Dispatchers.IO) {
+                        repository.toggleCategoryFavorite(profileId, category)
+                        repository.library(profileId)
+                    }
+                }.onSuccess { library ->
+                    _uiState.update { state -> if (state.activeProfileId == profileId) state.copy(library = library) else state }
+                }
             }
         }
     }
