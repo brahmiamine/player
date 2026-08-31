@@ -284,12 +284,12 @@ fun PlayerScreen(
         } else {
             var lastSavedAt = 0L
             while (true) {
-                delay(500)
+                delay(1_000)
                 val duration = player.duration.takeIf { it > 0 && it != C.TIME_UNSET } ?: 0L
                 positionMs = player.currentPosition.coerceAtLeast(0L)
                 durationMs = duration
                 val now = SystemClock.elapsedRealtime()
-                if (positionMs > 0 && now - lastSavedAt >= 5_000) {
+                if (positionMs > 0 && now - lastSavedAt >= 15_000) {
                     lastSavedAt = now
                     onProgress(entry, positionMs, duration)
                 }

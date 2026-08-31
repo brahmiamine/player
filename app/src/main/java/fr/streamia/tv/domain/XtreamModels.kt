@@ -22,7 +22,7 @@ data class MediaCategory(
     val name: String,
     val type: MediaType,
 ) {
-    val key: String get() = "${type.name}:$id"
+    val key: String = "${type.name}:$id"
 }
 
 data class MediaEntry(
@@ -40,7 +40,7 @@ data class MediaEntry(
     val playable: Boolean = type != MediaType.Series,
     val addedAtEpochSeconds: Long? = null,
 ) {
-    val key: String get() = "${type.name}:$id"
+    val key: String = "${type.name}:$id"
 }
 
 data class MediaDetails(
@@ -101,6 +101,14 @@ data class EpgGuide(
     val channels: Map<String, EpgChannel>,
     val loadedAtEpochSeconds: Long = System.currentTimeMillis() / 1000,
 ) {
+    private val channelsByAlias: Map<String, EpgChannel> = buildMap {
+        channels.forEach { (key, channel) ->
+            put(key.normalizedLookupKey(), channel)
+            put(channel.channelId.normalizedLookupKey(), channel)
+            channel.displayName?.takeIf(String::isNotBlank)?.let { put(it.normalizedLookupKey(), channel) }
+        }
+    }
+
     fun forEntry(entry: MediaEntry): List<EpgProgram> {
         val candidates = buildList {
             entry.tvgId?.takeIf(String::isNotBlank)?.let(::add)
@@ -109,14 +117,13 @@ data class EpgGuide(
         }
         for (candidate in candidates) {
             channels[candidate]?.programs?.let { if (it.isNotEmpty()) return it }
-            channels.values.firstOrNull {
-                it.channelId.equals(candidate, ignoreCase = true) ||
-                    it.displayName.equals(candidate, ignoreCase = true)
-            }?.programs?.let { if (it.isNotEmpty()) return it }
+            channelsByAlias[candidate.normalizedLookupKey()]?.programs?.let { if (it.isNotEmpty()) return it }
         }
         return emptyList()
     }
 }
+
+private fun String.normalizedLookupKey(): String = trim().lowercase()
 
 data class AccountInfo(
     val username: String,
@@ -135,6 +142,11 @@ data class Catalog(
     private val entriesBySection = entries.groupBy(MediaEntry::type)
     private val categoriesBySection = categories.groupBy(MediaCategory::type)
     private val entriesByKey = entries.associateBy(MediaEntry::key)
+    private val searchIndex by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        entries.map { entry ->
+            IndexedEntry(entry, "${entry.name}\u0000${entry.displayName}\u0000${entry.tvgId.orEmpty()}".lowercase())
+        }
+    }
 
     fun categoriesFor(type: MediaType): List<MediaCategory> = categoriesBySection[type].orEmpty()
 
@@ -151,14 +163,11 @@ data class Catalog(
     fun search(query: String, type: MediaType? = null, limit: Int = 500): List<MediaEntry> {
         val needle = query.trim().lowercase()
         if (needle.isBlank()) return emptyList()
-        return entries.asSequence()
-            .filter { type == null || it.type == type }
-            .filter {
-                it.name.lowercase().contains(needle) ||
-                    it.displayName.lowercase().contains(needle) ||
-                    it.tvgId?.lowercase()?.contains(needle) == true
-            }
+        return searchIndex.asSequence()
+            .filter { type == null || it.entry.type == type }
+            .filter { it.text.contains(needle) }
             .take(limit)
+            .map(IndexedEntry::entry)
             .toList()
     }
 
@@ -167,6 +176,8 @@ data class Catalog(
         fun allCategory(type: MediaType) = MediaCategory(ALL_CATEGORY_ID, "Tout", type)
     }
 }
+
+private data class IndexedEntry(val entry: MediaEntry, val text: String)
 
 fun List<MediaEntry>.adjacentTo(currentKey: String, delta: Int): MediaEntry? {
     if (isEmpty()) return null

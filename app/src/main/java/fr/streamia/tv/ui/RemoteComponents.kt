@@ -1,7 +1,7 @@
 package fr.streamia.tv.ui
 
-import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.content.Context
 import android.util.LruCache
 import android.view.KeyEvent as AndroidKeyEvent
 import androidx.compose.animation.core.animateFloatAsState
@@ -27,6 +27,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -58,10 +59,17 @@ import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
 import fr.streamia.tv.ui.theme.Night
 import fr.streamia.tv.ui.theme.RaisedSurface
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import java.net.HttpURLConnection
-import java.net.URL
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.Deferred
+import okhttp3.Cache
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import java.io.File
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
 
 @Composable
 fun FocusableSurface(
@@ -263,9 +271,10 @@ private fun RemoteArtwork(
     contentScale: ContentScale,
     imagePadding: Int,
 ) {
-    val bitmap by produceState<ImageBitmap?>(initialValue = LogoMemoryCache.get(url), key1 = url) {
+    val context = LocalContext.current.applicationContext
+    val bitmap by produceState<ImageBitmap?>(initialValue = ArtworkLoader.get(url), key1 = url) {
         if (url.isNullOrBlank() || value != null) return@produceState
-        value = withContext(Dispatchers.IO) { downloadLogo(url) }?.also { LogoMemoryCache.put(url, it) }
+        value = ArtworkLoader.load(context, url)
     }
     Box(
         modifier = modifier
@@ -291,32 +300,47 @@ private fun RemoteArtwork(
     }
 }
 
-private object LogoMemoryCache {
+private object ArtworkLoader {
     private val cache = LruCache<String, ImageBitmap>(128)
-    fun get(url: String?): ImageBitmap? = url?.let(cache::get)
-    fun put(url: String, bitmap: ImageBitmap) { cache.put(url, bitmap) }
-}
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val inFlight = ConcurrentHashMap<String, Deferred<ImageBitmap?>>()
+    @Volatile private var client: OkHttpClient? = null
 
-private fun downloadLogo(url: String): ImageBitmap? = runCatching {
-    val connection = (URL(url).openConnection() as HttpURLConnection).apply {
-        connectTimeout = 5_000
-        readTimeout = 7_000
-        useCaches = true
-        setRequestProperty("User-Agent", "Streamia-TV/1.5")
-    }
-    try {
-        if (connection.responseCode !in 200..299) return@runCatching null
-        val decoded = connection.inputStream.use { stream -> BitmapFactory.decodeStream(stream) }
-            ?: return@runCatching null
-        val largest = maxOf(decoded.width, decoded.height)
-        if (largest <= 480) decoded.asImageBitmap()
-        else {
-            val ratio = 480f / largest
-            Bitmap.createScaledBitmap(decoded, (decoded.width * ratio).toInt(), (decoded.height * ratio).toInt(), true)
-                .also { if (it !== decoded) decoded.recycle() }
-                .asImageBitmap()
+    fun get(url: String?): ImageBitmap? = url?.let(cache::get)
+
+    suspend fun load(context: Context, url: String): ImageBitmap? {
+        get(url)?.let { return it }
+        val deferred = inFlight.computeIfAbsent(url) {
+            scope.async { download(client(context), url)?.also { cache.put(url, it) } }
         }
-    } finally {
-        connection.disconnect()
+        return try {
+            deferred.await()
+        } finally {
+            inFlight.remove(url, deferred)
+        }
     }
-}.getOrNull()
+
+    @Synchronized
+    private fun client(context: Context): OkHttpClient = client ?: OkHttpClient.Builder()
+        .cache(Cache(File(context.cacheDir, "artwork-http"), 64L * 1024L * 1024L))
+        .connectTimeout(5, TimeUnit.SECONDS)
+        .readTimeout(8, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(true)
+        .build()
+        .also { client = it }
+
+    private fun download(client: OkHttpClient, url: String): ImageBitmap? = runCatching {
+        val request = Request.Builder().url(url).header("User-Agent", "Streamia-TV/1.5").build()
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) return@runCatching null
+            val bytes = response.body.bytes()
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+            var sample = 1
+            while (maxOf(bounds.outWidth, bounds.outHeight) / sample > 640) sample *= 2
+            BitmapFactory.decodeByteArray(
+                bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample },
+            )?.asImageBitmap()
+        }
+    }.getOrNull()
+}

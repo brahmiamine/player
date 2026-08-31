@@ -1,0 +1,5 @@
+HSPLfr/streamia/tv/MainActivity;
+HSPLfr/streamia/tv/StreamiaApplication;
+HSPLfr/streamia/tv/ui/StreamiaAppKt;
+HSPLfr/streamia/tv/ui/StreamiaViewModel;
+HSPLfr/streamia/tv/data/XtreamRepository;

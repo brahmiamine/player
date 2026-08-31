@@ -19,6 +19,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -35,6 +36,14 @@ import fr.streamia.tv.ui.theme.FocusBlueBright
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
 import fr.streamia.tv.ui.theme.Night
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+
+private data class SearchResult(
+    val categories: List<MediaCategory> = emptyList(),
+    val entries: List<MediaEntry> = emptyList(),
+)
 
 @Composable
 fun SearchScreen(
@@ -51,16 +60,24 @@ fun SearchScreen(
     var query by remember { mutableStateOf("") }
     var type by remember { mutableStateOf<MediaType?>(null) }
     val needle = query.trim().lowercase()
-    val categories = remember(catalog, needle, type) {
-        if (needle.isBlank()) emptyList() else catalog.categories.asSequence()
-            .filter { type == null || it.type == type }
-            .filter { it.name.lowercase().contains(needle) }
-            .take(120)
-            .toList()
+    val result by produceState(SearchResult(), catalog, needle, type) {
+        if (needle.isBlank()) {
+            value = SearchResult()
+            return@produceState
+        }
+        delay(220)
+        value = withContext(Dispatchers.Default) {
+            SearchResult(
+                catalog.categories.asSequence()
+                    .filter { type == null || it.type == type }
+                    .filter { it.name.contains(needle, ignoreCase = true) }
+                    .take(120).toList(),
+                catalog.search(needle, type, limit = 600),
+            )
+        }
     }
-    val entries = remember(catalog, needle, type) {
-        if (needle.isBlank()) emptyList() else catalog.search(needle, type, limit = 600)
-    }
+    val categories = result.categories
+    val entries = result.entries
 
     Column(Modifier.fillMaxSize().background(Night).padding(28.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
