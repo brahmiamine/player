@@ -37,6 +37,9 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -341,6 +344,9 @@ private fun LiveCatalogLayout(
     }
     var controlsVisible by remember { mutableStateOf(false) }
     var fullscreenTarget by remember { mutableStateOf<MediaEntry?>(null) }
+    var focusCategoryAfterChange by remember { mutableStateOf(false) }
+    val categoryFocus = remember { FocusRequester() }
+    val channelFocus = remember { FocusRequester() }
     val hiddenOffset = with(LocalDensity.current) { (-620).dp.toPx() }
     val controlsOffset by animateFloatAsState(
         if (controlsVisible) 0f else hiddenOffset,
@@ -363,6 +369,13 @@ private fun LiveCatalogLayout(
         controlsVisible = false
         delay(220)
         onEntrySelected(target)
+    }
+    LaunchedEffect(selectedCategoryId, focusCategoryAfterChange) {
+        if (focusCategoryAfterChange) {
+            yield()
+            runCatching { categoryFocus.requestFocus() }
+            focusCategoryAfterChange = false
+        }
     }
     if (previewEntry != null && catalog.entry(previewEntry!!.key) == null) {
         previewEntry = entries.firstOrNull()
@@ -399,6 +412,8 @@ private fun LiveCatalogLayout(
             onSelected = onCategorySelected,
             onToggleFavorite = onToggleCategoryFavorite,
             requestInitialFocus = false,
+            selectedFocusRequester = categoryFocus,
+            onRight = { runCatching { channelFocus.requestFocus() } },
             modifier = Modifier.width(250.dp).fillMaxHeight(),
         )
 
@@ -409,6 +424,16 @@ private fun LiveCatalogLayout(
                 favoriteEntries = favoriteEntries,
                 fullscreenPending = fullscreenTarget != null,
                 initialListPosition = initialListPosition,
+                selectedFocusRequester = channelFocus,
+                onLeft = { channel ->
+                    val exactCategory = categories.firstOrNull { it.id == channel.categoryId }
+                    if (exactCategory != null && exactCategory.id != selectedCategoryId) {
+                        focusCategoryAfterChange = true
+                        onCategorySelected(exactCategory)
+                    } else {
+                        runCatching { categoryFocus.requestFocus() }
+                    }
+                },
                 onListPositionChanged = onListPositionChanged,
                 onConfirm = { channel ->
                     when (
@@ -438,6 +463,8 @@ private fun LiveChannelList(
     favoriteEntries: Set<String>,
     fullscreenPending: Boolean,
     initialListPosition: NavigationListPosition,
+    selectedFocusRequester: FocusRequester,
+    onLeft: (MediaEntry) -> Unit,
     onListPositionChanged: (NavigationListPosition) -> Unit,
     onConfirm: (MediaEntry) -> Unit,
     onToggleFavorite: (MediaEntry) -> Unit,
@@ -448,7 +475,7 @@ private fun LiveChannelList(
         initialFirstVisibleItemIndex = initialListPosition.index.coerceIn(0, lastIndex),
         initialFirstVisibleItemScrollOffset = initialListPosition.offset.coerceAtLeast(0),
     )
-    val channelFocus = remember(previewKey) { FocusRequester() }
+    val channelFocus = selectedFocusRequester
 
     LaunchedEffect(listState) {
         snapshotFlow {
@@ -493,6 +520,15 @@ private fun LiveChannelList(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(48.dp)
+                            .onPreviewKeyEvent { event ->
+                                if (
+                                    event.type == KeyEventType.KeyDown &&
+                                    event.nativeKeyEvent.keyCode == android.view.KeyEvent.KEYCODE_DPAD_LEFT
+                                ) {
+                                    onLeft(entry)
+                                    true
+                                } else false
+                            }
                             .then(if (previewKey == entry.key) Modifier.focusRequester(channelFocus) else Modifier),
                     ) {
                         Row(
@@ -610,7 +646,7 @@ private fun LivePreview(
                     Modifier
                         .align(Alignment.BottomStart)
                         .fillMaxWidth()
-                        .background(Night.copy(alpha = 0.90f))
+                        .background(Night.copy(alpha = 0.72f))
                         .padding(horizontal = 14.dp, vertical = 10.dp),
                 ) {
                     Text(entry.displayName, color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -698,10 +734,13 @@ private fun CategoryRail(
     onSelected: (MediaCategory) -> Unit,
     onToggleFavorite: (MediaCategory) -> Unit,
     requestInitialFocus: Boolean = true,
+    selectedFocusRequester: FocusRequester? = null,
+    onRight: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
-    val selectedFocus = remember(selectedCategoryId, type) { FocusRequester() }
+    val internalSelectedFocus = remember(selectedCategoryId, type) { FocusRequester() }
+    val selectedFocus = selectedFocusRequester ?: internalSelectedFocus
 
     androidx.compose.runtime.LaunchedEffect(type, categories.size, selectedCategoryId, requestInitialFocus) {
         val index = categories.indexOfFirst { it.id == selectedCategoryId }
@@ -736,6 +775,16 @@ private fun CategoryRail(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(46.dp)
+                        .onPreviewKeyEvent { event ->
+                            if (
+                                onRight != null &&
+                                event.type == KeyEventType.KeyDown &&
+                                event.nativeKeyEvent.keyCode == android.view.KeyEvent.KEYCODE_DPAD_RIGHT
+                            ) {
+                                onRight()
+                                true
+                            } else false
+                        }
                         .then(if (category.id == selectedCategoryId) Modifier.focusRequester(selectedFocus) else Modifier),
                 ) {
                     Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {

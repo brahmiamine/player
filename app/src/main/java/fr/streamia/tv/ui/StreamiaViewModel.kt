@@ -61,6 +61,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         _uiState.value = StreamiaUiState(
             booting = false,
             busy = false,
+            catalogHydrating = true,
             screen = StreamiaScreen.Player(entry, returnToSeries),
             rawCatalog = startupCatalog,
             catalog = startupCatalog,
@@ -76,7 +77,11 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                     mergeCatalog(loaded)
                     if (loaded.source == CatalogSource.Cache) refreshSilently(profileId)
                 }
-                .onFailure { _uiState.update { state -> state.copy(offline = true, message = it.safeMessage()) } }
+                .onFailure {
+                    _uiState.update { state ->
+                        state.copy(catalogHydrating = false, offline = true, message = it.safeMessage())
+                    }
+                }
         }
         if (entry.type == MediaType.Live) loadEpg(entry)
     }
@@ -500,6 +505,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                         state.copy(
                             booting = false,
                             busy = false,
+                            catalogHydrating = false,
                             rawCatalog = loaded.catalog,
                             catalog = presentation.catalog,
                             credentials = loaded.credentials,
@@ -557,6 +563,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
 data class StreamiaUiState(
     val booting: Boolean = true,
     val busy: Boolean = false,
+    val catalogHydrating: Boolean = false,
     val screen: StreamiaScreen = StreamiaScreen.Login,
     val rawCatalog: Catalog? = null,
     val catalog: Catalog? = null,

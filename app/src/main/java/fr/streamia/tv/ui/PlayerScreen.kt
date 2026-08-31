@@ -148,6 +148,7 @@ fun PlayerScreen(
     var seekFeedback by remember(entry.key) { mutableStateOf<String?>(null) }
     var positionMs by remember(entry.key) { mutableStateOf(0L) }
     var durationMs by remember(entry.key) { mutableStateOf(0L) }
+    var watchdogRecoveryCount by remember(entry.key) { mutableStateOf(0) }
 
     fun startCandidate(url: String, positionMs: Long = 0L) {
         activeStreamUrl = url
@@ -316,6 +317,28 @@ fun PlayerScreen(
                     onProgress(entry, positionMs, duration)
                 }
             }
+        }
+    }
+
+    LaunchedEffect(entry.key, sharedLivePlayer) {
+        if (sharedLivePlayer) return@LaunchedEffect
+        var previousPosition = -1L
+        var stalledChecks = 0
+        while (true) {
+            delay(5_000)
+            val currentPosition = player.currentPosition.coerceAtLeast(0L)
+            val shouldAdvance = player.isPlaying && player.playbackState == Player.STATE_READY
+            val stalled = shouldAdvance && previousPosition >= 0L && currentPosition - previousPosition < 500L
+            stalledChecks = if (stalled) stalledChecks + 1 else 0
+            if (!stalled) watchdogRecoveryCount = 0
+
+            if (stalledChecks >= 2 && watchdogRecoveryCount < 2) {
+                watchdogRecoveryCount += 1
+                stalledChecks = 0
+                buffering = true
+                startCandidate(activeStreamUrl, currentPosition)
+            }
+            previousPosition = currentPosition
         }
     }
 
@@ -588,7 +611,7 @@ private fun PlayerInfoBand(
         modifier
             .fillMaxWidth()
             .padding(horizontal = 24.dp, vertical = 22.dp)
-            .background(Night.copy(alpha = 0.96f), androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
+            .background(Night.copy(alpha = 0.72f), androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
             .padding(horizontal = 22.dp, vertical = 16.dp),
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
