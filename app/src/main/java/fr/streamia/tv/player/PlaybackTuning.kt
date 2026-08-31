@@ -20,10 +20,10 @@ object PlaybackTuning {
         MediaType.Movie,
         MediaType.Series,
         -> BufferProfile(
-            minBufferMs = 15_000,
-            maxBufferMs = 50_000,
-            bufferForPlaybackMs = 800,
-            bufferForPlaybackAfterRebufferMs = 2_000,
+            minBufferMs = 25_000,
+            maxBufferMs = 90_000,
+            bufferForPlaybackMs = 650,
+            bufferForPlaybackAfterRebufferMs = 3_000,
         )
     }
 }

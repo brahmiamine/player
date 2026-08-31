@@ -28,7 +28,14 @@ class PlaybackControlsTest {
     @Test
     fun `info displays the player information band`() {
         assertEquals(PlaybackRemoteAction.ToggleHud, playbackRemoteAction(MediaType.Live, PlaybackRemoteButton.Info))
-        assertEquals(PlaybackRemoteAction.ToggleHud, playbackRemoteAction(MediaType.Movie, PlaybackRemoteButton.Info))
+        assertEquals(PlaybackRemoteAction.OpenSettings, playbackRemoteAction(MediaType.Movie, PlaybackRemoteButton.Info))
+        assertEquals(PlaybackRemoteAction.OpenSettings, playbackRemoteAction(MediaType.Series, PlaybackRemoteButton.Info))
+    }
+
+    @Test
+    fun `OK toggles playback for movies and series`() {
+        assertEquals(PlaybackRemoteAction.TogglePlayback, playbackRemoteAction(MediaType.Movie, PlaybackRemoteButton.Ok))
+        assertEquals(PlaybackRemoteAction.TogglePlayback, playbackRemoteAction(MediaType.Series, PlaybackRemoteButton.Ok))
     }
 
     @Test

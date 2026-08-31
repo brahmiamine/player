@@ -155,11 +155,16 @@ fun PlayerScreen(
             livePlaybackSession.playUrl(entry.key, url)
             return
         }
-        player.stop()
-        player.setMediaItem(MediaItem.fromUri(url))
-        if (positionMs > 0 && entry.type != MediaType.Live) player.seekTo(positionMs)
-        player.prepare()
-        player.play()
+        runCatching {
+            player.stop()
+            player.setMediaItem(MediaItem.fromUri(url))
+            if (positionMs > 0 && entry.type != MediaType.Live) player.seekTo(positionMs)
+            player.prepare()
+            player.play()
+        }.onFailure {
+            buffering = false
+            playbackError = "Ce contenu ne peut pas être démarré pour le moment."
+        }
     }
 
     DisposableEffect(player) {
@@ -244,8 +249,10 @@ fun PlayerScreen(
 
     DisposableEffect(entry.key) {
         onDispose {
-            val duration = player.duration.takeIf { it > 0 && it != C.TIME_UNSET } ?: 0L
-            onProgress(entry, player.currentPosition.coerceAtLeast(0), duration)
+            runCatching {
+                val duration = player.duration.takeIf { it > 0 && it != C.TIME_UNSET } ?: 0L
+                onProgress(entry, player.currentPosition.coerceAtLeast(0), duration)
+            }
         }
     }
 
