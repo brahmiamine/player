@@ -127,6 +127,9 @@ fun StreamiaTvRoot(viewModel: StreamiaViewModel) {
             val playerScreen = current.screen as? StreamiaScreen.Player
             if (playerScreen != null && activeProfileId != null) {
                 sessionStore.save(activeProfileId, playerScreen.entry, playerScreen.returnToSeries)
+            } else if (current.lastViewedEntry != null && activeProfileId != null) {
+                val entry = current.lastViewedEntry ?: return@collect
+                sessionStore.save(activeProfileId, entry, entry.type == MediaType.Series)
             }
 
             if (current.screen is StreamiaScreen.Login && activeProfileId == null && previouslyActiveProfileId != null) {

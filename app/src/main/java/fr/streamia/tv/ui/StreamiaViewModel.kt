@@ -232,6 +232,12 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         _uiState.update { it.copy(browserType = type, browserCategoryId = categoryId) }
     }
 
+    fun rememberLastContent(entry: MediaEntry) {
+        _uiState.update { state ->
+            if (state.lastViewedEntry?.key == entry.key) state else state.copy(lastViewedEntry = entry)
+        }
+    }
+
     fun openCategory(category: MediaCategory) {
         _uiState.update {
             it.copy(
@@ -375,6 +381,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 message = null,
                 epg = emptyList(),
                 resumePositionMs = resume,
+                lastViewedEntry = entry,
             )
         }
         if (entry.type == MediaType.Live) loadEpg(entry)
@@ -567,6 +574,7 @@ data class StreamiaUiState(
     val resumePositionMs: Long = 0,
     val browserType: MediaType? = null,
     val browserCategoryId: String? = null,
+    val lastViewedEntry: MediaEntry? = null,
 )
 
 sealed interface StreamiaScreen {

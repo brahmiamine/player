@@ -7,7 +7,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -67,6 +66,7 @@ import fr.streamia.tv.player.PlaybackDiagnosticsTracker
 import fr.streamia.tv.player.PlaybackRemoteAction
 import fr.streamia.tv.player.PlaybackRemoteButton
 import fr.streamia.tv.player.PlaybackTransportStore
+import fr.streamia.tv.player.PlaybackTrackPreferenceStore
 import fr.streamia.tv.player.PlaybackUrlStrategy
 import fr.streamia.tv.player.StreamTechnicalInfo
 import fr.streamia.tv.player.StreamiaPlayerFactory
@@ -88,13 +88,13 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-private enum class VideoAspect(val label: String, val resizeMode: Int) {
+internal enum class VideoAspect(val label: String, val resizeMode: Int) {
     Fit("Ajuster", AspectRatioFrameLayout.RESIZE_MODE_FIT),
     Fill("Remplir", AspectRatioFrameLayout.RESIZE_MODE_FILL),
     Zoom("Zoom", AspectRatioFrameLayout.RESIZE_MODE_ZOOM),
 }
 
-private data class TrackChoice(val label: String, val language: String?)
+internal data class TrackChoice(val label: String, val language: String?)
 
 private const val VOD_SEEK_STEP_MS = 10_000L
 
@@ -119,6 +119,7 @@ fun PlayerScreen(
         if (sharedLivePlayer) livePlaybackSession.player else StreamiaPlayerFactory.create(context.applicationContext, entry.type)
     }
     val transportStore = remember { PlaybackTransportStore(context.applicationContext) }
+    val trackPreferenceStore = remember { PlaybackTrackPreferenceStore(context.applicationContext) }
     val diagnosticsTracker = remember { PlaybackDiagnosticsTracker() }
     val dolbyCapabilities = remember { DolbyCapabilityDetector.detect(context.applicationContext) }
     val livePickerOpen by PlayerOverlayController.livePickerOpen.collectAsStateWithLifecycle()
@@ -139,6 +140,7 @@ fun PlayerScreen(
     var subtitleTracks by remember { mutableStateOf(listOf(TrackChoice("Désactivés", null))) }
     var audioIndex by remember { mutableStateOf(0) }
     var subtitleIndex by remember { mutableStateOf(0) }
+    var trackPreferencesApplied by remember(entry.key) { mutableStateOf(false) }
     var technicalInfo by remember { mutableStateOf(StreamTechnicalInfo()) }
     var diagnostics by remember { mutableStateOf(PlaybackDiagnostics()) }
     var dolbyVisionDetected by remember { mutableStateOf(false) }
@@ -210,8 +212,21 @@ fun PlayerScreen(
                 if (sharedLivePlayer) livePlaybackSession.recoverAudio(tracks)
                 audioTracks = listOf(TrackChoice("Auto", null)) + extractChoices(tracks, C.TRACK_TYPE_AUDIO)
                 subtitleTracks = listOf(TrackChoice("Désactivés", null)) + extractChoices(tracks, C.TRACK_TYPE_TEXT)
-                audioIndex = audioIndex.coerceIn(0, audioTracks.lastIndex.coerceAtLeast(0))
-                subtitleIndex = subtitleIndex.coerceIn(0, subtitleTracks.lastIndex.coerceAtLeast(0))
+                if (!trackPreferencesApplied) {
+                    val saved = trackPreferenceStore.load()
+                    audioIndex = audioTracks.indexOfFirst { it.language == saved.audioLanguage }.coerceAtLeast(0)
+                    subtitleIndex = subtitleTracks.indexOfFirst { it.language == saved.subtitleLanguage }.coerceAtLeast(0)
+                    player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+                        .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
+                        .setPreferredAudioLanguage(audioTracks[audioIndex].language)
+                        .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, subtitleTracks[subtitleIndex].language == null)
+                        .setPreferredTextLanguage(subtitleTracks[subtitleIndex].language)
+                        .build()
+                    trackPreferencesApplied = true
+                } else {
+                    audioIndex = audioIndex.coerceIn(0, audioTracks.lastIndex.coerceAtLeast(0))
+                    subtitleIndex = subtitleIndex.coerceIn(0, subtitleTracks.lastIndex.coerceAtLeast(0))
+                }
 
                 selectedVideoFormat(tracks)?.let { format ->
                     val isDolbyVision = isDolbyVisionFormat(format.sampleMimeType, format.codecs)
@@ -536,10 +551,12 @@ fun PlayerScreen(
                 onNextAudio = {
                     audioIndex = (audioIndex + 1) % audioTracks.size.coerceAtLeast(1)
                     applyAudio(audioTracks[audioIndex])
+                    trackPreferenceStore.saveAudio(audioTracks[audioIndex].language)
                 },
                 onNextSubtitle = {
                     subtitleIndex = (subtitleIndex + 1) % subtitleTracks.size.coerceAtLeast(1)
                     applySubtitle(subtitleTracks[subtitleIndex])
+                    trackPreferenceStore.saveSubtitle(subtitleTracks[subtitleIndex].language)
                 },
                 onNextAspect = { aspect = VideoAspect.entries[(aspect.ordinal + 1) % VideoAspect.entries.size] },
                 onClose = { settingsOpen = false; rootFocus.requestFocus() },
@@ -705,73 +722,6 @@ private fun PlaybackTimeline(positionMs: Long, durationMs: Long) {
         }
         Spacer(Modifier.width(12.dp))
         Text(formatDuration(durationMs), color = Ink, fontSize = 12.sp)
-    }
-}
-
-@Composable
-private fun BoxScope.PlayerSettings(
-    audioTracks: List<TrackChoice>,
-    audioIndex: Int,
-    subtitleTracks: List<TrackChoice>,
-    subtitleIndex: Int,
-    aspect: VideoAspect,
-    dolbyVisionLabel: String?,
-    dolbyAtmosLabel: String?,
-    firstFocus: FocusRequester,
-    onNextAudio: () -> Unit,
-    onNextSubtitle: () -> Unit,
-    onNextAspect: () -> Unit,
-    onClose: () -> Unit,
-) {
-    Column(
-        Modifier
-            .align(Alignment.CenterEnd)
-            .fillMaxHeight()
-            .width(430.dp)
-            .background(Night.copy(alpha = 0.98f))
-            .padding(26.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("Lecture", color = Ink, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.weight(1f))
-            FocusableSurface(onClick = onClose, modifier = Modifier.width(100.dp).height(48.dp)) {
-                Text("Fermer", color = Ink, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 14.dp))
-            }
-        }
-        Spacer(Modifier.height(8.dp))
-        SettingButton(
-            title = "Piste audio",
-            value = audioTracks.getOrNull(audioIndex)?.label ?: "Auto",
-            onClick = onNextAudio,
-            modifier = Modifier.focusRequester(firstFocus),
-        )
-        SettingButton(
-            title = "Sous-titres",
-            value = subtitleTracks.getOrNull(subtitleIndex)?.label ?: "Désactivés",
-            onClick = onNextSubtitle,
-        )
-        SettingButton(title = "Format vidéo", value = aspect.label, onClick = onNextAspect)
-        val dolbyText = listOfNotNull(dolbyVisionLabel, dolbyAtmosLabel).joinToString(" · ")
-        Text(
-            if (dolbyText.isBlank()) "Dolby : aucun format Dolby sélectionné" else dolbyText,
-            color = if (dolbyText.isBlank()) MutedInk else FocusBlueBright,
-            fontSize = 13.sp,
-            fontWeight = if (dolbyText.isBlank()) FontWeight.Normal else FontWeight.Bold,
-            lineHeight = 18.sp,
-        )
-        Text("OK fait défiler les options disponibles. Retour ou Fermer revient à la vidéo.", color = MutedInk, fontSize = 13.sp, lineHeight = 19.sp)
-    }
-}
-
-@Composable
-private fun SettingButton(title: String, value: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    FocusableSurface(onClick = onClick, modifier = modifier.fillMaxWidth().height(74.dp)) {
-        Column(Modifier.padding(horizontal = 16.dp)) {
-            Text(title, color = MutedInk, fontSize = 12.sp)
-            Spacer(Modifier.height(4.dp))
-            Text(value, color = FocusBlueBright, fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
     }
 }
 

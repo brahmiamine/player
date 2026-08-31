@@ -102,6 +102,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onEntrySelected = viewModel::openEntry,
                     onToggleEntryFavorite = viewModel::toggleEntryFavorite,
                     onToggleCategoryFavorite = viewModel::toggleCategoryFavorite,
+                    onRememberContent = viewModel::rememberLastContent,
                     onLocationChanged = viewModel::rememberBrowserLocation,
                     onHome = viewModel::showHome,
                     onSearch = viewModel::showSearch,
