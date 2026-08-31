@@ -63,7 +63,7 @@ fun SeriesScreen(
     val episodes = remember(details, selectedSeason) { details?.episodesIn(selectedSeason).orEmpty() }
     val firstFocus = remember(selectedSeason) { FocusRequester() }
 
-    LaunchedEffect(episodes.size) {
+    LaunchedEffect(selectedSeason, episodes.size) {
         if (episodes.isNotEmpty()) {
             yield()
             runCatching { firstFocus.requestFocus() }
