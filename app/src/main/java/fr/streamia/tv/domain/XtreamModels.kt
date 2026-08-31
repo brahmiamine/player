@@ -138,12 +138,14 @@ data class Catalog(
     val entries: List<MediaEntry>,
     val account: AccountInfo? = null,
 ) {
-    private val entriesBySectionAndCategory = entries.groupBy { "${it.type.name}:${it.categoryId}" }
-    private val entriesBySection = entries.groupBy(MediaEntry::type)
+    /** Index nettoyé une seule fois hors de l'UI, même pour les catalogues de plusieurs centaines de milliers d'entrées. */
+    private val navigableEntries = entries.filterNot(MediaEntry::isVisualSeparator)
+    private val entriesBySectionAndCategory = navigableEntries.groupBy { "${it.type.name}:${it.categoryId}" }
+    private val entriesBySection = navigableEntries.groupBy(MediaEntry::type)
     private val categoriesBySection = categories.groupBy(MediaCategory::type)
-    private val entriesByKey = entries.associateBy(MediaEntry::key)
+    private val entriesByKey = navigableEntries.associateBy(MediaEntry::key)
     private val searchIndex by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
-        entries.map { entry ->
+        navigableEntries.map { entry ->
             IndexedEntry(entry, "${entry.name}\u0000${entry.displayName}\u0000${entry.tvgId.orEmpty()}".lowercase())
         }
     }

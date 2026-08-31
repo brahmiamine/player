@@ -61,7 +61,6 @@ import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.domain.ServerCredentials
 import fr.streamia.tv.domain.XtreamUrlBuilder
-import fr.streamia.tv.domain.isVisualSeparator
 import fr.streamia.tv.player.LivePlaybackSession
 import fr.streamia.tv.ui.theme.DeepSurface
 import fr.streamia.tv.ui.theme.FocusBlueBright
@@ -132,7 +131,10 @@ fun BrowserScreen(
 
     val baseCategories = remember(catalog, selectedType) { catalog.categoriesFor(selectedType) }
     val favoriteEntriesForType = remember(catalog, selectedType, library.favoriteEntries) {
-        catalog.entriesFor(selectedType).filter { it.key in library.favoriteEntries }
+        library.favoriteEntries.asSequence()
+            .mapNotNull(catalog::entry)
+            .filter { it.type == selectedType }
+            .toList()
     }
     val historyForType = remember(catalog, selectedType, library.history) {
         library.history.asSequence()
@@ -154,7 +156,7 @@ fun BrowserScreen(
             FAVORITES_CATEGORY_ID -> favoriteEntriesForType
             HISTORY_CATEGORY_ID -> historyForType.map { it.second }
             else -> catalog.entriesIn(selectedType, selectedCategoryId)
-        }.filterNot(MediaEntry::isVisualSeparator)
+        }
     }
     val historyByKey = remember(historyForType) { historyForType.associate { it.second.key to it.first } }
 
