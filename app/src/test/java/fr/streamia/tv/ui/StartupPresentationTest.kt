@@ -78,6 +78,7 @@ class StartupPresentationTest {
         displayName = "Live",
         type = MediaType.Live,
         categoryId = "1",
+        iconUrl = null,
         number = 1,
         extension = "ts",
     )
