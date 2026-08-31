@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -52,8 +51,16 @@ fun OrganizerScreen(
     var destinationCategoryId by remember(type) {
         mutableStateOf(catalog.categoriesFor(type).drop(1).firstOrNull()?.id ?: catalog.categoriesFor(type).firstOrNull()?.id)
     }
-    val categories = catalog.categoriesFor(type)
-    val sourceEntries = sourceCategoryId?.let { catalog.entriesIn(type, it) }.orEmpty()
+    var localCategoryOrder by remember(catalog, type) {
+        mutableStateOf(catalog.categoriesFor(type).map(MediaCategory::key))
+    }
+    var locallyMovedEntryKeys by remember(catalog, type, sourceCategoryId) { mutableStateOf(emptySet<String>()) }
+    val categoriesByKey = remember(catalog, type) { catalog.categoriesFor(type).associateBy(MediaCategory::key) }
+    val categories = remember(localCategoryOrder, categoriesByKey) { localCategoryOrder.mapNotNull(categoriesByKey::get) }
+    val sourceEntries = remember(catalog, type, sourceCategoryId, locallyMovedEntryKeys) {
+        sourceCategoryId?.let { catalog.entriesIn(type, it) }.orEmpty()
+            .filterNot { it.key in locallyMovedEntryKeys }
+    }
 
     Column(Modifier.fillMaxSize().background(Night).padding(24.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -96,6 +103,7 @@ fun OrganizerScreen(
                     FocusableSurface(
                         onClick = {
                             val ordered = moveSelected(categories, selectedCategoryKeys, -1)
+                            localCategoryOrder = ordered.map(MediaCategory::key)
                             onCategoryOrderChanged(type, ordered.map(MediaCategory::key))
                         },
                         enabled = selectedCategoryKeys.isNotEmpty(),
@@ -105,6 +113,7 @@ fun OrganizerScreen(
                     FocusableSurface(
                         onClick = {
                             val ordered = moveSelected(categories, selectedCategoryKeys, 1)
+                            localCategoryOrder = ordered.map(MediaCategory::key)
                             onCategoryOrderChanged(type, ordered.map(MediaCategory::key))
                         },
                         enabled = selectedCategoryKeys.isNotEmpty(),
@@ -112,7 +121,7 @@ fun OrganizerScreen(
                     ) { Text("↓", color = Ink, fontSize = 19.sp, modifier = Modifier.padding(start = 31.dp)) }
                 }
                 Spacer(Modifier.height(9.dp))
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     items(categories, key = MediaCategory::key) { category ->
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                             FocusableSurface(
@@ -124,7 +133,7 @@ fun OrganizerScreen(
                                     }
                                 },
                                 selected = sourceCategoryId == category.id,
-                                modifier = Modifier.weight(1f).height(58.dp),
+                                modifier = Modifier.weight(1f).height(50.dp),
                             ) {
                                 Column(Modifier.padding(horizontal = 13.dp)) {
                                     Text(category.name, color = Ink, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -138,7 +147,7 @@ fun OrganizerScreen(
                                     }
                                 },
                                 selected = category.key in selectedCategoryKeys,
-                                modifier = Modifier.width(58.dp).height(58.dp),
+                                modifier = Modifier.width(52.dp).height(50.dp),
                             ) {
                                 Text(if (category.key in selectedCategoryKeys) "☑" else "☐", color = FocusBlueBright, fontSize = 18.sp, modifier = Modifier.padding(start = 18.dp))
                             }
@@ -156,7 +165,7 @@ fun OrganizerScreen(
                 }
                 Spacer(Modifier.height(9.dp))
                 LazyColumn(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                    items(sourceEntries, key = MediaEntry::key) { entry ->
+                    items(sourceEntries, key = MediaEntry::key, contentType = { "organizer-entry" }) { entry ->
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                             FocusableSurface(
                                 onClick = {
@@ -165,11 +174,10 @@ fun OrganizerScreen(
                                     }
                                 },
                                 selected = entry.key in selectedEntryKeys,
-                                modifier = Modifier.weight(1f).height(62.dp),
+                                modifier = Modifier.weight(1f).height(50.dp),
                             ) {
                                 Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    ChannelLogo(entry.iconUrl, entry.displayName, Modifier.size(42.dp))
-                                    Spacer(Modifier.width(10.dp))
+                                    Text(entry.number.toString(), color = MutedInk, fontSize = 11.sp, modifier = Modifier.width(48.dp))
                                     Text(entry.displayName, color = Ink, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                                     Text(if (entry.key in selectedEntryKeys) "☑" else "☐", color = FocusBlueBright, fontSize = 16.sp)
                                 }
@@ -194,6 +202,7 @@ fun OrganizerScreen(
                     ) { Text("→", color = Ink, fontSize = 18.sp, modifier = Modifier.padding(start = 22.dp)) }
                     FocusableSurface(
                         onClick = {
+                            locallyMovedEntryKeys = locallyMovedEntryKeys + selectedEntryKeys
                             destinationCategoryId?.let { onMoveEntries(selectedEntryKeys, it) }
                             selectedEntryKeys = emptySet()
                         },

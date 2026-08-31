@@ -6,7 +6,7 @@ import org.junit.Test
 
 class PlaylistProfileTest {
     @Test
-    fun `fresh Xtream catalog stays local until interval expires`() {
+    fun `fresh Xtream catalog never requests automatic refresh`() {
         val now = 100_000_000L
         val profile = PlaylistProfile(
             id = "xtream",
@@ -19,11 +19,11 @@ class PlaylistProfileTest {
             lastRefreshAt = now - 5L * 60L * 60L * 1000L,
         )
 
-        assertFalse(profile.isCatalogRefreshDue(now))
+        assertFalse(profile.shouldAutoRefresh(now))
     }
 
     @Test
-    fun `Xtream catalog refresh becomes due after configured interval`() {
+    fun `expired Xtream catalog still never requests automatic refresh`() {
         val now = 100_000_000L
         val profile = PlaylistProfile(
             id = "xtream",
@@ -33,19 +33,20 @@ class PlaylistProfileTest {
             lastRefreshAt = now - 6L * 60L * 60L * 1000L,
         )
 
-        assertTrue(profile.isCatalogRefreshDue(now))
+        assertFalse(profile.shouldAutoRefresh(now))
     }
 
     @Test
-    fun `never refreshed profile is immediately due`() {
+    fun `remote M3U becomes due according to its interval`() {
         val profile = PlaylistProfile(
-            id = "xtream",
-            name = "TV",
-            kind = PlaylistKind.Xtream,
+            id = "m3u-remote",
+            name = "Remote",
+            kind = PlaylistKind.M3u,
+            m3uUrl = "https://provider.test/list.m3u",
             lastRefreshAt = 0L,
         )
 
-        assertTrue(profile.isCatalogRefreshDue(1_000L))
+        assertTrue(profile.shouldAutoRefresh(1_000L))
     }
 
     @Test

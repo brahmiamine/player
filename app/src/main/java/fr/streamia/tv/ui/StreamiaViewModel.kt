@@ -28,9 +28,12 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() {
     private val _uiState = MutableStateFlow(StreamiaUiState())
+    private val catalogLayoutMutation = Mutex()
     val uiState: StateFlow<StreamiaUiState> = _uiState.asStateFlow()
 
     init {
@@ -324,20 +327,42 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
 
     fun setCategoryOrder(type: MediaType, categoryKeys: List<String>) {
         val profileId = _uiState.value.activeProfileId ?: return
-        repository.setCategoryOrder(profileId, type, categoryKeys)
-        refreshLibraryPresentation()
+        viewModelScope.launch(Dispatchers.IO) {
+            catalogLayoutMutation.withLock {
+                repository.setCategoryOrder(profileId, type, categoryKeys)
+            }
+        }
     }
 
     fun moveEntries(entryKeys: Set<String>, targetCategoryId: String) {
         val profileId = _uiState.value.activeProfileId ?: return
-        repository.moveEntries(profileId, entryKeys, targetCategoryId)
-        refreshLibraryPresentation()
+        if (entryKeys.isEmpty()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            catalogLayoutMutation.withLock {
+                repository.moveEntries(profileId, entryKeys, targetCategoryId)
+            }
+        }
     }
 
     fun resetEntryMoves(entryKeys: Set<String>) {
         val profileId = _uiState.value.activeProfileId ?: return
-        repository.resetEntryMoves(profileId, entryKeys)
-        refreshLibraryPresentation()
+        if (entryKeys.isEmpty()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            catalogLayoutMutation.withLock {
+                repository.resetEntryMoves(profileId, entryKeys)
+            }
+        }
+    }
+
+    fun closeOrganizer() {
+        showSettings()
+        val profileId = _uiState.value.activeProfileId ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            catalogLayoutMutation.withLock {
+                val presentation = libraryPresentation(profileId)
+                applyLibraryPresentation(profileId, presentation)
+            }
+        }
     }
 
     fun closePlayer() {
