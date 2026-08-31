@@ -117,9 +117,11 @@ fun BrowserScreen(
         ?.takeIf { catalog.count(it) > 0 }
         ?: MediaType.entries.firstOrNull { catalog.count(it) > 0 }
         ?: MediaType.Live
-    var selectedType by remember(catalog, initialType) { mutableStateOf(defaultType) }
+    // initialType/initialCategoryId ne servent qu'à l'entrée dans l'écran. Les inclure dans
+    // les clés recréait l'état après onLocationChanged et annulait le clic suivant.
+    var selectedType by remember(catalog, credentials) { mutableStateOf(defaultType) }
     var lastLiveEntryKey by remember(catalog, credentials) { mutableStateOf(restoredLiveSelection.second) }
-    var selectedCategoryId by remember(catalog, initialCategoryId) {
+    var selectedCategoryId by remember(catalog, credentials) {
         mutableStateOf(
             if (defaultType == MediaType.Live) {
                 restoredLiveSelection.first ?: initialCategoryId ?: defaultCategoryId(catalog, MediaType.Live)
