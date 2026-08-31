@@ -59,7 +59,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
     StreamiaTheme {
         ResponsiveTvViewport {
             when {
-                state.booting -> BootScreen()
+                shouldShowStartupGate(state) -> BootScreen()
 
                 state.screen is StreamiaScreen.Login -> LoginScreen(
                     profiles = state.profiles,
