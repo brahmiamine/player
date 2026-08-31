@@ -13,6 +13,7 @@ enum class PlaybackRemoteButton {
     PlayPause,
     Rewind,
     FastForward,
+    Info,
     Other,
 }
 
@@ -40,6 +41,7 @@ fun playbackRemoteAction(type: MediaType, button: PlaybackRemoteButton): Playbac
         PlaybackRemoteButton.Right -> if (type == MediaType.Live) PlaybackRemoteAction.OpenSettings else PlaybackRemoteAction.SeekForward
         PlaybackRemoteButton.Rewind -> if (type == MediaType.Live) PlaybackRemoteAction.None else PlaybackRemoteAction.SeekBackward
         PlaybackRemoteButton.FastForward -> if (type == MediaType.Live) PlaybackRemoteAction.None else PlaybackRemoteAction.SeekForward
+        PlaybackRemoteButton.Info -> PlaybackRemoteAction.ToggleHud
         PlaybackRemoteButton.Other -> PlaybackRemoteAction.None
     }
 

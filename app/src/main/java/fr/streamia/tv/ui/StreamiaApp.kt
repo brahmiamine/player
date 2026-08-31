@@ -17,9 +17,10 @@ import androidx.tv.material3.Text
 import fr.streamia.tv.ui.theme.MutedInk
 import fr.streamia.tv.ui.theme.Night
 import fr.streamia.tv.ui.theme.StreamiaTheme
+import fr.streamia.tv.player.LivePlaybackSession
 
 @Composable
-fun StreamiaApp(viewModel: StreamiaViewModel) {
+fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackSession) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
     StreamiaTheme {
@@ -57,6 +58,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel) {
                 state.screen is StreamiaScreen.Browser && state.catalog != null && state.credentials != null -> BrowserScreen(
                     catalog = state.catalog!!,
                     credentials = state.credentials!!,
+                    livePlaybackSession = livePlaybackSession,
                     library = state.library,
                     offline = state.offline,
                     busy = state.busy,
@@ -154,6 +156,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel) {
                         entry = playerScreen.entry,
                         epg = state.epg,
                         resumePositionMs = state.resumePositionMs,
+                        livePlaybackSession = livePlaybackSession,
                         onBack = {
                             LiveBrowserReturnState.remember(playerScreen.entry)
                             viewModel.closePlayer()

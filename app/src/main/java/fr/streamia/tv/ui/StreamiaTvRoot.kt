@@ -4,11 +4,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.streamia.tv.data.PlaybackSessionStore
 import fr.streamia.tv.data.resolveStartupProfileId
 import fr.streamia.tv.domain.MediaType
+import fr.streamia.tv.player.LivePlaybackSession
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -48,6 +50,11 @@ fun StreamiaTvRoot(viewModel: StreamiaViewModel) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val sessionStore = remember { PlaybackSessionStore(context.applicationContext) }
+    val livePlaybackSession = remember { LivePlaybackSession(context.applicationContext) }
+
+    DisposableEffect(livePlaybackSession) {
+        onDispose(livePlaybackSession::release)
+    }
 
     LaunchedEffect(Unit) {
         val initialState = viewModel.uiState.value
@@ -127,5 +134,5 @@ fun StreamiaTvRoot(viewModel: StreamiaViewModel) {
         }
     }
 
-    StreamiaApp(viewModel)
+    StreamiaApp(viewModel, livePlaybackSession)
 }

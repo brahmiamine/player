@@ -77,6 +77,7 @@ import fr.streamia.tv.player.isDolbyAtmosFormat
 import fr.streamia.tv.player.isDolbyVisionFormat
 import fr.streamia.tv.player.playbackRemoteAction
 import fr.streamia.tv.player.resolveSeekPosition
+import fr.streamia.tv.player.LivePlaybackSession
 import fr.streamia.tv.ui.theme.FocusBlueBright
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
@@ -105,13 +106,17 @@ fun PlayerScreen(
     entry: MediaEntry,
     epg: List<EpgProgram>,
     resumePositionMs: Long,
+    livePlaybackSession: LivePlaybackSession,
     onBack: () -> Unit,
     onZap: (Int) -> Unit,
     onEntrySelected: (MediaEntry) -> Unit,
     onProgress: (MediaEntry, Long, Long) -> Unit,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    val player = remember(entry.type) { StreamiaPlayerFactory.create(context.applicationContext, entry.type) }
+    val sharedLivePlayer = entry.type == MediaType.Live
+    val player = remember(entry.type, livePlaybackSession) {
+        if (sharedLivePlayer) livePlaybackSession.player else StreamiaPlayerFactory.create(context.applicationContext, entry.type)
+    }
     val transportStore = remember { PlaybackTransportStore(context.applicationContext) }
     val diagnosticsTracker = remember { PlaybackDiagnosticsTracker() }
     val dolbyCapabilities = remember { DolbyCapabilityDetector.detect(context.applicationContext) }
@@ -145,6 +150,10 @@ fun PlayerScreen(
         activeStreamUrl = url
         playbackError = null
         buffering = true
+        if (sharedLivePlayer) {
+            livePlaybackSession.playUrl(entry.key, url)
+            return
+        }
         player.stop()
         player.setMediaItem(MediaItem.fromUri(url))
         if (positionMs > 0 && entry.type != MediaType.Live) player.seekTo(positionMs)
@@ -153,7 +162,7 @@ fun PlayerScreen(
     }
 
     DisposableEffect(player) {
-        onDispose { player.release() }
+        onDispose { if (!sharedLivePlayer) player.release() }
     }
 
     DisposableEffect(player, entry.key) {
@@ -192,6 +201,7 @@ fun PlayerScreen(
             }
 
             override fun onTracksChanged(tracks: Tracks) {
+                if (sharedLivePlayer) livePlaybackSession.recoverAudio(tracks)
                 audioTracks = listOf(TrackChoice("Auto", null)) + extractChoices(tracks, C.TRACK_TYPE_AUDIO)
                 subtitleTracks = listOf(TrackChoice("Désactivés", null)) + extractChoices(tracks, C.TRACK_TYPE_TEXT)
                 audioIndex = audioIndex.coerceIn(0, audioTracks.lastIndex.coerceAtLeast(0))
@@ -256,7 +266,14 @@ fun PlayerScreen(
             preference = transportStore.preferenceFor(baseUrl),
         )
         candidateIndex = 0
-        startCandidate(streamCandidates.firstOrNull() ?: baseUrl, resumePositionMs)
+        if (sharedLivePlayer && livePlaybackSession.isCurrent(entry)) {
+            activeStreamUrl = livePlaybackSession.activeUrl
+            buffering = player.playbackState != Player.STATE_READY
+            player.play()
+        } else {
+            val url = streamCandidates.firstOrNull() ?: baseUrl
+            startCandidate(url, resumePositionMs)
+        }
     }
 
     LaunchedEffect(entry.key) {
@@ -360,7 +377,7 @@ fun PlayerScreen(
                         true
                     }
                     PlaybackRemoteAction.OpenSettings -> { settingsOpen = true; hudVisible = true; true }
-                    PlaybackRemoteAction.ToggleHud -> { hudVisible = !hudVisible; true }
+                    PlaybackRemoteAction.ToggleHud -> { hudVisible = true; true }
                     PlaybackRemoteAction.TogglePlayback -> {
                         if (player.isPlaying) player.pause() else player.play()
                         hudVisible = true
@@ -879,6 +896,7 @@ private fun Int.toPlaybackRemoteButton(): PlaybackRemoteButton = when (this) {
     AndroidKeyEvent.KEYCODE_DPAD_RIGHT -> PlaybackRemoteButton.Right
     AndroidKeyEvent.KEYCODE_MENU -> PlaybackRemoteButton.Menu
     AndroidKeyEvent.KEYCODE_SETTINGS -> PlaybackRemoteButton.Settings
+    AndroidKeyEvent.KEYCODE_INFO -> PlaybackRemoteButton.Info
     AndroidKeyEvent.KEYCODE_DPAD_CENTER,
     AndroidKeyEvent.KEYCODE_ENTER,
     AndroidKeyEvent.KEYCODE_NUMPAD_ENTER,
