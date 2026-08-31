@@ -6,11 +6,8 @@ import fr.streamia.tv.domain.MediaType
 import org.json.JSONObject
 
 /**
- * Mémorise uniquement le dernier contenu réellement ouvert dans le lecteur.
- *
- * La session est globale car elle doit permettre de retrouver à la fois la playlist
- * et le contenu à rouvrir après une fermeture ou une destruction du processus Android.
- * Les identifiants Xtream et les URL de playlist ne sont jamais copiés ici.
+ * Mémorise la dernière playlist active et le dernier contenu réellement ouvert dans le lecteur.
+ * Les identifiants Xtream et les URL privées ne sont jamais copiés ici.
  */
 class PlaybackSessionStore(context: Context) {
     private val preferences = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
@@ -22,8 +19,25 @@ class PlaybackSessionStore(context: Context) {
             put("updated_at", System.currentTimeMillis())
             put("entry", entry.toJson())
         }
-        preferences.edit().putString(KEY_SESSION, root.toString()).apply()
+        preferences.edit()
+            .putString(KEY_SESSION, root.toString())
+            .putString(KEY_ACTIVE_PROFILE, profileId)
+            .putBoolean(KEY_AUTO_OPEN_DISABLED, false)
+            .apply()
     }
+
+    fun saveActiveProfile(profileId: String) {
+        if (profileId.isBlank()) return
+        preferences.edit()
+            .putString(KEY_ACTIVE_PROFILE, profileId)
+            .putBoolean(KEY_AUTO_OPEN_DISABLED, false)
+            .apply()
+    }
+
+    fun loadActiveProfileId(): String? =
+        preferences.getString(KEY_ACTIVE_PROFILE, null)?.takeIf(String::isNotBlank)
+
+    fun isAutoOpenDisabled(): Boolean = preferences.getBoolean(KEY_AUTO_OPEN_DISABLED, false)
 
     fun load(): LastPlaybackSession? = runCatching {
         val raw = preferences.getString(KEY_SESSION, null) ?: return@runCatching null
@@ -38,8 +52,19 @@ class PlaybackSessionStore(context: Context) {
         )
     }.getOrNull()
 
-    fun clear() {
+    fun clearPlayback() {
         preferences.edit().remove(KEY_SESSION).apply()
+    }
+
+    /** Compatibilité avec les anciens appels : clear() efface seulement le contenu, pas le profil actif. */
+    fun clear() = clearPlayback()
+
+    fun disableAutoOpen() {
+        preferences.edit()
+            .remove(KEY_SESSION)
+            .remove(KEY_ACTIVE_PROFILE)
+            .putBoolean(KEY_AUTO_OPEN_DISABLED, true)
+            .apply()
     }
 
     private fun MediaEntry.toJson(): JSONObject = JSONObject().apply {
@@ -92,6 +117,8 @@ class PlaybackSessionStore(context: Context) {
     private companion object {
         const val PREFERENCES_NAME = "streamia-playback-session-v1"
         const val KEY_SESSION = "last_playback"
+        const val KEY_ACTIVE_PROFILE = "active_profile"
+        const val KEY_AUTO_OPEN_DISABLED = "auto_open_disabled"
     }
 }
 

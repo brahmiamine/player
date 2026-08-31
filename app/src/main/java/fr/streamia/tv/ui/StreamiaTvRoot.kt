@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.tv.material3.Text
 import fr.streamia.tv.data.PlaybackSessionStore
+import fr.streamia.tv.data.resolveStartupProfileId
 import fr.streamia.tv.domain.Catalog
 import fr.streamia.tv.domain.MediaCategory
 import fr.streamia.tv.domain.MediaEntry
@@ -57,9 +58,7 @@ object PlayerOverlayController {
 
 /**
  * Racine TV autour de StreamiaApp.
- *
- * Elle garde le lecteur monté pendant l'affichage du sélecteur de chaînes et restaure
- * automatiquement le dernier contenu après une relance complète de l'application.
+ * Elle garde le lecteur monté pendant le sélecteur Live et restaure la dernière playlist/contenu.
  */
 @Composable
 fun StreamiaTvRoot(viewModel: StreamiaViewModel) {
@@ -72,15 +71,21 @@ fun StreamiaTvRoot(viewModel: StreamiaViewModel) {
         val initialState = viewModel.uiState.value
         if (initialState.activeProfileId != null || initialState.screen !is StreamiaScreen.Login) return@LaunchedEffect
 
-        val session = sessionStore.load() ?: return@LaunchedEffect
-        if (initialState.profiles.none { it.id == session.profileId }) {
-            sessionStore.clear()
-            return@LaunchedEffect
-        }
+        val availableIds = initialState.profiles.map { it.id }
+        val storedSession = sessionStore.load()
+        val validSession = storedSession?.takeIf { it.profileId in availableIds }
+        if (storedSession != null && validSession == null) sessionStore.clearPlayback()
 
-        viewModel.openProfile(session.profileId)
+        val targetProfileId = resolveStartupProfileId(
+            availableProfileIds = availableIds,
+            playbackProfileId = validSession?.profileId,
+            activeProfileId = sessionStore.loadActiveProfileId(),
+            autoOpenDisabled = sessionStore.isAutoOpenDisabled(),
+        ) ?: return@LaunchedEffect
+
+        viewModel.openProfile(targetProfileId)
         val loaded = viewModel.uiState.first { candidate ->
-            val profileReady = candidate.activeProfileId == session.profileId &&
+            val profileReady = candidate.activeProfileId == targetProfileId &&
                 candidate.catalog != null &&
                 !candidate.busy
             val failed = candidate.screen is StreamiaScreen.Login &&
@@ -89,7 +94,8 @@ fun StreamiaTvRoot(viewModel: StreamiaViewModel) {
             profileReady || failed
         }
 
-        if (loaded.activeProfileId != session.profileId || loaded.catalog == null) return@LaunchedEffect
+        if (loaded.activeProfileId != targetProfileId || loaded.catalog == null) return@LaunchedEffect
+        val session = validSession?.takeIf { it.profileId == targetProfileId } ?: return@LaunchedEffect
 
         val restoredEntry = when {
             session.entry.type == MediaType.Series && session.entry.playable -> session.entry
@@ -107,17 +113,24 @@ fun StreamiaTvRoot(viewModel: StreamiaViewModel) {
     LaunchedEffect(Unit) {
         var previouslyActiveProfileId: String? = null
         viewModel.uiState.collect { current ->
-            current.activeProfileId?.let { previouslyActiveProfileId = it }
+            val activeProfileId = current.activeProfileId
+            if (activeProfileId != null) {
+                val savedPlayback = sessionStore.load()
+                if (savedPlayback != null && savedPlayback.profileId != activeProfileId) {
+                    sessionStore.clearPlayback()
+                }
+                sessionStore.saveActiveProfile(activeProfileId)
+                previouslyActiveProfileId = activeProfileId
+            }
 
             val playerScreen = current.screen as? StreamiaScreen.Player
-            val activeProfileId = current.activeProfileId
             if (playerScreen != null && activeProfileId != null) {
                 sessionStore.save(activeProfileId, playerScreen.entry, playerScreen.returnToSeries)
             }
 
-            // Un vrai logout repasse d'un profil actif vers Login. On ne restaure pas après logout explicite.
-            if (current.screen is StreamiaScreen.Login && current.activeProfileId == null && previouslyActiveProfileId != null) {
-                sessionStore.clear()
+            // Un logout explicite repasse d'un profil actif vers Login et désactive l'auto-ouverture.
+            if (current.screen is StreamiaScreen.Login && activeProfileId == null && previouslyActiveProfileId != null) {
+                sessionStore.disableAutoOpen()
                 previouslyActiveProfileId = null
             }
 

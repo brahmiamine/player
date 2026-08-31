@@ -1,11 +1,13 @@
 package fr.streamia.tv.ui
 
+import android.os.SystemClock
 import android.view.KeyEvent as AndroidKeyEvent
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -43,8 +45,8 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.Tracks
+import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import androidx.tv.material3.MaterialTheme
@@ -55,6 +57,14 @@ import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.domain.ServerCredentials
 import fr.streamia.tv.domain.XtreamUrlBuilder
+import fr.streamia.tv.player.PlaybackDiagnostics
+import fr.streamia.tv.player.PlaybackDiagnosticsTracker
+import fr.streamia.tv.player.PlaybackTransportStore
+import fr.streamia.tv.player.PlaybackUrlStrategy
+import fr.streamia.tv.player.StreamTechnicalInfo
+import fr.streamia.tv.player.StreamiaPlayerFactory
+import fr.streamia.tv.player.codecLabel
+import fr.streamia.tv.player.hdrLabel
 import fr.streamia.tv.ui.theme.FocusBlueBright
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
@@ -87,27 +97,77 @@ fun PlayerScreen(
     onProgress: (MediaEntry, Long, Long) -> Unit,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    val player = remember { ExoPlayer.Builder(context).build().apply { playWhenReady = true } }
+    val player = remember(entry.type) { StreamiaPlayerFactory.create(context.applicationContext, entry.type) }
+    val transportStore = remember { PlaybackTransportStore(context.applicationContext) }
+    val diagnosticsTracker = remember { PlaybackDiagnosticsTracker() }
     val rootFocus = remember { FocusRequester() }
     val settingsFocus = remember { FocusRequester() }
+
     var guideOpen by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
     var hudVisible by remember { mutableStateOf(true) }
     var buffering by remember { mutableStateOf(true) }
     var playbackError by remember { mutableStateOf<String?>(null) }
+    var streamCandidates by remember { mutableStateOf(emptyList<String>()) }
+    var candidateIndex by remember { mutableStateOf(0) }
     var activeStreamUrl by remember { mutableStateOf("") }
-    var fallbackAttempted by remember { mutableStateOf(false) }
     var numberBuffer by remember { mutableStateOf("") }
     var aspect by remember { mutableStateOf(VideoAspect.Fit) }
     var audioTracks by remember { mutableStateOf(listOf(TrackChoice("Auto", null))) }
     var subtitleTracks by remember { mutableStateOf(listOf(TrackChoice("Désactivés", null))) }
     var audioIndex by remember { mutableStateOf(0) }
     var subtitleIndex by remember { mutableStateOf(0) }
+    var technicalInfo by remember { mutableStateOf(StreamTechnicalInfo()) }
+    var diagnostics by remember { mutableStateOf(PlaybackDiagnostics()) }
+
+    fun startCandidate(url: String, positionMs: Long = 0L) {
+        activeStreamUrl = url
+        playbackError = null
+        buffering = true
+        player.stop()
+        player.setMediaItem(MediaItem.fromUri(url))
+        if (positionMs > 0 && entry.type != MediaType.Live) player.seekTo(positionMs)
+        player.prepare()
+        player.play()
+    }
 
     DisposableEffect(player) {
+        onDispose { player.release() }
+    }
+
+    DisposableEffect(player, entry.key) {
         val listener = object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
-                buffering = playbackState == Player.STATE_BUFFERING || playbackState == Player.STATE_IDLE
+                val now = SystemClock.elapsedRealtime()
+                when (playbackState) {
+                    Player.STATE_BUFFERING,
+                    Player.STATE_IDLE,
+                    -> {
+                        buffering = true
+                        diagnosticsTracker.onBufferingStarted(now)
+                    }
+                    Player.STATE_READY,
+                    Player.STATE_ENDED,
+                    -> {
+                        buffering = false
+                        diagnosticsTracker.onBufferingEnded(now)
+                    }
+                }
+                diagnostics = diagnosticsTracker.snapshot(now)
+            }
+
+            override fun onRenderedFirstFrame() {
+                val now = SystemClock.elapsedRealtime()
+                diagnosticsTracker.onFirstFrame(now)
+                diagnosticsTracker.onBufferingEnded(now)
+                diagnostics = diagnosticsTracker.snapshot(now)
+                buffering = false
+                transportStore.recordSuccess(activeStreamUrl, entry.type)
+            }
+
+            override fun onVideoSizeChanged(videoSize: VideoSize) {
+                if (videoSize.width <= 0 || videoSize.height <= 0) return
+                technicalInfo = technicalInfo.copy(width = videoSize.width, height = videoSize.height)
             }
 
             override fun onTracksChanged(tracks: Tracks) {
@@ -115,33 +175,33 @@ fun PlayerScreen(
                 subtitleTracks = listOf(TrackChoice("Désactivés", null)) + extractChoices(tracks, C.TRACK_TYPE_TEXT)
                 audioIndex = audioIndex.coerceIn(0, audioTracks.lastIndex.coerceAtLeast(0))
                 subtitleIndex = subtitleIndex.coerceIn(0, subtitleTracks.lastIndex.coerceAtLeast(0))
+
+                selectedVideoFormat(tracks)?.let { format ->
+                    technicalInfo = technicalInfo.copy(
+                        width = format.width.takeIf { it > 0 } ?: technicalInfo.width,
+                        height = format.height.takeIf { it > 0 } ?: technicalInfo.height,
+                        frameRate = format.frameRate.takeIf { it > 0f },
+                        codec = codecLabel(format.sampleMimeType, format.codecs),
+                        bitrate = format.bitrate.takeIf { it > 0 },
+                        hdr = hdrLabel(format.sampleMimeType, format.colorInfo?.colorTransfer),
+                    )
+                }
             }
 
             override fun onPlayerError(error: PlaybackException) {
-                if (!fallbackAttempted) {
-                    val alternate = XtreamUrlBuilder.alternateTransportUrl(activeStreamUrl)
-                    if (alternate != null) {
-                        fallbackAttempted = true
-                        activeStreamUrl = alternate
-                        playbackError = null
-                        buffering = true
-                        val previousPosition = player.currentPosition.coerceAtLeast(0)
-                        player.setMediaItem(MediaItem.fromUri(alternate))
-                        if (previousPosition > 0 && entry.type != MediaType.Live) player.seekTo(previousPosition)
-                        player.prepare()
-                        player.play()
-                        return
-                    }
+                val next = candidateIndex + 1
+                if (next < streamCandidates.size) {
+                    val previousPosition = player.currentPosition.coerceAtLeast(0L)
+                    candidateIndex = next
+                    startCandidate(streamCandidates[next], previousPosition)
+                    return
                 }
                 playbackError = "Ce contenu ne peut pas être lu pour le moment."
                 buffering = false
             }
         }
         player.addListener(listener)
-        onDispose {
-            player.removeListener(listener)
-            player.release()
-        }
+        onDispose { player.removeListener(listener) }
     }
 
     DisposableEffect(entry.key) {
@@ -151,17 +211,23 @@ fun PlayerScreen(
         }
     }
 
-    LaunchedEffect(entry.key) {
+    LaunchedEffect(entry.key, credentials) {
         playbackError = null
         buffering = true
         hudVisible = true
-        fallbackAttempted = false
         numberBuffer = ""
-        activeStreamUrl = XtreamUrlBuilder(credentials).stream(entry)
-        player.setMediaItem(MediaItem.fromUri(activeStreamUrl))
-        if (resumePositionMs > 0 && entry.type != MediaType.Live) player.seekTo(resumePositionMs)
-        player.prepare()
-        player.play()
+        technicalInfo = StreamTechnicalInfo()
+        diagnosticsTracker.reset(SystemClock.elapsedRealtime())
+        diagnostics = diagnosticsTracker.snapshot(SystemClock.elapsedRealtime())
+
+        val baseUrl = XtreamUrlBuilder(credentials).stream(entry)
+        streamCandidates = PlaybackUrlStrategy.candidates(
+            initialUrl = baseUrl,
+            type = entry.type,
+            preference = transportStore.preferenceFor(baseUrl),
+        )
+        candidateIndex = 0
+        startCandidate(streamCandidates.firstOrNull() ?: baseUrl, resumePositionMs)
     }
 
     LaunchedEffect(entry.key) {
@@ -196,7 +262,7 @@ fun PlayerScreen(
     }
     LaunchedEffect(hudVisible, guideOpen, settingsOpen, entry.key) {
         if (hudVisible && !guideOpen && !settingsOpen) {
-            delay(4_500)
+            delay(6_000)
             hudVisible = false
         }
     }
@@ -304,9 +370,9 @@ fun PlayerScreen(
             FocusableSurface(
                 onClick = {
                     playbackError = null
-                    buffering = true
-                    player.prepare()
-                    player.play()
+                    candidateIndex = 0
+                    val retryUrl = streamCandidates.firstOrNull() ?: activeStreamUrl
+                    startCandidate(retryUrl, if (entry.type == MediaType.Live) 0L else player.currentPosition.coerceAtLeast(0L))
                 },
                 modifier = Modifier.align(Alignment.Center).width(560.dp).height(112.dp),
             ) {
@@ -323,12 +389,19 @@ fun PlayerScreen(
         }
 
         if (hudVisible && !guideOpen && !settingsOpen) {
-            PlayerHud(
+            PlayerInfoBand(
                 entry = entry,
+                categoryName = catalog.categoriesFor(entry.type).firstOrNull { it.id == entry.categoryId }?.name,
                 epg = epg,
                 isPlaying = player.isPlaying,
                 numberBuffer = numberBuffer,
-                modifier = Modifier.fillMaxSize(),
+                technicalInfo = technicalInfo,
+                diagnostics = diagnostics,
+                transport = streamTransportLabel(activeStreamUrl),
+                audioLabel = audioTracks.getOrNull(audioIndex)?.label ?: "Auto",
+                subtitleLabel = subtitleTracks.getOrNull(subtitleIndex)?.label ?: "Désactivés",
+                resumePositionMs = resumePositionMs,
+                modifier = Modifier.align(Alignment.BottomCenter),
             )
         }
 
@@ -384,33 +457,44 @@ fun PlayerScreen(
 }
 
 @Composable
-private fun PlayerHud(
+private fun PlayerInfoBand(
     entry: MediaEntry,
+    categoryName: String?,
     epg: List<EpgProgram>,
     isPlaying: Boolean,
     numberBuffer: String,
+    technicalInfo: StreamTechnicalInfo,
+    diagnostics: PlaybackDiagnostics,
+    transport: String,
+    audioLabel: String,
+    subtitleLabel: String,
+    resumePositionMs: Long,
     modifier: Modifier = Modifier,
 ) {
-    Box(modifier) {
-        Row(
-            Modifier
-                .align(Alignment.TopStart)
-                .padding(36.dp)
-                .width(if (entry.type == MediaType.Live) 720.dp else 560.dp)
-                .background(Night.copy(alpha = 0.94f), androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
-                .padding(horizontal = 18.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.Top,
-        ) {
-            ChannelLogo(entry.iconUrl, entry.displayName, Modifier.size(72.dp))
+    Column(
+        modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp, vertical = 22.dp)
+            .background(Night.copy(alpha = 0.96f), androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
+            .padding(horizontal = 22.dp, vertical = 16.dp),
+    ) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            ChannelLogo(entry.iconUrl, entry.displayName, Modifier.size(74.dp))
             Spacer(Modifier.width(16.dp))
             Column(Modifier.weight(1f)) {
-                Text(entry.displayName, color = Ink, fontSize = 21.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                val prefix = if (entry.type == MediaType.Live) "${entry.number} · " else ""
+                Text(
+                    prefix + entry.displayName,
+                    color = Ink,
+                    fontSize = 21.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
                 Spacer(Modifier.height(4.dp))
                 if (entry.type == MediaType.Live) {
                     val current = epg.firstOrNull()
-                    if (current == null) {
-                        Text("Chaîne ${entry.number}", color = FocusBlueBright, fontSize = 14.sp)
-                    } else {
+                    if (current != null) {
                         Text(
                             listOfNotNull(current.timeRange(), current.title).joinToString(" · "),
                             color = FocusBlueBright,
@@ -419,42 +503,75 @@ private fun PlayerHud(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
-                        current.description?.takeIf(String::isNotBlank)?.let { description ->
-                            Spacer(Modifier.height(3.dp))
-                            Text(description, color = MutedInk, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        }
                         epg.getOrNull(1)?.let { next ->
-                            Spacer(Modifier.height(5.dp))
-                            Text("À suivre ${next.timeRange()?.let { "$it · " }.orEmpty()}${next.title}", color = MutedInk, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(
+                                "À suivre ${next.timeRange()?.let { "$it · " }.orEmpty()}${next.title}",
+                                color = MutedInk,
+                                fontSize = 12.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
                         }
+                    } else {
+                        Text(categoryName ?: "Direct", color = FocusBlueBright, fontSize = 13.sp)
                     }
                 } else {
-                    Text("${entry.type.displayName} · ${entry.extension.uppercase()}", color = FocusBlueBright, fontSize = 13.sp)
+                    val resume = resumePositionMs.takeIf { it > 0 }?.let { " · reprise ${formatDuration(it)}" }.orEmpty()
+                    Text(
+                        "${entry.type.displayName}${categoryName?.let { " · $it" }.orEmpty()}$resume",
+                        color = FocusBlueBright,
+                        fontSize = 13.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    entry.plot?.takeIf(String::isNotBlank)?.let {
+                        Text(it, color = MutedInk, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
                 }
+            }
+
+            Spacer(Modifier.width(20.dp))
+            Column(Modifier.width(470.dp), horizontalAlignment = Alignment.End) {
+                Text(
+                    "${technicalInfo.qualityLabel} · ${technicalInfo.resolutionText} · ${technicalInfo.fpsText}",
+                    color = Ink,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                )
+                Text(
+                    "${technicalInfo.codec ?: "Codec —"} · ${technicalInfo.bitrateText} · ${technicalInfo.hdr ?: "HDR/SDR —"}",
+                    color = FocusBlueBright,
+                    fontSize = 13.sp,
+                    maxLines = 1,
+                )
+                Text(
+                    "$transport · Audio $audioLabel · ST $subtitleLabel",
+                    color = MutedInk,
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    diagnosticsText(diagnostics),
+                    color = MutedInk,
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                )
             }
         }
 
-        Row(
-            Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 30.dp)
-                .background(Night.copy(alpha = 0.94f), androidx.compose.foundation.shape.RoundedCornerShape(10.dp))
-                .padding(horizontal = 22.dp, vertical = 13.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(if (isPlaying) "⏸ Lecture" else "▶ Pause", color = Ink, fontSize = 14.sp)
-            Spacer(Modifier.width(24.dp))
+        Spacer(Modifier.height(12.dp))
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(if (isPlaying) "⏸ Lecture" else "▶ Pause", color = Ink, fontSize = 13.sp)
+            Spacer(Modifier.width(20.dp))
             if (entry.type == MediaType.Live) {
-                Text("↑ ↓ zapper", color = MutedInk, fontSize = 14.sp)
-                Spacer(Modifier.width(22.dp))
-                Text("0–9 chaîne", color = MutedInk, fontSize = 14.sp)
-                Spacer(Modifier.width(22.dp))
-                Text("← guide", color = MutedInk, fontSize = 14.sp)
-                Spacer(Modifier.width(22.dp))
+                Text("OK liste · ↑ ↓ zap · 0–9 chaîne · ← guide", color = MutedInk, fontSize = 13.sp)
+                Spacer(Modifier.width(20.dp))
             }
-            Text("→ audio / sous-titres / écran", color = MutedInk, fontSize = 14.sp)
+            Text("→ audio / sous-titres / écran", color = MutedInk, fontSize = 13.sp)
             if (numberBuffer.isNotBlank()) {
-                Spacer(Modifier.width(22.dp))
+                Spacer(Modifier.weight(1f))
                 Text("CH $numberBuffer", color = FocusBlueBright, fontSize = 14.sp, fontWeight = FontWeight.Bold)
             }
         }
@@ -462,7 +579,7 @@ private fun PlayerHud(
 }
 
 @Composable
-private fun PlayerSettings(
+private fun BoxScope.PlayerSettings(
     audioTracks: List<TrackChoice>,
     audioIndex: Int,
     subtitleTracks: List<TrackChoice>,
@@ -476,7 +593,7 @@ private fun PlayerSettings(
 ) {
     Column(
         Modifier
-            .alignForSettings()
+            .align(Alignment.CenterEnd)
             .fillMaxHeight()
             .width(430.dp)
             .background(Night.copy(alpha = 0.98f))
@@ -593,6 +710,15 @@ private fun PlayerGuide(
     }
 }
 
+private fun selectedVideoFormat(tracks: Tracks): androidx.media3.common.Format? {
+    tracks.groups.filter { it.type == C.TRACK_TYPE_VIDEO }.forEach { group ->
+        for (index in 0 until group.length) {
+            if (group.isTrackSelected(index)) return group.getTrackFormat(index)
+        }
+    }
+    return null
+}
+
 private fun extractChoices(tracks: Tracks, type: Int): List<TrackChoice> = buildList {
     val seen = mutableSetOf<String>()
     tracks.groups.filter { it.type == type }.forEach { group ->
@@ -622,4 +748,32 @@ private fun EpgProgram.timeRange(): String? {
     return "${format.format(Date(start * 1000L))}–${format.format(Date(end * 1000L))}"
 }
 
-private fun Modifier.alignForSettings(): Modifier = this
+private fun streamTransportLabel(url: String): String {
+    if (url.isBlank()) return "Transport —"
+    val scheme = url.substringBefore("://", "").uppercase().ifBlank { "HTTP" }
+    val extension = url.substringBefore('?').substringBefore('#').substringAfterLast('.', "").lowercase()
+    val container = when (extension) {
+        "m3u8" -> "HLS"
+        "ts" -> "TS"
+        else -> extension.uppercase().ifBlank { "AUTO" }
+    }
+    return "$scheme · $container"
+}
+
+private fun diagnosticsText(value: PlaybackDiagnostics): String {
+    val startup = value.startupTimeMs?.let { "démarrage ${it} ms" } ?: "démarrage…"
+    val rebuffer = if (value.rebufferCount == 0) {
+        "0 rebuffer"
+    } else {
+        "${value.rebufferCount} rebuffer · ${value.totalRebufferTimeMs} ms"
+    }
+    return "$startup · $rebuffer"
+}
+
+private fun formatDuration(positionMs: Long): String {
+    val totalSeconds = positionMs.coerceAtLeast(0L) / 1000L
+    val hours = totalSeconds / 3600L
+    val minutes = (totalSeconds % 3600L) / 60L
+    val seconds = totalSeconds % 60L
+    return if (hours > 0) "%d:%02d:%02d".format(hours, minutes, seconds) else "%02d:%02d".format(minutes, seconds)
+}

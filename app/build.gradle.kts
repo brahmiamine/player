@@ -41,8 +41,6 @@ android {
     }
 
     lint {
-        // Media3 marque encore les API de sélection de pistes comme instables en 1.11.
-        // Leur usage est volontaire et isolé dans les écrans de lecture/aperçu.
         disable += "UnsafeOptInUsageError"
     }
 
@@ -86,6 +84,7 @@ dependencies {
     implementation("androidx.tv:tv-material:1.1.0")
     implementation("androidx.media3:media3-exoplayer:$media3Version")
     implementation("androidx.media3:media3-exoplayer-hls:$media3Version")
+    implementation("androidx.media3:media3-datasource-okhttp:$media3Version")
     implementation("androidx.media3:media3-ui:$media3Version")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
