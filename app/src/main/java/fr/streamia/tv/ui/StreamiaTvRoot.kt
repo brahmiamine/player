@@ -70,7 +70,17 @@ fun StreamiaTvRoot(viewModel: StreamiaViewModel) {
             playbackProfileId = validSession?.profileId,
             activeProfileId = sessionStore.loadActiveProfileId(),
             autoOpenDisabled = sessionStore.isAutoOpenDisabled(),
-        ) ?: return@LaunchedEffect
+        )
+        if (targetProfileId == null) {
+            viewModel.finishStartup()
+            return@LaunchedEffect
+        }
+
+        val session = validSession?.takeIf { it.profileId == targetProfileId }
+        if (session != null) {
+            viewModel.resumeStartup(targetProfileId, session.entry, session.returnToSeries)
+            return@LaunchedEffect
+        }
 
         viewModel.openProfile(targetProfileId)
         val loaded = viewModel.uiState.first { candidate ->
@@ -84,19 +94,6 @@ fun StreamiaTvRoot(viewModel: StreamiaViewModel) {
         }
 
         if (loaded.activeProfileId != targetProfileId || loaded.catalog == null) return@LaunchedEffect
-        val session = validSession?.takeIf { it.profileId == targetProfileId } ?: return@LaunchedEffect
-
-        val restoredEntry = when {
-            session.entry.type == MediaType.Series && session.entry.playable -> session.entry
-            else -> loaded.catalog.entry(session.entry.key) ?: session.entry
-        }
-
-        when (restoredEntry.type) {
-            MediaType.Movie -> viewModel.playMovie(restoredEntry)
-            MediaType.Live,
-            MediaType.Series,
-            -> viewModel.openEntry(restoredEntry)
-        }
     }
 
     LaunchedEffect(Unit) {

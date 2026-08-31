@@ -33,7 +33,53 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     private val _uiState = MutableStateFlow(StreamiaUiState())
     val uiState: StateFlow<StreamiaUiState> = _uiState.asStateFlow()
 
-    init { showLogin() }
+    init {
+        _uiState.value = StreamiaUiState(
+            booting = true,
+            screen = StreamiaScreen.Login,
+            profiles = repository.profiles(),
+        )
+    }
+
+    fun finishStartup() {
+        if (_uiState.value.activeProfileId == null) showLogin()
+    }
+
+    /**
+     * Lance immédiatement le dernier média avec les informations sauvegardées. Le catalogue
+     * complet est relu depuis le disque ensuite, sans retarder le premier affichage vidéo.
+     */
+    fun resumeStartup(profileId: String, entry: MediaEntry, returnToSeries: Boolean) {
+        val profile = repository.profile(profileId)
+        val credentials = profile?.credentialsOrNull()
+        if (profile == null || credentials == null) {
+            openProfile(profileId)
+            return
+        }
+        val library = repository.library(profileId)
+        val startupCatalog = Catalog(emptyList(), listOf(entry))
+        _uiState.value = StreamiaUiState(
+            booting = false,
+            busy = false,
+            screen = StreamiaScreen.Player(entry, returnToSeries),
+            rawCatalog = startupCatalog,
+            catalog = startupCatalog,
+            credentials = credentials,
+            activeProfileId = profileId,
+            profiles = repository.profiles(),
+            library = library,
+            resumePositionMs = library.history.firstOrNull { it.entry.key == entry.key }?.positionMs ?: 0L,
+        )
+        viewModelScope.launch {
+            runCatching { repository.openProfile(profileId) }
+                .onSuccess { loaded ->
+                    mergeCatalog(loaded)
+                    if (loaded.source == CatalogSource.Cache) refreshSilently(profileId)
+                }
+                .onFailure { _uiState.update { state -> state.copy(offline = true, message = it.safeMessage()) } }
+        }
+        if (entry.type == MediaType.Live) loadEpg(entry)
+    }
 
     fun signIn(profileId: String?, profileName: String, server: String, username: String, password: String) {
         if (_uiState.value.busy) return
