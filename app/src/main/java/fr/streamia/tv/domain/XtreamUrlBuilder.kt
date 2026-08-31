@@ -22,6 +22,9 @@ class XtreamUrlBuilder(private val credentials: ServerCredentials) {
 
     fun api(action: String): String = "${authentication()}&action=${query(action)}"
 
+    fun playlist(output: String = "ts"): String =
+        "$baseUrl/get.php?username=${query(credentials.username)}&password=${query(credentials.password)}&type=m3u_plus&output=${query(output)}"
+
     fun stream(entry: MediaEntry): String = stream(entry.type, entry.id, entry.extension)
 
     fun stream(type: MediaType, streamId: Int, extension: String = type.defaultExtension): String {
