@@ -106,9 +106,18 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onRememberContent = viewModel::rememberLastContent,
                     onLocationChanged = viewModel::rememberBrowserLocation,
                     onHome = viewModel::showHome,
-                    onSearch = viewModel::showSearch,
-                    onEpg = viewModel::showEpg,
-                    onSettings = viewModel::showSettings,
+                    onSearch = {
+                        livePlaybackSession.stop(clearSession = true)
+                        viewModel.showSearch()
+                    },
+                    onEpg = {
+                        livePlaybackSession.stop(clearSession = true)
+                        viewModel.showEpg()
+                    },
+                    onSettings = {
+                        livePlaybackSession.stop(clearSession = true)
+                        viewModel.showSettings()
+                    },
                     onDismissMessage = viewModel::dismissMessage,
                 )
 
