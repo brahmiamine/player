@@ -6,11 +6,22 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.Canvas
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.unit.dp
+import fr.streamia.tv.ui.theme.FocusBlueBright
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.tv.material3.Text
@@ -175,11 +186,28 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
 
 @Composable
 private fun BootScreen() {
+    val transition = rememberInfiniteTransition(label = "startup-loader")
+    val rotation by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(tween(700, easing = LinearEasing), RepeatMode.Restart),
+        label = "startup-loader-rotation",
+    )
     Box(Modifier.fillMaxSize().background(Night), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             StreamiaLogo()
             Spacer(Modifier.height(22.dp))
-            Text("Préparation de votre télévision…", color = MutedInk, fontSize = 17.sp)
+            Canvas(Modifier.size(34.dp)) {
+                drawArc(
+                    color = FocusBlueBright,
+                    startAngle = rotation,
+                    sweepAngle = 255f,
+                    useCenter = false,
+                    style = Stroke(width = 5.dp.toPx(), cap = StrokeCap.Round),
+                )
+            }
+            Spacer(Modifier.height(14.dp))
+            Text("Ouverture de votre dernière lecture…", color = MutedInk, fontSize = 17.sp)
         }
     }
 }
