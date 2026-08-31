@@ -102,10 +102,42 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         }
     }
 
+    /**
+     * Si une liste Xtream/M3U est déjà connue en cache, on l'affiche tout de suite — le cache
+     * Xtream est permanent, ce n'est donc pas un état provisoire — pendant que
+     * [XtreamRepository.openProfile] confirme/réconcilie les favoris en arrière-plan sans bloquer
+     * l'écran derrière un « Chargement… ». Sans cache local, on retombe sur l'écran de chargement
+     * classique le temps du premier chargement réseau.
+     */
     fun openProfile(profileId: String) {
         if (_uiState.value.busy) return
-        _uiState.update { it.copy(busy = true, message = "Ouverture de la liste…") }
         viewModelScope.launch {
+            val profile = repository.profile(profileId)
+            val credentials = profile?.credentialsOrNull()
+            val cachedCatalog = if (credentials != null) repository.cachedCatalog(profileId) else null
+            if (credentials != null && cachedCatalog != null) {
+                _uiState.value = StreamiaUiState(
+                    booting = false,
+                    busy = false,
+                    screen = StreamiaScreen.Home,
+                    rawCatalog = cachedCatalog,
+                    catalog = cachedCatalog,
+                    credentials = credentials,
+                    activeProfileId = profileId,
+                    profiles = repository.profiles(),
+                    library = repository.library(profileId),
+                )
+                try {
+                    mergeCatalog(repository.openProfile(profileId))
+                } catch (error: Throwable) {
+                    _uiState.update { state ->
+                        if (state.activeProfileId == profileId) state.copy(offline = true, message = error.safeMessage())
+                        else state
+                    }
+                }
+                return@launch
+            }
+            _uiState.update { it.copy(busy = true, message = "Ouverture de la liste…") }
             try {
                 val loaded = repository.openProfile(profileId)
                 showCatalog(loaded)
