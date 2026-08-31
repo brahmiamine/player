@@ -233,8 +233,8 @@ fun BrowserScreen(
                     navigationStore.saveLiveSelection(selectedCategoryId, it.key)
                     onRememberContent(it)
                 },
-                onListPositionChanged = {
-                    navigationStore.saveListPosition(MediaType.Live, selectedCategoryId, it)
+                onListPositionChanged = { categoryId, position ->
+                    navigationStore.saveListPosition(MediaType.Live, categoryId, position)
                 },
                 onToggleCategoryFavorite = onToggleCategoryFavorite,
                 onEntrySelected = onEntrySelected,
@@ -343,7 +343,7 @@ private fun LiveCatalogLayout(
     historyCount: Int,
     onCategorySelected: (MediaCategory) -> Unit,
     onPreviewChanged: (MediaEntry) -> Unit,
-    onListPositionChanged: (NavigationListPosition) -> Unit,
+    onListPositionChanged: (String, NavigationListPosition) -> Unit,
     onToggleCategoryFavorite: (MediaCategory) -> Unit,
     onEntrySelected: (MediaEntry) -> Unit,
     onToggleEntryFavorite: (MediaEntry) -> Unit,
@@ -429,6 +429,11 @@ private fun LiveCatalogLayout(
         )
 
         key(selectedCategoryId) {
+            // Fige la catégorie associée à cette instance de LiveChannelList : le flush de
+            // position en fin de debounce peut s'exécuter après que selectedCategoryId ait déjà
+            // changé (catégorie suivante sélectionnée pendant la fenêtre de 300 ms), et lire l'état
+            // mutable à ce moment-là sauverait la position de l'ancienne catégorie sous la nouvelle.
+            val categoryIdForPosition = selectedCategoryId
             LiveChannelList(
                 entries = entries,
                 previewKey = previewEntry?.key,
@@ -447,7 +452,7 @@ private fun LiveCatalogLayout(
                         runCatching { categoryFocus.requestFocus() }
                     }
                 },
-                onListPositionChanged = onListPositionChanged,
+                onListPositionChanged = { onListPositionChanged(categoryIdForPosition, it) },
                 onConfirm = { channel ->
                     when (
                         liveChannelConfirmAction(
