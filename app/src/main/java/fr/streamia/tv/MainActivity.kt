@@ -1,5 +1,6 @@
 package fr.streamia.tv
 
+import android.annotation.SuppressLint
 import android.os.Bundle
 import android.view.KeyEvent
 import androidx.activity.ComponentActivity
@@ -39,6 +40,10 @@ class MainActivity : ComponentActivity() {
         setContent { StreamiaTvRoot(viewModel) }
     }
 
+    // ComponentActivity redéfinit dispatchKeyEvent avec une restriction de groupe AndroidX.
+    // L'interception est volontaire ici pour capter OK avant le PlayerScreen, puis tous les
+    // autres événements sont immédiatement rendus au dispatcher normal de l'Activity.
+    @SuppressLint("RestrictedApi")
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (!::viewModel.isInitialized || !event.isTvOkKey()) return super.dispatchKeyEvent(event)
 
