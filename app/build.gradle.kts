@@ -14,8 +14,8 @@ android {
         applicationId = "fr.streamia.tv"
         minSdk = 23
         targetSdk = 36
-        versionCode = 13
-        versionName = "1.5.4"
+        versionCode = 14
+        versionName = "1.5.5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
@@ -68,12 +68,10 @@ kotlin {
 
 dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2026.04.01")
-    val firebaseBom = platform("com.google.firebase:firebase-bom:34.18.0")
     val media3Version = "1.11.0"
 
     implementation(composeBom)
     androidTestImplementation(composeBom)
-    implementation(firebaseBom)
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
 
     implementation("androidx.core:core-ktx:1.17.0")
@@ -90,6 +88,8 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer-hls:$media3Version")
     implementation("androidx.media3:media3-datasource-okhttp:$media3Version")
     implementation("androidx.media3:media3-ui:$media3Version")
+
+    implementation(platform("com.google.firebase:firebase-bom:34.18.0"))
     implementation("com.google.firebase:firebase-crashlytics")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
