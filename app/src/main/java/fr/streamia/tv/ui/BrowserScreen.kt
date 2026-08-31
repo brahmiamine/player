@@ -1,6 +1,5 @@
 package fr.streamia.tv.ui
 
-import android.view.KeyEvent as AndroidKeyEvent
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -77,6 +76,7 @@ fun BrowserScreen(
     onEntrySelected: (MediaEntry) -> Unit,
     onToggleEntryFavorite: (MediaEntry) -> Unit,
     onToggleCategoryFavorite: (MediaCategory) -> Unit,
+    onLocationChanged: (MediaType, String?) -> Unit,
     onHome: () -> Unit,
     onSearch: () -> Unit,
     onEpg: () -> Unit,
@@ -130,6 +130,9 @@ fun BrowserScreen(
             selectedCategoryId = defaultCategoryId(catalog, selectedType)
         }
     }
+    LaunchedEffect(selectedType, selectedCategoryId) {
+        onLocationChanged(selectedType, selectedCategoryId)
+    }
 
     Column(Modifier.fillMaxSize().background(Night)) {
         BrowserHeader(
@@ -172,6 +175,7 @@ fun BrowserScreen(
                 entries = entries,
                 favoriteCategories = library.favoriteCategories,
                 favoriteEntries = library.favoriteEntries,
+                historyCount = historyForType.size,
                 onCategorySelected = { selectedCategoryId = it.id },
                 onToggleCategoryFavorite = onToggleCategoryFavorite,
                 onEntrySelected = onEntrySelected,
@@ -187,6 +191,7 @@ fun BrowserScreen(
                 entries = entries,
                 favoriteCategories = library.favoriteCategories,
                 favoriteEntries = library.favoriteEntries,
+                historyCount = historyForType.size,
                 historyByKey = historyByKey,
                 onCategorySelected = { selectedCategoryId = it.id },
                 onToggleCategoryFavorite = onToggleCategoryFavorite,
@@ -271,6 +276,7 @@ private fun LiveCatalogLayout(
     entries: List<MediaEntry>,
     favoriteCategories: Set<String>,
     favoriteEntries: Set<String>,
+    historyCount: Int,
     onCategorySelected: (MediaCategory) -> Unit,
     onToggleCategoryFavorite: (MediaCategory) -> Unit,
     onEntrySelected: (MediaEntry) -> Unit,
@@ -292,6 +298,7 @@ private fun LiveCatalogLayout(
             countFor = { category ->
                 when (category.id) {
                     FAVORITES_CATEGORY_ID -> favoriteEntries.count { it.startsWith("${MediaType.Live.name}:") }
+                    HISTORY_CATEGORY_ID -> historyCount
                     else -> catalog.entriesIn(MediaType.Live, category.id).size
                 }
             },
@@ -389,6 +396,8 @@ private fun LivePreview(
     val player = remember { ExoPlayer.Builder(context).build().apply { playWhenReady = true } }
     var buffering by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf(false) }
+    var activeUrl by remember { mutableStateOf("") }
+    var fallbackAttempted by remember { mutableStateOf(false) }
 
     DisposableEffect(player) {
         val listener = object : Player.Listener {
@@ -397,7 +406,21 @@ private fun LivePreview(
             }
 
             override fun onPlayerError(playbackException: PlaybackException) {
+                if (!fallbackAttempted) {
+                    val alternate = XtreamUrlBuilder.alternateTransportUrl(activeUrl)
+                    if (alternate != null) {
+                        fallbackAttempted = true
+                        activeUrl = alternate
+                        error = false
+                        buffering = true
+                        player.setMediaItem(MediaItem.fromUri(alternate))
+                        player.prepare()
+                        player.play()
+                        return
+                    }
+                }
                 error = true
+                buffering = false
             }
         }
         player.addListener(listener)
@@ -412,8 +435,9 @@ private fun LivePreview(
         delay(280)
         error = false
         buffering = true
-        val url = XtreamUrlBuilder(credentials).stream(target)
-        player.setMediaItem(MediaItem.fromUri(url))
+        fallbackAttempted = false
+        activeUrl = XtreamUrlBuilder(credentials).stream(target)
+        player.setMediaItem(MediaItem.fromUri(activeUrl))
         player.prepare()
         player.play()
     }
@@ -471,6 +495,7 @@ private fun VodCatalogLayout(
     entries: List<MediaEntry>,
     favoriteCategories: Set<String>,
     favoriteEntries: Set<String>,
+    historyCount: Int,
     historyByKey: Map<String, PlaybackHistoryItem>,
     onCategorySelected: (MediaCategory) -> Unit,
     onToggleCategoryFavorite: (MediaCategory) -> Unit,
@@ -487,6 +512,7 @@ private fun VodCatalogLayout(
             countFor = { category ->
                 when (category.id) {
                     FAVORITES_CATEGORY_ID -> favoriteEntries.count { it.startsWith("${type.name}:") }
+                    HISTORY_CATEGORY_ID -> historyCount
                     else -> catalog.entriesIn(type, category.id).size
                 }
             },
