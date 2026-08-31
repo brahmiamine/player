@@ -36,6 +36,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -46,6 +47,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import fr.streamia.tv.data.PlaybackHistoryItem
+import fr.streamia.tv.data.BrowserNavigationStore
 import fr.streamia.tv.data.UserLibrarySnapshot
 import fr.streamia.tv.domain.Catalog
 import fr.streamia.tv.domain.MediaCategory
@@ -82,6 +84,7 @@ fun BrowserScreen(
     onEntrySelected: (MediaEntry) -> Unit,
     onToggleEntryFavorite: (MediaEntry) -> Unit,
     onToggleCategoryFavorite: (MediaCategory) -> Unit,
+    onRememberContent: (MediaEntry) -> Unit,
     onLocationChanged: (MediaType, String?) -> Unit,
     onHome: () -> Unit,
     onSearch: () -> Unit,
@@ -90,24 +93,22 @@ fun BrowserScreen(
     onDismissMessage: () -> Unit,
 ) {
     BackHandler(onBack = onHome)
+    val context = LocalContext.current.applicationContext
+    val navigationStore = remember(credentials) { BrowserNavigationStore(context, credentials) }
 
     val defaultType = initialType
         ?.takeIf { catalog.count(it) > 0 }
         ?: MediaType.entries.firstOrNull { catalog.count(it) > 0 }
         ?: MediaType.Live
     var selectedType by remember(catalog, initialType) { mutableStateOf(defaultType) }
-    var selectedCategoryId by remember(catalog, initialCategoryId, selectedType) {
-        mutableStateOf(initialCategoryId ?: defaultCategoryId(catalog, selectedType))
+    var selectedCategoryId by remember(catalog, initialCategoryId) {
+        mutableStateOf(initialCategoryId ?: navigationStore.category(selectedType) ?: defaultCategoryId(catalog, selectedType))
     }
     val restoredLiveEntryKey = remember(catalog, initialType, initialCategoryId) {
-        if (defaultType == MediaType.Live) LiveBrowserReturnState.consume() else null
+        if (defaultType == MediaType.Live) LiveBrowserReturnState.consume() ?: navigationStore.entry(MediaType.Live) else null
     }
 
-    val baseCategories = remember(catalog, selectedType, library.favoriteCategories) {
-        val raw = catalog.categoriesFor(selectedType)
-        val (favorite, other) = raw.partition { it.key in library.favoriteCategories }
-        favorite + other
-    }
+    val baseCategories = remember(catalog, selectedType) { catalog.categoriesFor(selectedType) }
     val favoriteEntriesForType = remember(catalog, selectedType, library.favoriteEntries) {
         catalog.entriesFor(selectedType).filter { it.key in library.favoriteEntries }
     }
@@ -118,12 +119,13 @@ fun BrowserScreen(
             .toList()
     }
     val categories = remember(baseCategories, favoriteEntriesForType.size, historyForType.size, selectedType) {
-        buildList {
-            if (favoriteEntriesForType.isNotEmpty()) add(MediaCategory(FAVORITES_CATEGORY_ID, "★ Favoris", selectedType))
-            if (historyForType.isNotEmpty()) add(MediaCategory(HISTORY_CATEGORY_ID, "↺ Historique", selectedType))
-            addAll(baseCategories)
-            add(Catalog.allCategory(selectedType))
-        }
+        buildBrowserCategories(
+            type = selectedType,
+            providerCategories = baseCategories,
+            favoriteCategoryKeys = library.favoriteCategories,
+            hasFavoriteEntries = favoriteEntriesForType.isNotEmpty(),
+            hasHistory = historyForType.isNotEmpty(),
+        )
     }
     val entries = remember(catalog, selectedType, selectedCategoryId, favoriteEntriesForType, historyForType) {
         when (selectedCategoryId) {
@@ -141,6 +143,7 @@ fun BrowserScreen(
     }
     androidx.compose.runtime.LaunchedEffect(selectedType, selectedCategoryId) {
         onLocationChanged(selectedType, selectedCategoryId)
+        navigationStore.saveCategory(selectedType, selectedCategoryId)
     }
 
     Column(Modifier.fillMaxSize().background(Night)) {
@@ -153,7 +156,7 @@ fun BrowserScreen(
             onTypeSelected = {
                 if (it != MediaType.Live) livePlaybackSession.stop(clearSession = true)
                 selectedType = it
-                selectedCategoryId = defaultCategoryId(catalog, it)
+                selectedCategoryId = navigationStore.category(it) ?: defaultCategoryId(catalog, it)
             },
             onSearch = onSearch,
             onEpg = onEpg,
@@ -190,6 +193,10 @@ fun BrowserScreen(
                 favoriteEntries = library.favoriteEntries,
                 historyCount = historyForType.size,
                 onCategorySelected = { selectedCategoryId = it.id },
+                onPreviewChanged = {
+                    navigationStore.saveEntry(MediaType.Live, it.key)
+                    onRememberContent(it)
+                },
                 onToggleCategoryFavorite = onToggleCategoryFavorite,
                 onEntrySelected = onEntrySelected,
                 onToggleEntryFavorite = onToggleEntryFavorite,
@@ -209,6 +216,7 @@ fun BrowserScreen(
                 onCategorySelected = { selectedCategoryId = it.id },
                 onToggleCategoryFavorite = onToggleCategoryFavorite,
                 onEntrySelected = onEntrySelected,
+                onEntryFocused = { navigationStore.saveEntry(selectedType, it.key) },
                 onToggleEntryFavorite = onToggleEntryFavorite,
                 modifier = Modifier.fillMaxSize().padding(start = 18.dp, end = 18.dp, bottom = 18.dp),
             )
@@ -294,6 +302,7 @@ private fun LiveCatalogLayout(
     favoriteEntries: Set<String>,
     historyCount: Int,
     onCategorySelected: (MediaCategory) -> Unit,
+    onPreviewChanged: (MediaEntry) -> Unit,
     onToggleCategoryFavorite: (MediaCategory) -> Unit,
     onEntrySelected: (MediaEntry) -> Unit,
     onToggleEntryFavorite: (MediaEntry) -> Unit,
@@ -320,6 +329,7 @@ private fun LiveCatalogLayout(
         yield()
         controlsVisible = true
     }
+    LaunchedEffect(previewEntry?.key) { previewEntry?.let(onPreviewChanged) }
     LaunchedEffect(fullscreenTarget) {
         val target = fullscreenTarget ?: return@LaunchedEffect
         controlsVisible = false
@@ -579,6 +589,7 @@ private fun VodCatalogLayout(
     onCategorySelected: (MediaCategory) -> Unit,
     onToggleCategoryFavorite: (MediaCategory) -> Unit,
     onEntrySelected: (MediaEntry) -> Unit,
+    onEntryFocused: (MediaEntry) -> Unit,
     onToggleEntryFavorite: (MediaEntry) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -607,6 +618,7 @@ private fun VodCatalogLayout(
             favoriteEntries = favoriteEntries,
             historyByKey = historyByKey,
             onEntrySelected = onEntrySelected,
+            onEntryFocused = onEntryFocused,
             onToggleFavorite = onToggleEntryFavorite,
             modifier = Modifier.weight(1f).fillMaxHeight(),
         )
@@ -689,6 +701,7 @@ private fun PosterGrid(
     favoriteEntries: Set<String>,
     historyByKey: Map<String, PlaybackHistoryItem>,
     onEntrySelected: (MediaEntry) -> Unit,
+    onEntryFocused: (MediaEntry) -> Unit,
     onToggleFavorite: (MediaEntry) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -717,6 +730,7 @@ private fun PosterGrid(
                         favorite = entry.key in favoriteEntries,
                         history = historyByKey[entry.key],
                         onClick = { onEntrySelected(entry) },
+                        onFocused = { onEntryFocused(entry) },
                         onLongClick = { onToggleFavorite(entry) },
                     )
                 }
@@ -731,10 +745,12 @@ private fun PosterCard(
     favorite: Boolean,
     history: PlaybackHistoryItem?,
     onClick: () -> Unit,
+    onFocused: () -> Unit,
     onLongClick: () -> Unit,
 ) {
     FocusableSurface(
         onClick = onClick,
+        onFocused = onFocused,
         onLongClick = onLongClick,
         selected = favorite,
         modifier = Modifier.fillMaxWidth().height(245.dp),
