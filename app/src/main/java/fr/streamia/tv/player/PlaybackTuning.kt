@@ -10,10 +10,20 @@ data class BufferProfile(
 )
 
 object PlaybackTuning {
-    fun forType(type: MediaType): BufferProfile = BufferProfile(
-        minBufferMs = 50_000,
-        maxBufferMs = 50_000,
-        bufferForPlaybackMs = 2_500,
-        bufferForPlaybackAfterRebufferMs = 5_000,
-    )
+    fun forType(type: MediaType): BufferProfile = when (type) {
+        MediaType.Live -> BufferProfile(
+            minBufferMs = 2_500,
+            maxBufferMs = 12_000,
+            bufferForPlaybackMs = 350,
+            bufferForPlaybackAfterRebufferMs = 900,
+        )
+        MediaType.Movie,
+        MediaType.Series,
+        -> BufferProfile(
+            minBufferMs = 15_000,
+            maxBufferMs = 50_000,
+            bufferForPlaybackMs = 800,
+            bufferForPlaybackAfterRebufferMs = 2_000,
+        )
+    }
 }
