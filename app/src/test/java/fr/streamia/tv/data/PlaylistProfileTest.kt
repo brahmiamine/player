@@ -7,7 +7,7 @@ import org.junit.Test
 class PlaylistProfileTest {
     @Test
     fun `fresh Xtream catalog stays local until interval expires`() {
-        val now = 10_000_000L
+        val now = 100_000_000L
         val profile = PlaylistProfile(
             id = "xtream",
             name = "TV",
@@ -24,7 +24,7 @@ class PlaylistProfileTest {
 
     @Test
     fun `Xtream catalog refresh becomes due after configured interval`() {
-        val now = 30_000_000L
+        val now = 100_000_000L
         val profile = PlaylistProfile(
             id = "xtream",
             name = "TV",
