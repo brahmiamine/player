@@ -52,6 +52,7 @@ import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.domain.ServerCredentials
 import fr.streamia.tv.domain.XtreamUrlBuilder
+import fr.streamia.tv.player.StreamiaPlayerFactory
 import fr.streamia.tv.ui.theme.DeepSurface
 import fr.streamia.tv.ui.theme.FocusBlueBright
 import fr.streamia.tv.ui.theme.Ink
@@ -62,6 +63,14 @@ import kotlinx.coroutines.delay
 
 private const val FAVORITES_CATEGORY_ID = "__favorites__"
 private const val HISTORY_CATEGORY_ID = "__history__"
+
+/**
+ * Le preview Live doit libérer sa connexion AVANT de démarrer le plein écran.
+ * Beaucoup de fournisseurs Xtream limitent le compte à une seule connexion simultanée.
+ */
+private class LivePreviewHandle {
+    var stop: () -> Unit = {}
+}
 
 @Composable
 fun BrowserScreen(
@@ -110,8 +119,12 @@ fun BrowserScreen(
     }
     val categories = remember(baseCategories, favoriteEntriesForType.size, historyForType.size, selectedType) {
         buildList {
-            if (favoriteEntriesForType.isNotEmpty()) add(MediaCategory(FAVORITES_CATEGORY_ID, "★ Favoris", selectedType))
-            if (historyForType.isNotEmpty()) add(MediaCategory(HISTORY_CATEGORY_ID, "↺ Historique", selectedType))
+            if (favoriteEntriesForType.isNotEmpty()) {
+                add(MediaCategory(FAVORITES_CATEGORY_ID, "★ Favoris", selectedType))
+            }
+            if (historyForType.isNotEmpty()) {
+                add(MediaCategory(HISTORY_CATEGORY_ID, "↺ Historique", selectedType))
+            }
             addAll(baseCategories)
             add(Catalog.allCategory(selectedType))
         }
@@ -157,7 +170,10 @@ fun BrowserScreen(
             ) {
                 Text(
                     "$message  ·  OK fermer",
-                    color = if (message.contains("média", ignoreCase = true) || message.contains("import", ignoreCase = true)) FocusBlueBright else MaterialTheme.colorScheme.error,
+                    color = if (
+                        message.contains("média", ignoreCase = true) ||
+                        message.contains("import", ignoreCase = true)
+                    ) FocusBlueBright else MaterialTheme.colorScheme.error,
                     fontSize = 12.sp,
                     modifier = Modifier.padding(horizontal = 16.dp),
                     maxLines = 1,
@@ -252,7 +268,7 @@ private fun BrowserHeader(
             when {
                 busy -> "Chargement…"
                 offline -> "Cache"
-                else -> "En ligne"
+                else -> "Local / en ligne"
             },
             color = if (offline) WarmSignal else MutedInk,
             fontSize = 10.sp,
@@ -261,7 +277,12 @@ private fun BrowserHeader(
 }
 
 @Composable
-private fun HeaderAction(label: String, width: androidx.compose.ui.unit.Dp, onClick: () -> Unit, enabled: Boolean = true) {
+private fun HeaderAction(
+    label: String,
+    width: androidx.compose.ui.unit.Dp,
+    onClick: () -> Unit,
+    enabled: Boolean = true,
+) {
     FocusableSurface(onClick = onClick, enabled = enabled, modifier = Modifier.width(width).height(44.dp)) {
         Text(label, color = Ink, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 10.dp))
     }
@@ -284,9 +305,22 @@ private fun LiveCatalogLayout(
     modifier: Modifier = Modifier,
 ) {
     var previewKey by remember(catalog) { mutableStateOf<String?>(null) }
+    var pendingFullscreen by remember { mutableStateOf<MediaEntry?>(null) }
+    val previewHandle = remember { LivePreviewHandle() }
+
     LaunchedEffect(selectedCategoryId, entries) {
         if (entries.none { it.key == previewKey }) previewKey = entries.firstOrNull()?.key
     }
+
+    LaunchedEffect(pendingFullscreen) {
+        val target = pendingFullscreen ?: return@LaunchedEffect
+        // Ferme immédiatement le socket du preview. Un très court délai laisse au serveur Xtream
+        // le temps de libérer le slot de connexion avant que le Player plein écran se connecte.
+        previewHandle.stop()
+        delay(140)
+        onEntrySelected(target)
+    }
+
     val previewEntry = entries.firstOrNull { it.key == previewKey } ?: entries.firstOrNull()
 
     Row(modifier, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -312,7 +346,7 @@ private fun LiveCatalogLayout(
             previewKey = previewEntry?.key,
             favoriteEntries = favoriteEntries,
             onPreview = { previewKey = it.key },
-            onOpen = onEntrySelected,
+            onOpen = { pendingFullscreen = it },
             onToggleFavorite = onToggleEntryFavorite,
             modifier = Modifier.width(340.dp).fillMaxHeight(),
         )
@@ -321,6 +355,7 @@ private fun LiveCatalogLayout(
             credentials = credentials,
             entry = previewEntry,
             favorite = previewEntry?.key in favoriteEntries,
+            handle = previewHandle,
             modifier = Modifier.weight(1f).fillMaxHeight(),
         )
     }
@@ -337,7 +372,10 @@ private fun LiveChannelList(
     modifier: Modifier = Modifier,
 ) {
     Column(modifier) {
-        Row(Modifier.fillMaxWidth().padding(start = 3.dp, bottom = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier.fillMaxWidth().padding(start = 3.dp, bottom = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Text("Chaînes", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.weight(1f))
             Text(entries.size.toString(), color = MutedInk, fontSize = 10.sp)
@@ -384,22 +422,32 @@ private fun LiveChannelList(
     }
 }
 
+private fun stopPreviewPlayer(player: ExoPlayer) {
+    player.pause()
+    player.stop()
+    player.clearMediaItems()
+}
+
 @androidx.annotation.OptIn(markerClass = [UnstableApi::class])
 @Composable
 private fun LivePreview(
     credentials: ServerCredentials,
     entry: MediaEntry?,
     favorite: Boolean,
+    handle: LivePreviewHandle,
     modifier: Modifier = Modifier,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    val player = remember { ExoPlayer.Builder(context).build().apply { playWhenReady = true } }
+    // Même pile réseau/buffer que le plein écran : cela évite deux comportements de lecture
+    // différents et permet au pool HTTP d'être réutilisé après la fermeture du preview.
+    val player = remember { StreamiaPlayerFactory.create(context.applicationContext, MediaType.Live) }
     var buffering by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf(false) }
     var activeUrl by remember { mutableStateOf("") }
     var fallbackAttempted by remember { mutableStateOf(false) }
 
     DisposableEffect(player) {
+        handle.stop = { stopPreviewPlayer(player) }
         val listener = object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
                 buffering = playbackState == Player.STATE_BUFFERING
@@ -413,6 +461,7 @@ private fun LivePreview(
                         activeUrl = alternate
                         error = false
                         buffering = true
+                        stopPreviewPlayer(player)
                         player.setMediaItem(MediaItem.fromUri(alternate))
                         player.prepare()
                         player.play()
@@ -425,25 +474,38 @@ private fun LivePreview(
         }
         player.addListener(listener)
         onDispose {
+            handle.stop = {}
             player.removeListener(listener)
+            stopPreviewPlayer(player)
             player.release()
         }
     }
 
-    LaunchedEffect(entry?.key) {
-        val target = entry ?: return@LaunchedEffect
-        delay(280)
+    LaunchedEffect(entry?.key, credentials) {
+        val target = entry
+        if (target == null) {
+            stopPreviewPlayer(player)
+            return@LaunchedEffect
+        }
+        delay(240)
         error = false
         buffering = true
         fallbackAttempted = false
         activeUrl = XtreamUrlBuilder(credentials).stream(target)
+        stopPreviewPlayer(player)
         player.setMediaItem(MediaItem.fromUri(activeUrl))
         player.prepare()
         player.play()
     }
 
     Column(modifier) {
-        Text("Aperçu en direct", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 3.dp, bottom = 7.dp))
+        Text(
+            "Aperçu en direct",
+            color = Ink,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(start = 3.dp, bottom = 7.dp),
+        )
         Box(Modifier.fillMaxWidth().weight(1f).background(Color.Black)) {
             if (entry != null) {
                 AndroidView(
@@ -470,7 +532,14 @@ private fun LivePreview(
                         .background(Night.copy(alpha = 0.90f))
                         .padding(horizontal = 14.dp, vertical = 10.dp),
                 ) {
-                    Text(entry.displayName, color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        entry.displayName,
+                        color = Ink,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                     Spacer(Modifier.height(3.dp))
                     Text(
                         "CH ${entry.number}${if (favorite) " · ★ Favori" else ""}  ·  OK plein écran · OK long favori",
@@ -551,7 +620,10 @@ private fun CategoryRail(
     }
 
     Column(modifier) {
-        Row(Modifier.fillMaxWidth().padding(start = 3.dp, bottom = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier.fillMaxWidth().padding(start = 3.dp, bottom = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Text("Catégories", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.weight(1f))
             Text("OK long = favori", color = MutedInk, fontSize = 9.sp)
@@ -569,7 +641,10 @@ private fun CategoryRail(
                         .height(46.dp)
                         .then(if (category == categories.first()) Modifier.focusRequester(firstFocus) else Modifier),
                 ) {
-                    Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
                         if (!virtual && category.key in favoriteCategories) {
                             Text("★", color = FocusBlueBright, fontSize = 10.sp)
                             Spacer(Modifier.width(5.dp))
@@ -604,7 +679,14 @@ private fun PosterGrid(
 ) {
     Column(modifier) {
         Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(categoryName.ifBlank { type.displayName }, color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                categoryName.ifBlank { type.displayName },
+                color = Ink,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
             Spacer(Modifier.width(10.dp))
             Text("${entries.size} ${type.pluralName}", color = MutedInk, fontSize = 10.sp)
             Spacer(Modifier.weight(1f))
