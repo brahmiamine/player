@@ -1,5 +1,8 @@
 package fr.streamia.tv.ui
 
+import fr.streamia.tv.domain.MediaEntry
+import fr.streamia.tv.domain.MediaType
+
 /**
  * Mémoire très courte du dernier Live quitté en plein écran.
  * Elle permet au navigateur Live de rouvrir exactement sur la chaîne qui jouait,
@@ -11,6 +14,10 @@ object LiveBrowserReturnState {
 
     fun remember(entryKey: String) {
         pendingEntryKey = entryKey
+    }
+
+    fun remember(entry: MediaEntry) {
+        if (entry.type == MediaType.Live) pendingEntryKey = entry.key
     }
 
     fun consume(): String? = pendingEntryKey.also { pendingEntryKey = null }
