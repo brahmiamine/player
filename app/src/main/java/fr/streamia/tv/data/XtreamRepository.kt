@@ -39,6 +39,17 @@ class XtreamRepository(context: Context) {
     fun library(profileId: String): UserLibrarySnapshot = libraryStore.snapshot(profileId)
     fun customizedCatalog(profileId: String, catalog: Catalog): Catalog = libraryStore.applyToCatalog(profileId, catalog)
 
+    /** Prépare les index d'un catalogue massif hors du thread d'interface. */
+    suspend fun prepareCatalogPresentation(profileId: String, catalog: Catalog): CatalogPresentation =
+        withContext(Dispatchers.Default) {
+            val library = libraryStore.snapshot(profileId)
+            CatalogPresentation(
+                catalog = libraryStore.applyToCatalog(catalog, library),
+                library = library,
+                profiles = playlistStore.loadAll(),
+            )
+        }
+
     /**
      * Indique si une vraie synchronisation fournisseur est nécessaire.
      * Xtream utilise le même intervalle configurable que la playlist distante, mais un M3U local
@@ -99,9 +110,9 @@ class XtreamRepository(context: Context) {
         return LoadedCatalog(catalog, credentials, CatalogSource.Network, id)
     }
 
-    suspend fun refreshProfile(profileId: String): LoadedCatalog {
+    suspend fun refreshProfile(profileId: String): LoadedCatalog = withContext(Dispatchers.IO) {
         val profile = playlistStore.find(profileId) ?: throw XtreamException("Cette liste n'existe plus.")
-        return when (profile.kind) {
+        when (profile.kind) {
             PlaylistKind.Xtream -> {
                 val credentials = profile.credentialsOrNull() ?: throw XtreamException("Identifiants Xtream incomplets.")
                 val catalog = client.loadCatalog(credentials)
@@ -357,6 +368,12 @@ class XtreamRepository(context: Context) {
 
     private fun String?.cleanName(defaultValue: String): String = this?.trim()?.takeIf(String::isNotBlank) ?: defaultValue
 }
+
+data class CatalogPresentation(
+    val catalog: Catalog,
+    val library: UserLibrarySnapshot,
+    val profiles: List<PlaylistProfile>,
+)
 
 data class LoadedCatalog(
     val catalog: Catalog,

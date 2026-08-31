@@ -99,7 +99,10 @@ class UserLibraryStore(context: Context) {
     }
 
     fun applyToCatalog(profileId: String, catalog: Catalog): Catalog {
-        val snapshot = snapshot(profileId)
+        return applyToCatalog(catalog, snapshot(profileId))
+    }
+
+    fun applyToCatalog(catalog: Catalog, snapshot: UserLibrarySnapshot): Catalog {
         val movedEntries = catalog.entries.map { entry ->
             snapshot.movedEntries[entry.key]?.let { destination -> entry.copy(categoryId = destination) } ?: entry
         }

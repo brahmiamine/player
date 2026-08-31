@@ -37,9 +37,11 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         val credentials = ServerCredentials(server.trim(), username.trim(), password)
         _uiState.update { it.copy(busy = true, message = null) }
         viewModelScope.launch {
-            runCatching { repository.signIn(credentials, profileId, profileName) }
-                .onSuccess(::showCatalog)
-                .onFailure(::showError)
+            try {
+                showCatalog(repository.signIn(credentials, profileId, profileName))
+            } catch (error: Throwable) {
+                showError(error)
+            }
         }
     }
 
@@ -47,12 +49,13 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         if (_uiState.value.busy) return
         _uiState.update { it.copy(busy = true, message = "Ouverture de la liste…") }
         viewModelScope.launch {
-            runCatching { repository.openProfile(profileId) }
-                .onSuccess { loaded ->
-                    showCatalog(loaded)
-                    if (loaded.source == CatalogSource.Cache) refreshSilently(profileId)
-                }
-                .onFailure(::showError)
+            try {
+                val loaded = repository.openProfile(profileId)
+                showCatalog(loaded)
+                if (loaded.source == CatalogSource.Cache) refreshSilently(profileId)
+            } catch (error: Throwable) {
+                showError(error)
+            }
         }
     }
 
@@ -60,9 +63,11 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         if (_uiState.value.busy) return
         _uiState.update { it.copy(busy = true, message = "Analyse du fichier M3U…") }
         viewModelScope.launch {
-            runCatching { repository.importM3u(uri, profileId, profileName) }
-                .onSuccess(::showCatalog)
-                .onFailure(::showError)
+            try {
+                showCatalog(repository.importM3u(uri, profileId, profileName))
+            } catch (error: Throwable) {
+                showError(error)
+            }
         }
     }
 
@@ -76,9 +81,11 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         if (_uiState.value.busy) return
         _uiState.update { it.copy(busy = true, message = "Téléchargement et analyse de la playlist…") }
         viewModelScope.launch {
-            runCatching {
-                repository.importM3uUrl(m3uUrl, profileId, profileName, xmlTvUrl, autoRefreshHours)
-            }.onSuccess(::showCatalog).onFailure(::showError)
+            try {
+                showCatalog(repository.importM3uUrl(m3uUrl, profileId, profileName, xmlTvUrl, autoRefreshHours))
+            } catch (error: Throwable) {
+                showError(error)
+            }
         }
     }
 
@@ -119,9 +126,11 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         if (_uiState.value.busy) return
         _uiState.update { it.copy(busy = true, message = null) }
         viewModelScope.launch {
-            runCatching { repository.refreshProfile(profileId) }
-                .onSuccess(::mergeCatalog)
-                .onFailure(::showError)
+            try {
+                mergeCatalog(repository.refreshProfile(profileId))
+            } catch (error: Throwable) {
+                showError(error)
+            }
         }
     }
 
@@ -361,29 +370,29 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     }
 
     private suspend fun refreshSilently(profileId: String) {
-        runCatching { repository.refreshProfile(profileId) }
-            .onSuccess(::mergeCatalog)
-            .onFailure {
-                if (_uiState.value.activeProfileId == profileId) {
-                    _uiState.update { state -> state.copy(offline = true, busy = false) }
-                }
+        try {
+            mergeCatalog(repository.refreshProfile(profileId))
+        } catch (_: Throwable) {
+            if (_uiState.value.activeProfileId == profileId) {
+                _uiState.update { state -> state.copy(offline = true, busy = false) }
             }
+        }
     }
 
-    private fun mergeCatalog(loaded: LoadedCatalog) {
+    private suspend fun mergeCatalog(loaded: LoadedCatalog) {
         val current = _uiState.value
         if (current.activeProfileId != loaded.profileId) return
-        val library = repository.library(loaded.profileId)
-        val customized = repository.customizedCatalog(loaded.profileId, loaded.catalog)
+        val presentation = repository.prepareCatalogPresentation(loaded.profileId, loaded.catalog)
+        if (_uiState.value.activeProfileId != loaded.profileId) return
         _uiState.update { state ->
             state.copy(
                 booting = false,
                 busy = false,
                 rawCatalog = loaded.catalog,
-                catalog = customized,
+                catalog = presentation.catalog,
                 credentials = loaded.credentials,
-                profiles = repository.profiles(),
-                library = library,
+                profiles = presentation.profiles,
+                library = presentation.library,
                 offline = loaded.source == CatalogSource.Cache,
                 epgGuide = null,
                 message = loaded.importSummary ?: state.message,
@@ -395,19 +404,18 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         _uiState.value = StreamiaUiState(booting = false, screen = StreamiaScreen.Login, profiles = repository.profiles())
     }
 
-    private fun showCatalog(loaded: LoadedCatalog) {
-        val library = repository.library(loaded.profileId)
-        val customized = repository.customizedCatalog(loaded.profileId, loaded.catalog)
+    private suspend fun showCatalog(loaded: LoadedCatalog) {
+        val presentation = repository.prepareCatalogPresentation(loaded.profileId, loaded.catalog)
         _uiState.value = StreamiaUiState(
             booting = false,
             busy = false,
             screen = StreamiaScreen.Home,
             rawCatalog = loaded.catalog,
-            catalog = customized,
+            catalog = presentation.catalog,
             credentials = loaded.credentials,
             activeProfileId = loaded.profileId,
-            profiles = repository.profiles(),
-            library = library,
+            profiles = presentation.profiles,
+            library = presentation.library,
             offline = loaded.source == CatalogSource.Cache,
             message = loaded.importSummary,
         )
