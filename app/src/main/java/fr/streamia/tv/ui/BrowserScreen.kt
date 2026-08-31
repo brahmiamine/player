@@ -26,20 +26,23 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.ui.PlayerView
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import fr.streamia.tv.data.PlaybackHistoryItem
@@ -63,15 +66,12 @@ import kotlinx.coroutines.yield
 private const val FAVORITES_CATEGORY_ID = "__favorites__"
 private const val HISTORY_CATEGORY_ID = "__history__"
 
-/**
- * Permet de fermer explicitement l'aperçu Live avant de lancer le lecteur plein écran.
- * C'est important pour les abonnements Xtream limités à une seule connexion simultanée.
- */
 @Composable
 fun BrowserScreen(
     catalog: Catalog,
     credentials: ServerCredentials,
     livePlaybackSession: LivePlaybackSession,
+    liveVideoSurface: @Composable (LiveVideoSurfacePlacement) -> Unit,
     library: UserLibrarySnapshot,
     offline: Boolean,
     busy: Boolean,
@@ -179,6 +179,7 @@ fun BrowserScreen(
                 catalog = catalog,
                 credentials = credentials,
                 livePlaybackSession = livePlaybackSession,
+                liveVideoSurface = liveVideoSurface,
                 categories = categories,
                 selectedCategoryId = selectedCategoryId,
                 entries = entries,
@@ -282,6 +283,7 @@ private fun LiveCatalogLayout(
     catalog: Catalog,
     credentials: ServerCredentials,
     livePlaybackSession: LivePlaybackSession,
+    liveVideoSurface: @Composable (LiveVideoSurfacePlacement) -> Unit,
     categories: List<MediaCategory>,
     selectedCategoryId: String,
     entries: List<MediaEntry>,
@@ -297,6 +299,34 @@ private fun LiveCatalogLayout(
 ) {
     var previewEntry by remember(catalog, initialPreviewKey) {
         mutableStateOf(entries.firstOrNull { it.key == initialPreviewKey } ?: entries.firstOrNull())
+    }
+    var controlsVisible by remember { mutableStateOf(false) }
+    var fullscreenTarget by remember { mutableStateOf<MediaEntry?>(null) }
+    val categoryWidth by animateDpAsState(
+        if (controlsVisible) 250.dp else 0.dp,
+        animationSpec = tween(220),
+        label = "live-category-width",
+    )
+    val channelWidth by animateDpAsState(
+        if (controlsVisible) 340.dp else 0.dp,
+        animationSpec = tween(220),
+        label = "live-channel-width",
+    )
+    val controlsAlpha by animateFloatAsState(
+        if (controlsVisible) 1f else 0f,
+        animationSpec = tween(160),
+        label = "live-controls-alpha",
+    )
+
+    LaunchedEffect(Unit) {
+        yield()
+        controlsVisible = true
+    }
+    LaunchedEffect(fullscreenTarget) {
+        val target = fullscreenTarget ?: return@LaunchedEffect
+        controlsVisible = false
+        delay(220)
+        onEntrySelected(target)
     }
     if (previewEntry != null && catalog.entry(previewEntry!!.key) == null) {
         previewEntry = entries.firstOrNull()
@@ -318,34 +348,35 @@ private fun LiveCatalogLayout(
             onSelected = onCategorySelected,
             onToggleFavorite = onToggleCategoryFavorite,
             requestInitialFocus = false,
-            modifier = Modifier.width(250.dp).fillMaxHeight(),
+            modifier = Modifier.width(categoryWidth).fillMaxHeight().graphicsLayer { alpha = controlsAlpha },
         )
 
         LiveChannelList(
             entries = entries,
             previewKey = previewEntry?.key,
             favoriteEntries = favoriteEntries,
-            fullscreenPending = false,
+            fullscreenPending = fullscreenTarget != null,
             onConfirm = { channel ->
                 when (
                     liveChannelConfirmAction(
                         previewKey = previewEntry?.key,
                         channelKey = channel.key,
-                        fullscreenPending = false,
+                        fullscreenPending = fullscreenTarget != null,
                     )
                 ) {
                     LiveChannelConfirmAction.Preview -> previewEntry = channel
-                    LiveChannelConfirmAction.Fullscreen -> onEntrySelected(channel)
+                    LiveChannelConfirmAction.Fullscreen -> fullscreenTarget = channel
                     LiveChannelConfirmAction.Ignore -> Unit
                 }
             },
             onToggleFavorite = onToggleEntryFavorite,
-            modifier = Modifier.width(340.dp).fillMaxHeight(),
+            modifier = Modifier.width(channelWidth).fillMaxHeight().graphicsLayer { alpha = controlsAlpha },
         )
 
         LivePreview(
             credentials = credentials,
             livePlaybackSession = livePlaybackSession,
+            liveVideoSurface = liveVideoSurface,
             entry = previewEntry,
             favorite = previewEntry?.key in favoriteEntries,
             modifier = Modifier.weight(1f).fillMaxHeight(),
@@ -435,6 +466,7 @@ private fun LiveChannelList(
 private fun LivePreview(
     credentials: ServerCredentials,
     livePlaybackSession: LivePlaybackSession,
+    liveVideoSurface: @Composable (LiveVideoSurfacePlacement) -> Unit,
     entry: MediaEntry?,
     favorite: Boolean,
     modifier: Modifier = Modifier,
@@ -492,17 +524,7 @@ private fun LivePreview(
         Text("Aperçu en direct", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 3.dp, bottom = 7.dp))
         Box(Modifier.fillMaxWidth().weight(1f).background(Color.Black)) {
             if (entry != null) {
-                AndroidView(
-                    factory = { viewContext ->
-                        PlayerView(viewContext).apply {
-                            useController = false
-                            keepScreenOn = true
-                            this.player = player
-                        }
-                    },
-                    update = { it.player = player },
-                    modifier = Modifier.fillMaxSize(),
-                )
+                liveVideoSurface(LiveVideoSurfacePlacement(Modifier.fillMaxSize()))
                 if (buffering) {
                     Text("Chargement…", color = Ink, fontSize = 14.sp, modifier = Modifier.align(Alignment.Center))
                 }
