@@ -103,32 +103,8 @@ class UserLibraryStore(context: Context) {
         return applyToCatalog(catalog, snapshot(profileId))
     }
 
-    fun applyToCatalog(catalog: Catalog, snapshot: UserLibrarySnapshot): Catalog {
-        // Rien à personnaliser : éviter de reconstruire un Catalog (et de refaire tous ses index
-        // internes) quand ni le tri des catégories ni le déplacement d'entrées n'ont été utilisés.
-        if (snapshot.movedEntries.isEmpty() && snapshot.categoryOrder.isEmpty()) return catalog
-
-        val movedEntries = if (snapshot.movedEntries.isEmpty()) {
-            catalog.entries
-        } else {
-            catalog.entries.map { entry ->
-                snapshot.movedEntries[entry.key]?.let { destination -> entry.copy(categoryId = destination) } ?: entry
-            }
-        }
-        val orderedCategories = MediaType.entries.flatMap { type ->
-            val categories = catalog.categoriesFor(type)
-            val preferred = snapshot.categoryOrder[type.name].orEmpty()
-            if (preferred.isEmpty()) categories
-            else {
-                val byKey = categories.associateBy(MediaCategory::key)
-                buildList {
-                    preferred.forEach { byKey[it]?.let(::add) }
-                    categories.filterNot { it.key in preferred }.forEach(::add)
-                }
-            }
-        }
-        return Catalog(orderedCategories, movedEntries, catalog.account)
-    }
+    fun applyToCatalog(catalog: Catalog, snapshot: UserLibrarySnapshot): Catalog =
+        applyUserLibraryToCatalog(catalog, snapshot)
 
     private fun loadRoot(profileId: String): JSONObject = runCatching {
         JSONObject(preferences.getString(key(profileId), null) ?: "{}")
@@ -226,6 +202,39 @@ data class UserLibrarySnapshot(
 
 fun UserLibrarySnapshot.hasSameCatalogLayoutAs(other: UserLibrarySnapshot): Boolean =
     categoryOrder == other.categoryOrder && movedEntries == other.movedEntries
+
+/**
+ * Applique les déplacements d'entrées et le tri des catégories d'un [UserLibrarySnapshot] à un
+ * [Catalog]. Extraite en fonction de haut niveau (plutôt que méthode de [UserLibraryStore]) afin
+ * de rester testable sans dépendance Android : [UserLibraryStore] a besoin d'un [android.content.Context]
+ * réel pour ses SharedPreferences, alors que cette logique de fusion est pure.
+ */
+fun applyUserLibraryToCatalog(catalog: Catalog, snapshot: UserLibrarySnapshot): Catalog {
+    // Rien à personnaliser : éviter de reconstruire un Catalog (et de refaire tous ses index
+    // internes) quand ni le tri des catégories ni le déplacement d'entrées n'ont été utilisés.
+    if (snapshot.movedEntries.isEmpty() && snapshot.categoryOrder.isEmpty()) return catalog
+
+    val movedEntries = if (snapshot.movedEntries.isEmpty()) {
+        catalog.entries
+    } else {
+        catalog.entries.map { entry ->
+            snapshot.movedEntries[entry.key]?.let { destination -> entry.copy(categoryId = destination) } ?: entry
+        }
+    }
+    val orderedCategories = MediaType.entries.flatMap { type ->
+        val categories = catalog.categoriesFor(type)
+        val preferred = snapshot.categoryOrder[type.name].orEmpty()
+        if (preferred.isEmpty()) categories
+        else {
+            val byKey = categories.associateBy(MediaCategory::key)
+            buildList {
+                preferred.forEach { byKey[it]?.let(::add) }
+                categories.filterNot { it.key in preferred }.forEach(::add)
+            }
+        }
+    }
+    return Catalog(orderedCategories, movedEntries, catalog.account)
+}
 
 data class PlaybackHistoryItem(
     val entry: MediaEntry,
