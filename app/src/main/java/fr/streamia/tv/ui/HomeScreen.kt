@@ -62,7 +62,8 @@ fun HomeScreen(
     onEpg: () -> Unit,
     onRefresh: () -> Unit,
     onChangePlaylist: () -> Unit,
-    onResumeEntry: (MediaEntry) -> Unit,
+    onResumePlayback: (MediaEntry) -> Unit,
+    onOpenFavorite: (MediaEntry) -> Unit,
 ) {
     val firstFocus = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { firstFocus.requestFocus() } }
@@ -73,7 +74,16 @@ fun HomeScreen(
     val resumeCards = remember(catalog, library.history) {
         library.history.asSequence()
             .filter { it.entry.type != MediaType.Live && it.isResumable() }
-            .map { item -> (catalog.entry(item.entry.key) ?: item.entry) to item.progress }
+            .map { item ->
+                // Les entrées Séries de l'historique sont des épisodes synthétisés à la lecture
+                // (playEpisode), absents du catalogue sous leur propre clé — celui-ci n'indexe que
+                // les séries parentes. Relire via catalog.entry() pour un épisode risquerait donc,
+                // en cas de collision d'identifiant entre un episode.id et un series.id, de
+                // substituer silencieusement la série parente (non lisible) à l'épisode enregistré.
+                // Seuls les films sont réellement présents dans le catalogue sous leur propre clé.
+                val entry = if (item.entry.type == MediaType.Movie) catalog.entry(item.entry.key) ?: item.entry else item.entry
+                entry to item.progress
+            }
             .toList()
     }
 
@@ -134,7 +144,7 @@ fun HomeScreen(
                         title = "Reprendre la lecture",
                         entries = resumeCards,
                         firstFocusRequester = if (focusOnResume) firstFocus else null,
-                        onEntryClick = onResumeEntry,
+                        onEntryClick = onResumePlayback,
                     )
                     Spacer(Modifier.height(CardRowSpacing))
                 }
@@ -148,7 +158,7 @@ fun HomeScreen(
                         title = "Favoris",
                         entries = favoriteCards,
                         firstFocusRequester = if (focusOnFavorites) firstFocus else null,
-                        onEntryClick = onResumeEntry,
+                        onEntryClick = onOpenFavorite,
                     )
                     Spacer(Modifier.height(CardRowSpacing))
                 }
@@ -191,16 +201,17 @@ private fun MainActionGrid(
         modifier,
         horizontalArrangement = Arrangement.spacedBy(18.dp),
     ) {
+        val liveTileEnabled = !catalogLoading && catalog.count(MediaType.Live) > 0
         HomeTile(
             title = "TV en direct",
             subtitle = if (catalogLoading) "Chargement…" else "${catalog.count(MediaType.Live)} chaînes",
             symbol = "▣",
             modifier = Modifier
-                .then(if (firstFocus != null && !catalogLoading) Modifier.focusRequester(firstFocus) else Modifier)
+                .then(if (firstFocus != null && liveTileEnabled) Modifier.focusRequester(firstFocus) else Modifier)
                 .width(360.dp)
                 .fillMaxSize(),
             onClick = { onOpenSection(MediaType.Live) },
-            enabled = !catalogLoading && catalog.count(MediaType.Live) > 0,
+            enabled = liveTileEnabled,
             prominent = true,
         )
 
@@ -254,7 +265,7 @@ private fun MainActionGrid(
                 "⚙",
                 "Paramètres",
                 onSettings,
-                Modifier.weight(1f).then(if (firstFocus != null && catalogLoading) Modifier.focusRequester(firstFocus) else Modifier),
+                Modifier.weight(1f).then(if (firstFocus != null && !liveTileEnabled) Modifier.focusRequester(firstFocus) else Modifier),
             )
             HomeAction("↻", if (busy || catalogLoading) "Chargement…" else "Actualiser", onRefresh, Modifier.weight(1f), enabled = !busy && !catalogLoading)
             HomeAction("⇄", "Changer de liste", onChangePlaylist, Modifier.weight(1f))

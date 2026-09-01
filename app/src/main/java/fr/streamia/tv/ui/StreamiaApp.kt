@@ -88,7 +88,8 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onEpg = viewModel::showEpg,
                     onRefresh = viewModel::refresh,
                     onChangePlaylist = viewModel::logout,
-                    onResumeEntry = viewModel::openEntry,
+                    onResumePlayback = viewModel::resumePlayback,
+                    onOpenFavorite = viewModel::openEntry,
                 )
 
                 state.screen is StreamiaScreen.Browser && state.catalog != null && state.credentials != null -> BrowserScreen(

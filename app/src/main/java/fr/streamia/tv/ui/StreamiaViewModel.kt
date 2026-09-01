@@ -239,6 +239,15 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         }
     }
 
+    /**
+     * Reprend directement la lecture d'un contenu VOD (rangée « Reprendre la lecture ») sans passer
+     * par l'écran de détails que [openEntry] ouvrirait pour un film. Les épisodes de série sont déjà
+     * lisibles directement via [openEntry] ; seul le cas Film nécessite ce raccourci.
+     */
+    fun resumePlayback(entry: MediaEntry) {
+        if (entry.type == MediaType.Movie) openPlayer(entry, returnToSeries = false) else openEntry(entry)
+    }
+
     fun playMovie(movie: MediaEntry) = openPlayer(movie, returnToSeries = false)
 
     fun playEpisode(series: MediaEntry, episode: SeriesEpisode) {
