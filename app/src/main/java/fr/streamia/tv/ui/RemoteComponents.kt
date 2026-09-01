@@ -36,10 +36,13 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -218,6 +221,9 @@ fun TvTextField(
 @Composable
 fun StreamiaLogo(modifier: Modifier = Modifier, compact: Boolean = false) {
     Row(modifier, verticalAlignment = Alignment.CenterVertically) {
+        // Marque : un écran de télévision — le repère que le design Nocturne associe à « Streamia
+        // TV » (un pictogramme sobre, jamais un aplat décoratif) — plutôt que l'ancien logo
+        // bouton lecture/onde, sans lien avec ce vocabulaire visuel.
         Box(
             Modifier
                 .size(if (compact) 42.dp else 58.dp)
@@ -225,22 +231,16 @@ fun StreamiaLogo(modifier: Modifier = Modifier, compact: Boolean = false) {
                     drawCircle(FocusBlue, radius = size.minDimension / 2)
                     val w = size.width
                     val h = size.height
-                    val path = androidx.compose.ui.graphics.Path().apply {
-                        moveTo(w * 0.40f, h * 0.29f)
-                        lineTo(w * 0.73f, h * 0.50f)
-                        lineTo(w * 0.40f, h * 0.71f)
-                        close()
-                    }
-                    drawPath(path, color = Ink)
-                    drawArc(
-                        color = FocusBlueBright,
-                        startAngle = -58f,
-                        sweepAngle = 116f,
-                        useCenter = false,
-                        topLeft = Offset(w * 0.10f, h * 0.10f),
-                        size = Size(w * 0.80f, h * 0.80f),
-                        style = Stroke(width = w * 0.055f),
+                    val stroke = Stroke(width = w * 0.075f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+                    drawRoundRect(
+                        FocusBlueBright,
+                        topLeft = Offset(w * 0.22f, h * 0.28f),
+                        size = Size(w * 0.56f, h * 0.34f),
+                        cornerRadius = CornerRadius(w * 0.06f),
+                        style = stroke,
                     )
+                    drawLine(FocusBlueBright, Offset(w * 0.5f, h * 0.62f), Offset(w * 0.5f, h * 0.72f), stroke.width, cap = StrokeCap.Round)
+                    drawLine(FocusBlueBright, Offset(w * 0.36f, h * 0.74f), Offset(w * 0.64f, h * 0.74f), stroke.width, cap = StrokeCap.Round)
                 },
         )
         Spacer(Modifier.width(if (compact) 12.dp else 16.dp))
