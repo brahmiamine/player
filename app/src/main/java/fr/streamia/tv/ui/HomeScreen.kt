@@ -6,22 +6,33 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
+import fr.streamia.tv.data.UserLibrarySnapshot
+import fr.streamia.tv.data.isResumable
 import fr.streamia.tv.domain.Catalog
+import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.ui.theme.FocusBlueBright
 import fr.streamia.tv.ui.theme.Ink
@@ -31,12 +42,19 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+/** Hauteur allouée à la grille d'actions principale : proche de la surface qu'occupait
+ * l'ancien `fillMaxSize()` (écran logique 1280x720, moins l'en-tête et les marges), pour que
+ * l'accueil garde le même confort quand aucune rangée « Reprendre »/« Favoris » n'est affichée. */
+private val MainGridHeight = 560.dp
+private val CardRowSpacing = 22.dp
+
 @Composable
 fun HomeScreen(
     catalog: Catalog,
     profileName: String?,
     offline: Boolean,
     busy: Boolean,
+    library: UserLibrarySnapshot,
     catalogLoading: Boolean = false,
     onOpenSection: (MediaType) -> Unit,
     onSettings: () -> Unit,
@@ -44,111 +62,285 @@ fun HomeScreen(
     onEpg: () -> Unit,
     onRefresh: () -> Unit,
     onChangePlaylist: () -> Unit,
+    onResumeEntry: (MediaEntry) -> Unit,
 ) {
-    val firstFocus = androidx.compose.runtime.remember { FocusRequester() }
+    val firstFocus = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { firstFocus.requestFocus() } }
 
-    Column(
+    // Reprise en cours : uniquement le contenu VOD (Films/Séries) assez avancé pour être
+    // reprenable — Direct n'a pas de notion de position de lecture. On relit l'entrée depuis le
+    // catalogue courant (icône/nom à jour) tout en gardant l'item d'historique pour sa progression.
+    val resumeCards = remember(catalog, library.history) {
+        library.history.asSequence()
+            .filter { it.entry.type != MediaType.Live && it.isResumable() }
+            .map { item -> (catalog.entry(item.entry.key) ?: item.entry) to item.progress }
+            .toList()
+    }
+
+    // Favoris : accès direct depuis l'accueil sans repasser par une catégorie. Si un favori est
+    // aussi présent dans l'historique, sa progression est affichée pour rester cohérent avec le
+    // reste de l'app plutôt que d'inventer un second indicateur.
+    val favoriteCards = remember(catalog, library.favoriteEntries, library.history) {
+        val historyByKey = library.history.associateBy { it.entry.key }
+        library.favoriteEntries.asSequence()
+            .mapNotNull(catalog::entry)
+            .map { entry -> entry to historyByKey[entry.key]?.progress?.takeIf { it > 0.02f } }
+            .toList()
+    }
+
+    // Le focus initial va toujours à la rangée la plus haute réellement affichée, pour ne jamais
+    // demander le focus d'un composant pas encore composé (grille hors écran si les deux rangées
+    // sont présentes). Sans historique ni favori (cas courant après import), le comportement est
+    // strictement identique à l'ancien écran fixe.
+    val focusOnResume = resumeCards.isNotEmpty()
+    val focusOnFavorites = !focusOnResume && favoriteCards.isNotEmpty()
+    val focusOnGrid = !focusOnResume && !focusOnFavorites
+
+    LazyColumn(
         Modifier
             .fillMaxSize()
             .background(Night)
             .padding(horizontal = 46.dp, vertical = 30.dp),
     ) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            StreamiaLogo()
-            Spacer(Modifier.weight(1f))
-            Column(horizontalAlignment = Alignment.End) {
-                profileName?.takeIf(String::isNotBlank)?.let {
-                    Text(it, color = Ink, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+        item {
+            Column(Modifier.fillMaxWidth()) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    StreamiaLogo()
+                    Spacer(Modifier.weight(1f))
+                    Column(horizontalAlignment = Alignment.End) {
+                        profileName?.takeIf(String::isNotBlank)?.let {
+                            Text(it, color = Ink, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                        val expiry = catalog.account?.expiresAtEpochSeconds?.let(::formatExpiry)
+                        Text(
+                            buildString {
+                                append(if (offline) "Mode cache" else "Liste connectée")
+                                if (catalogLoading) append(" · chargement du catalogue…")
+                                if (expiry != null) append(" · expire le $expiry")
+                            },
+                            color = if (offline) FocusBlueBright else MutedInk,
+                            fontSize = 13.sp,
+                        )
+                    }
                 }
-                val expiry = catalog.account?.expiresAtEpochSeconds?.let(::formatExpiry)
-                Text(
-                    buildString {
-                        append(if (offline) "Mode cache" else "Liste connectée")
-                        if (catalogLoading) append(" · chargement du catalogue…")
-                        if (expiry != null) append(" · expire le $expiry")
-                    },
-                    color = if (offline) FocusBlueBright else MutedInk,
-                    fontSize = 13.sp,
-                )
+                Spacer(Modifier.height(28.dp))
             }
         }
 
-        Spacer(Modifier.height(28.dp))
+        if (resumeCards.isNotEmpty()) {
+            item {
+                Column(Modifier.fillMaxWidth()) {
+                    HomeCardRow(
+                        title = "Reprendre la lecture",
+                        entries = resumeCards,
+                        firstFocusRequester = if (focusOnResume) firstFocus else null,
+                        onEntryClick = onResumeEntry,
+                    )
+                    Spacer(Modifier.height(CardRowSpacing))
+                }
+            }
+        }
 
-        Row(
-            Modifier.fillMaxSize(),
-            horizontalArrangement = Arrangement.spacedBy(18.dp),
-        ) {
-            HomeTile(
-                title = "TV en direct",
-                subtitle = if (catalogLoading) "Chargement…" else "${catalog.count(MediaType.Live)} chaînes",
-                symbol = "▣",
-                modifier = Modifier
-                    .then(if (!catalogLoading) Modifier.focusRequester(firstFocus) else Modifier)
-                    .width(360.dp)
-                    .fillMaxSize(),
-                onClick = { onOpenSection(MediaType.Live) },
-                enabled = !catalogLoading && catalog.count(MediaType.Live) > 0,
-                prominent = true,
+        if (favoriteCards.isNotEmpty()) {
+            item {
+                Column(Modifier.fillMaxWidth()) {
+                    HomeCardRow(
+                        title = "Favoris",
+                        entries = favoriteCards,
+                        firstFocusRequester = if (focusOnFavorites) firstFocus else null,
+                        onEntryClick = onResumeEntry,
+                    )
+                    Spacer(Modifier.height(CardRowSpacing))
+                }
+            }
+        }
+
+        item {
+            MainActionGrid(
+                catalog = catalog,
+                catalogLoading = catalogLoading,
+                busy = busy,
+                firstFocus = if (focusOnGrid) firstFocus else null,
+                onOpenSection = onOpenSection,
+                onSearch = onSearch,
+                onEpg = onEpg,
+                onSettings = onSettings,
+                onRefresh = onRefresh,
+                onChangePlaylist = onChangePlaylist,
+                modifier = Modifier.fillMaxWidth().height(MainGridHeight),
             )
+        }
+    }
+}
 
-            Column(
-                Modifier.width(360.dp).fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(18.dp),
-            ) {
-                Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-                    HomeTile(
-                        title = "Films",
-                        subtitle = if (catalogLoading) "Chargement…" else "${catalog.count(MediaType.Movie)} contenus",
-                        symbol = "▶",
-                        modifier = Modifier.weight(1f).fillMaxSize(),
-                        onClick = { onOpenSection(MediaType.Movie) },
-                        enabled = !catalogLoading && catalog.count(MediaType.Movie) > 0,
-                    )
-                    HomeTile(
-                        title = "Séries",
-                        subtitle = if (catalogLoading) "Chargement…" else "${catalog.count(MediaType.Series)} contenus",
-                        symbol = "▤",
-                        modifier = Modifier.weight(1f).fillMaxSize(),
-                        onClick = { onOpenSection(MediaType.Series) },
-                        enabled = !catalogLoading && catalog.count(MediaType.Series) > 0,
-                    )
-                }
-                Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-                    HomeTile(
-                        title = "Recherche",
-                        subtitle = "Tout le catalogue",
-                        symbol = "⌕",
-                        modifier = Modifier.weight(1f).fillMaxSize(),
-                        onClick = onSearch,
-                        enabled = !catalogLoading,
-                    )
-                    HomeTile(
-                        title = "Guide TV",
-                        subtitle = "EPG",
-                        symbol = "≡",
-                        modifier = Modifier.weight(1f).fillMaxSize(),
-                        onClick = onEpg,
-                        enabled = !catalogLoading && catalog.count(MediaType.Live) > 0,
-                    )
-                }
-            }
+@Composable
+private fun MainActionGrid(
+    catalog: Catalog,
+    catalogLoading: Boolean,
+    busy: Boolean,
+    firstFocus: FocusRequester?,
+    onOpenSection: (MediaType) -> Unit,
+    onSettings: () -> Unit,
+    onSearch: () -> Unit,
+    onEpg: () -> Unit,
+    onRefresh: () -> Unit,
+    onChangePlaylist: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier,
+        horizontalArrangement = Arrangement.spacedBy(18.dp),
+    ) {
+        HomeTile(
+            title = "TV en direct",
+            subtitle = if (catalogLoading) "Chargement…" else "${catalog.count(MediaType.Live)} chaînes",
+            symbol = "▣",
+            modifier = Modifier
+                .then(if (firstFocus != null && !catalogLoading) Modifier.focusRequester(firstFocus) else Modifier)
+                .width(360.dp)
+                .fillMaxSize(),
+            onClick = { onOpenSection(MediaType.Live) },
+            enabled = !catalogLoading && catalog.count(MediaType.Live) > 0,
+            prominent = true,
+        )
 
-            Column(
-                Modifier.weight(1f).fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(18.dp),
-            ) {
-                HomeAction(
-                    "⚙",
-                    "Paramètres",
-                    onSettings,
-                    Modifier.weight(1f).then(if (catalogLoading) Modifier.focusRequester(firstFocus) else Modifier),
+        Column(
+            Modifier.width(360.dp).fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(18.dp),
+        ) {
+            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+                HomeTile(
+                    title = "Films",
+                    subtitle = if (catalogLoading) "Chargement…" else "${catalog.count(MediaType.Movie)} contenus",
+                    symbol = "▶",
+                    modifier = Modifier.weight(1f).fillMaxSize(),
+                    onClick = { onOpenSection(MediaType.Movie) },
+                    enabled = !catalogLoading && catalog.count(MediaType.Movie) > 0,
                 )
-                HomeAction("↻", if (busy || catalogLoading) "Chargement…" else "Actualiser", onRefresh, Modifier.weight(1f), enabled = !busy && !catalogLoading)
-                HomeAction("⇄", "Changer de liste", onChangePlaylist, Modifier.weight(1f))
+                HomeTile(
+                    title = "Séries",
+                    subtitle = if (catalogLoading) "Chargement…" else "${catalog.count(MediaType.Series)} contenus",
+                    symbol = "▤",
+                    modifier = Modifier.weight(1f).fillMaxSize(),
+                    onClick = { onOpenSection(MediaType.Series) },
+                    enabled = !catalogLoading && catalog.count(MediaType.Series) > 0,
+                )
+            }
+            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+                HomeTile(
+                    title = "Recherche",
+                    subtitle = "Tout le catalogue",
+                    symbol = "⌕",
+                    modifier = Modifier.weight(1f).fillMaxSize(),
+                    onClick = onSearch,
+                    enabled = !catalogLoading,
+                )
+                HomeTile(
+                    title = "Guide TV",
+                    subtitle = "EPG",
+                    symbol = "≡",
+                    modifier = Modifier.weight(1f).fillMaxSize(),
+                    onClick = onEpg,
+                    enabled = !catalogLoading && catalog.count(MediaType.Live) > 0,
+                )
             }
         }
+
+        Column(
+            Modifier.weight(1f).fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(18.dp),
+        ) {
+            HomeAction(
+                "⚙",
+                "Paramètres",
+                onSettings,
+                Modifier.weight(1f).then(if (firstFocus != null && catalogLoading) Modifier.focusRequester(firstFocus) else Modifier),
+            )
+            HomeAction("↻", if (busy || catalogLoading) "Chargement…" else "Actualiser", onRefresh, Modifier.weight(1f), enabled = !busy && !catalogLoading)
+            HomeAction("⇄", "Changer de liste", onChangePlaylist, Modifier.weight(1f))
+        }
+    }
+}
+
+@Composable
+private fun HomeCardRow(
+    title: String,
+    entries: List<Pair<MediaEntry, Float?>>,
+    firstFocusRequester: FocusRequester?,
+    onEntryClick: (MediaEntry) -> Unit,
+) {
+    Column(Modifier.fillMaxWidth()) {
+        Text(title, color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(10.dp))
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            itemsIndexed(entries, key = { _, (entry, _) -> entry.key }) { index, (entry, progress) ->
+                HomeMediaCard(
+                    entry = entry,
+                    progress = progress,
+                    onClick = { onEntryClick(entry) },
+                    modifier = if (index == 0 && firstFocusRequester != null) {
+                        Modifier.focusRequester(firstFocusRequester)
+                    } else {
+                        Modifier
+                    },
+                )
+            }
+        }
+    }
+}
+
+private val HomeCardWidth = 172.dp
+private val HomeCardHeight = 196.dp
+
+@Composable
+private fun HomeMediaCard(
+    entry: MediaEntry,
+    progress: Float?,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    FocusableSurface(
+        onClick = onClick,
+        modifier = modifier.width(HomeCardWidth).height(HomeCardHeight),
+    ) {
+        Column(Modifier.fillMaxSize().padding(9.dp)) {
+            MediaArtwork(entry.iconUrl, entry.displayName, Modifier.fillMaxWidth().height(128.dp))
+            Spacer(Modifier.height(7.dp))
+            Text(
+                entry.displayName,
+                color = Ink,
+                fontSize = 11.sp,
+                lineHeight = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.weight(1f))
+            Text(entry.type.displayName, color = FocusBlueBright, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+            if (progress != null) {
+                Spacer(Modifier.height(5.dp))
+                HomeProgressBar(progress)
+            }
+        }
+    }
+}
+
+@Composable
+private fun HomeProgressBar(progress: Float, modifier: Modifier = Modifier) {
+    Box(
+        modifier
+            .fillMaxWidth()
+            .height(4.dp)
+            .clip(RoundedCornerShape(2.dp))
+            .background(MutedInk.copy(alpha = 0.25f)),
+    ) {
+        Box(
+            Modifier
+                .fillMaxHeight()
+                .fillMaxWidth(progress.coerceIn(0f, 1f))
+                .clip(RoundedCornerShape(2.dp))
+                .background(FocusBlueBright),
+        )
     }
 }
 

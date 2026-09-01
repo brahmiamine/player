@@ -80,6 +80,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     profileName = state.profiles.firstOrNull { it.id == state.activeProfileId }?.name,
                     offline = state.offline,
                     busy = state.busy,
+                    library = state.library,
                     catalogLoading = state.catalogHydrating,
                     onOpenSection = viewModel::openSection,
                     onSettings = viewModel::showSettings,
@@ -87,6 +88,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onEpg = viewModel::showEpg,
                     onRefresh = viewModel::refresh,
                     onChangePlaylist = viewModel::logout,
+                    onResumeEntry = viewModel::openEntry,
                 )
 
                 state.screen is StreamiaScreen.Browser && state.catalog != null && state.credentials != null -> BrowserScreen(

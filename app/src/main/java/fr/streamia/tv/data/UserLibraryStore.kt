@@ -70,8 +70,7 @@ class UserLibraryStore(context: Context) {
 
     fun resumePosition(profileId: String, entryKey: String): Long {
         val item = snapshot(profileId).history.firstOrNull { it.entry.key == entryKey } ?: return 0L
-        if (item.durationMs > 0 && item.positionMs >= item.durationMs - 30_000) return 0L
-        return item.positionMs.takeIf { it >= 30_000 } ?: 0L
+        return item.positionMs.takeIf { item.isResumable() } ?: 0L
     }
 
     fun setCategoryOrder(profileId: String, type: MediaType, categoryKeys: List<String>) {
@@ -244,4 +243,14 @@ data class PlaybackHistoryItem(
 ) {
     val progress: Float
         get() = if (durationMs <= 0) 0f else (positionMs.toDouble() / durationMs).coerceIn(0.0, 1.0).toFloat()
+}
+
+/**
+ * Une lecture n'est reprenable que si elle a assez avancé (>= 30 s) sans être quasiment terminée
+ * (à moins de 30 s de la fin). Logique partagée entre [UserLibraryStore.resumePosition] (reprise
+ * exacte d'un contenu déjà ouvert) et la rangée « Reprendre la lecture » de l'accueil.
+ */
+fun PlaybackHistoryItem.isResumable(): Boolean {
+    if (durationMs > 0 && positionMs >= durationMs - 30_000) return false
+    return positionMs >= 30_000
 }
