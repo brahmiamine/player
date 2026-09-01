@@ -44,6 +44,12 @@ import fr.streamia.tv.ui.theme.FocusBlueBright
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
 import fr.streamia.tv.ui.theme.Night
+import fr.streamia.tv.ui.theme.TypeBody
+import fr.streamia.tv.ui.theme.TypeBodyLineHeight
+import fr.streamia.tv.ui.theme.TypeHero
+import fr.streamia.tv.ui.theme.TypeHeroLineHeight
+import fr.streamia.tv.ui.theme.TypeLabel
+import fr.streamia.tv.ui.theme.TypeSectionTitle
 import kotlinx.coroutines.yield
 
 @Composable
@@ -74,7 +80,7 @@ fun SeriesScreen(
         Column(Modifier.width(365.dp).fillMaxHeight().verticalScroll(rememberScrollState())) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 FocusableSurface(onClick = onBack, modifier = Modifier.weight(1f).height(48.dp)) {
-                    Text("← Retour", color = Ink, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 15.dp))
+                    Text("← Retour", color = Ink, fontSize = TypeLabel, modifier = Modifier.padding(horizontal = 15.dp))
                 }
                 FocusableSurface(
                     onClick = onToggleFavorite,
@@ -90,7 +96,7 @@ fun SeriesScreen(
             Spacer(Modifier.height(20.dp))
             ChannelLogo(details?.details?.posterUrl ?: series.iconUrl, series.name, Modifier.size(230.dp))
             Spacer(Modifier.height(16.dp))
-            Text(series.name, color = Ink, fontSize = 27.sp, lineHeight = 33.sp, fontWeight = FontWeight.Bold)
+            Text(series.name, color = Ink, fontSize = TypeHero, lineHeight = TypeHeroLineHeight, fontWeight = FontWeight.Bold)
             val info = details?.details
             val meta = listOfNotNull(
                 info?.rating?.let { "★ ${"%.1f".format(it)}" } ?: series.rating?.let { "★ ${"%.1f".format(it)}" },
@@ -101,12 +107,12 @@ fun SeriesScreen(
             )
             if (meta.isNotEmpty()) {
                 Spacer(Modifier.height(8.dp))
-                Text(meta.joinToString(" · "), color = FocusBlueBright, fontSize = 13.sp, lineHeight = 19.sp)
+                Text(meta.joinToString(" · "), color = FocusBlueBright, fontSize = TypeLabel, fontWeight = FontWeight.SemiBold)
             }
             val plot = info?.plot ?: series.plot
             if (!plot.isNullOrBlank()) {
                 Spacer(Modifier.height(12.dp))
-                Text(plot, color = MutedInk, fontSize = 14.sp, lineHeight = 20.sp, maxLines = 12, overflow = TextOverflow.Ellipsis)
+                Text(plot, color = MutedInk, fontSize = TypeBody, lineHeight = TypeBodyLineHeight, maxLines = 12, overflow = TextOverflow.Ellipsis)
             }
             SeriesInfoLine("Réalisateur", info?.director)
             SeriesInfoLine("Distribution", info?.cast)
@@ -118,23 +124,23 @@ fun SeriesScreen(
 
         when {
             busy -> Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.Center) {
-                Text("Chargement des informations, saisons et épisodes…", color = MutedInk, fontSize = 19.sp)
+                Text("Chargement des informations, saisons et épisodes…", color = MutedInk, fontSize = TypeSectionTitle)
             }
             details == null -> Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.Center) {
                 FocusableSurface(onClick = onRetry, modifier = Modifier.width(520.dp).height(110.dp)) {
                     Column(Modifier.padding(horizontal = 24.dp)) {
-                        Text(message ?: "Les épisodes ne sont pas disponibles.", color = Ink, fontSize = 18.sp)
+                        Text(message ?: "Les épisodes ne sont pas disponibles.", color = Ink, fontSize = TypeSectionTitle)
                         Spacer(Modifier.height(6.dp))
-                        Text("OK pour réessayer", color = FocusBlueBright, fontSize = 14.sp)
+                        Text("OK pour réessayer", color = FocusBlueBright, fontSize = TypeLabel)
                     }
                 }
             }
             details.episodes.isEmpty() -> Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.Center) {
-                Text("Aucun épisode fourni par ce serveur.", color = MutedInk, fontSize = 20.sp)
+                Text("Aucun épisode fourni par ce serveur.", color = MutedInk, fontSize = TypeSectionTitle)
             }
             else -> {
                 Column(Modifier.width(185.dp).fillMaxHeight()) {
-                    Text("Saisons", color = Ink, fontSize = 21.sp, fontWeight = FontWeight.Bold)
+                    Text("Saisons", color = Ink, fontSize = TypeSectionTitle, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(11.dp))
                     LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(details.seasons, key = { it }) { season ->
@@ -143,7 +149,7 @@ fun SeriesScreen(
                                 selected = selectedSeason == season,
                                 modifier = Modifier.fillMaxWidth().height(54.dp),
                             ) {
-                                Text("Saison $season", color = Ink, fontSize = 15.sp, modifier = Modifier.padding(horizontal = 15.dp))
+                                Text("Saison $season", color = Ink, fontSize = TypeLabel, modifier = Modifier.padding(horizontal = 15.dp))
                             }
                         }
                     }
@@ -151,9 +157,9 @@ fun SeriesScreen(
                 Spacer(Modifier.width(20.dp))
                 Column(Modifier.weight(1f).fillMaxHeight()) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
-                        Text("Saison $selectedSeason", color = Ink, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                        Text("Saison $selectedSeason", color = Ink, fontSize = TypeSectionTitle, fontWeight = FontWeight.Bold)
                         Spacer(Modifier.width(12.dp))
-                        Text("${episodes.size} épisodes", color = MutedInk, fontSize = 14.sp)
+                        Text("${episodes.size} épisodes", color = MutedInk, fontSize = TypeLabel)
                     }
                     Spacer(Modifier.height(12.dp))
                     LazyVerticalGrid(
@@ -189,7 +195,7 @@ fun SeriesScreen(
                                         }
                                     }
                                     Spacer(Modifier.height(5.dp))
-                                    Text(episode.title, color = Ink, fontSize = 16.sp, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                    Text(episode.title, color = Ink, fontSize = TypeBody, lineHeight = TypeBodyLineHeight, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                                     Spacer(Modifier.height(5.dp))
                                     Text(listOfNotNull(episode.duration, episode.releaseDate).joinToString(" · "), color = MutedInk, fontSize = 12.sp, maxLines = 1)
                                     }
@@ -207,6 +213,6 @@ fun SeriesScreen(
 private fun SeriesInfoLine(label: String, value: String?) {
     if (value.isNullOrBlank()) return
     Spacer(Modifier.height(8.dp))
-    Text(label, color = MutedInk, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-    Text(value, color = Ink, fontSize = 13.sp, lineHeight = 18.sp, maxLines = 4, overflow = TextOverflow.Ellipsis)
+    Text(label, color = MutedInk, fontSize = TypeLabel, fontWeight = FontWeight.Bold)
+    Text(value, color = Ink, fontSize = TypeLabel, lineHeight = 20.sp, maxLines = 4, overflow = TextOverflow.Ellipsis)
 }
