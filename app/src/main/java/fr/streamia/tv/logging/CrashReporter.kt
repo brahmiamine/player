@@ -132,7 +132,11 @@ internal fun sanitizeStreamUrl(rawUrl: String): String {
 }
 
 internal fun sanitizeFreeText(value: String): String = value
-    .replace(Regex("(?i)/(live|movie|series)/[^/\\s?]+/[^/\\s?]+/")) { match ->
+    // The trailing '/' is optional: a stream URL that ends right after the password segment
+    // (no id/extension after it, e.g. an auth-probe URL "/live/user/pass") has no character
+    // left to anchor a mandatory trailing slash on, so requiring one let both credentials
+    // through untouched for that shape.
+    .replace(Regex("(?i)/(live|movie|series)/[^/\\s?]+/[^/\\s?]+/?")) { match ->
         "/${match.groupValues[1]}/***/***/"
     }
     .replace(Regex("(?i)(username|user|password|pass)=([^&\\s]+)")) { match ->

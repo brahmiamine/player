@@ -39,4 +39,15 @@ class CrashReporterSanitizerTest {
         val safe = sanitizeStreamUrl("not a valid url with user/password")
         assertEquals("stream://redacted", safe)
     }
+
+    @Test
+    fun `free text redacts credentials from a URL with no trailing segment`() {
+        // Xtream servers accept "/live/user/pass" with no id/extension as an auth probe, so a
+        // network exception message can legitimately end right after the password segment.
+        val safe = sanitizeFreeText("Auth check failed for https://host/live/johndoe/Sup3rSecret")
+
+        assertTrue(safe.contains("/live/***/***/"))
+        assertFalse(safe.contains("johndoe"))
+        assertFalse(safe.contains("Sup3rSecret"))
+    }
 }
