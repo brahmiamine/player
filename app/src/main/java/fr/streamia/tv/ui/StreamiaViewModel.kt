@@ -84,7 +84,9 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 }
                 .onFailure {
                     _uiState.update { state ->
-                        state.copy(catalogHydrating = false, offline = true, message = it.safeMessage())
+                        if (state.activeProfileId == profileId) {
+                            state.copy(catalogHydrating = false, offline = true, message = it.safeMessage())
+                        } else state
                     }
                 }
         }
