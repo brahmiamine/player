@@ -1,10 +1,39 @@
 package fr.streamia.tv.data
 
+import fr.streamia.tv.domain.MediaEntry
+import fr.streamia.tv.domain.MediaType
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class UserLibrarySnapshotTest {
+    private fun historyItem(positionMs: Long, durationMs: Long) = PlaybackHistoryItem(
+        entry = MediaEntry(id = 1, name = "Film", categoryId = "0", iconUrl = null, number = 0, type = MediaType.Movie),
+        positionMs = positionMs,
+        durationMs = durationMs,
+        updatedAt = 0,
+    )
+
+    @Test
+    fun `below 30 seconds is not resumable`() {
+        assertFalse(historyItem(positionMs = 29_999, durationMs = 6_000_000).isResumable())
+    }
+
+    @Test
+    fun `at 30 seconds with a duration left is resumable`() {
+        assertTrue(historyItem(positionMs = 30_000, durationMs = 6_000_000).isResumable())
+    }
+
+    @Test
+    fun `within the last 30 seconds of duration is not resumable`() {
+        assertFalse(historyItem(positionMs = 5_975_000, durationMs = 6_000_000).isResumable())
+    }
+
+    @Test
+    fun `unknown duration is resumable once past 30 seconds`() {
+        assertTrue(historyItem(positionMs = 45_000, durationMs = 0).isResumable())
+    }
+
     @Test
     fun `favorites do not invalidate catalog layout projection`() {
         val captured = UserLibrarySnapshot(favoriteEntries = setOf("Live:1"))
