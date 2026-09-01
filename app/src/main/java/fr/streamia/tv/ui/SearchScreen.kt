@@ -35,6 +35,10 @@ import fr.streamia.tv.ui.theme.FocusBlueBright
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
 import fr.streamia.tv.ui.theme.Night
+import fr.streamia.tv.ui.theme.TypeBody
+import fr.streamia.tv.ui.theme.TypeLabel
+import fr.streamia.tv.ui.theme.TypeScreenTitle
+import fr.streamia.tv.ui.theme.TypeSectionTitle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -63,12 +67,12 @@ fun SearchScreen(
     Column(Modifier.fillMaxSize().background(Night).padding(28.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             FocusableSurface(onClick = onBack, modifier = Modifier.width(120.dp).height(52.dp)) {
-                Text("← Retour", color = Ink, fontSize = 15.sp, modifier = Modifier.padding(horizontal = 14.dp))
+                Text("← Retour", color = Ink, fontSize = TypeLabel, modifier = Modifier.padding(horizontal = 14.dp))
             }
             Spacer(Modifier.width(18.dp))
-            Text("Recherche globale", color = Ink, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+            Text("Recherche globale", color = Ink, fontSize = TypeScreenTitle, fontWeight = FontWeight.Bold)
             Spacer(Modifier.weight(1f))
-            Text("${entries.size} résultats", color = MutedInk, fontSize = 14.sp)
+            Text("${entries.size} résultats", color = MutedInk, fontSize = TypeLabel)
         }
         Spacer(Modifier.height(18.dp))
         TvTextField(
@@ -89,13 +93,13 @@ fun SearchScreen(
 
         if (needle.isBlank()) {
             Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("Tapez quelques lettres pour rechercher dans tout Streamia.", color = MutedInk, fontSize = 20.sp)
+                Text("Tapez quelques lettres pour rechercher dans tout Streamia.", color = MutedInk, fontSize = TypeSectionTitle)
                 Spacer(Modifier.height(8.dp))
-                Text("Live · Films · Séries", color = FocusBlueBright, fontSize = 15.sp)
+                Text("Live · Films · Séries", color = FocusBlueBright, fontSize = TypeLabel)
             }
         } else {
             Column(Modifier.fillMaxSize()) {
-                Text("Contenus (${entries.size})", color = Ink, fontSize = 19.sp, fontWeight = FontWeight.Bold)
+                Text("Contenus (${entries.size})", color = Ink, fontSize = TypeSectionTitle, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(10.dp))
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(entries, key = MediaEntry::key) { entry ->
@@ -108,7 +112,7 @@ fun SearchScreen(
                                     ChannelLogo(entry.iconUrl, entry.displayName, Modifier.size(52.dp))
                                     Spacer(Modifier.width(12.dp))
                                     Column(Modifier.weight(1f)) {
-                                        Text(entry.displayName, color = Ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Text(entry.displayName, color = Ink, fontSize = TypeBody, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                         Text(
                                             "${entry.type.displayName} · ${if (entry.type == MediaType.Live) "CH ${entry.number}" else entry.extension.uppercase()}",
                                             color = MutedInk,
@@ -145,6 +149,6 @@ fun SearchScreen(
 @Composable
 private fun SearchFilter(label: String, selected: Boolean, onClick: () -> Unit) {
     FocusableSurface(onClick = onClick, selected = selected, modifier = Modifier.width(122.dp).height(46.dp)) {
-        Text(label, color = Ink, fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 14.dp))
+        Text(label, color = Ink, fontSize = TypeLabel, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 14.dp))
     }
 }

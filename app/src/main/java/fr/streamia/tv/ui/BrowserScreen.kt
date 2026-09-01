@@ -67,6 +67,8 @@ import fr.streamia.tv.ui.theme.FocusBlueBright
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
 import fr.streamia.tv.ui.theme.Night
+import fr.streamia.tv.ui.theme.TypeBody
+import fr.streamia.tv.ui.theme.TypeSectionTitle
 import fr.streamia.tv.ui.theme.WarmSignal
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.debounce
@@ -554,13 +556,13 @@ private fun LiveChannelList(
 
     Column(modifier) {
         Row(Modifier.fillMaxWidth().padding(start = 3.dp, bottom = 7.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Chaînes", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            Text("Chaînes", color = Ink, fontSize = TypeSectionTitle, fontWeight = FontWeight.Bold)
             Spacer(Modifier.weight(1f))
             Text("OK aperçu · OK encore plein écran", color = MutedInk, fontSize = 12.sp)
         }
         if (entries.isEmpty()) {
             Box(Modifier.fillMaxSize().background(DeepSurface), contentAlignment = Alignment.Center) {
-                Text("Aucune chaîne", color = MutedInk, fontSize = 14.sp)
+                Text("Aucune chaîne", color = MutedInk, fontSize = TypeBody)
             }
         } else {
             LazyColumn(
@@ -693,10 +695,10 @@ private fun LivePreview(
             if (entry != null) {
                 liveVideoSurface(LiveVideoSurfacePlacement(Modifier.fillMaxSize()))
                 if (buffering) {
-                    Text("Chargement…", color = Ink, fontSize = 14.sp, modifier = Modifier.align(Alignment.Center))
+                    Text("Chargement…", color = Ink, fontSize = TypeBody, modifier = Modifier.align(Alignment.Center))
                 }
                 if (error) {
-                    Text("Aperçu indisponible", color = MutedInk, fontSize = 14.sp, modifier = Modifier.align(Alignment.Center))
+                    Text("Aperçu indisponible", color = MutedInk, fontSize = TypeBody, modifier = Modifier.align(Alignment.Center))
                 }
                 Column(
                     Modifier
@@ -705,7 +707,7 @@ private fun LivePreview(
                         .background(Night.copy(alpha = 0.72f))
                         .padding(horizontal = 14.dp, vertical = 10.dp),
                 ) {
-                    Text(entry.displayName, color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(entry.displayName, color = Ink, fontSize = TypeBody, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Spacer(Modifier.height(3.dp))
                     Text(
                         "CH ${entry.number}${if (favorite) " · ★ Favori" else ""} · OK encore = plein écran · OK long = favori",
@@ -715,7 +717,7 @@ private fun LivePreview(
                     )
                 }
             } else {
-                Text("Sélectionnez une chaîne puis appuyez sur OK", color = MutedInk, fontSize = 16.sp, modifier = Modifier.align(Alignment.Center))
+                Text("Sélectionnez une chaîne puis appuyez sur OK", color = MutedInk, fontSize = TypeBody, modifier = Modifier.align(Alignment.Center))
             }
         Text(
             "Aperçu en direct",
@@ -814,7 +816,7 @@ private fun CategoryRail(
 
     Column(modifier) {
         Row(Modifier.fillMaxWidth().padding(start = 3.dp, bottom = 7.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Catégories", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            Text("Catégories", color = Ink, fontSize = TypeSectionTitle, fontWeight = FontWeight.Bold)
             Spacer(Modifier.weight(1f))
             Text("OK choisir · OK long favori", color = MutedInk, fontSize = 12.sp)
         }
@@ -879,7 +881,7 @@ private fun PosterGrid(
 ) {
     Column(modifier) {
         Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(categoryName.ifBlank { type.displayName }, color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(categoryName.ifBlank { type.displayName }, color = Ink, fontSize = TypeSectionTitle, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Spacer(Modifier.width(10.dp))
             Text("${entries.size} ${type.pluralName}", color = MutedInk, fontSize = 12.sp)
             Spacer(Modifier.weight(1f))
@@ -888,7 +890,7 @@ private fun PosterGrid(
 
         if (entries.isEmpty()) {
             Box(Modifier.fillMaxSize().background(DeepSurface), contentAlignment = Alignment.Center) {
-                Text("Aucun contenu dans cette catégorie", color = MutedInk, fontSize = 16.sp)
+                Text("Aucun contenu dans cette catégorie", color = MutedInk, fontSize = TypeBody)
             }
         } else {
             LazyVerticalGrid(

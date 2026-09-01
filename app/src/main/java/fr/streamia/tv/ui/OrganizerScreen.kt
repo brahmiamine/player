@@ -35,6 +35,9 @@ import fr.streamia.tv.ui.theme.FocusBlueBright
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
 import fr.streamia.tv.ui.theme.Night
+import fr.streamia.tv.ui.theme.TypeLabel
+import fr.streamia.tv.ui.theme.TypeSectionTitle
+import fr.streamia.tv.ui.theme.TypeScreenTitle
 
 @Composable
 fun OrganizerScreen(
@@ -66,10 +69,10 @@ fun OrganizerScreen(
     Column(Modifier.fillMaxSize().background(Night).padding(24.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             FocusableSurface(onClick = onBack, modifier = Modifier.width(120.dp).height(50.dp)) {
-                Text("← Retour", color = Ink, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 14.dp))
+                Text("← Retour", color = Ink, fontSize = TypeLabel, modifier = Modifier.padding(horizontal = 14.dp))
             }
             Spacer(Modifier.width(16.dp))
-            Text("Organiser le catalogue", color = Ink, fontSize = 27.sp, fontWeight = FontWeight.Bold)
+            Text("Organiser le catalogue", color = Ink, fontSize = TypeScreenTitle, fontWeight = FontWeight.Bold)
             Spacer(Modifier.weight(1f))
             MediaType.entries.forEach { mediaType ->
                 FocusableSurface(
@@ -83,7 +86,7 @@ fun OrganizerScreen(
                     selected = type == mediaType,
                     modifier = Modifier.width(115.dp).height(48.dp),
                 ) {
-                    Text(mediaType.displayName, color = Ink, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 12.dp))
+                    Text(mediaType.displayName, color = Ink, fontSize = TypeLabel, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 12.dp))
                 }
                 Spacer(Modifier.width(7.dp))
             }
@@ -92,14 +95,14 @@ fun OrganizerScreen(
         Text(
             "Sélection multiple : cochez plusieurs catégories pour les déplacer ensemble, ou plusieurs contenus pour les affecter à une autre catégorie.",
             color = MutedInk,
-            fontSize = 13.sp,
+            fontSize = TypeLabel,
         )
         Spacer(Modifier.height(14.dp))
 
         Row(Modifier.fillMaxSize()) {
             Column(Modifier.width(420.dp).fillMaxHeight()) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Catégories (${categories.size})", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    Text("Catégories (${categories.size})", color = Ink, fontSize = TypeSectionTitle, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.weight(1f))
                     FocusableSurface(
                         onClick = {
@@ -171,8 +174,8 @@ fun OrganizerScreen(
             Column(Modifier.weight(1f).fillMaxHeight()) {
                 val sourceName = categories.firstOrNull { it.id == sourceCategoryId }?.name ?: "Catégorie"
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text(sourceName, color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text("${selectedEntryKeys.size} sélectionné(s)", color = FocusBlueBright, fontSize = 13.sp)
+                    Text(sourceName, color = Ink, fontSize = TypeSectionTitle, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text("${selectedEntryKeys.size} sélectionné(s)", color = FocusBlueBright, fontSize = TypeLabel)
                 }
                 Spacer(Modifier.height(9.dp))
                 LazyColumn(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(7.dp)) {
@@ -189,7 +192,7 @@ fun OrganizerScreen(
                             ) {
                                 Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                                     Text(entry.number.toString(), color = MutedInk, fontSize = 11.sp, modifier = Modifier.width(48.dp))
-                                    Text(entry.displayName, color = Ink, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                                    Text(entry.displayName, color = Ink, fontSize = TypeLabel, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                                     StreamiaIcon(
                                         if (entry.key in selectedEntryKeys) StreamiaIconGlyph.CheckboxOn else StreamiaIconGlyph.CheckboxOff,
                                         size = 18.dp,
@@ -233,14 +236,14 @@ fun OrganizerScreen(
                         enabled = selectedEntryKeys.isNotEmpty() && destinationCategoryId != null,
                         modifier = Modifier.width(190.dp).height(52.dp),
                     ) {
-                        Text("Déplacer la sélection", color = Ink, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 14.dp))
+                        Text("Déplacer la sélection", color = Ink, fontSize = TypeLabel, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 14.dp))
                     }
                     FocusableSurface(
                         onClick = { onResetMoves(selectedEntryKeys); selectedEntryKeys = emptySet() },
                         enabled = selectedEntryKeys.isNotEmpty(),
                         modifier = Modifier.width(150.dp).height(52.dp),
                     ) {
-                        Text("Réinitialiser", color = Ink, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 14.dp))
+                        Text("Réinitialiser", color = Ink, fontSize = TypeLabel, modifier = Modifier.padding(horizontal = 14.dp))
                     }
                 }
             }
