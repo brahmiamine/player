@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.sp
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import fr.streamia.tv.ui.theme.FocusBlueBright
+import fr.streamia.tv.ui.theme.HeadingWeight
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
 import fr.streamia.tv.ui.theme.Night
@@ -58,7 +59,7 @@ internal fun BoxScope.PlayerSettings(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("Lecture", color = Ink, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+            Text("Lecture", color = Ink, fontSize = 24.sp, fontWeight = HeadingWeight)
             Spacer(Modifier.weight(1f))
             FocusableSurface(onClick = onClose, modifier = Modifier.width(100.dp).height(48.dp)) {
                 Text("Fermer", color = Ink, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 14.dp))

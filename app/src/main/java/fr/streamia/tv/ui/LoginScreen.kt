@@ -121,7 +121,7 @@ fun LoginScreen(
         ) {
             StreamiaLogo()
             Column {
-                Text("Vos chaînes,\nvos listes.", color = Ink, fontSize = 33.sp, lineHeight = 39.sp, fontWeight = FontWeight.SemiBold)
+                Text("Vos chaînes,\nvos listes.", color = Ink, fontSize = 33.sp, lineHeight = 39.sp, fontWeight = HeadingWeight)
                 Spacer(Modifier.height(14.dp))
                 Text(
                     "Xtream, fichier M3U ou URL M3U distante. XMLTV externe et actualisation automatique sont pris en charge.",
