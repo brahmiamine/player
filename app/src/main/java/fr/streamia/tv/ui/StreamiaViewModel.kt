@@ -77,6 +77,17 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             resumePositionMs = library.history.firstOrNull { it.entry.key == entry.key }?.positionMs ?: 0L,
         )
         viewModelScope.launch {
+            // Le catalogue déjà en cache est réel (pas un espace réservé) : dès qu'il est
+            // disponible, on l'affiche et on lève catalogHydrating immédiatement, sans attendre la
+            // réconciliation complète des favoris ci-dessous. C'est ce verrou qui, tant qu'il reste
+            // levé, retient OK/gauche/retour sur l'écran de démarrage avant de retourner au
+            // navigateur Live/VOD — le lever plus tôt raccourcit d'autant cette attente.
+            val quickCatalog = runCatching { repository.cachedCatalog(profileId) }.getOrNull()
+            if (quickCatalog != null && _uiState.value.activeProfileId == profileId) {
+                _uiState.update { state ->
+                    state.copy(catalogHydrating = false, rawCatalog = quickCatalog, catalog = quickCatalog)
+                }
+            }
             runCatching { repository.openProfile(profileId) }
                 .onSuccess { loaded ->
                     mergeCatalog(loaded)
@@ -84,7 +95,9 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 }
                 .onFailure {
                     _uiState.update { state ->
-                        state.copy(catalogHydrating = false, offline = true, message = it.safeMessage())
+                        if (state.activeProfileId == profileId) {
+                            state.copy(catalogHydrating = false, offline = true, message = it.safeMessage())
+                        } else state
                     }
                 }
         }

@@ -405,6 +405,12 @@ fun PlayerScreen(
         when {
             settingsOpen -> { settingsOpen = false; rootFocus.requestFocus() }
             guideOpen -> { guideOpen = false; rootFocus.requestFocus() }
+            // Passe par le même chemin que OK/gauche (PlayerOverlayController.openLivePicker) au
+            // lieu d'appeler onBack()/closePlayer() directement : sans ce report, un retour appuyé
+            // pendant que le catalogue restauré au démarrage (resumeStartup) est encore en cours de
+            // relecture atterrit sur l'accueil au lieu du navigateur Live, car closePlayer() retombe
+            // sur l'accueil tant que catalogHydrating est vrai.
+            sharedLivePlayer -> PlayerOverlayController.openLivePicker()
             else -> onBack()
         }
     }
