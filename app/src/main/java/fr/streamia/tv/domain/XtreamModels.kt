@@ -138,10 +138,20 @@ data class Catalog(
     val entries: List<MediaEntry>,
     val account: AccountInfo? = null,
 ) {
-    /** Index nettoyé une seule fois hors de l'UI, même pour les catalogues de plusieurs centaines de milliers d'entrées. */
+    /**
+     * Index nettoyé une seule fois hors de l'UI, même pour les catalogues de plusieurs centaines
+     * de milliers d'entrées. entriesBySectionAndCategory dérive de entriesBySection (groupBy
+     * imbriqué par catégorie à l'intérieur de chaque type déjà partitionné) plutôt que d'un groupBy
+     * sur une clé "TYPE:catégorie" concaténée par entrée : cette reconstruction tourne à chaque
+     * réouverture de l'app sur un contenu Live restauré (resumeStartup) et à chaque rafraîchissement
+     * silencieux du catalogue, donc éviter une allocation de String par entrée ici réduit
+     * sensiblement le travail CPU/GC de ce chemin pour les gros catalogues IPTV.
+     */
     private val navigableEntries = entries.filterNot(MediaEntry::isVisualSeparator)
-    private val entriesBySectionAndCategory = navigableEntries.groupBy { "${it.type.name}:${it.categoryId}" }
     private val entriesBySection = navigableEntries.groupBy(MediaEntry::type)
+    private val entriesBySectionAndCategory = entriesBySection.mapValues { (_, sectionEntries) ->
+        sectionEntries.groupBy(MediaEntry::categoryId)
+    }
     private val categoriesBySection = categories.groupBy(MediaCategory::type)
     private val entriesByKey = navigableEntries.associateBy(MediaEntry::key)
     private val searchIndex by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
@@ -156,7 +166,7 @@ data class Catalog(
 
     fun entriesIn(type: MediaType, categoryId: String): List<MediaEntry> =
         if (categoryId == ALL_CATEGORY_ID) entriesFor(type)
-        else entriesBySectionAndCategory["${type.name}:$categoryId"].orEmpty()
+        else entriesBySectionAndCategory[type]?.get(categoryId).orEmpty()
 
     fun entry(key: String): MediaEntry? = entriesByKey[key]
 
