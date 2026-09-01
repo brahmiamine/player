@@ -3,6 +3,7 @@ package fr.streamia.tv.player
 import android.content.Context
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
@@ -37,8 +38,13 @@ object StreamiaPlayerFactory {
             )
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
-        val dataSourceFactory = OkHttpDataSource.Factory(httpClient)
+        val httpDataSourceFactory = OkHttpDataSource.Factory(httpClient)
             .setUserAgent("Streamia-TV/1.5")
+        // DefaultMediaSourceFactory reuses this exact factory for every source it builds, including
+        // externally loaded subtitle files (SingleSampleMediaSource). An OkHttpDataSource.Factory alone
+        // only understands http(s) — a local subtitle picked via SAF (content://) would fail to load.
+        // DefaultDataSource.Factory keeps OkHttp for http(s) and adds file/content/asset resolution on top.
+        val dataSourceFactory = DefaultDataSource.Factory(context, httpDataSourceFactory)
         val mediaSourceFactory = DefaultMediaSourceFactory(context)
             .setDataSourceFactory(dataSourceFactory)
             .setLoadErrorHandlingPolicy(DefaultLoadErrorHandlingPolicy(5))

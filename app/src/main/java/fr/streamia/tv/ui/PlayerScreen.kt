@@ -1,8 +1,12 @@
 package fr.streamia.tv.ui
 
+import android.net.Uri
 import android.os.SystemClock
+import android.provider.OpenableColumns
 import android.view.KeyEvent as AndroidKeyEvent
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
@@ -42,9 +46,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.net.toUri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.Tracks
@@ -98,6 +104,9 @@ internal data class TrackChoice(val label: String, val language: String?)
 
 private const val VOD_SEEK_STEP_MS = 10_000L
 
+/** Tag de langue "indéterminée" (BCP-47) posé sur tout sous-titre externe chargé manuellement. */
+private const val EXTERNAL_SUBTITLE_LANGUAGE_TAG = "und"
+
 @androidx.annotation.OptIn(markerClass = [UnstableApi::class])
 @Composable
 fun PlayerScreen(
@@ -149,6 +158,14 @@ fun PlayerScreen(
     var positionMs by remember(entry.key) { mutableStateOf(0L) }
     var durationMs by remember(entry.key) { mutableStateOf(0L) }
     var watchdogRecoveryCount by remember(entry.key) { mutableStateOf(0) }
+    // Sous-titre externe (.srt/.vtt) chargé pour cette session de lecture uniquement : pas de
+    // persistance entre relectures, il repart à null à chaque nouvelle entrée (remember(entry.key)).
+    var externalSubtitle by remember(entry.key) { mutableStateOf<MediaItem.SubtitleConfiguration?>(null) }
+    var externalSubtitleError by remember(entry.key) { mutableStateOf<String?>(null) }
+    // Une fois le sous-titre externe demandé, le prochain onTracksChanged doit pointer subtitleIndex
+    // sur la piste "und" qui vient d'apparaître, sinon le HUD/Réglages continuent d'afficher
+    // "Désactivés" bien que le sous-titre externe soit réellement actif dans le lecteur.
+    var externalSubtitlePendingSync by remember(entry.key) { mutableStateOf(false) }
 
     fun startCandidate(url: String, positionMs: Long = 0L) {
         activeStreamUrl = url
@@ -160,7 +177,13 @@ fun PlayerScreen(
         }
         runCatching {
             player.stop()
-            player.setMediaItem(MediaItem.fromUri(url))
+            // Un MediaItem.SubtitleConfiguration ne peut être attaché qu'à la construction du
+            // MediaItem : on le réinjecte ici pour que le sous-titre externe survive à un
+            // changement de candidat ou à une reconnexion du watchdog sur ce même flux.
+            val mediaItem = MediaItem.Builder().setUri(url).apply {
+                externalSubtitle?.let { setSubtitleConfigurations(listOf(it)) }
+            }.build()
+            player.setMediaItem(mediaItem)
             if (positionMs > 0 && entry.type != MediaType.Live) player.seekTo(positionMs)
             player.prepare()
             player.play()
@@ -168,6 +191,38 @@ fun PlayerScreen(
             buffering = false
             playbackError = "Ce contenu ne peut pas être démarré pour le moment."
         }
+    }
+
+    fun loadExternalSubtitle(subtitleUri: Uri, displayName: String) {
+        if (sharedLivePlayer) return
+        val mimeType = subtitleMimeTypeFor(displayName)
+        if (mimeType == null) {
+            externalSubtitleError = "Format non reconnu : utilisez un fichier .srt ou .vtt."
+            return
+        }
+        externalSubtitleError = null
+        externalSubtitle = MediaItem.SubtitleConfiguration.Builder(subtitleUri)
+            .setMimeType(mimeType)
+            .setLanguage(EXTERNAL_SUBTITLE_LANGUAGE_TAG)
+            .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
+            .setLabel(displayName)
+            .build()
+        // "Désactivés" (aucune piste embarquée choisie) désactive tout le type TRACK_TYPE_TEXT dans
+        // les TrackSelectionParameters au premier onTracksChanged. Sans réactivation explicite ici,
+        // ExoPlayer ignore le sous-titre externe même marqué SELECTION_FLAG_DEFAULT : le type entier
+        // du renderer resterait coupé.
+        player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+            .setPreferredTextLanguage(EXTERNAL_SUBTITLE_LANGUAGE_TAG)
+            .build()
+        externalSubtitlePendingSync = true
+        startCandidate(activeStreamUrl, player.currentPosition.coerceAtLeast(0L))
+    }
+
+    val pickSubtitleFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val displayName = documentDisplayName(context, uri) ?: uri.lastPathSegment.orEmpty()
+        loadExternalSubtitle(uri, displayName)
     }
 
     DisposableEffect(player) {
@@ -226,7 +281,17 @@ fun PlayerScreen(
                     trackPreferencesApplied = true
                 } else {
                     audioIndex = audioIndex.coerceIn(0, audioTracks.lastIndex.coerceAtLeast(0))
-                    subtitleIndex = subtitleIndex.coerceIn(0, subtitleTracks.lastIndex.coerceAtLeast(0))
+                    val externalIndex = if (externalSubtitlePendingSync) {
+                        subtitleTracks.indexOfFirst { it.language == EXTERNAL_SUBTITLE_LANGUAGE_TAG }
+                    } else {
+                        -1
+                    }
+                    if (externalIndex >= 0) {
+                        subtitleIndex = externalIndex
+                        externalSubtitlePendingSync = false
+                    } else {
+                        subtitleIndex = subtitleIndex.coerceIn(0, subtitleTracks.lastIndex.coerceAtLeast(0))
+                    }
                 }
 
                 selectedVideoFormat(tracks)?.let { format ->
@@ -485,10 +550,18 @@ fun PlayerScreen(
             Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("●", color = FocusBlueBright, fontSize = 34.sp)
                 Spacer(Modifier.height(12.dp))
-                Text("Chargement de ${entry.displayName}…", color = Ink, fontSize = 18.sp)
-                if (resumePositionMs > 0 && entry.type != MediaType.Live) {
+                if (!sharedLivePlayer && watchdogRecoveryCount > 0) {
+                    // Distingue une reconnexion automatique après un flux figé (watchdog) du
+                    // chargement initial générique : même habillage visuel, message différent.
+                    Text("Reconnexion en cours… (tentative $watchdogRecoveryCount/2)", color = Ink, fontSize = 18.sp)
                     Spacer(Modifier.height(6.dp))
-                    Text("Reprise de la lecture", color = MutedInk, fontSize = 13.sp)
+                    Text("Le flux s'est interrompu, nouvelle tentative automatique", color = MutedInk, fontSize = 13.sp)
+                } else {
+                    Text("Chargement de ${entry.displayName}…", color = Ink, fontSize = 18.sp)
+                    if (resumePositionMs > 0 && entry.type != MediaType.Live) {
+                        Spacer(Modifier.height(6.dp))
+                        Text("Reprise de la lecture", color = MutedInk, fontSize = 13.sp)
+                    }
                 }
             }
         }
@@ -599,6 +672,26 @@ fun PlayerScreen(
                 },
                 onNextAspect = { aspect = VideoAspect.entries[(aspect.ordinal + 1) % VideoAspect.entries.size] },
                 onClose = { settingsOpen = false; rootFocus.requestFocus() },
+                externalSubtitleAvailable = !sharedLivePlayer,
+                externalSubtitleLabel = externalSubtitle?.label,
+                externalSubtitleError = externalSubtitleError,
+                onPickExternalSubtitleFile = {
+                    // Les fournisseurs de documents décrivent rarement .srt/.vtt avec un type MIME
+                    // fiable (souvent text/plain ou application/octet-stream) : on filtre large côté
+                    // sélecteur puis on valide réellement via l'extension dans subtitleMimeTypeFor().
+                    pickSubtitleFile.launch(
+                        arrayOf("text/plain", "text/vtt", "application/x-subrip", "application/octet-stream"),
+                    )
+                },
+                onLoadExternalSubtitleUrl = { url ->
+                    val uri = url.toUri()
+                    if (uri.scheme != "http" && uri.scheme != "https") {
+                        externalSubtitleError = "URL de sous-titre invalide (http/https attendu)."
+                    } else {
+                        val fileName = url.substringBefore('?').substringBefore('#').substringAfterLast('/')
+                        loadExternalSubtitle(uri, fileName.ifBlank { url })
+                    }
+                },
             )
         }
     }
@@ -939,6 +1032,21 @@ private fun diagnosticsText(value: PlaybackDiagnostics): String {
     }
     return "$startup · $rebuffer"
 }
+
+private fun subtitleMimeTypeFor(name: String): String? =
+    when (name.substringBefore('?').substringBefore('#').substringAfterLast('.', "").lowercase()) {
+        "srt" -> MimeTypes.APPLICATION_SUBRIP
+        "vtt" -> MimeTypes.TEXT_VTT
+        else -> null
+    }
+
+/** Nom d'affichage d'un document SAF (souvent différent du dernier segment d'un content://). */
+private fun documentDisplayName(context: android.content.Context, uri: Uri): String? = runCatching {
+    context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+        val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+        if (nameIndex >= 0 && cursor.moveToFirst()) cursor.getString(nameIndex) else null
+    }
+}.getOrNull()
 
 private fun formatDuration(positionMs: Long): String {
     val totalSeconds = positionMs.coerceAtLeast(0L) / 1000L
