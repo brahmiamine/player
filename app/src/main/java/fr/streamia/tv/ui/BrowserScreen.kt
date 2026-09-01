@@ -293,18 +293,18 @@ private fun BrowserHeader(
             ) {
                 Column(Modifier.padding(horizontal = 10.dp)) {
                     Text(type.displayName, color = Ink, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    Text(catalog.count(type).toString(), color = MutedInk, fontSize = 9.sp)
+                    Text(catalog.count(type).toString(), color = MutedInk, fontSize = 11.sp)
                 }
             }
             Spacer(Modifier.width(6.dp))
         }
 
         Spacer(Modifier.weight(1f))
-        HeaderAction("⌕", 52.dp, onSearch)
+        HeaderAction("Recherche", 52.dp, onSearch, glyph = StreamiaIconGlyph.Search)
         Spacer(Modifier.width(6.dp))
         HeaderAction("EPG", 68.dp, onEpg, catalog.count(MediaType.Live) > 0)
         Spacer(Modifier.width(6.dp))
-        HeaderAction("⚙", 52.dp, onSettings)
+        HeaderAction("Paramètres", 52.dp, onSettings, glyph = StreamiaIconGlyph.Settings)
         Spacer(Modifier.width(10.dp))
         Box(Modifier.size(6.dp).background(if (offline) WarmSignal else Color(0xFF6CCB91)))
         Spacer(Modifier.width(5.dp))
@@ -315,15 +315,30 @@ private fun BrowserHeader(
                 else -> "Local / en ligne"
             },
             color = if (offline) WarmSignal else MutedInk,
-            fontSize = 10.sp,
+            fontSize = 12.sp,
         )
     }
 }
 
 @Composable
-private fun HeaderAction(label: String, width: androidx.compose.ui.unit.Dp, onClick: () -> Unit, enabled: Boolean = true) {
-    FocusableSurface(onClick = onClick, enabled = enabled, modifier = Modifier.width(width).height(44.dp)) {
-        Text(label, color = Ink, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 10.dp))
+private fun HeaderAction(
+    label: String,
+    width: androidx.compose.ui.unit.Dp,
+    onClick: () -> Unit,
+    enabled: Boolean = true,
+    glyph: StreamiaIconGlyph? = null,
+) {
+    FocusableSurface(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier.width(width).height(44.dp),
+        contentDescription = if (glyph != null) label else null,
+    ) {
+        if (glyph != null) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { StreamiaIcon(glyph, size = 22.dp) }
+        } else {
+            Text(label, color = Ink, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 10.dp))
+        }
     }
 }
 
@@ -541,7 +556,7 @@ private fun LiveChannelList(
         Row(Modifier.fillMaxWidth().padding(start = 3.dp, bottom = 7.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("Chaînes", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.weight(1f))
-            Text("OK aperçu · OK encore plein écran", color = MutedInk, fontSize = 9.sp)
+            Text("OK aperçu · OK encore plein écran", color = MutedInk, fontSize = 12.sp)
         }
         if (entries.isEmpty()) {
             Box(Modifier.fillMaxSize().background(DeepSurface), contentAlignment = Alignment.Center) {
@@ -576,7 +591,7 @@ private fun LiveChannelList(
                             Modifier.fillMaxWidth().padding(horizontal = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Text(entry.number.toString(), color = MutedInk, fontSize = 9.sp, modifier = Modifier.width(38.dp))
+                            Text(entry.number.toString(), color = MutedInk, fontSize = 11.sp, modifier = Modifier.width(38.dp))
                             ChannelLogo(entry.iconUrl, entry.displayName, Modifier.size(31.dp))
                             Spacer(Modifier.width(8.dp))
                             Text(
@@ -590,7 +605,7 @@ private fun LiveChannelList(
                             )
                             if (entry.key in favoriteEntries) {
                                 Spacer(Modifier.width(5.dp))
-                                Text("★", color = FocusBlueBright, fontSize = 12.sp)
+                                StreamiaIcon(StreamiaIconGlyph.Star, size = 12.dp)
                             }
                         }
                     }
@@ -695,7 +710,7 @@ private fun LivePreview(
                     Text(
                         "CH ${entry.number}${if (favorite) " · ★ Favori" else ""} · OK encore = plein écran · OK long = favori",
                         color = FocusBlueBright,
-                        fontSize = 10.sp,
+                        fontSize = 12.sp,
                         maxLines = 1,
                     )
                 }
@@ -801,7 +816,7 @@ private fun CategoryRail(
         Row(Modifier.fillMaxWidth().padding(start = 3.dp, bottom = 7.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("Catégories", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.weight(1f))
-            Text("OK choisir · OK long favori", color = MutedInk, fontSize = 9.sp)
+            Text("OK choisir · OK long favori", color = MutedInk, fontSize = 12.sp)
         }
         LazyColumn(
             state = listState,
@@ -830,7 +845,7 @@ private fun CategoryRail(
                 ) {
                     Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                         if (!virtual && category.key in favoriteCategories) {
-                            Text("★", color = FocusBlueBright, fontSize = 10.sp)
+                            StreamiaIcon(StreamiaIconGlyph.Star, size = 12.dp)
                             Spacer(Modifier.width(5.dp))
                         }
                         Text(
@@ -842,7 +857,7 @@ private fun CategoryRail(
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f),
                         )
-                        Text(countFor(category).toString(), color = MutedInk, fontSize = 9.sp)
+                        Text(countFor(category).toString(), color = MutedInk, fontSize = 11.sp)
                     }
                 }
             }
@@ -866,9 +881,9 @@ private fun PosterGrid(
         Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(categoryName.ifBlank { type.displayName }, color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Spacer(Modifier.width(10.dp))
-            Text("${entries.size} ${type.pluralName}", color = MutedInk, fontSize = 10.sp)
+            Text("${entries.size} ${type.pluralName}", color = MutedInk, fontSize = 12.sp)
             Spacer(Modifier.weight(1f))
-            Text("OK ouvrir · OK long ajouter/retirer favori", color = MutedInk, fontSize = 9.sp)
+            Text("OK ouvrir · OK long ajouter/retirer favori", color = MutedInk, fontSize = 12.sp)
         }
 
         if (entries.isEmpty()) {
@@ -910,7 +925,7 @@ private fun PosterCard(
         onFocused = onFocused,
         onLongClick = onLongClick,
         selected = favorite,
-        modifier = Modifier.fillMaxWidth().height(245.dp),
+        modifier = Modifier.fillMaxWidth().height(252.dp),
     ) {
         Column(Modifier.fillMaxSize().padding(8.dp)) {
             MediaArtwork(entry.iconUrl, entry.displayName, Modifier.fillMaxWidth().height(175.dp))
@@ -918,22 +933,28 @@ private fun PosterCard(
             Text(
                 entry.displayName,
                 color = Ink,
-                fontSize = 11.sp,
-                lineHeight = 14.sp,
+                fontSize = 13.sp,
+                lineHeight = 16.sp,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
             Spacer(Modifier.weight(1f))
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                val detail = entry.rating?.let { "★ ${"%.1f".format(it)}" }
-                    ?: if (entry.type == MediaType.Series && entry.playable) "Épisode" else entry.type.displayName
-                Text(detail, color = FocusBlueBright, fontSize = 9.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                val ratingText = entry.rating?.let { "%.1f".format(it) }
+                if (ratingText != null) {
+                    StreamiaIcon(StreamiaIconGlyph.Star, size = 11.dp)
+                    Spacer(Modifier.width(3.dp))
+                    Text(ratingText, color = FocusBlueBright, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                } else {
+                    val label = if (entry.type == MediaType.Series && entry.playable) "Épisode" else entry.type.displayName
+                    Text(label, color = FocusBlueBright, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                }
                 Spacer(Modifier.weight(1f))
                 if (history != null && history.progress > 0.02f) {
-                    Text("${history.progressPercent()}%", color = MutedInk, fontSize = 9.sp)
+                    Text("${history.progressPercent()}%", color = MutedInk, fontSize = 12.sp)
                 } else if (favorite) {
-                    Text("★", color = FocusBlueBright, fontSize = 10.sp)
+                    StreamiaIcon(StreamiaIconGlyph.Star, size = 12.dp)
                 }
             }
         }

@@ -3,6 +3,7 @@ package fr.streamia.tv.ui
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -149,7 +150,12 @@ fun OrganizerScreen(
                                 selected = category.key in selectedCategoryKeys,
                                 modifier = Modifier.width(52.dp).height(50.dp),
                             ) {
-                                Text(if (category.key in selectedCategoryKeys) "☑" else "☐", color = FocusBlueBright, fontSize = 18.sp, modifier = Modifier.padding(start = 18.dp))
+                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    StreamiaIcon(
+                                        if (category.key in selectedCategoryKeys) StreamiaIconGlyph.CheckboxOn else StreamiaIconGlyph.CheckboxOff,
+                                        size = 18.dp,
+                                    )
+                                }
                             }
                         }
                     }
@@ -179,7 +185,10 @@ fun OrganizerScreen(
                                 Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                                     Text(entry.number.toString(), color = MutedInk, fontSize = 11.sp, modifier = Modifier.width(48.dp))
                                     Text(entry.displayName, color = Ink, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                                    Text(if (entry.key in selectedEntryKeys) "☑" else "☐", color = FocusBlueBright, fontSize = 16.sp)
+                                    StreamiaIcon(
+                                        if (entry.key in selectedEntryKeys) StreamiaIconGlyph.CheckboxOn else StreamiaIconGlyph.CheckboxOff,
+                                        size = 18.dp,
+                                    )
                                 }
                             }
                         }
@@ -191,7 +200,11 @@ fun OrganizerScreen(
                     FocusableSurface(
                         onClick = { destinationCategoryId = previousDestination(categories, destinationCategoryId, sourceCategoryId) },
                         modifier = Modifier.width(62.dp).height(52.dp),
-                    ) { Text("←", color = Ink, fontSize = 18.sp, modifier = Modifier.padding(start = 22.dp)) }
+                    ) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            StreamiaIcon(StreamiaIconGlyph.ArrowBack, tint = Ink, size = 18.dp)
+                        }
+                    }
                     Column(Modifier.weight(1f)) {
                         Text("Destination", color = MutedInk, fontSize = 11.sp)
                         Text(destination?.name ?: "Choisir une catégorie", color = Ink, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -199,7 +212,11 @@ fun OrganizerScreen(
                     FocusableSurface(
                         onClick = { destinationCategoryId = nextDestination(categories, destinationCategoryId, sourceCategoryId) },
                         modifier = Modifier.width(62.dp).height(52.dp),
-                    ) { Text("→", color = Ink, fontSize = 18.sp, modifier = Modifier.padding(start = 22.dp)) }
+                    ) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            StreamiaIcon(StreamiaIconGlyph.ArrowForward, tint = Ink, size = 18.dp)
+                        }
+                    }
                     FocusableSurface(
                         onClick = {
                             locallyMovedEntryKeys = locallyMovedEntryKeys + selectedEntryKeys

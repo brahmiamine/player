@@ -287,7 +287,7 @@ private fun ChannelGridRow(
                 ChannelLogo(channel.iconUrl, channel.displayName, Modifier.size(40.dp))
                 Spacer(Modifier.width(9.dp))
                 Column {
-                    Text(channel.number.toString(), color = MutedInk, fontSize = 10.sp)
+                    Text(channel.number.toString(), color = MutedInk, fontSize = 11.sp)
                     Text(
                         channel.displayName,
                         color = Ink,

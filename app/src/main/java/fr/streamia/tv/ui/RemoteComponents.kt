@@ -4,6 +4,7 @@ import android.graphics.BitmapFactory
 import android.content.Context
 import android.util.LruCache
 import android.view.KeyEvent as AndroidKeyEvent
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
@@ -33,6 +34,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -86,6 +88,11 @@ fun FocusableSurface(
     var focused by remember { mutableStateOf(false) }
     var longPressConsumed by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(if (focused) 1.035f else 1f, label = "focus-scale")
+    // Léger relief plutôt qu'un aplat pur : une élévation discrète au repos, plus marquée en focus,
+    // pour aider l'œil à séparer les rangées denses (Accueil, EPG) du fond sans réintroduire de
+    // glassmorphisme ni de bordures colorées supplémentaires — un seul réglage, partagé par tous
+    // les usages de FocusableSurface.
+    val elevation by animateDpAsState(if (focused) 10.dp else 2.dp, label = "focus-elevation")
     val shape = RoundedCornerShape(12.dp)
     val background = when {
         focused -> FocusBlue
@@ -101,6 +108,7 @@ fun FocusableSurface(
     Box(
         modifier = modifier
             .scale(scale)
+            .shadow(elevation, shape, clip = false)
             .clip(shape)
             .background(background)
             .border(border, shape)

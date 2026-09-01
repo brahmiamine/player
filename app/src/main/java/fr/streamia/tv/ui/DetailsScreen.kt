@@ -54,16 +54,24 @@ fun MovieDetailsScreen(
             Spacer(Modifier.height(16.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 FocusableSurface(onClick = onPlay, enabled = !busy, modifier = Modifier.weight(1f).height(58.dp)) {
-                    Text(
-                        if (resumePositionMs > 0) "▶ Reprendre" else "▶ Lire",
-                        color = Ink,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 16.dp),
-                    )
+                    Row(
+                        Modifier.padding(horizontal = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        StreamiaIcon(StreamiaIconGlyph.Movie, tint = Ink, size = 16.dp)
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            if (resumePositionMs > 0) "Reprendre" else "Lire",
+                            color = Ink,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
                 }
                 FocusableSurface(onClick = onToggleFavorite, selected = favorite, modifier = Modifier.width(72.dp).height(58.dp)) {
-                    Text(if (favorite) "★" else "☆", color = FocusBlueBright, fontSize = 25.sp, modifier = Modifier.padding(start = 21.dp))
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        StreamiaIcon(if (favorite) StreamiaIconGlyph.Star else StreamiaIconGlyph.StarOutline, size = 22.dp)
+                    }
                 }
             }
         }
