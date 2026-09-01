@@ -162,6 +162,10 @@ fun PlayerScreen(
     // persistance entre relectures, il repart à null à chaque nouvelle entrée (remember(entry.key)).
     var externalSubtitle by remember(entry.key) { mutableStateOf<MediaItem.SubtitleConfiguration?>(null) }
     var externalSubtitleError by remember(entry.key) { mutableStateOf<String?>(null) }
+    // Une fois le sous-titre externe demandé, le prochain onTracksChanged doit pointer subtitleIndex
+    // sur la piste "und" qui vient d'apparaître, sinon le HUD/Réglages continuent d'afficher
+    // "Désactivés" bien que le sous-titre externe soit réellement actif dans le lecteur.
+    var externalSubtitlePendingSync by remember(entry.key) { mutableStateOf(false) }
 
     fun startCandidate(url: String, positionMs: Long = 0L) {
         activeStreamUrl = url
@@ -211,6 +215,7 @@ fun PlayerScreen(
             .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
             .setPreferredTextLanguage(EXTERNAL_SUBTITLE_LANGUAGE_TAG)
             .build()
+        externalSubtitlePendingSync = true
         startCandidate(activeStreamUrl, player.currentPosition.coerceAtLeast(0L))
     }
 
@@ -276,7 +281,17 @@ fun PlayerScreen(
                     trackPreferencesApplied = true
                 } else {
                     audioIndex = audioIndex.coerceIn(0, audioTracks.lastIndex.coerceAtLeast(0))
-                    subtitleIndex = subtitleIndex.coerceIn(0, subtitleTracks.lastIndex.coerceAtLeast(0))
+                    val externalIndex = if (externalSubtitlePendingSync) {
+                        subtitleTracks.indexOfFirst { it.language == EXTERNAL_SUBTITLE_LANGUAGE_TAG }
+                    } else {
+                        -1
+                    }
+                    if (externalIndex >= 0) {
+                        subtitleIndex = externalIndex
+                        externalSubtitlePendingSync = false
+                    } else {
+                        subtitleIndex = subtitleIndex.coerceIn(0, subtitleTracks.lastIndex.coerceAtLeast(0))
+                    }
                 }
 
                 selectedVideoFormat(tracks)?.let { format ->

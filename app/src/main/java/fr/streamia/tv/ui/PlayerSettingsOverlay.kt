@@ -14,7 +14,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -49,7 +52,9 @@ internal fun BoxScope.PlayerSettings(
 ) {
     Column(
         Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(430.dp)
-            .background(Night.copy(alpha = 0.98f)).padding(26.dp),
+            .background(Night.copy(alpha = 0.98f))
+            .verticalScroll(rememberScrollState())
+            .padding(26.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -89,6 +94,19 @@ private fun ExternalSubtitleSection(
 ) {
     var urlFieldOpen by remember { mutableStateOf(false) }
     var urlInput by remember { mutableStateOf("") }
+    var pendingSubmission by remember { mutableStateOf(false) }
+
+    // loadExternalSubtitle() n'a pas de retour direct : on ne referme/vide le champ qu'une fois le
+    // résultat observé (currentLabel/errorMessage), pour qu'une URL invalide ou un échec de
+    // chargement laisse le champ ouvert avec la saisie intacte plutôt que de forcer une resaisie.
+    LaunchedEffect(currentLabel, errorMessage) {
+        if (!pendingSubmission) return@LaunchedEffect
+        pendingSubmission = false
+        if (errorMessage == null) {
+            urlFieldOpen = false
+            urlInput = ""
+        }
+    }
 
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("Sous-titre externe", color = MutedInk, fontSize = 12.sp)
@@ -117,9 +135,8 @@ private fun ExternalSubtitleSection(
                 onClick = {
                     val url = urlInput.trim()
                     if (url.isNotEmpty()) {
+                        pendingSubmission = true
                         onLoadUrl(url)
-                        urlFieldOpen = false
-                        urlInput = ""
                     }
                 },
                 modifier = Modifier.fillMaxWidth().height(52.dp),
