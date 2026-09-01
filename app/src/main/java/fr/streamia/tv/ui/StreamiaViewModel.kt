@@ -10,6 +10,7 @@ import fr.streamia.tv.data.PlaylistProfile
 import fr.streamia.tv.data.UserLibrarySnapshot
 import fr.streamia.tv.data.hasSameCatalogLayoutAs
 import fr.streamia.tv.data.XtreamRepository
+import fr.streamia.tv.domain.AccountInfo
 import fr.streamia.tv.domain.Catalog
 import fr.streamia.tv.domain.EpgGuide
 import fr.streamia.tv.domain.EpgProgram
@@ -30,12 +31,16 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() {
     private val _uiState = MutableStateFlow(StreamiaUiState())
     private val catalogLayoutMutation = Mutex()
     private val libraryMutation = Mutex()
     private var libraryMutationSequence = 0L
+    private var connectionTestSequence = 0L
     val uiState: StateFlow<StreamiaUiState> = _uiState.asStateFlow()
 
     init {
@@ -94,7 +99,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     }
 
     fun signIn(profileId: String?, profileName: String, server: String, username: String, password: String) {
-        if (_uiState.value.busy) return
+        if (_uiState.value.busy || _uiState.value.testingConnection) return
         val credentials = ServerCredentials(server.trim(), username.trim(), password)
         _uiState.update { it.copy(busy = true, message = null) }
         viewModelScope.launch {
@@ -102,6 +107,38 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 showCatalog(repository.signIn(credentials, profileId, profileName))
             } catch (error: Throwable) {
                 showError(error)
+            }
+        }
+    }
+
+    /**
+     * Contrôle rapide des identifiants Xtream (un seul aller-retour, sans charger le catalogue)
+     * avant d'enregistrer la liste. N'écrit rien sur disque et ne change pas d'écran : c'est une
+     * simple vérification que l'utilisateur peut lancer depuis le formulaire.
+     *
+     * Utilise un état [StreamiaUiState.testingConnection] distinct de `busy` plutôt que de le
+     * réutiliser : `busy` déclenche l'indicateur « Connexion au serveur… / chargement de la liste »
+     * de [XtreamForm], qui serait trompeur ici puisqu'aucun catalogue n'est chargé. Les deux
+     * actions restent mutuellement exclusives : chacune vérifie l'état de l'autre avant de démarrer,
+     * et l'écran désactive les deux boutons ainsi que « Retour » tant que l'une des deux tourne —
+     * comme pour [openProfile], l'état est marqué avant tout point de suspension pour fermer la
+     * fenêtre entre l'appui et la recomposition qui désactive le bouton.
+     *
+     * [connectionTestSequence] écarte un résultat devenu obsolète si un second test démarre avant
+     * que le premier n'ait fini (même logique que [libraryMutationSequence] pour les favoris).
+     */
+    fun testConnection(server: String, username: String, password: String) {
+        if (_uiState.value.busy || _uiState.value.testingConnection) return
+        val credentials = ServerCredentials(server.trim(), username.trim(), password)
+        val sequence = ++connectionTestSequence
+        _uiState.update { it.copy(testingConnection = true, message = null) }
+        viewModelScope.launch {
+            val result = runCatching { repository.testConnection(credentials) }
+            if (sequence != connectionTestSequence) return@launch
+            result.onSuccess { account ->
+                _uiState.update { it.copy(testingConnection = false, message = account.toConnectionSuccessMessage()) }
+            }.onFailure { error ->
+                _uiState.update { it.copy(testingConnection = false, message = error.safeMessage()) }
             }
         }
     }
@@ -643,11 +680,20 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     }
 
     private fun Throwable.safeMessage(): String = message?.takeIf { it.isNotBlank() } ?: "Une erreur inattendue s'est produite."
+
+    private fun AccountInfo.toConnectionSuccessMessage(): String = buildString {
+        append("Connexion réussie · compte $status")
+        expiresAtEpochSeconds?.let { append(", expire le ${formatExpiry(it)}") }
+    }
+
+    private fun formatExpiry(epochSeconds: Long): String =
+        SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date(epochSeconds * 1000L))
 }
 
 data class StreamiaUiState(
     val booting: Boolean = true,
     val busy: Boolean = false,
+    val testingConnection: Boolean = false,
     val catalogHydrating: Boolean = false,
     val screen: StreamiaScreen = StreamiaScreen.Login,
     val rawCatalog: Catalog? = null,

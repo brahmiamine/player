@@ -51,9 +51,11 @@ private enum class LoginMode { Manager, Xtream, M3u }
 fun LoginScreen(
     profiles: List<PlaylistProfile>,
     busy: Boolean,
+    testingConnection: Boolean,
     message: String?,
     onOpenProfile: (String) -> Unit,
     onSignIn: (String?, String, String, String, String) -> Unit,
+    onTestConnection: (String, String, String) -> Unit,
     onImportM3u: (Uri, String?, String) -> Unit,
     onImportM3uUrl: (String?, String, String, String, Int) -> Unit,
     onSaveM3uSettings: (String, String, String, Int) -> Unit,
@@ -156,6 +158,7 @@ fun LoginScreen(
                     username = username,
                     password = password,
                     busy = busy,
+                    testingConnection = testingConnection,
                     message = message,
                     primaryFocus = primaryFocus,
                     onNameChange = { profileName = it; onDismissMessage() },
@@ -163,6 +166,7 @@ fun LoginScreen(
                     onUsernameChange = { username = it; onDismissMessage() },
                     onPasswordChange = { password = it; onDismissMessage() },
                     onSave = { onSignIn(editingProfile?.id, profileName, server, username, password) },
+                    onTest = { onTestConnection(server, username, password) },
                     onBack = ::showManager,
                 )
 
@@ -294,6 +298,7 @@ private fun XtreamForm(
     username: String,
     password: String,
     busy: Boolean,
+    testingConnection: Boolean,
     message: String?,
     primaryFocus: FocusRequester,
     onNameChange: (String) -> Unit,
@@ -301,13 +306,17 @@ private fun XtreamForm(
     onUsernameChange: (String) -> Unit,
     onPasswordChange: (String) -> Unit,
     onSave: () -> Unit,
+    onTest: () -> Unit,
     onBack: () -> Unit,
 ) {
-    val canSubmit = server.isNotBlank() && username.isNotBlank() && password.isNotBlank() && !busy
+    val locked = busy || testingConnection
+    val fieldsFilled = server.isNotBlank() && username.isNotBlank() && password.isNotBlank()
+    val canSubmit = fieldsFilled && !locked
+    val canTest = fieldsFilled && !locked
     var loaderStep by remember { mutableIntStateOf(0) }
-    LaunchedEffect(busy) {
+    LaunchedEffect(locked) {
         loaderStep = 0
-        while (busy) {
+        while (locked) {
             delay(320)
             loaderStep = (loaderStep + 1) % 4
         }
@@ -317,10 +326,10 @@ private fun XtreamForm(
         LazyColumn(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(9.dp)) {
             item { Text(if (editingProfile == null) "Ajouter une liste Xtream" else "Modifier la liste Xtream", style = MaterialTheme.typography.headlineMedium, color = Ink, fontWeight = FontWeight.SemiBold) }
             item { Text("HTTP et HTTPS sont acceptés. L'adresse est utilisée exactement comme fournie.", color = MutedInk, fontSize = 14.sp) }
-            item { TvTextField(profileName, onNameChange, "Nom de la liste (facultatif)", Modifier.fillMaxWidth().focusRequester(primaryFocus), enabled = !busy) }
-            item { TvTextField(server, onServerChange, "Adresse du serveur", Modifier.fillMaxWidth(), supportingText = "Exemple : http://serveur.example:8080", enabled = !busy) }
-            item { TvTextField(username, onUsernameChange, "Identifiant", Modifier.fillMaxWidth(), enabled = !busy) }
-            item { TvTextField(password, onPasswordChange, "Mot de passe", Modifier.fillMaxWidth(), PasswordVisualTransformation(), enabled = !busy) }
+            item { TvTextField(profileName, onNameChange, "Nom de la liste (facultatif)", Modifier.fillMaxWidth().focusRequester(primaryFocus), enabled = !locked) }
+            item { TvTextField(server, onServerChange, "Adresse du serveur", Modifier.fillMaxWidth(), supportingText = "Exemple : http://serveur.example:8080", enabled = !locked) }
+            item { TvTextField(username, onUsernameChange, "Identifiant", Modifier.fillMaxWidth(), enabled = !locked) }
+            item { TvTextField(password, onPasswordChange, "Mot de passe", Modifier.fillMaxWidth(), PasswordVisualTransformation(), enabled = !locked) }
             if (busy) {
                 item {
                     Row(
@@ -338,13 +347,41 @@ private fun XtreamForm(
                         }
                     }
                 }
+            } else if (testingConnection) {
+                item {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .background(DeepSurface, RoundedCornerShape(12.dp))
+                            .padding(horizontal = 18.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("●", color = FocusBlueBright, fontSize = 22.sp)
+                        Spacer(Modifier.width(12.dp))
+                        Column {
+                            Text("Test de connexion${".".repeat(loaderStep)}", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                            Text("Vérification rapide des identifiants, sans charger la liste", color = MutedInk, fontSize = 12.sp)
+                        }
+                    }
+                }
             }
-            if (message != null) item { Text(message, color = MaterialTheme.colorScheme.error, fontSize = 14.sp) }
+            if (message != null) {
+                item { Text(message, color = if (message.startsWith("Connexion réussie")) FocusBlueBright else MaterialTheme.colorScheme.error, fontSize = 14.sp) }
+            }
         }
         Spacer(Modifier.height(10.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(11.dp)) {
-            SmallAction("Retour", !busy, onBack, Modifier.weight(0.34f).height(60.dp))
-            FocusableSurface(onClick = onSave, enabled = canSubmit, modifier = Modifier.weight(0.66f).height(60.dp)) {
+            SmallAction("Retour", !locked, onBack, Modifier.weight(0.22f).height(60.dp))
+            FocusableSurface(onClick = onTest, enabled = canTest, modifier = Modifier.weight(0.32f).height(60.dp)) {
+                Text(
+                    if (testingConnection) "Vérification…" else "Tester la connexion",
+                    color = if (canTest || testingConnection) Ink else MutedInk,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 12.dp),
+                )
+            }
+            FocusableSurface(onClick = onSave, enabled = canSubmit, modifier = Modifier.weight(0.46f).height(60.dp)) {
                 Text(if (busy) "Connexion en cours…" else "Enregistrer et ouvrir", color = if (canSubmit || busy) Ink else MutedInk, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 18.dp))
             }
         }
