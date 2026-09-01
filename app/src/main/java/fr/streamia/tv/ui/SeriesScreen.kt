@@ -195,7 +195,7 @@ fun SeriesScreen(
                                         }
                                     }
                                     Spacer(Modifier.height(5.dp))
-                                    Text(episode.title, color = Ink, fontSize = TypeBody, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                    Text(episode.title, color = Ink, fontSize = TypeBody, lineHeight = TypeBodyLineHeight, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                                     Spacer(Modifier.height(5.dp))
                                     Text(listOfNotNull(episode.duration, episode.releaseDate).joinToString(" · "), color = MutedInk, fontSize = 12.sp, maxLines = 1)
                                     }
