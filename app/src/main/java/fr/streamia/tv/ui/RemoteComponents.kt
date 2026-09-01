@@ -261,7 +261,7 @@ fun StreamiaLogo(modifier: Modifier = Modifier, compact: Boolean = false) {
 @Composable
 fun SectionLabel(text: String, modifier: Modifier = Modifier, fontSize: androidx.compose.ui.unit.TextUnit = TypeSectionTitle) {
     Text(
-        text.uppercase(java.util.Locale.getDefault()),
+        text.asKickerLabel(),
         color = MutedInk,
         fontSize = fontSize,
         fontWeight = HeadingWeight,
@@ -269,6 +269,10 @@ fun SectionLabel(text: String, modifier: Modifier = Modifier, fontSize: androidx
         modifier = modifier,
     )
 }
+
+// En dehors du composable : lire Locale.getDefault() directement dans un @Composable n'est pas
+// observable par la recomposition (Lint : "Reading locale in a non-observable way").
+private fun String.asKickerLabel(): String = uppercase(java.util.Locale.getDefault())
 
 @Composable
 fun ChannelLogo(url: String?, channelName: String, modifier: Modifier = Modifier) {
