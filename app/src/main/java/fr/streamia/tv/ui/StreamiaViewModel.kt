@@ -82,6 +82,20 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             resumePositionMs = library.history.firstOrNull { it.entry.key == entry.key }?.positionMs ?: 0L,
         )
         viewModelScope.launch {
+            // Catalogue déjà résolu (favoris/ordre déjà appliqués) persisté lors d'une précédente
+            // réconciliation réussie pour ce profil : s'il est encore valide pour l'organisation
+            // courante, il permet de sortir de catalogHydrating immédiatement, sans attendre que
+            // openProfile()+mergeCatalog() ci-dessous refassent tout le travail. Ce chemin lent
+            // continue de tourner derrière pour rattraper un éventuel changement côté fournisseur
+            // (nouvelles/anciennes chaînes) depuis la dernière fois : c'est lui qui a le dernier mot.
+            val resolved = runCatching { repository.resolvedCatalogIfLayoutUnchanged(profileId, library) }.getOrNull()
+            if (resolved != null) {
+                _uiState.update { state ->
+                    if (state.activeProfileId == profileId) {
+                        state.copy(catalogHydrating = false, rawCatalog = resolved, catalog = resolved)
+                    } else state
+                }
+            }
             runCatching { repository.openProfile(profileId) }
                 .onSuccess { loaded ->
                     mergeCatalog(loaded)
@@ -656,7 +670,21 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                     }
                 }
             }
-            if (committed || !layoutChanged) return
+            if (committed || !layoutChanged) {
+                // Garde le catalogue déjà résolu sur disque pour que resumeStartup() puisse le
+                // réutiliser directement à la prochaine relance de l'app tant que l'organisation
+                // courante (categoryOrder/movedEntries) n'a pas changé depuis (voir
+                // resolvedCatalogIfLayoutUnchanged). Seulement quand quelque chose a réellement été
+                // personnalisé (applyUserLibraryToCatalog a reconstruit une nouvelle instance) :
+                // sans chaîne déplacée ni tri de catégories, ce catalogue résolu serait un doublon
+                // strictement identique au cache brut déjà écrit par CatalogCache.save(), payé en
+                // pure perte (I/O + reparsing) à chaque lecture par la majorité des profils qui
+                // n'utilisent pas l'organisateur.
+                if (committed && presentation.catalog !== loaded.catalog) {
+                    runCatching { repository.saveResolvedCatalog(loaded.profileId, presentation.catalog, presentation.library) }
+                }
+                return
+            }
 
             val latest = _uiState.value
             if (latest.activeProfileId != loaded.profileId) return

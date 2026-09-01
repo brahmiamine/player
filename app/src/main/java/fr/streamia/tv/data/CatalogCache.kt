@@ -19,40 +19,67 @@ class CatalogCache(context: Context) {
     private val legacyFiles = listOf(File(filesDir, "catalog-v2.json"), File(filesDir, "catalog-v1.json"))
 
     suspend fun save(profileId: String, catalog: Catalog) = withContext(Dispatchers.IO) {
-        val file = fileFor(profileId)
+        writeAtomically(fileFor(profileId)) { json ->
+            json.name("saved_at").value(System.currentTimeMillis())
+            writeCatalogBody(json, catalog)
+        }
+        legacyFiles.forEach(File::delete)
+    }
+
+    /**
+     * Catalogue déjà résolu (favoris/ordre appliqués par [fr.streamia.tv.data.applyUserLibraryToCatalog])
+     * tel qu'obtenu à la fin de la dernière réconciliation réussie, associé à l'empreinte du layout
+     * ([fr.streamia.tv.data.catalogLayoutFingerprint]) utilisé pour le produire. Permet à une
+     * réouverture de l'app de réafficher directement un catalogue déjà prêt à l'emploi sans repasser
+     * par [fr.streamia.tv.data.applyUserLibraryToCatalog] tant que l'organisation (favoris exclus,
+     * qui ne changent pas la structure du Catalog) n'a pas changé depuis — voir
+     * [loadResolved].
+     */
+    suspend fun saveResolved(profileId: String, catalog: Catalog, layoutFingerprint: String) = withContext(Dispatchers.IO) {
+        writeAtomically(resolvedFileFor(profileId)) { json ->
+            json.name("layout_fingerprint").value(layoutFingerprint)
+            writeCatalogBody(json, catalog)
+        }
+    }
+
+    /**
+     * Ne renvoie le catalogue déjà résolu que si [expectedLayoutFingerprint] correspond à celui
+     * enregistré avec lui : sinon l'organisation courante (chaînes déplacées, ordre des catégories)
+     * a changé depuis, et le réutiliser tel quel replacerait une entrée dans la mauvaise catégorie.
+     * L'appelant doit alors retomber sur le chemin normal (catalogue brut + réapplication).
+     */
+    suspend fun loadResolved(profileId: String, expectedLayoutFingerprint: String): Catalog? =
+        withContext(Dispatchers.IO) {
+            val file = resolvedFileFor(profileId)
+            if (!file.exists()) return@withContext null
+            runCatching {
+                var fingerprint = ""
+                val categories = ArrayList<MediaCategory>()
+                val entries = ArrayList<MediaEntry>()
+                file.inputStream().reader(StandardCharsets.UTF_8).buffered().use { input ->
+                    JsonReader(input).use { json ->
+                        json.beginObject()
+                        while (json.hasNext()) {
+                            when (json.nextName()) {
+                                "layout_fingerprint" -> fingerprint = json.nextString()
+                                "categories" -> readCategories(json, categories)
+                                "entries" -> readEntries(json, entries)
+                                else -> json.skipValue()
+                            }
+                        }
+                        json.endObject()
+                    }
+                }
+                if (fingerprint != expectedLayoutFingerprint) null else Catalog(categories, entries)
+            }.getOrNull()
+        }
+
+    private inline fun writeAtomically(file: File, crossinline body: (JsonWriter) -> Unit) {
         val temporary = File(file.parentFile, "${file.name}.tmp")
         temporary.outputStream().writer(StandardCharsets.UTF_8).buffered().use { output ->
             JsonWriter(output).use { json ->
                 json.beginObject()
-                json.name("saved_at").value(System.currentTimeMillis())
-                json.name("categories").beginArray()
-                for (category in catalog.categories) {
-                    json.beginObject()
-                    json.name("id").value(category.id)
-                    json.name("name").value(category.name)
-                    json.name("type").value(category.type.name)
-                    json.endObject()
-                }
-                json.endArray()
-                json.name("entries").beginArray()
-                for (entry in catalog.entries) {
-                    json.beginObject()
-                    json.name("id").value(entry.id.toLong())
-                    json.name("name").value(entry.name)
-                    json.name("display_name").value(entry.displayName)
-                    json.name("type").value(entry.type.name)
-                    json.name("category_id").value(entry.categoryId)
-                    json.name("icon").nullableValue(entry.iconUrl)
-                    json.name("number").value(entry.number.toLong())
-                    json.name("extension").value(entry.extension)
-                    json.name("tvg_id").nullableValue(entry.tvgId)
-                    json.name("plot").nullableValue(entry.plot)
-                    json.name("rating").nullableValue(entry.rating)
-                    json.name("playable").value(entry.playable)
-                    json.name("added_at").nullableValue(entry.addedAtEpochSeconds)
-                    json.endObject()
-                }
-                json.endArray()
+                body(json)
                 json.endObject()
             }
         }
@@ -60,7 +87,37 @@ class CatalogCache(context: Context) {
             temporary.copyTo(file, overwrite = true)
             temporary.delete()
         }
-        legacyFiles.forEach(File::delete)
+    }
+
+    private fun writeCatalogBody(json: JsonWriter, catalog: Catalog) {
+        json.name("categories").beginArray()
+        for (category in catalog.categories) {
+            json.beginObject()
+            json.name("id").value(category.id)
+            json.name("name").value(category.name)
+            json.name("type").value(category.type.name)
+            json.endObject()
+        }
+        json.endArray()
+        json.name("entries").beginArray()
+        for (entry in catalog.entries) {
+            json.beginObject()
+            json.name("id").value(entry.id.toLong())
+            json.name("name").value(entry.name)
+            json.name("display_name").value(entry.displayName)
+            json.name("type").value(entry.type.name)
+            json.name("category_id").value(entry.categoryId)
+            json.name("icon").nullableValue(entry.iconUrl)
+            json.name("number").value(entry.number.toLong())
+            json.name("extension").value(entry.extension)
+            json.name("tvg_id").nullableValue(entry.tvgId)
+            json.name("plot").nullableValue(entry.plot)
+            json.name("rating").nullableValue(entry.rating)
+            json.name("playable").value(entry.playable)
+            json.name("added_at").nullableValue(entry.addedAtEpochSeconds)
+            json.endObject()
+        }
+        json.endArray()
     }
 
     suspend fun load(profileId: String): Catalog? = withContext(Dispatchers.IO) {
@@ -86,11 +143,19 @@ class CatalogCache(context: Context) {
         }.getOrNull()
     }
 
-    suspend fun clear(profileId: String) = withContext(Dispatchers.IO) { fileFor(profileId).delete() }
+    suspend fun clear(profileId: String) = withContext(Dispatchers.IO) {
+        fileFor(profileId).delete()
+        resolvedFileFor(profileId).delete()
+    }
 
     private fun fileFor(profileId: String): File {
         val safeId = profileId.replace(Regex("[^A-Za-z0-9._-]"), "_")
         return File(filesDir, "catalog-v4-$safeId.json")
+    }
+
+    private fun resolvedFileFor(profileId: String): File {
+        val safeId = profileId.replace(Regex("[^A-Za-z0-9._-]"), "_")
+        return File(filesDir, "catalog-v4-resolved-$safeId.json")
     }
 
     private fun readCategories(json: JsonReader, target: MutableList<MediaCategory>) {
