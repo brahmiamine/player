@@ -270,9 +270,11 @@ fun SectionLabel(text: String, modifier: Modifier = Modifier, fontSize: androidx
     )
 }
 
-// En dehors du composable : lire Locale.getDefault() directement dans un @Composable n'est pas
-// observable par la recomposition (Lint : "Reading locale in a non-observable way").
-private fun String.asKickerLabel(): String = uppercase(java.util.Locale.getDefault())
+// En dehors du composable : lire une locale directement dans un @Composable n'est pas observable
+// par la recomposition (Lint : "Reading locale in a non-observable way"). Locale.FRENCH plutôt que
+// getDefault() : l'app n'affiche que du texte français (androidResources.localeFilters = "fr"),
+// donc la casse ne doit pas dépendre de la locale système de l'appareil.
+private fun String.asKickerLabel(): String = uppercase(java.util.Locale.FRENCH)
 
 @Composable
 fun ChannelLogo(url: String?, channelName: String, modifier: Modifier = Modifier) {
