@@ -3,6 +3,7 @@ package fr.streamia.tv.ui
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -120,8 +121,18 @@ fun SearchScreen(
                                 onClick = { onToggleEntryFavorite(entry) },
                                 selected = entry.key in favoriteEntries,
                                 modifier = Modifier.width(64.dp).height(76.dp),
+                                contentDescription = if (entry.key in favoriteEntries) {
+                                    "Retirer ${entry.displayName} des favoris"
+                                } else {
+                                    "Ajouter ${entry.displayName} aux favoris"
+                                },
                             ) {
-                                Text(if (entry.key in favoriteEntries) "★" else "☆", color = FocusBlueBright, fontSize = 23.sp, modifier = Modifier.padding(start = 18.dp))
+                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    StreamiaIcon(
+                                        if (entry.key in favoriteEntries) StreamiaIconGlyph.Star else StreamiaIconGlyph.StarOutline,
+                                        size = 22.dp,
+                                    )
+                                }
                             }
                         }
                     }

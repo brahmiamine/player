@@ -205,7 +205,7 @@ private fun MainActionGrid(
         HomeTile(
             title = "TV en direct",
             subtitle = if (catalogLoading) "Chargement…" else "${catalog.count(MediaType.Live)} chaînes",
-            symbol = "▣",
+            glyph = StreamiaIconGlyph.Live,
             modifier = Modifier
                 .then(if (firstFocus != null && liveTileEnabled) Modifier.focusRequester(firstFocus) else Modifier)
                 .width(360.dp)
@@ -223,7 +223,7 @@ private fun MainActionGrid(
                 HomeTile(
                     title = "Films",
                     subtitle = if (catalogLoading) "Chargement…" else "${catalog.count(MediaType.Movie)} contenus",
-                    symbol = "▶",
+                    glyph = StreamiaIconGlyph.Movie,
                     modifier = Modifier.weight(1f).fillMaxSize(),
                     onClick = { onOpenSection(MediaType.Movie) },
                     enabled = !catalogLoading && catalog.count(MediaType.Movie) > 0,
@@ -231,7 +231,7 @@ private fun MainActionGrid(
                 HomeTile(
                     title = "Séries",
                     subtitle = if (catalogLoading) "Chargement…" else "${catalog.count(MediaType.Series)} contenus",
-                    symbol = "▤",
+                    glyph = StreamiaIconGlyph.Series,
                     modifier = Modifier.weight(1f).fillMaxSize(),
                     onClick = { onOpenSection(MediaType.Series) },
                     enabled = !catalogLoading && catalog.count(MediaType.Series) > 0,
@@ -241,7 +241,7 @@ private fun MainActionGrid(
                 HomeTile(
                     title = "Recherche",
                     subtitle = "Tout le catalogue",
-                    symbol = "⌕",
+                    glyph = StreamiaIconGlyph.Search,
                     modifier = Modifier.weight(1f).fillMaxSize(),
                     onClick = onSearch,
                     enabled = !catalogLoading,
@@ -249,7 +249,7 @@ private fun MainActionGrid(
                 HomeTile(
                     title = "Guide TV",
                     subtitle = "EPG",
-                    symbol = "≡",
+                    glyph = StreamiaIconGlyph.Guide,
                     modifier = Modifier.weight(1f).fillMaxSize(),
                     onClick = onEpg,
                     enabled = !catalogLoading && catalog.count(MediaType.Live) > 0,
@@ -262,13 +262,13 @@ private fun MainActionGrid(
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
             HomeAction(
-                "⚙",
+                StreamiaIconGlyph.Settings,
                 "Paramètres",
                 onSettings,
                 Modifier.weight(1f).then(if (firstFocus != null && !liveTileEnabled) Modifier.focusRequester(firstFocus) else Modifier),
             )
-            HomeAction("↻", if (busy || catalogLoading) "Chargement…" else "Actualiser", onRefresh, Modifier.weight(1f), enabled = !busy && !catalogLoading)
-            HomeAction("⇄", "Changer de liste", onChangePlaylist, Modifier.weight(1f))
+            HomeAction(StreamiaIconGlyph.Refresh, if (busy || catalogLoading) "Chargement…" else "Actualiser", onRefresh, Modifier.weight(1f), enabled = !busy && !catalogLoading)
+            HomeAction(StreamiaIconGlyph.Swap, "Changer de liste", onChangePlaylist, Modifier.weight(1f))
         }
     }
 }
@@ -301,7 +301,10 @@ private fun HomeCardRow(
 }
 
 private val HomeCardWidth = 172.dp
-private val HomeCardHeight = 196.dp
+// 128dp d'illustration + jusqu'à 2 lignes de titre en 13sp/16sp de lineHeight + le label de type
+// + une éventuelle barre de progression : 224dp laisse une marge confortable dans le pire cas
+// (titre sur 2 lignes ET progression affichée) plutôt que de risquer un rognage en bas de carte.
+private val HomeCardHeight = 224.dp
 
 @Composable
 private fun HomeMediaCard(
@@ -320,14 +323,14 @@ private fun HomeMediaCard(
             Text(
                 entry.displayName,
                 color = Ink,
-                fontSize = 11.sp,
-                lineHeight = 14.sp,
+                fontSize = 13.sp,
+                lineHeight = 16.sp,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
             Spacer(Modifier.weight(1f))
-            Text(entry.type.displayName, color = FocusBlueBright, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+            Text(entry.type.displayName, color = FocusBlueBright, fontSize = 11.sp, fontWeight = FontWeight.Bold)
             if (progress != null) {
                 Spacer(Modifier.height(5.dp))
                 HomeProgressBar(progress)
@@ -359,7 +362,7 @@ private fun HomeProgressBar(progress: Float, modifier: Modifier = Modifier) {
 private fun HomeTile(
     title: String,
     subtitle: String,
-    symbol: String,
+    glyph: StreamiaIconGlyph,
     modifier: Modifier,
     onClick: () -> Unit,
     enabled: Boolean = true,
@@ -371,7 +374,7 @@ private fun HomeTile(
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Text(symbol, color = FocusBlueBright, fontSize = if (prominent) 88.sp else 54.sp, fontWeight = FontWeight.Bold)
+            StreamiaIcon(glyph, size = if (prominent) 64.dp else 42.dp)
             Spacer(Modifier.height(if (prominent) 24.dp else 12.dp))
             Text(title, color = Ink, fontSize = if (prominent) 29.sp else 20.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(5.dp))
@@ -382,7 +385,7 @@ private fun HomeTile(
 
 @Composable
 private fun HomeAction(
-    symbol: String,
+    glyph: StreamiaIconGlyph,
     title: String,
     onClick: () -> Unit,
     modifier: Modifier,
@@ -390,7 +393,7 @@ private fun HomeAction(
 ) {
     FocusableSurface(onClick = onClick, enabled = enabled, modifier = modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxSize().padding(horizontal = 26.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(symbol, color = FocusBlueBright, fontSize = 30.sp, fontWeight = FontWeight.Bold)
+            StreamiaIcon(glyph, size = 26.dp)
             Spacer(Modifier.width(18.dp))
             Text(title, color = Ink, fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
         }

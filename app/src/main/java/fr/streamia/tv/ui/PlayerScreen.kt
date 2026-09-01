@@ -548,7 +548,7 @@ fun PlayerScreen(
 
         if (buffering) {
             Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("●", color = FocusBlueBright, fontSize = 34.sp)
+                StatusDot(diameter = 24.dp)
                 Spacer(Modifier.height(12.dp))
                 if (!sharedLivePlayer && watchdogRecoveryCount > 0) {
                     // Distingue une reconnexion automatique après un flux figé (watchdog) du

@@ -76,8 +76,15 @@ fun SeriesScreen(
                 FocusableSurface(onClick = onBack, modifier = Modifier.weight(1f).height(48.dp)) {
                     Text("← Retour", color = Ink, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 15.dp))
                 }
-                FocusableSurface(onClick = onToggleFavorite, selected = favorite, modifier = Modifier.width(68.dp).height(48.dp)) {
-                    Text(if (favorite) "★" else "☆", color = FocusBlueBright, fontSize = 23.sp, modifier = Modifier.padding(start = 20.dp))
+                FocusableSurface(
+                    onClick = onToggleFavorite,
+                    selected = favorite,
+                    modifier = Modifier.width(68.dp).height(48.dp),
+                    contentDescription = if (favorite) "Retirer des favoris" else "Ajouter aux favoris",
+                ) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        StreamiaIcon(if (favorite) StreamiaIconGlyph.Star else StreamiaIconGlyph.StarOutline, size = 20.dp)
+                    }
                 }
             }
             Spacer(Modifier.height(20.dp))
@@ -173,12 +180,18 @@ fun SeriesScreen(
                                     Row(Modifier.fillMaxWidth()) {
                                         Text("S${episode.season.toString().padStart(2, '0')}E${episode.number.toString().padStart(2, '0')}", color = FocusBlueBright, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                         Spacer(Modifier.weight(1f))
-                                        episode.rating?.let { Text("★ ${"%.1f".format(it)}", color = FocusBlueBright, fontSize = 11.sp) }
+                                        episode.rating?.let {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                StreamiaIcon(StreamiaIconGlyph.Star, size = 12.dp)
+                                                Spacer(Modifier.width(3.dp))
+                                                Text("%.1f".format(it), color = FocusBlueBright, fontSize = 12.sp)
+                                            }
+                                        }
                                     }
                                     Spacer(Modifier.height(5.dp))
                                     Text(episode.title, color = Ink, fontSize = 16.sp, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                                     Spacer(Modifier.height(5.dp))
-                                    Text(listOfNotNull(episode.duration, episode.releaseDate).joinToString(" · "), color = MutedInk, fontSize = 11.sp, maxLines = 1)
+                                    Text(listOfNotNull(episode.duration, episode.releaseDate).joinToString(" · "), color = MutedInk, fontSize = 12.sp, maxLines = 1)
                                     }
                                 }
                             }

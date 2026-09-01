@@ -342,7 +342,7 @@ private fun XtreamForm(
                             .padding(horizontal = 18.dp, vertical = 14.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text("●", color = FocusBlueBright, fontSize = 22.sp)
+                        StatusDot(diameter = 14.dp)
                         Spacer(Modifier.width(12.dp))
                         Column {
                             Text("Connexion au serveur${".".repeat(loaderStep)}", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Bold)
@@ -359,7 +359,7 @@ private fun XtreamForm(
                             .padding(horizontal = 18.dp, vertical = 14.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text("●", color = FocusBlueBright, fontSize = 22.sp)
+                        StatusDot(diameter = 14.dp)
                         Spacer(Modifier.width(12.dp))
                         Column {
                             Text("Test de connexion${".".repeat(loaderStep)}", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Bold)

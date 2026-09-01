@@ -20,7 +20,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
-import fr.streamia.tv.ui.theme.FocusBlueBright
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
 import fr.streamia.tv.ui.theme.Night
@@ -57,14 +56,14 @@ fun SettingsScreen(
 
         Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                SettingsTile("⌕", "Recherche", "Rechercher dans toutes les chaînes, films et séries", onSearch, Modifier.focusRequester(firstFocus).weight(1f))
-                SettingsTile("≡", "Guide TV", "Programmes EPG et grille des chaînes", onEpg, Modifier.weight(1f))
-                SettingsTile("↕", "Organiser", "Réordonner les catégories et déplacer des contenus", onOrganizer, Modifier.weight(1f))
+                SettingsTile(StreamiaIconGlyph.Search, "Recherche", "Rechercher dans toutes les chaînes, films et séries", onSearch, Modifier.focusRequester(firstFocus).weight(1f))
+                SettingsTile(StreamiaIconGlyph.Guide, "Guide TV", "Programmes EPG et grille des chaînes", onEpg, Modifier.weight(1f))
+                SettingsTile(StreamiaIconGlyph.Reorder, "Organiser", "Réordonner les catégories et déplacer des contenus", onOrganizer, Modifier.weight(1f))
             }
             Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                SettingsTile("↻", if (busy) "Actualisation…" else "Actualiser", "Recharge la playlist et son catalogue", onRefresh, Modifier.weight(1f), enabled = !busy)
-                SettingsTile("⌫", "Effacer l'historique", "$historyCount élément(s) dans l'historique", onClearHistory, Modifier.weight(1f), enabled = historyCount > 0)
-                SettingsTile("⇄", "Changer de liste", "Retourner au gestionnaire de playlists", onChangePlaylist, Modifier.weight(1f))
+                SettingsTile(StreamiaIconGlyph.Refresh, if (busy) "Actualisation…" else "Actualiser", "Recharge la playlist et son catalogue", onRefresh, Modifier.weight(1f), enabled = !busy)
+                SettingsTile(StreamiaIconGlyph.Delete, "Effacer l'historique", "$historyCount élément(s) dans l'historique", onClearHistory, Modifier.weight(1f), enabled = historyCount > 0)
+                SettingsTile(StreamiaIconGlyph.Swap, "Changer de liste", "Retourner au gestionnaire de playlists", onChangePlaylist, Modifier.weight(1f))
             }
         }
     }
@@ -72,7 +71,7 @@ fun SettingsScreen(
 
 @Composable
 private fun SettingsTile(
-    symbol: String,
+    glyph: StreamiaIconGlyph,
     title: String,
     subtitle: String,
     onClick: () -> Unit,
@@ -81,7 +80,7 @@ private fun SettingsTile(
 ) {
     FocusableSurface(onClick = onClick, enabled = enabled, modifier = modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center) {
-            Text(symbol, color = FocusBlueBright, fontSize = 42.sp, fontWeight = FontWeight.Bold)
+            StreamiaIcon(glyph, size = 34.dp)
             Spacer(Modifier.height(12.dp))
             Text(title, color = Ink, fontSize = 20.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(6.dp))

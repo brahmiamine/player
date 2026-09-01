@@ -164,14 +164,19 @@ private fun TrackDropdown(
             Column(Modifier.padding(horizontal = 16.dp)) {
                 Text(title, color = MutedInk, fontSize = 12.sp)
                 Spacer(Modifier.height(4.dp))
-                Text(
-                    "${choices.getOrNull(selectedIndex)?.label ?: "Auto"}  ${if (expanded) "▴" else "▾"}",
-                    color = FocusBlueBright,
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        choices.getOrNull(selectedIndex)?.label ?: "Auto",
+                        color = FocusBlueBright,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    StreamiaIcon(if (expanded) StreamiaIconGlyph.ChevronUp else StreamiaIconGlyph.ChevronDown, size = 16.dp)
+                }
             }
         }
         if (expanded) {
