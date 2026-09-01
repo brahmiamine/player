@@ -101,7 +101,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     fun signIn(profileId: String?, profileName: String, server: String, username: String, password: String) {
         if (_uiState.value.busy || _uiState.value.testingConnection) return
         val credentials = ServerCredentials(server.trim(), username.trim(), password)
-        _uiState.update { it.copy(busy = true, message = null) }
+        _uiState.update { it.copy(busy = true, message = null, testSucceeded = false) }
         viewModelScope.launch {
             try {
                 showCatalog(repository.signIn(credentials, profileId, profileName))
@@ -131,14 +131,19 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         if (_uiState.value.busy || _uiState.value.testingConnection) return
         val credentials = ServerCredentials(server.trim(), username.trim(), password)
         val sequence = ++connectionTestSequence
-        _uiState.update { it.copy(testingConnection = true, message = null) }
+        _uiState.update { it.copy(testingConnection = true, message = null, testSucceeded = false) }
         viewModelScope.launch {
-            val result = runCatching { repository.testConnection(credentials) }
-            if (sequence != connectionTestSequence) return@launch
-            result.onSuccess { account ->
-                _uiState.update { it.copy(testingConnection = false, message = account.toConnectionSuccessMessage()) }
-            }.onFailure { error ->
-                _uiState.update { it.copy(testingConnection = false, message = error.safeMessage()) }
+            try {
+                val account = repository.testConnection(credentials)
+                if (sequence != connectionTestSequence) return@launch
+                _uiState.update {
+                    it.copy(testingConnection = false, message = account.toConnectionSuccessMessage(), testSucceeded = true)
+                }
+            } catch (cancellation: kotlinx.coroutines.CancellationException) {
+                throw cancellation
+            } catch (error: Throwable) {
+                if (sequence != connectionTestSequence) return@launch
+                _uiState.update { it.copy(testingConnection = false, message = error.safeMessage(), testSucceeded = false) }
             }
         }
     }
@@ -676,7 +681,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     }
 
     private fun showError(error: Throwable) {
-        _uiState.update { it.copy(busy = false, message = error.safeMessage(), profiles = repository.profiles()) }
+        _uiState.update { it.copy(busy = false, message = error.safeMessage(), testSucceeded = false, profiles = repository.profiles()) }
     }
 
     private fun Throwable.safeMessage(): String = message?.takeIf { it.isNotBlank() } ?: "Une erreur inattendue s'est produite."
@@ -694,6 +699,7 @@ data class StreamiaUiState(
     val booting: Boolean = true,
     val busy: Boolean = false,
     val testingConnection: Boolean = false,
+    val testSucceeded: Boolean = false,
     val catalogHydrating: Boolean = false,
     val screen: StreamiaScreen = StreamiaScreen.Login,
     val rawCatalog: Catalog? = null,

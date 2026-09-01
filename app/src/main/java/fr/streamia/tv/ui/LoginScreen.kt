@@ -52,6 +52,7 @@ fun LoginScreen(
     profiles: List<PlaylistProfile>,
     busy: Boolean,
     testingConnection: Boolean,
+    testSucceeded: Boolean,
     message: String?,
     onOpenProfile: (String) -> Unit,
     onSignIn: (String?, String, String, String, String) -> Unit,
@@ -159,6 +160,7 @@ fun LoginScreen(
                     password = password,
                     busy = busy,
                     testingConnection = testingConnection,
+                    testSucceeded = testSucceeded,
                     message = message,
                     primaryFocus = primaryFocus,
                     onNameChange = { profileName = it; onDismissMessage() },
@@ -299,6 +301,7 @@ private fun XtreamForm(
     password: String,
     busy: Boolean,
     testingConnection: Boolean,
+    testSucceeded: Boolean,
     message: String?,
     primaryFocus: FocusRequester,
     onNameChange: (String) -> Unit,
@@ -366,7 +369,7 @@ private fun XtreamForm(
                 }
             }
             if (message != null) {
-                item { Text(message, color = if (message.startsWith("Connexion réussie")) FocusBlueBright else MaterialTheme.colorScheme.error, fontSize = 14.sp) }
+                item { Text(message, color = if (testSucceeded) FocusBlueBright else MaterialTheme.colorScheme.error, fontSize = 14.sp) }
             }
         }
         Spacer(Modifier.height(10.dp))

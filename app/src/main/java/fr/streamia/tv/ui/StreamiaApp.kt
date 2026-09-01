@@ -65,6 +65,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     profiles = state.profiles,
                     busy = state.busy,
                     testingConnection = state.testingConnection,
+                    testSucceeded = state.testSucceeded,
                     message = state.message,
                     onOpenProfile = viewModel::openProfile,
                     onSignIn = viewModel::signIn,

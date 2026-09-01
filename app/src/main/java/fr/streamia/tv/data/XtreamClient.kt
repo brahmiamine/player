@@ -32,12 +32,16 @@ class XtreamClient {
      * catalogues volumineux.
      */
     suspend fun testConnection(credentials: ServerCredentials): AccountInfo = withContext(Dispatchers.IO) {
-        parseAccount(fetchObject(XtreamUrlBuilder(credentials).authentication()))
+        testConnectionOnIo(credentials)
     }
+
+    /** Suppose déjà être sur [Dispatchers.IO] : utilisée par [loadCatalog], lui-même déjà dispatché. */
+    private fun testConnectionOnIo(credentials: ServerCredentials): AccountInfo =
+        parseAccount(fetchObject(XtreamUrlBuilder(credentials).authentication()))
 
     suspend fun loadCatalog(credentials: ServerCredentials): Catalog = withContext(Dispatchers.IO) {
         val urls = XtreamUrlBuilder(credentials)
-        val account = testConnection(credentials)
+        val account = testConnectionOnIo(credentials)
         if (!account.status.equals("Active", ignoreCase = true)) {
             throw XtreamException("Ce compte n'est pas actif (${account.status}).")
         }
