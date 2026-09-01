@@ -96,11 +96,13 @@ fun EpgScreen(
     val availableDates = remember(guide, zone) {
         guide?.availableDates(zone)?.takeIf { it.isNotEmpty() } ?: listOf(LocalDate.now(zone))
     }
-    var selectedDate by remember { mutableStateOf(availableDates.first()) }
+    var selectedDate by remember { mutableStateOf(availableDates.firstOrNull { it == LocalDate.now(zone) } ?: availableDates.first()) }
     if (selectedDate !in availableDates) {
         selectedDate = availableDates.firstOrNull { it == LocalDate.now(zone) } ?: availableDates.first()
     }
-    if (selected != null && guide?.forEntry(selected!!.channel)?.contains(selected!!.program) != true) {
+    if (selected != null &&
+        (channels.none { it.key == selected!!.channel.key } || guide?.forEntry(selected!!.channel)?.contains(selected!!.program) != true)
+    ) {
         selected = null
     }
 
@@ -117,7 +119,10 @@ fun EpgScreen(
 
     Column(Modifier.fillMaxSize().background(Night).padding(24.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            FocusableSurface(onClick = onBack, modifier = Modifier.width(115.dp).height(50.dp)) {
+            FocusableSurface(
+                onClick = { if (selected != null) selected = null else onBack() },
+                modifier = Modifier.width(115.dp).height(50.dp),
+            ) {
                 Text("← Retour", color = Ink, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 14.dp))
             }
             Spacer(Modifier.width(16.dp))
@@ -308,6 +313,10 @@ private fun ChannelGridRow(
             }
         } else {
             val listState = rememberLazyListState(initialFirstVisibleItemIndex = liveIndex.coerceAtLeast(0))
+            // rememberLazyListState() ne relit initialFirstVisibleItemIndex qu'à la création : sans
+            // ce recalage explicite, changer de jour garde le défilement du jour précédent alors que
+            // dayBlocks (et donc liveIndex) ont changé, laissant le programme en cours hors écran.
+            LaunchedEffect(dayStart) { listState.scrollToItem(liveIndex.coerceAtLeast(0)) }
             LazyRow(state = listState, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 itemsIndexed(dayBlocks, key = { _, block -> block.program.blockKey(channel) }) { _, block ->
                     val isLive = isToday && block.program.isLiveAt(nowEpoch)
@@ -445,7 +454,10 @@ private fun EpgGuide.availableDates(zone: ZoneId): List<LocalDate> {
     }
     if (minEpoch == Long.MAX_VALUE || maxEpoch == Long.MIN_VALUE || maxEpoch < minEpoch) return emptyList()
     val minDate = Instant.ofEpochSecond(minEpoch).atZone(zone).toLocalDate()
-    val maxDate = Instant.ofEpochSecond(maxEpoch).atZone(zone).toLocalDate()
+    // maxEpoch est une fin de programme, donc exclusive : un dernier programme se terminant pile à
+    // minuit ne doit pas ajouter le jour suivant, sous peine d'une journée finale entièrement vide
+    // (dayBlocksFor exclut déjà ce programme de ce jour-là via end <= dayStart).
+    val maxDate = Instant.ofEpochSecond((maxEpoch - 1).coerceAtLeast(minEpoch)).atZone(zone).toLocalDate()
     val span = ChronoUnit.DAYS.between(minDate, maxDate).coerceIn(0L, MAX_DAY_SPAN)
     return (0..span).map { minDate.plusDays(it) }
 }
