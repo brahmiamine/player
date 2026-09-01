@@ -25,9 +25,23 @@ import java.net.URL
 import java.nio.charset.StandardCharsets
 
 class XtreamClient {
+    /**
+     * Vérifie les identifiants Xtream sans charger le catalogue : un seul aller-retour vers
+     * player_api.php (sans `action=`), la même requête que la première étape de [loadCatalog].
+     * Permet de valider un compte avant de lancer l'import complet, potentiellement long sur les
+     * catalogues volumineux.
+     */
+    suspend fun testConnection(credentials: ServerCredentials): AccountInfo = withContext(Dispatchers.IO) {
+        testConnectionOnIo(credentials)
+    }
+
+    /** Suppose déjà être sur [Dispatchers.IO] : utilisée par [loadCatalog], lui-même déjà dispatché. */
+    private fun testConnectionOnIo(credentials: ServerCredentials): AccountInfo =
+        parseAccount(fetchObject(XtreamUrlBuilder(credentials).authentication()))
+
     suspend fun loadCatalog(credentials: ServerCredentials): Catalog = withContext(Dispatchers.IO) {
         val urls = XtreamUrlBuilder(credentials)
-        val account = parseAccount(fetchObject(urls.authentication()))
+        val account = testConnectionOnIo(credentials)
         if (!account.status.equals("Active", ignoreCase = true)) {
             throw XtreamException("Ce compte n'est pas actif (${account.status}).")
         }

@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
+import fr.streamia.tv.domain.AccountInfo
 import fr.streamia.tv.domain.Catalog
 import fr.streamia.tv.domain.EpgGuide
 import fr.streamia.tv.domain.EpgProgram
@@ -208,6 +209,9 @@ class XtreamRepository(context: Context) {
         playlistStore.delete(profileId)
         cache.clear(profileId)
     }
+
+    /** Contrôle léger des identifiants (sans charger le catalogue), utilisé avant l'enregistrement. */
+    suspend fun testConnection(credentials: ServerCredentials): AccountInfo = client.testConnection(credentials)
 
     suspend fun movieDetails(credentials: ServerCredentials, movie: MediaEntry): MediaDetails =
         client.loadMovieDetails(credentials, movie)

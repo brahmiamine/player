@@ -64,9 +64,12 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                 state.screen is StreamiaScreen.Login -> LoginScreen(
                     profiles = state.profiles,
                     busy = state.busy,
+                    testingConnection = state.testingConnection,
+                    testSucceeded = state.testSucceeded,
                     message = state.message,
                     onOpenProfile = viewModel::openProfile,
                     onSignIn = viewModel::signIn,
+                    onTestConnection = viewModel::testConnection,
                     onImportM3u = viewModel::importM3u,
                     onImportM3uUrl = viewModel::importM3uUrl,
                     onSaveM3uSettings = viewModel::saveM3uSettings,
