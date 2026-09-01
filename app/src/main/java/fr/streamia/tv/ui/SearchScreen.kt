@@ -32,6 +32,7 @@ import fr.streamia.tv.domain.Catalog
 import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.ui.theme.FocusBlueBright
+import fr.streamia.tv.ui.theme.HeadingWeight
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
 import fr.streamia.tv.ui.theme.Night
@@ -70,7 +71,7 @@ fun SearchScreen(
                 Text("← Retour", color = Ink, fontSize = TypeLabel, modifier = Modifier.padding(horizontal = 14.dp))
             }
             Spacer(Modifier.width(18.dp))
-            Text("Recherche globale", color = Ink, fontSize = TypeScreenTitle, fontWeight = FontWeight.Bold)
+            Text("Recherche globale", color = Ink, fontSize = TypeScreenTitle, fontWeight = HeadingWeight)
             Spacer(Modifier.weight(1f))
             Text("${entries.size} résultats", color = MutedInk, fontSize = TypeLabel)
         }
@@ -99,7 +100,7 @@ fun SearchScreen(
             }
         } else {
             Column(Modifier.fillMaxSize()) {
-                Text("Contenus (${entries.size})", color = Ink, fontSize = TypeSectionTitle, fontWeight = FontWeight.Bold)
+                SectionLabel("Contenus (${entries.size})")
                 Spacer(Modifier.height(10.dp))
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(entries, key = MediaEntry::key) { entry ->

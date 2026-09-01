@@ -64,6 +64,7 @@ import fr.streamia.tv.domain.XtreamUrlBuilder
 import fr.streamia.tv.player.LivePlaybackSession
 import fr.streamia.tv.ui.theme.DeepSurface
 import fr.streamia.tv.ui.theme.FocusBlueBright
+import fr.streamia.tv.ui.theme.HeadingWeight
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
 import fr.streamia.tv.ui.theme.Night
@@ -308,7 +309,7 @@ private fun BrowserHeader(
         Spacer(Modifier.width(6.dp))
         HeaderAction("Paramètres", 52.dp, onSettings, glyph = StreamiaIconGlyph.Settings)
         Spacer(Modifier.width(10.dp))
-        Box(Modifier.size(6.dp).background(if (offline) WarmSignal else Color(0xFF6CCB91)))
+        Box(Modifier.size(6.dp).background(if (offline) WarmSignal else Color(0xFF8FBFA0)))
         Spacer(Modifier.width(5.dp))
         Text(
             when {
@@ -556,7 +557,7 @@ private fun LiveChannelList(
 
     Column(modifier) {
         Row(Modifier.fillMaxWidth().padding(start = 3.dp, bottom = 7.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Chaînes", color = Ink, fontSize = TypeSectionTitle, fontWeight = FontWeight.Bold)
+            SectionLabel("Chaînes")
             Spacer(Modifier.weight(1f))
             Text("OK aperçu · OK encore plein écran", color = MutedInk, fontSize = 12.sp)
         }
@@ -816,7 +817,7 @@ private fun CategoryRail(
 
     Column(modifier) {
         Row(Modifier.fillMaxWidth().padding(start = 3.dp, bottom = 7.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Catégories", color = Ink, fontSize = TypeSectionTitle, fontWeight = FontWeight.Bold)
+            SectionLabel("Catégories")
             Spacer(Modifier.weight(1f))
             Text("OK choisir · OK long favori", color = MutedInk, fontSize = 12.sp)
         }
@@ -881,7 +882,7 @@ private fun PosterGrid(
 ) {
     Column(modifier) {
         Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(categoryName.ifBlank { type.displayName }, color = Ink, fontSize = TypeSectionTitle, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(categoryName.ifBlank { type.displayName }, color = Ink, fontSize = TypeSectionTitle, fontWeight = HeadingWeight, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Spacer(Modifier.width(10.dp))
             Text("${entries.size} ${type.pluralName}", color = MutedInk, fontSize = 12.sp)
             Spacer(Modifier.weight(1f))

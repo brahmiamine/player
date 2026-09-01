@@ -16,10 +16,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
+import fr.streamia.tv.ui.theme.HeadingWeight
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
 import fr.streamia.tv.ui.theme.Night
@@ -44,7 +44,7 @@ fun SettingsScreen(
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             StreamiaLogo(compact = true)
             Spacer(Modifier.weight(1f))
-            Text("Paramètres et outils", color = Ink, fontSize = 27.sp, fontWeight = FontWeight.Bold)
+            Text("Paramètres et outils", color = Ink, fontSize = 27.sp, fontWeight = HeadingWeight)
         }
         Spacer(Modifier.height(26.dp))
         Text(
@@ -82,7 +82,7 @@ private fun SettingsTile(
         Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center) {
             StreamiaIcon(glyph, size = 34.dp)
             Spacer(Modifier.height(12.dp))
-            Text(title, color = Ink, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Text(title, color = Ink, fontSize = 20.sp, fontWeight = HeadingWeight)
             Spacer(Modifier.height(6.dp))
             Text(subtitle, color = MutedInk, fontSize = 13.sp, lineHeight = 18.sp)
         }

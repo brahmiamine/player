@@ -36,10 +36,13 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -58,10 +61,13 @@ import androidx.tv.material3.Text
 import fr.streamia.tv.ui.theme.DeepSurface
 import fr.streamia.tv.ui.theme.FocusBlue
 import fr.streamia.tv.ui.theme.FocusBlueBright
+import fr.streamia.tv.ui.theme.HeadingWeight
 import fr.streamia.tv.ui.theme.Ink
+import fr.streamia.tv.ui.theme.KickerLetterSpacing
 import fr.streamia.tv.ui.theme.MutedInk
 import fr.streamia.tv.ui.theme.Night
 import fr.streamia.tv.ui.theme.RaisedSurface
+import fr.streamia.tv.ui.theme.TypeSectionTitle
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -102,7 +108,7 @@ fun FocusableSurface(
     val border = when {
         focused -> BorderStroke(3.dp, FocusBlueBright)
         selected -> BorderStroke(2.dp, FocusBlue)
-        else -> BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
+        else -> BorderStroke(1.dp, Ink.copy(alpha = 0.08f))
     }
 
     Box(
@@ -193,7 +199,7 @@ fun TvTextField(
             .background(fieldBackground)
             .border(
                 if (focused && enabled) 3.dp else 1.dp,
-                if (focused && enabled) FocusBlueBright else Color.White.copy(if (enabled) 0.12f else 0.05f),
+                if (focused && enabled) FocusBlueBright else Ink.copy(if (enabled) 0.12f else 0.05f),
                 shape,
             )
             .onFocusChanged { focused = enabled && it.isFocused }
@@ -215,6 +221,9 @@ fun TvTextField(
 @Composable
 fun StreamiaLogo(modifier: Modifier = Modifier, compact: Boolean = false) {
     Row(modifier, verticalAlignment = Alignment.CenterVertically) {
+        // Marque : un écran de télévision — le repère que le design Nocturne associe à « Streamia
+        // TV » (un pictogramme sobre, jamais un aplat décoratif) — plutôt que l'ancien logo
+        // bouton lecture/onde, sans lien avec ce vocabulaire visuel.
         Box(
             Modifier
                 .size(if (compact) 42.dp else 58.dp)
@@ -222,22 +231,16 @@ fun StreamiaLogo(modifier: Modifier = Modifier, compact: Boolean = false) {
                     drawCircle(FocusBlue, radius = size.minDimension / 2)
                     val w = size.width
                     val h = size.height
-                    val path = androidx.compose.ui.graphics.Path().apply {
-                        moveTo(w * 0.40f, h * 0.29f)
-                        lineTo(w * 0.73f, h * 0.50f)
-                        lineTo(w * 0.40f, h * 0.71f)
-                        close()
-                    }
-                    drawPath(path, color = Ink)
-                    drawArc(
-                        color = FocusBlueBright,
-                        startAngle = -58f,
-                        sweepAngle = 116f,
-                        useCenter = false,
-                        topLeft = Offset(w * 0.10f, h * 0.10f),
-                        size = Size(w * 0.80f, h * 0.80f),
-                        style = Stroke(width = w * 0.055f),
+                    val stroke = Stroke(width = w * 0.075f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+                    drawRoundRect(
+                        FocusBlueBright,
+                        topLeft = Offset(w * 0.22f, h * 0.28f),
+                        size = Size(w * 0.56f, h * 0.34f),
+                        cornerRadius = CornerRadius(w * 0.06f),
+                        style = stroke,
                     )
+                    drawLine(FocusBlueBright, Offset(w * 0.5f, h * 0.62f), Offset(w * 0.5f, h * 0.72f), stroke.width, cap = StrokeCap.Round)
+                    drawLine(FocusBlueBright, Offset(w * 0.36f, h * 0.74f), Offset(w * 0.64f, h * 0.74f), stroke.width, cap = StrokeCap.Round)
                 },
         )
         Spacer(Modifier.width(if (compact) 12.dp else 16.dp))
@@ -245,10 +248,33 @@ fun StreamiaLogo(modifier: Modifier = Modifier, compact: Boolean = false) {
             text = "Streamia TV",
             style = if (compact) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineMedium,
             color = Ink,
-            fontWeight = FontWeight.SemiBold,
+            fontWeight = HeadingWeight,
         )
     }
 }
+
+/**
+ * Étiquette au-dessus d'une liste ou d'une rangée ("Catégories", "Chaînes", "Reprendre la
+ * lecture"…) : capitales espacées sur un ton neutre plutôt qu'un titre plein, pour la distinguer
+ * du contenu qu'elle introduit — celui-ci garde sa pleine lisibilité, seule l'étiquette s'efface.
+ */
+@Composable
+fun SectionLabel(text: String, modifier: Modifier = Modifier, fontSize: androidx.compose.ui.unit.TextUnit = TypeSectionTitle) {
+    Text(
+        text.asKickerLabel(),
+        color = MutedInk,
+        fontSize = fontSize,
+        fontWeight = HeadingWeight,
+        letterSpacing = KickerLetterSpacing,
+        modifier = modifier,
+    )
+}
+
+// En dehors du composable : lire une locale directement dans un @Composable n'est pas observable
+// par la recomposition (Lint : "Reading locale in a non-observable way"). Locale.FRENCH plutôt que
+// getDefault() : l'app n'affiche que du texte français (androidResources.localeFilters = "fr"),
+// donc la casse ne doit pas dépendre de la locale système de l'appareil.
+private fun String.asKickerLabel(): String = uppercase(java.util.Locale.FRENCH)
 
 @Composable
 fun ChannelLogo(url: String?, channelName: String, modifier: Modifier = Modifier) {

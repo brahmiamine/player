@@ -39,6 +39,7 @@ import fr.streamia.tv.data.PlaylistKind
 import fr.streamia.tv.data.PlaylistProfile
 import fr.streamia.tv.ui.theme.DeepSurface
 import fr.streamia.tv.ui.theme.FocusBlueBright
+import fr.streamia.tv.ui.theme.HeadingWeight
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
 import fr.streamia.tv.ui.theme.Night
@@ -120,7 +121,7 @@ fun LoginScreen(
         ) {
             StreamiaLogo()
             Column {
-                Text("Vos chaînes,\nvos listes.", color = Ink, fontSize = 33.sp, lineHeight = 39.sp, fontWeight = FontWeight.SemiBold)
+                Text("Vos chaînes,\nvos listes.", color = Ink, fontSize = 33.sp, lineHeight = 39.sp, fontWeight = HeadingWeight)
                 Spacer(Modifier.height(14.dp))
                 Text(
                     "Xtream, fichier M3U ou URL M3U distante. XMLTV externe et actualisation automatique sont pris en charge.",
@@ -238,7 +239,7 @@ private fun PlaylistManager(
     onConfirmDelete: (PlaylistProfile) -> Unit,
 ) {
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(11.dp)) {
-        Text("Mes listes", style = MaterialTheme.typography.headlineMedium, color = Ink, fontWeight = FontWeight.SemiBold)
+        Text("Mes listes", style = MaterialTheme.typography.headlineMedium, color = Ink, fontWeight = HeadingWeight)
         Text(
             if (profiles.isEmpty()) "Aucune liste enregistrée. Ajoutez votre première source."
             else "${profiles.size} liste${if (profiles.size > 1) "s" else ""} enregistrée${if (profiles.size > 1) "s" else ""}.",
@@ -327,7 +328,7 @@ private fun XtreamForm(
 
     Column(Modifier.fillMaxSize()) {
         LazyColumn(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(9.dp)) {
-            item { Text(if (editingProfile == null) "Ajouter une liste Xtream" else "Modifier la liste Xtream", style = MaterialTheme.typography.headlineMedium, color = Ink, fontWeight = FontWeight.SemiBold) }
+            item { Text(if (editingProfile == null) "Ajouter une liste Xtream" else "Modifier la liste Xtream", style = MaterialTheme.typography.headlineMedium, color = Ink, fontWeight = HeadingWeight) }
             item { Text("HTTP et HTTPS sont acceptés. L'adresse est utilisée exactement comme fournie.", color = MutedInk, fontSize = 14.sp) }
             item { TvTextField(profileName, onNameChange, "Nom de la liste (facultatif)", Modifier.fillMaxWidth().focusRequester(primaryFocus), enabled = !locked) }
             item { TvTextField(server, onServerChange, "Adresse du serveur", Modifier.fillMaxWidth(), supportingText = "Exemple : http://serveur.example:8080", enabled = !locked) }
@@ -414,7 +415,7 @@ private fun M3uForm(
     val canSaveRemote = m3uUrl.isNotBlank() && !busy
     Column(Modifier.fillMaxSize()) {
         LazyColumn(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(9.dp)) {
-            item { Text(if (editingProfile == null) "Ajouter une liste M3U" else "Modifier la liste M3U", style = MaterialTheme.typography.headlineMedium, color = Ink, fontWeight = FontWeight.SemiBold) }
+            item { Text(if (editingProfile == null) "Ajouter une liste M3U" else "Modifier la liste M3U", style = MaterialTheme.typography.headlineMedium, color = Ink, fontWeight = HeadingWeight) }
             item { Text("Vous pouvez choisir un fichier local ou saisir une URL M3U distante. Une URL XMLTV est facultative ; sinon Streamia essaie l'EPG du fournisseur Xtream.", color = MutedInk, fontSize = 14.sp, lineHeight = 20.sp) }
             item { TvTextField(profileName, onNameChange, "Nom de la liste (facultatif)", Modifier.fillMaxWidth().focusRequester(primaryFocus)) }
             item { TvTextField(m3uUrl, onM3uUrlChange, "URL M3U distante (facultatif)", Modifier.fillMaxWidth(), supportingText = "http:// ou https:// · actualisation automatique") }

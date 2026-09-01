@@ -35,6 +35,7 @@ import fr.streamia.tv.domain.Catalog
 import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.ui.theme.FocusBlueBright
+import fr.streamia.tv.ui.theme.HeadingWeight
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
 import fr.streamia.tv.ui.theme.Night
@@ -281,7 +282,7 @@ private fun HomeCardRow(
     onEntryClick: (MediaEntry) -> Unit,
 ) {
     Column(Modifier.fillMaxWidth()) {
-        Text(title, color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        SectionLabel(title, fontSize = 16.sp)
         Spacer(Modifier.height(10.dp))
         LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             itemsIndexed(entries, key = { _, (entry, _) -> entry.key }) { index, (entry, progress) ->
@@ -376,7 +377,7 @@ private fun HomeTile(
         ) {
             StreamiaIcon(glyph, size = if (prominent) 64.dp else 42.dp)
             Spacer(Modifier.height(if (prominent) 24.dp else 12.dp))
-            Text(title, color = Ink, fontSize = if (prominent) 29.sp else 20.sp, fontWeight = FontWeight.Bold)
+            Text(title, color = Ink, fontSize = if (prominent) 29.sp else 20.sp, fontWeight = HeadingWeight)
             Spacer(Modifier.height(5.dp))
             Text(subtitle, color = MutedInk, fontSize = if (prominent) 15.sp else 12.sp)
         }

@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="streamia_night">#080B0D</color>
-    <color name="streamia_focus">#4E91A2</color>
-    <color name="streamia_ink">#F4F7F8</color>
+    <color name="streamia_night">#161826</color>
+    <color name="streamia_focus">#9184D9</color>
+    <color name="streamia_focus_dim">#2B2741</color>
+    <color name="streamia_ink">#E9E9ED</color>
 </resources>
