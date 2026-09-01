@@ -149,6 +149,11 @@ fun OrganizerScreen(
                                 },
                                 selected = category.key in selectedCategoryKeys,
                                 modifier = Modifier.width(52.dp).height(50.dp),
+                                contentDescription = if (category.key in selectedCategoryKeys) {
+                                    "Désélectionner ${category.name}"
+                                } else {
+                                    "Sélectionner ${category.name}"
+                                },
                             ) {
                                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                     StreamiaIcon(
@@ -200,6 +205,7 @@ fun OrganizerScreen(
                     FocusableSurface(
                         onClick = { destinationCategoryId = previousDestination(categories, destinationCategoryId, sourceCategoryId) },
                         modifier = Modifier.width(62.dp).height(52.dp),
+                        contentDescription = "Catégorie de destination précédente",
                     ) {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             StreamiaIcon(StreamiaIconGlyph.ArrowBack, tint = Ink, size = 18.dp)
@@ -212,6 +218,7 @@ fun OrganizerScreen(
                     FocusableSurface(
                         onClick = { destinationCategoryId = nextDestination(categories, destinationCategoryId, sourceCategoryId) },
                         modifier = Modifier.width(62.dp).height(52.dp),
+                        contentDescription = "Catégorie de destination suivante",
                     ) {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             StreamiaIcon(StreamiaIconGlyph.ArrowForward, tint = Ink, size = 18.dp)

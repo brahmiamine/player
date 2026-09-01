@@ -121,6 +121,11 @@ fun SearchScreen(
                                 onClick = { onToggleEntryFavorite(entry) },
                                 selected = entry.key in favoriteEntries,
                                 modifier = Modifier.width(64.dp).height(76.dp),
+                                contentDescription = if (entry.key in favoriteEntries) {
+                                    "Retirer ${entry.displayName} des favoris"
+                                } else {
+                                    "Ajouter ${entry.displayName} aux favoris"
+                                },
                             ) {
                                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                     StreamiaIcon(

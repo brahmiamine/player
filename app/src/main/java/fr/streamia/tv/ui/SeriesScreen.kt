@@ -76,7 +76,12 @@ fun SeriesScreen(
                 FocusableSurface(onClick = onBack, modifier = Modifier.weight(1f).height(48.dp)) {
                     Text("← Retour", color = Ink, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 15.dp))
                 }
-                FocusableSurface(onClick = onToggleFavorite, selected = favorite, modifier = Modifier.width(68.dp).height(48.dp)) {
+                FocusableSurface(
+                    onClick = onToggleFavorite,
+                    selected = favorite,
+                    modifier = Modifier.width(68.dp).height(48.dp),
+                    contentDescription = if (favorite) "Retirer des favoris" else "Ajouter aux favoris",
+                ) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         StreamiaIcon(if (favorite) StreamiaIconGlyph.Star else StreamiaIconGlyph.StarOutline, size = 20.dp)
                     }

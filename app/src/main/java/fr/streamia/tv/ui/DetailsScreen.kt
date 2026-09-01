@@ -68,7 +68,12 @@ fun MovieDetailsScreen(
                         )
                     }
                 }
-                FocusableSurface(onClick = onToggleFavorite, selected = favorite, modifier = Modifier.width(72.dp).height(58.dp)) {
+                FocusableSurface(
+                    onClick = onToggleFavorite,
+                    selected = favorite,
+                    modifier = Modifier.width(72.dp).height(58.dp),
+                    contentDescription = if (favorite) "Retirer des favoris" else "Ajouter aux favoris",
+                ) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         StreamiaIcon(if (favorite) StreamiaIconGlyph.Star else StreamiaIconGlyph.StarOutline, size = 22.dp)
                     }
