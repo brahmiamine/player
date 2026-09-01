@@ -138,6 +138,13 @@ fun PlayerScreen(
 
     var guideOpen by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
+    // OK/gauche/menu/retour sur le Live ne rouvrent plus un sélecteur superposé : ils demandent un
+    // retour vers le Browser principal (PlayerOverlayController.openLivePicker), qui peut être
+    // différé le temps que le catalogue restauré au démarrage finisse de s'hydrater
+    // (shouldDeferLiveBrowserReturn). Sans ce drapeau, l'écran ne montrait plus aucun retour
+    // visuel pendant cette attente (juste le HUD masqué) : à l'utilisateur, l'appui semblait
+    // ignoré alors que le retour est en réalité déjà programmé et va aboutir.
+    var returningToBrowser by remember(entry.key) { mutableStateOf(false) }
     var hudVisible by remember { mutableStateOf(true) }
     var buffering by remember { mutableStateOf(true) }
     var playbackError by remember { mutableStateOf<String?>(null) }
@@ -442,8 +449,8 @@ fun PlayerScreen(
             runCatching { settingsFocus.requestFocus() }
         }
     }
-    LaunchedEffect(hudVisible, guideOpen, settingsOpen, entry.key, livePickerOpen) {
-        if (hudVisible && !guideOpen && !settingsOpen && !livePickerOpen) {
+    LaunchedEffect(hudVisible, guideOpen, settingsOpen, entry.key, livePickerOpen, returningToBrowser) {
+        if (hudVisible && !guideOpen && !settingsOpen && !livePickerOpen && !returningToBrowser) {
             delay(6_000)
             hudVisible = false
         }
@@ -476,7 +483,7 @@ fun PlayerScreen(
             // pendant que le catalogue restauré au démarrage (resumeStartup) est encore en cours de
             // relecture atterrit sur l'accueil au lieu du navigateur Live, car closePlayer() retombe
             // sur l'accueil tant que catalogHydrating est vrai.
-            sharedLivePlayer -> PlayerOverlayController.openLivePicker()
+            sharedLivePlayer -> { returningToBrowser = true; PlayerOverlayController.openLivePicker() }
             else -> onBack()
         }
     }
@@ -488,7 +495,7 @@ fun PlayerScreen(
             .focusRequester(rootFocus)
             .focusable()
             .onPreviewKeyEvent { event ->
-                if (event.type != KeyEventType.KeyDown || guideOpen || settingsOpen || livePickerOpen) return@onPreviewKeyEvent false
+                if (event.type != KeyEventType.KeyDown || guideOpen || settingsOpen || livePickerOpen || returningToBrowser) return@onPreviewKeyEvent false
                 val keyCode = event.nativeKeyEvent.keyCode
                 val digit = keyCode.toTvDigit()
                 if (digit != null && entry.type == MediaType.Live) {
@@ -501,6 +508,7 @@ fun PlayerScreen(
                     PlaybackRemoteAction.ZapPrevious -> { onZap(-1); true }
                     PlaybackRemoteAction.ZapNext -> { onZap(1); true }
                     PlaybackRemoteAction.OpenLivePicker -> {
+                        returningToBrowser = true
                         PlayerOverlayController.openLivePicker()
                         hudVisible = false
                         true
@@ -547,7 +555,13 @@ fun PlayerScreen(
             )
         }
 
-        if (buffering) {
+        if (returningToBrowser) {
+            Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
+                StatusDot(diameter = 24.dp)
+                Spacer(Modifier.height(12.dp))
+                Text("Retour à la liste des chaînes…", color = Ink, fontSize = 18.sp)
+            }
+        } else if (buffering) {
             Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
                 StatusDot(diameter = 24.dp)
                 Spacer(Modifier.height(12.dp))
@@ -590,7 +604,7 @@ fun PlayerScreen(
             }
         }
 
-        if (hudVisible && !guideOpen && !settingsOpen && !livePickerOpen) {
+        if (hudVisible && !guideOpen && !settingsOpen && !livePickerOpen && !returningToBrowser) {
             PlayerInfoBand(
                 entry = entry,
                 categoryName = catalog.categoriesFor(entry.type).firstOrNull { it.id == entry.categoryId }?.name,

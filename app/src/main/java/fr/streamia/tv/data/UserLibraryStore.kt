@@ -203,6 +203,20 @@ fun UserLibrarySnapshot.hasSameCatalogLayoutAs(other: UserLibrarySnapshot): Bool
     categoryOrder == other.categoryOrder && movedEntries == other.movedEntries
 
 /**
+ * Empreinte stable des seuls champs qui changent réellement la structure d'un [Catalog] une fois
+ * passé par [applyUserLibraryToCatalog] (ordre des catégories, chaînes déplacées) — les favoris
+ * n'y touchent pas et n'ont donc pas besoin d'invalider un catalogue déjà résolu mis en cache.
+ * Sert de clé de validité à [CatalogCache.saveResolved]/[CatalogCache.loadResolved] : tant que
+ * cette empreinte n'a pas changé depuis l'enregistrement, le catalogue déjà résolu reste correct
+ * et peut être réutilisé tel quel sans repasser par [applyUserLibraryToCatalog].
+ */
+fun UserLibrarySnapshot.catalogLayoutFingerprint(): String {
+    val orderPart = categoryOrder.toSortedMap().entries.joinToString(";") { (type, ids) -> "$type=${ids.joinToString(",")}" }
+    val movedPart = movedEntries.toSortedMap().entries.joinToString(";") { (key, destination) -> "$key>$destination" }
+    return "$orderPart|$movedPart"
+}
+
+/**
  * Applique les déplacements d'entrées et le tri des catégories d'un [UserLibrarySnapshot] à un
  * [Catalog]. Extraite en fonction de haut niveau (plutôt que méthode de [UserLibraryStore]) afin
  * de rester testable sans dépendance Android : [UserLibraryStore] a besoin d'un [android.content.Context]
