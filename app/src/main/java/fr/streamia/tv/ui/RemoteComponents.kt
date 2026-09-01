@@ -58,10 +58,13 @@ import androidx.tv.material3.Text
 import fr.streamia.tv.ui.theme.DeepSurface
 import fr.streamia.tv.ui.theme.FocusBlue
 import fr.streamia.tv.ui.theme.FocusBlueBright
+import fr.streamia.tv.ui.theme.HeadingWeight
 import fr.streamia.tv.ui.theme.Ink
+import fr.streamia.tv.ui.theme.KickerLetterSpacing
 import fr.streamia.tv.ui.theme.MutedInk
 import fr.streamia.tv.ui.theme.Night
 import fr.streamia.tv.ui.theme.RaisedSurface
+import fr.streamia.tv.ui.theme.TypeSectionTitle
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -102,7 +105,7 @@ fun FocusableSurface(
     val border = when {
         focused -> BorderStroke(3.dp, FocusBlueBright)
         selected -> BorderStroke(2.dp, FocusBlue)
-        else -> BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
+        else -> BorderStroke(1.dp, Ink.copy(alpha = 0.08f))
     }
 
     Box(
@@ -193,7 +196,7 @@ fun TvTextField(
             .background(fieldBackground)
             .border(
                 if (focused && enabled) 3.dp else 1.dp,
-                if (focused && enabled) FocusBlueBright else Color.White.copy(if (enabled) 0.12f else 0.05f),
+                if (focused && enabled) FocusBlueBright else Ink.copy(if (enabled) 0.12f else 0.05f),
                 shape,
             )
             .onFocusChanged { focused = enabled && it.isFocused }
@@ -245,9 +248,26 @@ fun StreamiaLogo(modifier: Modifier = Modifier, compact: Boolean = false) {
             text = "Streamia TV",
             style = if (compact) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineMedium,
             color = Ink,
-            fontWeight = FontWeight.SemiBold,
+            fontWeight = HeadingWeight,
         )
     }
+}
+
+/**
+ * Étiquette au-dessus d'une liste ou d'une rangée ("Catégories", "Chaînes", "Reprendre la
+ * lecture"…) : capitales espacées sur un ton neutre plutôt qu'un titre plein, pour la distinguer
+ * du contenu qu'elle introduit — celui-ci garde sa pleine lisibilité, seule l'étiquette s'efface.
+ */
+@Composable
+fun SectionLabel(text: String, modifier: Modifier = Modifier, fontSize: androidx.compose.ui.unit.TextUnit = TypeSectionTitle) {
+    Text(
+        text.uppercase(java.util.Locale.getDefault()),
+        color = MutedInk,
+        fontSize = fontSize,
+        fontWeight = HeadingWeight,
+        letterSpacing = KickerLetterSpacing,
+        modifier = modifier,
+    )
 }
 
 @Composable

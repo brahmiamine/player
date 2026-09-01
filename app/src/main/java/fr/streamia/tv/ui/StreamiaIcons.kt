@@ -41,7 +41,9 @@ fun StreamiaIcon(
     size: Dp = 24.dp,
 ) {
     Canvas(modifier.size(size)) {
-        val stroke = Stroke(width = this.size.minDimension * 0.085f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        // Trait plus fin (Phosphor "regular" plutôt que "bold") pour rester dans le registre
+        // discret de Nocturne — un trait, jamais un aplat.
+        val stroke = Stroke(width = this.size.minDimension * 0.072f, cap = StrokeCap.Round, join = StrokeJoin.Round)
         when (glyph) {
             StreamiaIconGlyph.Live -> drawLive(tint, stroke)
             StreamiaIconGlyph.Movie -> drawMovie(tint)

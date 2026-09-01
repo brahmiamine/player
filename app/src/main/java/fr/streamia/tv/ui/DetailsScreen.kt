@@ -27,6 +27,7 @@ import androidx.tv.material3.Text
 import fr.streamia.tv.domain.MediaDetails
 import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.ui.theme.FocusBlueBright
+import fr.streamia.tv.ui.theme.HeadingWeight
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
 import fr.streamia.tv.ui.theme.Night
@@ -90,7 +91,7 @@ fun MovieDetailsScreen(
             Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text(movie.displayName, color = Ink, fontSize = TypeHero, lineHeight = TypeHeroLineHeight, fontWeight = FontWeight.Bold)
+            Text(movie.displayName, color = Ink, fontSize = TypeHero, lineHeight = TypeHeroLineHeight, fontWeight = HeadingWeight)
             if (busy && details == null) Text("Chargement des informations…", color = MutedInk, fontSize = TypeBody)
             val rating = details?.rating ?: movie.rating
             val meta = listOfNotNull(

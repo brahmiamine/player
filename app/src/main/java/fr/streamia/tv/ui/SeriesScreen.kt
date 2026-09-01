@@ -41,6 +41,7 @@ import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.SeriesDetails
 import fr.streamia.tv.domain.SeriesEpisode
 import fr.streamia.tv.ui.theme.FocusBlueBright
+import fr.streamia.tv.ui.theme.HeadingWeight
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
 import fr.streamia.tv.ui.theme.Night
@@ -96,7 +97,7 @@ fun SeriesScreen(
             Spacer(Modifier.height(20.dp))
             ChannelLogo(details?.details?.posterUrl ?: series.iconUrl, series.name, Modifier.size(230.dp))
             Spacer(Modifier.height(16.dp))
-            Text(series.name, color = Ink, fontSize = TypeHero, lineHeight = TypeHeroLineHeight, fontWeight = FontWeight.Bold)
+            Text(series.name, color = Ink, fontSize = TypeHero, lineHeight = TypeHeroLineHeight, fontWeight = HeadingWeight)
             val info = details?.details
             val meta = listOfNotNull(
                 info?.rating?.let { "★ ${"%.1f".format(it)}" } ?: series.rating?.let { "★ ${"%.1f".format(it)}" },
@@ -140,7 +141,7 @@ fun SeriesScreen(
             }
             else -> {
                 Column(Modifier.width(185.dp).fillMaxHeight()) {
-                    Text("Saisons", color = Ink, fontSize = TypeSectionTitle, fontWeight = FontWeight.Bold)
+                    SectionLabel("Saisons")
                     Spacer(Modifier.height(11.dp))
                     LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(details.seasons, key = { it }) { season ->
@@ -157,7 +158,7 @@ fun SeriesScreen(
                 Spacer(Modifier.width(20.dp))
                 Column(Modifier.weight(1f).fillMaxHeight()) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
-                        Text("Saison $selectedSeason", color = Ink, fontSize = TypeSectionTitle, fontWeight = FontWeight.Bold)
+                        SectionLabel("Saison $selectedSeason")
                         Spacer(Modifier.width(12.dp))
                         Text("${episodes.size} épisodes", color = MutedInk, fontSize = TypeLabel)
                     }

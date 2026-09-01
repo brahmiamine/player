@@ -42,6 +42,7 @@ import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.ui.theme.DeepSurface
 import fr.streamia.tv.ui.theme.FocusBlueBright
+import fr.streamia.tv.ui.theme.HeadingWeight
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
 import fr.streamia.tv.ui.theme.Night
@@ -129,7 +130,7 @@ fun EpgScreen(
                 Text("← Retour", color = Ink, fontSize = TypeLabel, modifier = Modifier.padding(horizontal = 14.dp))
             }
             Spacer(Modifier.width(16.dp))
-            Text("Guide TV · Grille horaire", color = Ink, fontSize = TypeScreenTitle, fontWeight = FontWeight.Bold)
+            Text("Guide TV · Grille horaire", color = Ink, fontSize = TypeScreenTitle, fontWeight = HeadingWeight)
             Spacer(Modifier.weight(1f))
             Text(if (guide == null) "XMLTV / fournisseur" else "${guide.channels.size} chaînes EPG", color = MutedInk, fontSize = TypeLabel)
             Spacer(Modifier.width(12.dp))
@@ -145,7 +146,7 @@ fun EpgScreen(
 
         Row(Modifier.fillMaxSize()) {
             Column(Modifier.width(250.dp).fillMaxHeight()) {
-                Text("Catégories", color = Ink, fontSize = TypeSectionTitle, fontWeight = FontWeight.Bold)
+                SectionLabel("Catégories")
                 Spacer(Modifier.height(9.dp))
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(7.dp)) {
                     items(categories, key = { it.key }) { category ->
@@ -236,7 +237,7 @@ private fun DayNavigator(
         }
         Spacer(Modifier.width(14.dp))
         Column {
-            Text(dayLabel(availableDates[dayIndex]), color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            Text(dayLabel(availableDates[dayIndex]), color = Ink, fontSize = 16.sp, fontWeight = HeadingWeight)
             Text(
                 if (isToday) "Aujourd'hui · il est ${formatClock(nowEpoch)}" else "Jour ${dayIndex + 1} sur ${availableDates.size}",
                 color = MutedInk,
@@ -394,7 +395,7 @@ private fun ProgramDetailsPanel(
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text(selected.program.title, color = Ink, fontSize = 20.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(selected.program.title, color = Ink, fontSize = 20.sp, fontWeight = HeadingWeight, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
                     "${selected.channel.number} · ${selected.channel.displayName} · ${selected.program.timeRange()}",
                     color = FocusBlueBright,

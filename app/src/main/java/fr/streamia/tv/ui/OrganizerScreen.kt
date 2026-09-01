@@ -32,6 +32,7 @@ import fr.streamia.tv.domain.MediaCategory
 import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.ui.theme.FocusBlueBright
+import fr.streamia.tv.ui.theme.HeadingWeight
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
 import fr.streamia.tv.ui.theme.Night
@@ -72,7 +73,7 @@ fun OrganizerScreen(
                 Text("← Retour", color = Ink, fontSize = TypeLabel, modifier = Modifier.padding(horizontal = 14.dp))
             }
             Spacer(Modifier.width(16.dp))
-            Text("Organiser le catalogue", color = Ink, fontSize = TypeScreenTitle, fontWeight = FontWeight.Bold)
+            Text("Organiser le catalogue", color = Ink, fontSize = TypeScreenTitle, fontWeight = HeadingWeight)
             Spacer(Modifier.weight(1f))
             MediaType.entries.forEach { mediaType ->
                 FocusableSurface(
@@ -102,7 +103,7 @@ fun OrganizerScreen(
         Row(Modifier.fillMaxSize()) {
             Column(Modifier.width(420.dp).fillMaxHeight()) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Catégories (${categories.size})", color = Ink, fontSize = TypeSectionTitle, fontWeight = FontWeight.Bold)
+                    SectionLabel("Catégories (${categories.size})")
                     Spacer(Modifier.weight(1f))
                     FocusableSurface(
                         onClick = {
@@ -174,7 +175,7 @@ fun OrganizerScreen(
             Column(Modifier.weight(1f).fillMaxHeight()) {
                 val sourceName = categories.firstOrNull { it.id == sourceCategoryId }?.name ?: "Catégorie"
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text(sourceName, color = Ink, fontSize = TypeSectionTitle, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(sourceName, color = Ink, fontSize = TypeSectionTitle, fontWeight = HeadingWeight, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text("${selectedEntryKeys.size} sélectionné(s)", color = FocusBlueBright, fontSize = TypeLabel)
                 }
                 Spacer(Modifier.height(9.dp))

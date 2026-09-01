@@ -85,6 +85,7 @@ import fr.streamia.tv.player.playbackRemoteAction
 import fr.streamia.tv.player.resolveSeekPosition
 import fr.streamia.tv.player.LivePlaybackSession
 import fr.streamia.tv.ui.theme.FocusBlueBright
+import fr.streamia.tv.ui.theme.HeadingWeight
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
 import fr.streamia.tv.ui.theme.Night
@@ -732,7 +733,7 @@ private fun PlayerInfoBand(
                     prefix + entry.displayName,
                     color = Ink,
                     fontSize = 21.sp,
-                    fontWeight = FontWeight.Bold,
+                    fontWeight = HeadingWeight,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -849,7 +850,7 @@ private fun PlaybackTimeline(positionMs: Long, durationMs: Long) {
         Text(formatDuration(positionMs), color = Ink, fontSize = 12.sp)
         Spacer(Modifier.width(12.dp))
         Canvas(Modifier.weight(1f).height(8.dp)) {
-            drawRoundRect(Color.White.copy(alpha = 0.22f), cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.height / 2))
+            drawRoundRect(Ink.copy(alpha = 0.22f), cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.height / 2))
             drawRoundRect(FocusBlueBright, size = Size(size.width * progress, size.height), cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.height / 2))
         }
         Spacer(Modifier.width(12.dp))
@@ -884,7 +885,7 @@ private fun PlayerGuide(
             .padding(24.dp),
     ) {
         Column(Modifier.width(290.dp).fillMaxHeight()) {
-            Text("Catégories", color = Ink, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+            SectionLabel("Catégories", fontSize = 22.sp)
             Spacer(Modifier.height(14.dp))
             LazyColumn(verticalArrangement = Arrangement.spacedBy(7.dp)) {
                 items(categories, key = { it.key }) { category ->
@@ -902,7 +903,7 @@ private fun PlayerGuide(
         Spacer(Modifier.width(20.dp))
         Column(Modifier.weight(1f).fillMaxHeight()) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("Chaînes", color = Ink, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                SectionLabel("Chaînes", fontSize = 22.sp)
                 Spacer(Modifier.weight(1f))
                 FocusableSurface(onClick = onClose, modifier = Modifier.width(105.dp).height(46.dp)) {
                     Text("Fermer", color = Ink, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 14.dp))
