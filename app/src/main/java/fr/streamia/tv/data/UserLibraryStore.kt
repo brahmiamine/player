@@ -206,9 +206,6 @@ fun UserLibrarySnapshot.hasSameCatalogLayoutAs(other: UserLibrarySnapshot): Bool
  * Empreinte stable des seuls champs qui changent réellement la structure d'un [Catalog] une fois
  * passé par [applyUserLibraryToCatalog] (ordre des catégories, chaînes déplacées) — les favoris
  * n'y touchent pas et n'ont donc pas besoin d'invalider un catalogue déjà résolu mis en cache.
- * Sert de clé de validité à [CatalogCache.saveResolved]/[CatalogCache.loadResolved] : tant que
- * cette empreinte n'a pas changé depuis l'enregistrement, le catalogue déjà résolu reste correct
- * et peut être réutilisé tel quel sans repasser par [applyUserLibraryToCatalog].
  */
 fun UserLibrarySnapshot.catalogLayoutFingerprint(): String {
     val orderPart = categoryOrder.toSortedMap().entries.joinToString(";") { (type, ids) -> "$type=${ids.joinToString(",")}" }
@@ -219,12 +216,11 @@ fun UserLibrarySnapshot.catalogLayoutFingerprint(): String {
 /**
  * Applique les déplacements d'entrées et le tri des catégories d'un [UserLibrarySnapshot] à un
  * [Catalog]. Extraite en fonction de haut niveau (plutôt que méthode de [UserLibraryStore]) afin
- * de rester testable sans dépendance Android : [UserLibraryStore] a besoin d'un [android.content.Context]
- * réel pour ses SharedPreferences, alors que cette logique de fusion est pure.
+ * de rester testable sans dépendance Android.
  */
 fun applyUserLibraryToCatalog(catalog: Catalog, snapshot: UserLibrarySnapshot): Catalog {
-    // Rien à personnaliser : éviter de reconstruire un Catalog (et de refaire tous ses index
-    // internes) quand ni le tri des catégories ni le déplacement d'entrées n'ont été utilisés.
+    // Rien à personnaliser : éviter de reconstruire un Catalog (et de refaire ses index internes)
+    // quand ni le tri des catégories ni le déplacement d'entrées n'ont été utilisés.
     if (snapshot.movedEntries.isEmpty() && snapshot.categoryOrder.isEmpty()) return catalog
 
     val movedEntries = if (snapshot.movedEntries.isEmpty()) {
@@ -246,7 +242,28 @@ fun applyUserLibraryToCatalog(catalog: Catalog, snapshot: UserLibrarySnapshot): 
             }
         }
     }
-    return Catalog(orderedCategories, movedEntries, catalog.account)
+    val adjustedCategoryCounts = if (catalog.categoryCounts.isEmpty() || snapshot.movedEntries.isEmpty()) {
+        catalog.categoryCounts
+    } else {
+        catalog.categoryCounts.toMutableMap().apply {
+            catalog.entries.forEach { entry ->
+                val destination = snapshot.movedEntries[entry.key] ?: return@forEach
+                if (destination == entry.categoryId) return@forEach
+                val sourceKey = Catalog.categoryKey(entry.type, entry.categoryId)
+                val destinationKey = Catalog.categoryKey(entry.type, destination)
+                this[sourceKey] = ((this[sourceKey] ?: 0) - 1).coerceAtLeast(0)
+                this[destinationKey] = (this[destinationKey] ?: 0) + 1
+            }
+        }
+    }
+    return Catalog(
+        categories = orderedCategories,
+        entries = movedEntries,
+        account = catalog.account,
+        totalCounts = catalog.totalCounts,
+        categoryCounts = adjustedCategoryCounts,
+        loadedCategoryKeys = catalog.loadedCategoryKeys,
+    )
 }
 
 data class PlaybackHistoryItem(
