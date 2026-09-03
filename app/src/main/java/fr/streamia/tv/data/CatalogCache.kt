@@ -84,6 +84,16 @@ class CatalogCache(context: Context) {
         )
     }
 
+    suspend fun loadAdjacent(
+        profileId: String,
+        current: MediaEntry,
+        categoryId: String,
+        delta: Int,
+    ): MediaEntry? = withContext(Dispatchers.IO) {
+        ensureMigrated(profileId)
+        database.loadAdjacent(profileId, current, categoryId, delta)
+    }
+
     suspend fun loadType(profileId: String, type: MediaType): List<MediaEntry> = withContext(Dispatchers.IO) {
         ensureMigrated(profileId)
         database.loadType(profileId, type)
