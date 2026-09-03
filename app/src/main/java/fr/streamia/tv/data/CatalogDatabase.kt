@@ -245,6 +245,56 @@ internal class CatalogDatabase(context: Context) :
         ).use(::readEntries)
     }
 
+    /** Reads the next/previous provider row directly from the index and wraps at section/category ends. */
+    fun loadAdjacent(
+        profileId: String,
+        current: MediaEntry,
+        categoryId: String,
+        delta: Int,
+    ): MediaEntry? {
+        if (delta == 0) return current
+        val all = categoryId == Catalog.ALL_CATEGORY_ID
+        val categoryClause = if (all) "" else " AND category_id = ?"
+        val forward = delta > 0
+        val comparison = if (forward) ">" else "<"
+        val idComparison = if (forward) ">" else "<"
+        val direction = if (forward) "ASC" else "DESC"
+        val args = buildList {
+            add(profileId)
+            add(current.type.name)
+            if (!all) add(categoryId)
+            add(current.number.toString())
+            add(current.number.toString())
+            add(current.id.toString())
+        }.toTypedArray()
+        val adjacent = readableDatabase.rawQuery(
+            """
+            SELECT ${ENTRY_COLUMNS.joinToString()} FROM catalog_entries
+            WHERE profile_id = ? AND media_type = ? AND navigable = 1$categoryClause
+              AND (number $comparison ? OR (number = ? AND media_id $idComparison ?))
+            ORDER BY number $direction, media_id $direction
+            LIMIT 1
+            """.trimIndent(),
+            args,
+        ).use { cursor -> if (cursor.moveToFirst()) readEntry(cursor) else null }
+        if (adjacent != null) return adjacent
+
+        val wrapArgs = buildList {
+            add(profileId)
+            add(current.type.name)
+            if (!all) add(categoryId)
+        }.toTypedArray()
+        return readableDatabase.rawQuery(
+            """
+            SELECT ${ENTRY_COLUMNS.joinToString()} FROM catalog_entries
+            WHERE profile_id = ? AND media_type = ? AND navigable = 1$categoryClause
+            ORDER BY number $direction, media_id $direction
+            LIMIT 1
+            """.trimIndent(),
+            wrapArgs,
+        ).use { cursor -> if (cursor.moveToFirst()) readEntry(cursor) else null }
+    }
+
     fun loadType(profileId: String, type: MediaType): List<MediaEntry> = readableDatabase.rawQuery(
         """
         SELECT ${ENTRY_COLUMNS.joinToString()} FROM catalog_entries
