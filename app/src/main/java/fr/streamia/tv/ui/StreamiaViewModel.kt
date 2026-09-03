@@ -193,7 +193,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                     library = repository.library(profileId),
                 )
                 try {
-                    mergeCatalog(repository.openProfile(profileId))
+                    mergeCatalog(repository.openProfile(profileId, knownCache = cachedCatalog))
                 } catch (error: Throwable) {
                     _uiState.update { state ->
                         if (state.activeProfileId == profileId) state.copy(offline = true, message = error.safeMessage())

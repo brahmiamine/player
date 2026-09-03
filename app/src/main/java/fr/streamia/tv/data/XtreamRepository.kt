@@ -92,11 +92,17 @@ class XtreamRepository(context: Context) {
     /**
      * Ouvre d'abord le cache local afin que l'interface soit disponible immédiatement.
      * Un cache Xtream est toujours renvoyé comme Local, sans date d'expiration.
+     *
+     * [knownCache] évite de relire et reparser le fichier de cache disque quand l'appelant l'a déjà
+     * fait juste avant (typiquement via [cachedCatalog] pour afficher l'écran immédiatement) : sur
+     * un catalogue volumineux, reparser le même JSON une seconde fois pour rien coûte de l'I/O et du
+     * CPU à chaque relance de l'app, ce qui ralentit d'autant l'affichage des catégories/chaînes.
      */
-    suspend fun openProfile(profileId: String): LoadedCatalog {
+    suspend fun openProfile(profileId: String, knownCache: Catalog? = null): LoadedCatalog {
         val profile = playlistStore.find(profileId) ?: throw XtreamException("Cette liste n'existe plus.")
         val credentials = profile.credentialsOrNull()
-        val cached = cache.load(profile.id)?.takeIf { profile.kind != PlaylistKind.Xtream || it.hasPlayableContent() }
+        val cached = knownCache
+            ?: cache.load(profile.id)?.takeIf { profile.kind != PlaylistKind.Xtream || it.hasPlayableContent() }
         if (credentials != null && cached != null) {
             credentialsStore.save(credentials)
             val source = if (profile.kind == PlaylistKind.M3u && shouldRefreshProfile(profile.id)) {
