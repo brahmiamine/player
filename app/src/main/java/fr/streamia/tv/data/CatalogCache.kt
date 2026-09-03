@@ -23,6 +23,8 @@ class CatalogCache(context: Context) {
     private val appContext = context.applicationContext
     private val filesDir = appContext.filesDir
     private val database = CatalogDatabase(appContext)
+    private val libraryStore = UserLibraryStore(appContext)
+    private val playlistStore = PlaylistStore(appContext)
     private val legacyFiles = listOf(File(filesDir, "catalog-v2.json"), File(filesDir, "catalog-v1.json"))
 
     suspend fun save(profileId: String, catalog: Catalog) = withContext(Dispatchers.IO) {
@@ -54,7 +56,8 @@ class CatalogCache(context: Context) {
     suspend fun load(profileId: String, extraEntryKeys: Set<String> = emptySet()): Catalog? =
         withContext(Dispatchers.IO) {
             ensureMigrated(profileId)
-            database.loadLightweight(profileId, extraEntryKeys)
+            val contextKeys = persistedContextKeys(profileId) + extraEntryKeys
+            database.loadLightweight(profileId, contextKeys)
         }
 
     suspend fun loadFull(profileId: String): Catalog? = withContext(Dispatchers.IO) {
@@ -68,9 +71,17 @@ class CatalogCache(context: Context) {
         categoryId: String,
         offset: Int,
         limit: Int,
-    ): List<MediaEntry> = withContext(Dispatchers.IO) {
+    ): CatalogPage = withContext(Dispatchers.IO) {
         ensureMigrated(profileId)
-        database.loadCategoryPage(profileId, type, categoryId, offset, limit)
+        if (limit <= 0) return@withContext CatalogPage(emptyList(), offset.coerceAtLeast(0), false)
+        val boundedLimit = limit.coerceAtMost(MAX_PAGE_SIZE)
+        val safeOffset = offset.coerceAtLeast(0)
+        val entries = database.loadCategoryPage(profileId, type, categoryId, safeOffset, boundedLimit)
+        CatalogPage(
+            entries = entries,
+            nextOffset = safeOffset + entries.size,
+            hasMore = entries.size == boundedLimit,
+        )
     }
 
     suspend fun loadType(profileId: String, type: MediaType): List<MediaEntry> = withContext(Dispatchers.IO) {
@@ -85,7 +96,10 @@ class CatalogCache(context: Context) {
         limit: Int = 500,
     ): List<MediaEntry> = withContext(Dispatchers.IO) {
         ensureMigrated(profileId)
-        database.search(profileId, query, type, limit)
+        val moves = libraryStore.snapshot(profileId).movedEntries
+        database.search(profileId, query, type, limit).map { entry ->
+            moves[entry.key]?.let { destination -> entry.copy(categoryId = destination) } ?: entry
+        }
     }
 
     suspend fun loadEntriesByKeys(profileId: String, keys: Set<String>): List<MediaEntry> = withContext(Dispatchers.IO) {
@@ -96,6 +110,19 @@ class CatalogCache(context: Context) {
     suspend fun clear(profileId: String) = withContext(Dispatchers.IO) {
         database.delete(profileId)
         deleteJsonCopies(profileId)
+    }
+
+    private fun persistedContextKeys(profileId: String): Set<String> {
+        val library = libraryStore.snapshot(profileId)
+        return buildSet {
+            addAll(library.favoriteEntries)
+            addAll(library.movedEntries.keys)
+            library.history.forEach { add(it.entry.key) }
+            playlistStore.find(profileId)?.credentialsOrNull()?.let { credentials ->
+                val navigation = BrowserNavigationStore(appContext, credentials)
+                MediaType.entries.forEach { type -> navigation.entry(type)?.let(::add) }
+            }
+        }
     }
 
     private fun ensureMigrated(profileId: String) {
@@ -224,4 +251,8 @@ class CatalogCache(context: Context) {
     private fun JsonReader.nextNullableString(): String? = if (peek() == JsonToken.NULL) { nextNull(); null } else nextString()
     private fun JsonReader.nextNullableDouble(): Double? = if (peek() == JsonToken.NULL) { nextNull(); null } else nextDouble()
     private fun JsonReader.nextNullableLong(): Long? = if (peek() == JsonToken.NULL) { nextNull(); null } else nextLong()
+
+    private companion object {
+        const val MAX_PAGE_SIZE = 500
+    }
 }
