@@ -586,11 +586,11 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
      * de métadonnées légères : [fr.streamia.tv.domain.Catalog.isCategoryLoaded] y répond toujours
      * vrai et cette fonction ne fait rien.
      */
-    private fun ensureSectionLoaded(type: MediaType, forceEpgSync: Boolean = false) {
+    private fun ensureSectionLoaded(type: MediaType) {
         val profileId = _uiState.value.activeProfileId ?: return
         val catalog = _uiState.value.catalog ?: return
         if (catalog.isCategoryLoaded(type, Catalog.ALL_CATEGORY_ID)) {
-            if (type == MediaType.Live) startEpgBackgroundSync(force = forceEpgSync)
+            if (type == MediaType.Live) startEpgBackgroundSync()
             return
         }
         val loadKey = "$profileId:section:${type.name}"
@@ -605,7 +605,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                     val mergedCatalog = repository.customizedCatalog(profileId, mergedRaw)
                     state.copy(rawCatalog = mergedRaw, catalog = mergedCatalog)
                 }
-                if (type == MediaType.Live) startEpgBackgroundSync(force = forceEpgSync)
+                if (type == MediaType.Live) startEpgBackgroundSync()
             } finally {
                 categoryLoadsInFlight.remove(loadKey)
             }
