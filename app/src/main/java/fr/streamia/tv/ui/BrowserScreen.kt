@@ -154,17 +154,24 @@ fun BrowserScreen(
         )
     }
 
-    val baseCategories = remember(catalog, selectedType) { catalog.categoriesFor(selectedType) }
-    val favoriteEntriesForType = remember(catalog, selectedType, library.favoriteEntries) {
+    val hiddenCategoryIds = remember(catalog, selectedType, library.hiddenCategories) {
+        catalog.categoriesFor(selectedType)
+            .filter { it.key in library.hiddenCategories }
+            .mapTo(mutableSetOf(), MediaCategory::id)
+    }
+    val baseCategories = remember(catalog, selectedType, library.hiddenCategories) {
+        catalog.categoriesFor(selectedType).filterNot { it.key in library.hiddenCategories }
+    }
+    val favoriteEntriesForType = remember(catalog, selectedType, library.favoriteEntries, hiddenCategoryIds) {
         library.favoriteEntries.asSequence()
             .mapNotNull(catalog::entry)
-            .filter { it.type == selectedType }
+            .filter { it.type == selectedType && it.categoryId !in hiddenCategoryIds }
             .toList()
     }
-    val historyForType = remember(catalog, selectedType, library.history) {
+    val historyForType = remember(catalog, selectedType, library.history, hiddenCategoryIds) {
         library.history.asSequence()
             .map { item -> item to (catalog.entry(item.entry.key) ?: item.entry) }
-            .filter { (_, entry) -> entry.type == selectedType }
+            .filter { (_, entry) -> entry.type == selectedType && entry.categoryId !in hiddenCategoryIds }
             .toList()
     }
     val categories = remember(baseCategories, favoriteEntriesForType.size, historyForType.size, selectedType) {
@@ -176,11 +183,11 @@ fun BrowserScreen(
             hasHistory = historyForType.isNotEmpty(),
         )
     }
-    val entries = remember(catalog, selectedType, selectedCategoryId, favoriteEntriesForType, historyForType) {
+    val entries = remember(catalog, selectedType, selectedCategoryId, favoriteEntriesForType, historyForType, hiddenCategoryIds) {
         when (selectedCategoryId) {
             FAVORITES_CATEGORY_ID -> favoriteEntriesForType
             HISTORY_CATEGORY_ID -> historyForType.map { it.second }
-            else -> catalog.entriesIn(selectedType, selectedCategoryId)
+            else -> catalog.entriesIn(selectedType, selectedCategoryId).filterNot { it.categoryId in hiddenCategoryIds }
         }
     }
     val historyByKey = remember(historyForType) { historyForType.associate { it.second.key to it.first } }
