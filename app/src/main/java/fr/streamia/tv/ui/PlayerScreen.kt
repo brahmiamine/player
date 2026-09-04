@@ -128,8 +128,12 @@ fun PlayerScreen(
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val sharedLivePlayer = entry.type == MediaType.Live
-    val player = remember(entry.type, livePlaybackSession) {
-        if (sharedLivePlayer) livePlaybackSession.player else StreamiaPlayerFactory.create(context.applicationContext, entry.type)
+    val player = remember(entry.type, livePlaybackSession, appSettings.bufferMode) {
+        if (sharedLivePlayer) {
+            livePlaybackSession.player
+        } else {
+            StreamiaPlayerFactory.create(context.applicationContext, entry.type, appSettings.bufferMode)
+        }
     }
     val mediaSession = remember(player) { MediaSession.Builder(context.applicationContext, player).build() }
     val transportStore = remember { PlaybackTransportStore(context.applicationContext) }
