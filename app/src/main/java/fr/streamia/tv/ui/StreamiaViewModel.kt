@@ -377,6 +377,10 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         updateAppSettings { it.copy(bufferMode = it.nextBufferMode()) }
     }
 
+    fun cycleLiveStreamFormat() {
+        updateAppSettings { it.copy(liveStreamFormat = it.nextLiveStreamFormat()) }
+    }
+
     private fun updateAppSettings(transform: (AppSettings) -> AppSettings) {
         val settings = repository.updateAppSettings(transform)
         _uiState.update { it.copy(appSettings = settings) }
