@@ -33,9 +33,9 @@ class XmlTvRepository {
         url: String,
         entries: List<MediaEntry>,
         sink: EpgWriteSink,
-    ): EpgSyncResult {
+    ) {
         val accepted = acceptedIds(entries)
-        return withRemoteStream(url) { stream -> parseToSink(stream, accepted, sink) }
+        withRemoteStream(url) { stream -> parseToSink(stream, accepted, sink) }
     }
 
     private fun acceptedIds(entries: List<MediaEntry>): Set<String> = buildSet {
@@ -169,14 +169,13 @@ class XmlTvRepository {
         stream: InputStream,
         acceptedIds: Set<String>,
         sink: EpgWriteSink,
-    ): EpgSyncResult {
+    ) {
         val parser = XmlPullParserFactory.newInstance().newPullParser().apply {
             setInput(stream, null)
         }
         val channelNames = HashMap<String, String?>()
         val acceptedChannelIds = HashSet<String>()
         val programBatch = ArrayList<EpgProgram>(PROGRAM_WRITE_BATCH_SIZE)
-        var writtenPrograms = 0
         var event = parser.eventType
         var currentChannelId: String? = null
         var currentChannelName: String? = null
@@ -191,7 +190,6 @@ class XmlTvRepository {
         fun flushPrograms() {
             if (programBatch.isEmpty()) return
             sink.writePrograms(programBatch)
-            writtenPrograms += programBatch.size
             programBatch.clear()
         }
 
@@ -255,7 +253,16 @@ class XmlTvRepository {
                                 channel in acceptedChannelIds ||
                                 channelNames[channel] in acceptedIds
                         )
-                        if (accepted && title != null) {
+                        if (accepted && title != null && channel != null) {
+                            if (channel !in acceptedChannelIds) {
+                                acceptedChannelIds += channel
+                                sink.writeChannel(
+                                    EpgChannel(
+                                        channelId = channel,
+                                        displayName = channelNames[channel],
+                                    ),
+                                )
+                            }
                             programBatch += EpgProgram(
                                 title = title,
                                 description = currentProgramDescription,
@@ -273,10 +280,6 @@ class XmlTvRepository {
             event = parser.next()
         }
         flushPrograms()
-        return EpgSyncResult(
-            channelCount = acceptedChannelIds.size,
-            programCount = writtenPrograms,
-        )
     }
 
     private fun parseDate(value: String?): Long? {
@@ -301,7 +304,3 @@ class XmlTvRepository {
     }
 }
 
-internal data class EpgSyncResult(
-    val channelCount: Int,
-    val programCount: Int,
-)
