@@ -1,6 +1,8 @@
 package fr.streamia.tv.player
 
 import android.content.Context
+import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.datasource.DefaultDataSource
@@ -56,6 +58,13 @@ object StreamiaPlayerFactory {
             .setLoadControl(loadControl)
             .build()
             .apply {
+                setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(C.USAGE_MEDIA)
+                        .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
+                        .build(),
+                    true,
+                )
                 playWhenReady = true
                 setHandleAudioBecomingNoisy(true)
             }
