@@ -20,6 +20,23 @@ class AppSettingsTest {
     }
 
     @Test
+    fun `video aspect cycles and wraps`() {
+        var settings = AppSettings(videoAspect = VideoAspectSetting.Fit)
+        val observed = buildList {
+            repeat(VideoAspectSetting.entries.size) {
+                add(settings.videoAspect)
+                settings = settings.copy(videoAspect = settings.nextVideoAspect())
+            }
+        }
+
+        assertEquals(
+            listOf(VideoAspectSetting.Fit, VideoAspectSetting.Fill, VideoAspectSetting.Zoom),
+            observed,
+        )
+        assertEquals(VideoAspectSetting.Fit, settings.videoAspect)
+    }
+
+    @Test
     fun `vod seek step cycles and exposes milliseconds`() {
         var settings = AppSettings(vodSeekStepSeconds = 10)
         val observed = buildList {
