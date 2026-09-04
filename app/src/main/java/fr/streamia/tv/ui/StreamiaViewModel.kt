@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import fr.streamia.tv.BuildConfig
 import fr.streamia.tv.data.AppSettings
 import fr.streamia.tv.data.CatalogSource
+import fr.streamia.tv.data.EpgCacheMetadata
 import fr.streamia.tv.data.LoadedCatalog
 import fr.streamia.tv.data.PlaylistProfile
 import fr.streamia.tv.data.UpdateCheckResult
@@ -16,7 +17,7 @@ import fr.streamia.tv.data.XtreamRepository
 import fr.streamia.tv.domain.AccountInfo
 import fr.streamia.tv.domain.Catalog
 import fr.streamia.tv.domain.EpgGuide
-import fr.streamia.tv.domain.EpgProgram
+import fr.streamia.tv.domain.EpgNowContext
 import fr.streamia.tv.domain.MediaCategory
 import fr.streamia.tv.domain.MediaDetails
 import fr.streamia.tv.domain.MediaEntry
@@ -25,6 +26,12 @@ import fr.streamia.tv.domain.SeriesDetails
 import fr.streamia.tv.domain.SeriesEpisode
 import fr.streamia.tv.domain.ServerCredentials
 import fr.streamia.tv.domain.adjacentTo
+import fr.streamia.tv.domain.epgNowContextAt
+import fr.streamia.tv.domain.withTimeOffset
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -35,6 +42,9 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.text.SimpleDateFormat
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.temporal.ChronoUnit
 import java.util.Date
 import java.util.Locale
 
@@ -44,6 +54,11 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     private val libraryMutation = Mutex()
     private var libraryMutationSequence = 0L
     private var connectionTestSequence = 0L
+    private var epgGuideLoadSequence = 0L
+    private var epgSyncJob: Job? = null
+    private var epgSyncProfileId: String? = null
+    private var epgChannelJob: Job? = null
+    private var epgTickerJob: Job? = null
     // Lu/écrit uniquement depuis le thread principal (appelants Compose) : évite de relancer une
     // requête SQLite déjà en vol pour la même page quand plusieurs recompositions déclenchent le
     // même chargement (ex. sélection rapide de catégories, LaunchedEffect qui se relance).
@@ -118,7 +133,13 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                     }
                 }
         }
-        if (entry.type == MediaType.Live) loadEpg(entry)
+        if (entry.type == MediaType.Live) {
+            loadEpg(entry)
+            startEpgTicker(entry)
+        } else {
+            epgChannelJob?.cancel()
+            epgTickerJob?.cancel()
+        }
     }
 
     fun signIn(profileId: String?, profileName: String, server: String, username: String, password: String) {
@@ -396,12 +417,24 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             }
     }
 
-    fun showHome() { _uiState.update { it.copy(screen = StreamiaScreen.Home, message = null) } }
+    fun showHome() {
+        _uiState.update {
+            it.copy(
+                screen = StreamiaScreen.Home,
+                message = null,
+                epgGuide = null,
+                epgAvailableDates = emptyList(),
+                epgSelectedDate = null,
+                epgLoading = false,
+            )
+        }
+    }
     fun showSettings() { _uiState.update { it.copy(screen = StreamiaScreen.Settings, message = null) } }
     fun showTools() { _uiState.update { it.copy(screen = StreamiaScreen.Tools, message = null) } }
     fun showAbout() { _uiState.update { it.copy(screen = StreamiaScreen.About, message = null) } }
 
     suspend fun cacheSizeBytes(): Long = repository.cacheSizeBytes()
+    suspend fun epgCacheSizeBytes(): Long = repository.epgCacheSizeBytes()
     fun showParentalControl() { _uiState.update { it.copy(screen = StreamiaScreen.ParentalControl, message = null) } }
     fun showSearch() { _uiState.update { it.copy(screen = StreamiaScreen.Search, message = null) } }
 
@@ -552,10 +585,13 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
      * de métadonnées légères : [fr.streamia.tv.domain.Catalog.isCategoryLoaded] y répond toujours
      * vrai et cette fonction ne fait rien.
      */
-    private fun ensureSectionLoaded(type: MediaType) {
+    private fun ensureSectionLoaded(type: MediaType, forceEpgSync: Boolean = false) {
         val profileId = _uiState.value.activeProfileId ?: return
         val catalog = _uiState.value.catalog ?: return
-        if (catalog.isCategoryLoaded(type, Catalog.ALL_CATEGORY_ID)) return
+        if (catalog.isCategoryLoaded(type, Catalog.ALL_CATEGORY_ID)) {
+            if (type == MediaType.Live) startEpgBackgroundSync(force = forceEpgSync)
+            return
+        }
         val loadKey = "$profileId:section:${type.name}"
         if (!categoryLoadsInFlight.add(loadKey)) return
         viewModelScope.launch {
@@ -568,6 +604,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                     val mergedCatalog = repository.customizedCatalog(profileId, mergedRaw)
                     state.copy(rawCatalog = mergedRaw, catalog = mergedCatalog)
                 }
+                if (type == MediaType.Live) startEpgBackgroundSync(force = forceEpgSync)
             } finally {
                 categoryLoadsInFlight.remove(loadKey)
             }
@@ -581,22 +618,21 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     }
 
     fun showEpg() {
-        val state = _uiState.value
-        val profileId = state.activeProfileId ?: return
-        val credentials = state.credentials ?: return
-        val rawCatalog = state.rawCatalog ?: state.catalog ?: return
-        _uiState.update { it.copy(screen = StreamiaScreen.Epg, epgLoading = it.epgGuide == null, message = null) }
-        if (state.epgGuide != null) return
-        viewModelScope.launch {
-            runCatching { repository.fullEpg(profileId, credentials, rawCatalog) }
-                .onSuccess { guide -> _uiState.update { it.copy(epgGuide = guide, epgLoading = false) } }
-                .onFailure { error -> _uiState.update { it.copy(epgLoading = false, message = error.safeMessage()) } }
-        }
+        if (_uiState.value.activeProfileId == null) return
+        _uiState.update { it.copy(screen = StreamiaScreen.Epg, epgLoading = true, message = null) }
+        ensureSectionLoaded(MediaType.Live)
+        loadEpgGuideFromCache(_uiState.value.epgSelectedDate)
+        startEpgBackgroundSync()
+    }
+
+    fun selectEpgDate(date: LocalDate) {
+        _uiState.update { it.copy(epgSelectedDate = date, epgGuide = null, epgLoading = true, message = null) }
+        loadEpgGuideFromCache(date)
     }
 
     fun reloadEpg() {
-        _uiState.update { it.copy(epgGuide = null) }
-        showEpg()
+        _uiState.update { it.copy(epgLoading = true, message = null) }
+        startEpgBackgroundSync(force = true)
     }
 
     /**
@@ -840,10 +876,12 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                     player?.returnToSeries == true && it.seriesDetails != null -> StreamiaScreen.Series(it.seriesDetails.series)
                     else -> StreamiaScreen.Browser
                 },
-                epg = emptyList(),
+                epg = EpgNowContext(),
                 resumePositionMs = 0,
             )
         }
+        epgChannelJob?.cancel()
+        epgTickerJob?.cancel()
         if (profileId != null) refreshLibrarySnapshot(profileId)
     }
 
@@ -892,7 +930,10 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             it.copy(
                 screen = StreamiaScreen.Player(entry, returnToSeries),
                 message = null,
-                epg = emptyList(),
+                epg = EpgNowContext(),
+                epgGuide = null,
+                epgAvailableDates = emptyList(),
+                epgSelectedDate = null,
                 resumePositionMs = resume,
                 lastViewedEntry = entry,
             )
@@ -930,27 +971,157 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
 
     private fun loadEpg(entry: MediaEntry) {
         val state = _uiState.value
-        val fromGuide = state.epgGuide?.forEntry(entry).orEmpty()
-        if (fromGuide.isNotEmpty()) {
-            _uiState.update { it.copy(epg = currentPrograms(fromGuide)) }
-            return
-        }
+        val profileId = state.activeProfileId ?: return
         val credentials = state.credentials ?: return
-        viewModelScope.launch {
-            runCatching { repository.shortEpg(credentials, entry.id) }
-                .onSuccess { programs ->
-                    val current = (_uiState.value.screen as? StreamiaScreen.Player)?.entry
-                    if (current?.key == entry.key) _uiState.update { it.copy(epg = programs) }
-                }
+        val offsetHours = state.appSettings.epgTimeOffsetHours
+        epgChannelJob?.cancel()
+        epgChannelJob = viewModelScope.launch {
+            val now = System.currentTimeMillis() / 1000
+            val cached = runCatching {
+                repository.cachedEpgNow(profileId, entry, now, offsetHours)
+            }.getOrNull()
+            if (cached != null && !cached.isEmpty) {
+                updatePlayerEpgIfCurrent(entry, cached)
+                return@launch
+            }
+
+            val programs = runCatching { repository.shortEpg(credentials, entry.id) }.getOrNull().orEmpty()
+            if (programs.isEmpty()) return@launch
+            val selected = programs.epgNowContextAt(nowEpochSeconds = now, offsetHours = offsetHours)
+            val fallback = if (!selected.isEmpty) selected else EpgNowContext(
+                current = programs.getOrNull(0)?.withTimeOffset(offsetHours),
+                next = programs.getOrNull(1)?.withTimeOffset(offsetHours),
+            )
+            updatePlayerEpgIfCurrent(entry, fallback)
         }
     }
 
-    private fun currentPrograms(programs: List<EpgProgram>): List<EpgProgram> {
-        val now = System.currentTimeMillis() / 1000
-        val currentIndex = programs.indexOfFirst { p ->
-            (p.startEpochSeconds ?: Long.MIN_VALUE) <= now && (p.endEpochSeconds ?: Long.MAX_VALUE) >= now
-        }.takeIf { it >= 0 } ?: programs.indexOfFirst { (it.startEpochSeconds ?: Long.MAX_VALUE) >= now }.coerceAtLeast(0)
-        return programs.drop(currentIndex).take(3)
+    private fun updatePlayerEpgIfCurrent(entry: MediaEntry, context: EpgNowContext) {
+        val current = (_uiState.value.screen as? StreamiaScreen.Player)?.entry
+        if (current?.key == entry.key) _uiState.update { it.copy(epg = context) }
+    }
+
+    private fun startEpgTicker(entry: MediaEntry) {
+        epgTickerJob?.cancel()
+        epgTickerJob = viewModelScope.launch {
+            while (isActive) {
+                delay(EPG_PLAYER_REFRESH_MS)
+                val state = _uiState.value
+                val current = (state.screen as? StreamiaScreen.Player)?.entry ?: return@launch
+                if (current.key != entry.key || current.type != MediaType.Live) return@launch
+                val profileId = state.activeProfileId ?: return@launch
+                val cached = runCatching {
+                    repository.cachedEpgNow(
+                        profileId = profileId,
+                        entry = current,
+                        nowEpochSeconds = System.currentTimeMillis() / 1000,
+                        offsetHours = state.appSettings.epgTimeOffsetHours,
+                    )
+                }.getOrNull()
+                if (cached != null && !cached.isEmpty) updatePlayerEpgIfCurrent(current, cached)
+            }
+        }
+    }
+
+    private fun startEpgBackgroundSync(force: Boolean = false) {
+        val state = _uiState.value
+        val profileId = state.activeProfileId ?: return
+        val credentials = state.credentials ?: return
+        if (state.catalogHydrating) return
+        val liveEntries = state.catalog?.entriesFor(MediaType.Live).orEmpty()
+        if (liveEntries.isEmpty()) return
+        if (epgSyncJob?.isActive == true && epgSyncProfileId == profileId) return
+
+        epgSyncProfileId = profileId
+        epgSyncJob = viewModelScope.launch {
+            try {
+                repository.refreshEpg(
+                    profileId = profileId,
+                    credentials = credentials,
+                    liveEntries = liveEntries,
+                    force = force,
+                )
+                if (_uiState.value.activeProfileId != profileId) return@launch
+                val player = (_uiState.value.screen as? StreamiaScreen.Player)?.entry
+                if (player?.type == MediaType.Live) loadEpg(player)
+                if (_uiState.value.screen is StreamiaScreen.Epg) {
+                    loadEpgGuideFromCache(_uiState.value.epgSelectedDate)
+                }
+            } catch (error: Throwable) {
+                if (error is CancellationException) throw error
+                if (_uiState.value.activeProfileId == profileId && _uiState.value.screen is StreamiaScreen.Epg) {
+                    _uiState.update { it.copy(epgLoading = false, message = error.safeMessage()) }
+                }
+            }
+        }
+    }
+
+    private fun loadEpgGuideFromCache(preferredDate: LocalDate?) {
+        val state = _uiState.value
+        val profileId = state.activeProfileId ?: return
+        val offsetHours = state.appSettings.epgTimeOffsetHours
+        val sequence = ++epgGuideLoadSequence
+        viewModelScope.launch {
+            val metadata = runCatching { repository.epgMetadata(profileId) }.getOrNull()
+            if (sequence != epgGuideLoadSequence || _uiState.value.activeProfileId != profileId) return@launch
+            if (metadata == null || metadata.programCount <= 0) {
+                if (_uiState.value.screen is StreamiaScreen.Epg) {
+                    _uiState.update { it.copy(epgGuide = null, epgAvailableDates = emptyList(), epgLoading = true) }
+                }
+                return@launch
+            }
+
+            val dates = epgDates(metadata, offsetHours)
+            if (dates.isEmpty()) {
+                _uiState.update { it.copy(epgGuide = null, epgAvailableDates = emptyList(), epgLoading = false) }
+                return@launch
+            }
+            val zone = ZoneId.systemDefault()
+            val today = LocalDate.now(zone)
+            val date = preferredDate?.takeIf { it in dates }
+                ?: dates.firstOrNull { it == today }
+                ?: dates.first()
+            val dayStart = date.atStartOfDay(zone).toEpochSecond()
+            val dayEnd = date.plusDays(1).atStartOfDay(zone).toEpochSecond()
+            val guide = runCatching {
+                repository.cachedEpgGuide(
+                    profileId = profileId,
+                    displayStartEpochSeconds = dayStart,
+                    displayEndEpochSeconds = dayEnd,
+                    offsetHours = offsetHours,
+                )
+            }.getOrElse {
+                if (sequence == epgGuideLoadSequence && _uiState.value.screen is StreamiaScreen.Epg) {
+                    _uiState.update { stateNow -> stateNow.copy(epgLoading = false, message = it.safeMessage()) }
+                }
+                return@launch
+            }
+            if (sequence != epgGuideLoadSequence || _uiState.value.activeProfileId != profileId) return@launch
+            if (_uiState.value.screen is StreamiaScreen.Epg) {
+                _uiState.update {
+                    it.copy(
+                        epgGuide = guide,
+                        epgAvailableDates = dates,
+                        epgSelectedDate = date,
+                        epgLoading = false,
+                    )
+                }
+            }
+        }
+    }
+
+    private fun epgDates(metadata: EpgCacheMetadata, offsetHours: Int): List<LocalDate> {
+        val minStart = metadata.minStartEpochSeconds ?: return emptyList()
+        val maxEnd = metadata.maxEndEpochSeconds ?: return emptyList()
+        if (maxEnd <= minStart) return emptyList()
+        val shiftSeconds = offsetHours * 3_600L
+        val zone = ZoneId.systemDefault()
+        val minDate = java.time.Instant.ofEpochSecond(minStart + shiftSeconds).atZone(zone).toLocalDate()
+        val maxDate = java.time.Instant.ofEpochSecond((maxEnd - 1 + shiftSeconds).coerceAtLeast(minStart + shiftSeconds))
+            .atZone(zone)
+            .toLocalDate()
+        val span = ChronoUnit.DAYS.between(minDate, maxDate).coerceIn(0L, MAX_EPG_DAY_SPAN)
+        return (0..span).map { minDate.plusDays(it) }
     }
 
     private fun refreshLibraryPresentation() {
@@ -1041,7 +1212,12 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 if (committed && presentation.catalog !== loaded.catalog) {
                     runCatching { repository.saveResolvedCatalog(loaded.profileId, presentation.catalog, presentation.library) }
                 }
-                if (committed) ensureSectionLoaded(MediaType.Live)
+                if (committed) {
+                    ensureSectionLoaded(
+                        MediaType.Live,
+                        forceEpgSync = loaded.source == CatalogSource.Network || loaded.source == CatalogSource.Import,
+                    )
+                }
                 return
             }
 
@@ -1080,7 +1256,10 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             offline = loaded.source == CatalogSource.Cache,
             message = loaded.importSummary,
         )
-        ensureSectionLoaded(MediaType.Live)
+        ensureSectionLoaded(
+            MediaType.Live,
+            forceEpgSync = loaded.source == CatalogSource.Network || loaded.source == CatalogSource.Import,
+        )
     }
 
     private fun showError(error: Throwable) {
@@ -1120,8 +1299,10 @@ data class StreamiaUiState(
     val message: String? = null,
     val mediaDetails: MediaDetails? = null,
     val seriesDetails: SeriesDetails? = null,
-    val epg: List<EpgProgram> = emptyList(),
+    val epg: EpgNowContext = EpgNowContext(),
     val epgGuide: EpgGuide? = null,
+    val epgAvailableDates: List<LocalDate> = emptyList(),
+    val epgSelectedDate: LocalDate? = null,
     val epgLoading: Boolean = false,
     val resumePositionMs: Long = 0,
     val browserType: MediaType? = null,
@@ -1144,6 +1325,9 @@ sealed interface StreamiaScreen {
     data class Series(val series: MediaEntry) : StreamiaScreen
     data class Player(val entry: MediaEntry, val returnToSeries: Boolean = false) : StreamiaScreen
 }
+
+private const val EPG_PLAYER_REFRESH_MS = 30_000L
+private const val MAX_EPG_DAY_SPAN = 30L
 
 class StreamiaViewModelFactory(private val repository: XtreamRepository) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
