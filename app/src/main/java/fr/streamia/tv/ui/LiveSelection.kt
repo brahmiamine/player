@@ -28,4 +28,4 @@ fun shouldRestartLivePreview(
     currentEntryKey: String?,
     currentMediaItemCount: Int,
     targetEntryKey: String,
-): Boolean = true
+): Boolean = currentEntryKey != targetEntryKey || currentMediaItemCount <= 0
