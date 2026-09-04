@@ -399,6 +399,9 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     fun showHome() { _uiState.update { it.copy(screen = StreamiaScreen.Home, message = null) } }
     fun showSettings() { _uiState.update { it.copy(screen = StreamiaScreen.Settings, message = null) } }
     fun showTools() { _uiState.update { it.copy(screen = StreamiaScreen.Tools, message = null) } }
+    fun showAbout() { _uiState.update { it.copy(screen = StreamiaScreen.About, message = null) } }
+
+    suspend fun cacheSizeBytes(): Long = repository.cacheSizeBytes()
     fun showParentalControl() { _uiState.update { it.copy(screen = StreamiaScreen.ParentalControl, message = null) } }
     fun showSearch() { _uiState.update { it.copy(screen = StreamiaScreen.Search, message = null) } }
 
@@ -1132,6 +1135,7 @@ sealed interface StreamiaScreen {
     data object Browser : StreamiaScreen
     data object Settings : StreamiaScreen
     data object Tools : StreamiaScreen
+    data object About : StreamiaScreen
     data object ParentalControl : StreamiaScreen
     data object Search : StreamiaScreen
     data object Epg : StreamiaScreen

@@ -48,6 +48,8 @@ class XtreamRepository(context: Context) {
     suspend fun checkForUpdate(currentVersion: String): UpdateCheckResult =
         withContext(Dispatchers.IO) { updateChecker.checkForUpdate(currentVersion) }
 
+    suspend fun cacheSizeBytes(): Long = withContext(Dispatchers.IO) { cache.databaseFileSizeBytes() }
+
     suspend fun exportBackup(profileId: String?): String = withContext(Dispatchers.IO) { backupManager.export(profileId) }
 
     suspend fun importBackup(profileId: String?, json: String): String =

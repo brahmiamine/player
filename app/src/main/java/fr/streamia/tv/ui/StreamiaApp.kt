@@ -185,7 +185,14 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onDismissUpdateCheck = viewModel::dismissUpdateCheck,
                     onExportBackup = viewModel::exportBackup,
                     onImportBackup = viewModel::importBackup,
+                    onAbout = viewModel::showAbout,
                     onBack = viewModel::showSettings,
+                )
+
+                state.screen is StreamiaScreen.About -> AboutScreen(
+                    versionName = BuildConfig.VERSION_NAME,
+                    onLoadCacheSize = viewModel::cacheSizeBytes,
+                    onBack = viewModel::showTools,
                 )
 
                 state.screen is StreamiaScreen.Search && state.catalog != null -> SearchScreen(

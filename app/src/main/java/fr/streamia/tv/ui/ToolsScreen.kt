@@ -59,6 +59,7 @@ fun ToolsScreen(
     onDismissUpdateCheck: () -> Unit,
     onExportBackup: suspend () -> String,
     onImportBackup: suspend (String) -> String,
+    onAbout: () -> Unit,
     onBack: () -> Unit,
 ) {
     BackHandler(onBack = onBack)
@@ -153,7 +154,13 @@ fun ToolsScreen(
                     { importLauncher.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) },
                     Modifier.weight(1f),
                 )
-                Spacer(Modifier.weight(1f))
+                SettingsTile(
+                    StreamiaIconGlyph.Settings,
+                    "À propos",
+                    "Version, appareil, taille du cache",
+                    onAbout,
+                    Modifier.weight(1f),
+                )
             }
         }
 
