@@ -62,6 +62,7 @@ import androidx.media3.ui.PlayerView
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import fr.streamia.tv.data.AppSettings
+import fr.streamia.tv.data.VideoAspectSetting
 import fr.streamia.tv.domain.Catalog
 import fr.streamia.tv.domain.EpgProgram
 import fr.streamia.tv.domain.MediaEntry
@@ -123,6 +124,7 @@ fun PlayerScreen(
     onZap: (Int) -> Unit,
     onEntrySelected: (MediaEntry) -> Unit,
     onProgress: (MediaEntry, Long, Long) -> Unit,
+    onCycleVideoAspect: () -> Unit,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val sharedLivePlayer = entry.type == MediaType.Live
@@ -154,7 +156,11 @@ fun PlayerScreen(
     var candidateIndex by remember { mutableStateOf(0) }
     var activeStreamUrl by remember { mutableStateOf("") }
     var numberBuffer by remember { mutableStateOf("") }
-    var aspect by remember { mutableStateOf(VideoAspect.Fit) }
+    val aspect = when (appSettings.videoAspect) {
+        VideoAspectSetting.Fit -> VideoAspect.Fit
+        VideoAspectSetting.Fill -> VideoAspect.Fill
+        VideoAspectSetting.Zoom -> VideoAspect.Zoom
+    }
     var audioTracks by remember { mutableStateOf(listOf(TrackChoice("Auto", null))) }
     var subtitleTracks by remember { mutableStateOf(listOf(TrackChoice("Désactivés", null))) }
     var audioIndex by remember { mutableStateOf(0) }
@@ -691,7 +697,7 @@ fun PlayerScreen(
                     applySubtitle(subtitleTracks[subtitleIndex])
                     trackPreferenceStore.saveSubtitle(subtitleTracks[subtitleIndex].language)
                 },
-                onNextAspect = { aspect = VideoAspect.entries[(aspect.ordinal + 1) % VideoAspect.entries.size] },
+                onNextAspect = onCycleVideoAspect,
                 onClose = { settingsOpen = false; rootFocus.requestFocus() },
                 externalSubtitleAvailable = !sharedLivePlayer,
                 externalSubtitleLabel = externalSubtitle?.label,
