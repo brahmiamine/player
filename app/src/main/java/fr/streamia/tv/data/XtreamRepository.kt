@@ -576,8 +576,12 @@ class XtreamRepository(context: Context) {
         // spinner de chargement après un premier affichage réussi.
         private val epgSyncMutexes = ConcurrentHashMap<String, Mutex>()
 
+        // computeIfAbsent (pas l'extension Kotlin getOrPut, qui fait un get()+put() non atomique
+        // et peut donc créer deux Mutex distincts pour le même profil sous contention, ce qui
+        // annulerait la garantie visée ici) : ConcurrentHashMap.computeIfAbsent garantit qu'un
+        // seul Mutex est créé et vu par tous les appelants pour un profileId donné.
         private fun epgSyncMutexFor(profileId: String): Mutex =
-            epgSyncMutexes.getOrPut(profileId) { Mutex() }
+            epgSyncMutexes.computeIfAbsent(profileId) { Mutex() }
     }
 }
 
