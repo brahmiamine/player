@@ -3,6 +3,7 @@ package fr.streamia.tv.player
 import android.content.Context
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
 import androidx.media3.common.Tracks
 import androidx.media3.exoplayer.ExoPlayer
 import fr.streamia.tv.data.BufferMode
@@ -10,6 +11,8 @@ import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.domain.ServerCredentials
 import fr.streamia.tv.domain.XtreamUrlBuilder
+
+fun shouldPrepareLivePlayback(playbackState: Int): Boolean = playbackState == Player.STATE_IDLE
 
 /** Un seul lecteur Live, partagé entre l'aperçu et le plein écran. */
 class LivePlaybackSession(context: Context, bufferMode: BufferMode = BufferMode.Auto) {
@@ -21,7 +24,7 @@ class LivePlaybackSession(context: Context, bufferMode: BufferMode = BufferMode.
 
     fun play(entry: MediaEntry, credentials: ServerCredentials) {
         if (entryKey == entry.key && player.mediaItemCount > 0) {
-            player.play()
+            continuePlayback()
             return
         }
         playUrl(entry.key, XtreamUrlBuilder(credentials).stream(entry))
@@ -61,12 +64,15 @@ class LivePlaybackSession(context: Context, bufferMode: BufferMode = BufferMode.
         }
     }
 
-    fun resume() {
-        if (entryKey != null && player.mediaItemCount > 0) {
+    fun continuePlayback() {
+        if (entryKey == null || player.mediaItemCount <= 0) return
+        if (shouldPrepareLivePlayback(player.playbackState)) {
             player.prepare()
-            player.play()
         }
+        player.play()
     }
+
+    fun resume() = continuePlayback()
 
     fun release() = player.release()
 }
