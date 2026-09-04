@@ -1,6 +1,8 @@
 package fr.streamia.tv.ui
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class LiveSelectionTest {
@@ -31,4 +33,37 @@ class LiveSelectionTest {
             ),
         )
     }
+    @Test
+    fun `same live channel keeps the current player session`() {
+        assertFalse(
+            shouldRestartLivePreview(
+                currentEntryKey = "Live:11",
+                currentMediaItemCount = 1,
+                targetEntryKey = "Live:11",
+            ),
+        )
+    }
+
+    @Test
+    fun `another live channel still restarts playback`() {
+        assertTrue(
+            shouldRestartLivePreview(
+                currentEntryKey = "Live:10",
+                currentMediaItemCount = 1,
+                targetEntryKey = "Live:11",
+            ),
+        )
+    }
+
+    @Test
+    fun `missing media item restarts even for the same channel`() {
+        assertTrue(
+            shouldRestartLivePreview(
+                currentEntryKey = "Live:11",
+                currentMediaItemCount = 0,
+                targetEntryKey = "Live:11",
+            ),
+        )
+    }
+
 }
