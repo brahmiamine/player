@@ -938,7 +938,13 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 lastViewedEntry = entry,
             )
         }
-        if (entry.type == MediaType.Live) loadEpg(entry)
+        if (entry.type == MediaType.Live) {
+            loadEpg(entry)
+            startEpgTicker(entry)
+        } else {
+            epgChannelJob?.cancel()
+            epgTickerJob?.cancel()
+        }
     }
 
     private fun loadMovie(movie: MediaEntry) {
@@ -1194,6 +1200,8 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                             library = state.library,
                             offline = loaded.source == CatalogSource.Cache,
                             epgGuide = null,
+                            epgAvailableDates = emptyList(),
+                            epgSelectedDate = null,
                             message = loaded.importSummary ?: state.message,
                         )
                     }
