@@ -56,6 +56,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.Tracks
 import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.session.MediaSession
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import androidx.tv.material3.MaterialTheme
@@ -128,6 +129,7 @@ fun PlayerScreen(
     val player = remember(entry.type, livePlaybackSession) {
         if (sharedLivePlayer) livePlaybackSession.player else StreamiaPlayerFactory.create(context.applicationContext, entry.type)
     }
+    val mediaSession = remember(player) { MediaSession.Builder(context.applicationContext, player).build() }
     val transportStore = remember { PlaybackTransportStore(context.applicationContext) }
     val trackPreferenceStore = remember { PlaybackTrackPreferenceStore(context.applicationContext) }
     val diagnosticsTracker = remember { PlaybackDiagnosticsTracker() }
@@ -231,6 +233,10 @@ fun PlayerScreen(
         if (uri == null) return@rememberLauncherForActivityResult
         val displayName = documentDisplayName(context, uri) ?: uri.lastPathSegment.orEmpty()
         loadExternalSubtitle(uri, displayName)
+    }
+
+    DisposableEffect(mediaSession) {
+        onDispose { mediaSession.release() }
     }
 
     DisposableEffect(player) {
