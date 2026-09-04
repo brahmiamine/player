@@ -1,5 +1,6 @@
 package fr.streamia.tv.player
 
+import fr.streamia.tv.data.BufferMode
 import fr.streamia.tv.domain.MediaType
 
 data class BufferProfile(
@@ -10,20 +11,18 @@ data class BufferProfile(
 )
 
 object PlaybackTuning {
-    fun forType(type: MediaType): BufferProfile = when (type) {
-        MediaType.Live -> BufferProfile(
-            minBufferMs = 2_500,
-            maxBufferMs = 12_000,
-            bufferForPlaybackMs = 350,
-            bufferForPlaybackAfterRebufferMs = 900,
-        )
+    fun forType(type: MediaType, mode: BufferMode = BufferMode.Auto): BufferProfile = when (type) {
+        MediaType.Live -> when (mode) {
+            BufferMode.LowLatency -> BufferProfile(1_500, 6_000, 250, 600)
+            BufferMode.Auto -> BufferProfile(2_500, 12_000, 350, 900)
+            BufferMode.Stable -> BufferProfile(5_000, 25_000, 700, 2_000)
+        }
         MediaType.Movie,
         MediaType.Series,
-        -> BufferProfile(
-            minBufferMs = 25_000,
-            maxBufferMs = 90_000,
-            bufferForPlaybackMs = 650,
-            bufferForPlaybackAfterRebufferMs = 3_000,
-        )
+        -> when (mode) {
+            BufferMode.LowLatency -> BufferProfile(12_000, 45_000, 450, 1_500)
+            BufferMode.Auto -> BufferProfile(25_000, 90_000, 650, 3_000)
+            BufferMode.Stable -> BufferProfile(40_000, 120_000, 1_000, 5_000)
+        }
     }
 }
