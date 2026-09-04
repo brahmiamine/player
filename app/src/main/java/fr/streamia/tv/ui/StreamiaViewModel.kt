@@ -338,8 +338,18 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
      * contenu jamais parcouru serait invisible à une recherche purement en mémoire.
      */
     suspend fun searchCatalog(query: String, type: MediaType?): List<MediaEntry> {
-        val profileId = _uiState.value.activeProfileId ?: return emptyList()
-        return runCatching { repository.search(profileId, query, type) }.getOrDefault(emptyList())
+        val state = _uiState.value
+        val profileId = state.activeProfileId ?: return emptyList()
+        val hiddenCategoryIdsByType = state.catalog
+            ?.categories
+            .orEmpty()
+            .filter { it.key in state.library.hiddenCategories }
+            .groupBy(MediaCategory::type)
+            .mapValues { (_, categories) -> categories.mapTo(mutableSetOf(), MediaCategory::id) }
+
+        return runCatching { repository.search(profileId, query, type) }
+            .getOrDefault(emptyList())
+            .filterNot { entry -> entry.categoryId in hiddenCategoryIdsByType[entry.type].orEmpty() }
     }
 
     fun showHome() { _uiState.update { it.copy(screen = StreamiaScreen.Home, message = null) } }
