@@ -275,6 +275,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     }
 
     fun saveM3uSettings(profileId: String, m3uUrl: String, xmlTvUrl: String, autoRefreshHours: Int) {
+        val previousEpgUrl = repository.profile(profileId)?.xmlTvUrl
         val updated = repository.updateRemoteSettings(
             profileId,
             m3uUrl.trim().takeIf(String::isNotBlank),
@@ -282,7 +283,30 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             autoRefreshHours,
         ) ?: return
         _uiState.update { it.copy(profiles = repository.profiles(), message = "Paramètres M3U/EPG enregistrés.") }
-        if (updated.isRemoteM3u && m3uUrl.isNotBlank()) openProfile(profileId)
+
+        val epgSourceChanged = previousEpgUrl != updated.xmlTvUrl
+        if (epgSourceChanged) {
+            viewModelScope.launch {
+                repository.clearEpgCache(profileId)
+                if (_uiState.value.activeProfileId == profileId) {
+                    _uiState.update {
+                        it.copy(
+                            epg = EpgNowContext(),
+                            epgGuide = null,
+                            epgAvailableDates = emptyList(),
+                            epgSelectedDate = null,
+                        )
+                    }
+                }
+                if (updated.isRemoteM3u && m3uUrl.isNotBlank()) {
+                    openProfile(profileId)
+                } else if (_uiState.value.activeProfileId == profileId) {
+                    startEpgBackgroundSync(force = true)
+                }
+            }
+        } else if (updated.isRemoteM3u && m3uUrl.isNotBlank()) {
+            openProfile(profileId)
+        }
     }
 
     fun renameProfile(profileId: String, name: String) {
