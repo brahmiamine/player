@@ -2,10 +2,13 @@ package fr.streamia.tv.data
 
 import android.content.Context
 
+enum class VideoAspectSetting { Fit, Fill, Zoom }
+
 data class AppSettings(
     val livePreviewEnabled: Boolean = true,
     val livePreviewDelayMs: Int = DEFAULT_LIVE_PREVIEW_DELAY_MS,
     val vodSeekStepSeconds: Int = DEFAULT_VOD_SEEK_STEP_SECONDS,
+    val videoAspect: VideoAspectSetting = VideoAspectSetting.Fit,
 ) {
     val vodSeekStepMs: Long
         get() = vodSeekStepSeconds * 1_000L
@@ -15,6 +18,9 @@ data class AppSettings(
 
     fun nextVodSeekStepSeconds(): Int =
         nextValue(VOD_SEEK_STEPS_SECONDS, vodSeekStepSeconds)
+
+    fun nextVideoAspect(): VideoAspectSetting =
+        VideoAspectSetting.entries[(videoAspect.ordinal + 1) % VideoAspectSetting.entries.size]
 
     companion object {
         val LIVE_PREVIEW_DELAYS_MS = listOf(0, 250, 500, 1_000, 2_000)
@@ -44,6 +50,12 @@ class AppSettingsStore(context: Context) {
             AppSettings.DEFAULT_VOD_SEEK_STEP_SECONDS,
         ).takeIf { it in AppSettings.VOD_SEEK_STEPS_SECONDS }
             ?: AppSettings.DEFAULT_VOD_SEEK_STEP_SECONDS,
+        videoAspect = runCatching {
+            VideoAspectSetting.valueOf(
+                preferences.getString(KEY_VIDEO_ASPECT, VideoAspectSetting.Fit.name)
+                    ?: VideoAspectSetting.Fit.name,
+            )
+        }.getOrDefault(VideoAspectSetting.Fit),
     )
 
     fun save(settings: AppSettings) {
@@ -51,6 +63,7 @@ class AppSettingsStore(context: Context) {
             .putBoolean(KEY_LIVE_PREVIEW_ENABLED, settings.livePreviewEnabled)
             .putInt(KEY_LIVE_PREVIEW_DELAY_MS, settings.livePreviewDelayMs)
             .putInt(KEY_VOD_SEEK_STEP_SECONDS, settings.vodSeekStepSeconds)
+            .putString(KEY_VIDEO_ASPECT, settings.videoAspect.name)
             .apply()
     }
 
@@ -65,5 +78,6 @@ class AppSettingsStore(context: Context) {
         const val KEY_LIVE_PREVIEW_ENABLED = "live_preview_enabled"
         const val KEY_LIVE_PREVIEW_DELAY_MS = "live_preview_delay_ms"
         const val KEY_VOD_SEEK_STEP_SECONDS = "vod_seek_step_seconds"
+        const val KEY_VIDEO_ASPECT = "video_aspect"
     }
 }
