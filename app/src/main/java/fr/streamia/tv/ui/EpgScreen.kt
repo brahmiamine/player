@@ -76,6 +76,8 @@ private val DayLabelFormatter = DateTimeFormatter.ofPattern("EEEE d MMMM", Local
 fun EpgScreen(
     catalog: Catalog,
     guide: EpgGuide?,
+    hiddenCategories: Set<String>,
+    hiddenEntries: Set<String>,
     loading: Boolean,
     message: String?,
     onOpenChannel: (MediaEntry) -> Unit,
@@ -94,8 +96,20 @@ fun EpgScreen(
         }
     }
 
-    val categories = remember(catalog) { listOf(Catalog.allCategory(MediaType.Live)) + catalog.categoriesFor(MediaType.Live) }
-    val channels = remember(catalog, categoryId) { catalog.entriesIn(MediaType.Live, categoryId) }
+    val hiddenCategoryIds = remember(catalog, hiddenCategories) {
+        catalog.categoriesFor(MediaType.Live)
+            .filter { it.key in hiddenCategories }
+            .mapTo(mutableSetOf(), MediaCategory::id)
+    }
+    val categories = remember(catalog, hiddenCategories) {
+        listOf(Catalog.allCategory(MediaType.Live)) +
+            catalog.categoriesFor(MediaType.Live).filterNot { it.key in hiddenCategories }
+    }
+    val channels = remember(catalog, categoryId, hiddenEntries, hiddenCategoryIds) {
+        catalog.entriesIn(MediaType.Live, categoryId).filterNot {
+            it.key in hiddenEntries || it.categoryId in hiddenCategoryIds
+        }
+    }
 
     val availableDates = remember(guide, zone) {
         guide?.availableDates(zone)?.takeIf { it.isNotEmpty() } ?: listOf(LocalDate.now(zone))
