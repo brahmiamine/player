@@ -286,6 +286,7 @@ class XtreamRepository(context: Context) {
     }
 
     fun toggleEntryFavorite(profileId: String, entry: MediaEntry): Boolean = libraryStore.toggleEntryFavorite(profileId, entry)
+    fun toggleEntryHidden(profileId: String, entry: MediaEntry): Boolean = libraryStore.toggleEntryHidden(profileId, entry)
     fun toggleCategoryFavorite(profileId: String, category: MediaCategory): Boolean = libraryStore.toggleCategoryFavorite(profileId, category)
     fun toggleCategoryHidden(profileId: String, category: MediaCategory): Boolean = libraryStore.toggleCategoryHidden(profileId, category)
     fun recordPlayback(profileId: String, entry: MediaEntry, positionMs: Long, durationMs: Long) =
