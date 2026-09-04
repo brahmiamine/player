@@ -341,9 +341,9 @@ class XtreamRepository(context: Context) {
         for (source in sources) {
             val session = epgCache.beginReplaceOnIo(profileId)
             try {
-                val result = xmlTvRepository.syncOnIo(source, liveEntries, session)
-                if (result.programCount <= 0) {
-                    throw XtreamException("La source EPG ne contient aucun programme correspondant aux chaînes.")
+                xmlTvRepository.syncOnIo(source, liveEntries, session)
+                if (session.writtenProgramCount <= 0) {
+                    throw XtreamException("La source EPG ne contient aucun programme exploitable correspondant aux chaînes.")
                 }
                 epgCache.commitReplaceOnIo(session, source)
                 return@withContext true
