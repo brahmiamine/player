@@ -79,11 +79,12 @@ fun HomeScreen(
     // Reprise en cours : uniquement le contenu VOD (Films/Séries) assez avancé pour être
     // reprenable — Direct n'a pas de notion de position de lecture. On relit l'entrée depuis le
     // catalogue courant (icône/nom à jour) tout en gardant l'item d'historique pour sa progression.
-    val resumeCards = remember(catalog, library.history, hiddenCategoryIdsByType) {
+    val resumeCards = remember(catalog, library.history, library.hiddenEntries, hiddenCategoryIdsByType) {
         library.history.asSequence()
             .filter {
                 it.entry.type != MediaType.Live &&
                     it.isResumable() &&
+                    it.entry.key !in library.hiddenEntries &&
                     it.entry.categoryId !in hiddenCategoryIdsByType[it.entry.type].orEmpty()
             }
             .map { item ->
@@ -102,9 +103,10 @@ fun HomeScreen(
     // Favoris : accès direct depuis l'accueil sans repasser par une catégorie. Si un favori est
     // aussi présent dans l'historique, sa progression est affichée pour rester cohérent avec le
     // reste de l'app plutôt que d'inventer un second indicateur.
-    val favoriteCards = remember(catalog, library.favoriteEntries, library.history, hiddenCategoryIdsByType) {
+    val favoriteCards = remember(catalog, library.favoriteEntries, library.history, library.hiddenEntries, hiddenCategoryIdsByType) {
         val historyByKey = library.history.associateBy { it.entry.key }
         library.favoriteEntries.asSequence()
+            .filterNot { it in library.hiddenEntries }
             .mapNotNull(catalog::entry)
             .filter { it.categoryId !in hiddenCategoryIdsByType[it.type].orEmpty() }
             .map { entry -> entry to historyByKey[entry.key]?.progress?.takeIf { it > 0.02f } }
