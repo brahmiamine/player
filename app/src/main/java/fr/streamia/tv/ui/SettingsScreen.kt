@@ -10,12 +10,15 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
@@ -67,8 +70,15 @@ fun SettingsScreen(
         )
         Spacer(Modifier.height(20.dp))
 
-        Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        // Hauteur de ligne fixe + défilement plutôt que weight(1f) sur 7 lignes non défilantes :
+        // sur un écran TV plus bas (résolutions non-16:9, canevas 10-foot ~540dp), diviser la
+        // hauteur disponible en 7 aurait laissé moins de place par ligne que ce que le contenu
+        // d'une tuile (icône + titre + sous-titre) nécessite, et FocusableSurface découpe
+        // silencieusement ce qui dépasse. Avec une hauteur fixe, rien n'est jamais tronqué ; s'il
+        // manque de place à l'écran, on défile (le focus D-pad ramène automatiquement la tuile
+        // sélectionnée dans la zone visible).
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Row(Modifier.fillMaxWidth().height(150.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 SettingsTile(
                     glyph = StreamiaIconGlyph.Live,
                     title = "Aperçu TV en direct",
@@ -86,7 +96,7 @@ fun SettingsScreen(
                     enabled = settings.livePreviewEnabled,
                 )
             }
-            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            Row(Modifier.fillMaxWidth().height(150.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 SettingsTile(
                     glyph = StreamiaIconGlyph.ArrowForward,
                     title = "Avance / retour VOD",
@@ -106,7 +116,7 @@ fun SettingsScreen(
                     modifier = Modifier.weight(1f),
                 )
             }
-            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            Row(Modifier.fillMaxWidth().height(150.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 SettingsTile(
                     glyph = StreamiaIconGlyph.Live,
                     title = "Format du flux Live",
@@ -130,7 +140,7 @@ fun SettingsScreen(
                     modifier = Modifier.weight(1f),
                 )
             }
-            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            Row(Modifier.fillMaxWidth().height(150.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 SettingsTile(
                     glyph = StreamiaIconGlyph.Reorder,
                     title = "Tri des chaînes en direct",
@@ -155,7 +165,7 @@ fun SettingsScreen(
                     modifier = Modifier.weight(1f),
                 )
             }
-            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            Row(Modifier.fillMaxWidth().height(150.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 SettingsTile(
                     glyph = StreamiaIconGlyph.Guide,
                     title = "Décalage horaire EPG",
@@ -176,7 +186,7 @@ fun SettingsScreen(
                     selected = settings.autoPlayNextEpisode,
                 )
             }
-            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            Row(Modifier.fillMaxWidth().height(150.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 SettingsTile(
                     glyph = StreamiaIconGlyph.Reorder,
                     title = "Taille des sous-titres",
@@ -193,7 +203,7 @@ fun SettingsScreen(
                     selected = settings.subtitleBackgroundEnabled,
                 )
             }
-            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            Row(Modifier.fillMaxWidth().height(150.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 SettingsTile(
                     glyph = StreamiaIconGlyph.Settings,
                     title = "Outils et gestion",
@@ -237,12 +247,16 @@ internal fun SettingsTile(
         selected = selected,
         modifier = modifier.fillMaxSize(),
     ) {
-        Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center) {
+        // maxLines + padding réduit : la tuile a une hauteur fixe (voir grilles Paramètres/Outils),
+        // qui varie peu, mais sa largeur et l'échelle de police système varient selon l'appareil —
+        // sans ces bornes, un titre ou sous-titre un peu long pourrait pousser le contenu hors des
+        // limites de la tuile, qui le découpe silencieusement (Box.clip dans FocusableSurface).
+        Column(Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 16.dp), verticalArrangement = Arrangement.Center) {
             StreamiaIcon(glyph, size = 34.dp)
             Spacer(Modifier.height(12.dp))
-            Text(title, color = Ink, fontSize = 20.sp, fontWeight = HeadingWeight)
+            Text(title, color = Ink, fontSize = 20.sp, fontWeight = HeadingWeight, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Spacer(Modifier.height(6.dp))
-            Text(subtitle, color = MutedInk, fontSize = 13.sp, lineHeight = 18.sp)
+            Text(subtitle, color = MutedInk, fontSize = 13.sp, lineHeight = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
