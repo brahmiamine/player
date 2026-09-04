@@ -221,6 +221,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                     activeProfileId = profileId,
                     profiles = repository.profiles(),
                     library = repository.library(profileId),
+                    appSettings = repository.appSettings(),
                 )
                 try {
                     mergeCatalog(repository.openProfile(profileId, knownCache = cachedCatalog))
@@ -1034,10 +1035,15 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         val profileId = state.activeProfileId ?: return
         val credentials = state.credentials ?: return
         if (state.catalogHydrating) return
-        val liveEntries = state.catalog?.entriesFor(MediaType.Live).orEmpty()
+        val catalog = state.catalog ?: return
+        if (!catalog.isCategoryLoaded(MediaType.Live, Catalog.ALL_CATEGORY_ID)) return
+        val liveEntries = catalog.entriesFor(MediaType.Live)
         if (liveEntries.isEmpty()) return
-        if (epgSyncJob?.isActive == true && epgSyncProfileId == profileId) return
 
+        if (epgSyncJob?.isActive == true) {
+            if (epgSyncProfileId == profileId) return
+            epgSyncJob?.cancel()
+        }
         epgSyncProfileId = profileId
         epgSyncJob = viewModelScope.launch {
             try {
@@ -1058,6 +1064,8 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 if (_uiState.value.activeProfileId == profileId && _uiState.value.screen is StreamiaScreen.Epg) {
                     _uiState.update { it.copy(epgLoading = false, message = error.safeMessage()) }
                 }
+            } finally {
+                if (epgSyncProfileId == profileId) epgSyncProfileId = null
             }
         }
     }
@@ -1221,10 +1229,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                     runCatching { repository.saveResolvedCatalog(loaded.profileId, presentation.catalog, presentation.library) }
                 }
                 if (committed) {
-                    ensureSectionLoaded(
-                        MediaType.Live,
-                        forceEpgSync = loaded.source == CatalogSource.Network || loaded.source == CatalogSource.Import,
-                    )
+                    ensureSectionLoaded(MediaType.Live)
                 }
                 return
             }
@@ -1240,6 +1245,11 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     }
 
     private fun showLogin() {
+        epgSyncJob?.cancel()
+        epgSyncJob = null
+        epgSyncProfileId = null
+        epgChannelJob?.cancel()
+        epgTickerJob?.cancel()
         _uiState.value = StreamiaUiState(
             booting = false,
             screen = StreamiaScreen.Login,
@@ -1264,10 +1274,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             offline = loaded.source == CatalogSource.Cache,
             message = loaded.importSummary,
         )
-        ensureSectionLoaded(
-            MediaType.Live,
-            forceEpgSync = loaded.source == CatalogSource.Network || loaded.source == CatalogSource.Import,
-        )
+        ensureSectionLoaded(MediaType.Live)
     }
 
     private fun showError(error: Throwable) {
