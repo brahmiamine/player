@@ -51,6 +51,20 @@ class AppSettingsTest {
     }
 
     @Test
+    fun `live stream format cycles and wraps`() {
+        var settings = AppSettings(liveStreamFormat = LiveStreamFormat.Auto)
+        val observed = buildList {
+            repeat(LiveStreamFormat.entries.size) {
+                add(settings.liveStreamFormat)
+                settings = settings.copy(liveStreamFormat = settings.nextLiveStreamFormat())
+            }
+        }
+
+        assertEquals(listOf(LiveStreamFormat.Auto, LiveStreamFormat.Ts, LiveStreamFormat.Hls), observed)
+        assertEquals(LiveStreamFormat.Auto, settings.liveStreamFormat)
+    }
+
+    @Test
     fun `vod seek step cycles and exposes milliseconds`() {
         var settings = AppSettings(vodSeekStepSeconds = 10)
         val observed = buildList {
