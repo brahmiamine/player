@@ -13,6 +13,7 @@ import fr.streamia.tv.logging.CrashReporter
 import fr.streamia.tv.ui.StreamiaTvRoot
 import fr.streamia.tv.ui.StreamiaViewModel
 import fr.streamia.tv.ui.StreamiaViewModelFactory
+import fr.streamia.tv.work.EpgSyncScheduler
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -20,6 +21,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         CrashReporter.initialize(applicationContext)
+        EpgSyncScheduler.schedule(applicationContext)
 
         WindowCompat.setDecorFitsSystemWindows(window, false)
         WindowInsetsControllerCompat(window, window.decorView).apply {
