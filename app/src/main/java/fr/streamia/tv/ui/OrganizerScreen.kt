@@ -142,7 +142,7 @@ fun OrganizerScreen(
                             ) {
                                 Column(Modifier.padding(horizontal = 13.dp)) {
                                     Text(category.name, color = Ink, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    Text("${catalog.entriesIn(type, category.id).size} éléments", color = MutedInk, fontSize = 11.sp)
+                                    Text("${catalog.countIn(type, category.id)} éléments", color = MutedInk, fontSize = 11.sp)
                                 }
                             }
                             FocusableSurface(

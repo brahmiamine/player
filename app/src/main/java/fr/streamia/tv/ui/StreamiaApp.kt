@@ -111,6 +111,8 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onToggleCategoryFavorite = viewModel::toggleCategoryFavorite,
                     onRememberContent = viewModel::rememberLastContent,
                     onLocationChanged = viewModel::rememberBrowserLocation,
+                    onEnsureCategoryLoaded = viewModel::ensureCategoryLoaded,
+                    onLoadMoreInCategory = viewModel::loadMoreInCategory,
                     onHome = viewModel::showHome,
                     onSearch = {
                         livePlaybackSession.stop(clearSession = true)
@@ -140,8 +142,8 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                 )
 
                 state.screen is StreamiaScreen.Search && state.catalog != null -> SearchScreen(
-                    catalog = state.catalog!!,
                     favoriteEntries = state.library.favoriteEntries,
+                    search = viewModel::searchCatalog,
                     onOpenEntry = viewModel::openEntry,
                     onToggleEntryFavorite = viewModel::toggleEntryFavorite,
                     onBack = viewModel::showHome,

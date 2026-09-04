@@ -3,7 +3,6 @@ package fr.streamia.tv.data
 import android.content.Context
 import android.util.JsonReader
 import android.util.JsonToken
-import android.util.JsonWriter
 import fr.streamia.tv.domain.Catalog
 import fr.streamia.tv.domain.MediaCategory
 import fr.streamia.tv.domain.MediaEntry
@@ -13,137 +12,159 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.nio.charset.StandardCharsets
 
-/** Cache JSON écrit et lu en flux pour éviter de dupliquer un catalogue massif en mémoire. */
+/**
+ * Indexed provider catalogue cache.
+ *
+ * New installs and successful refreshes are stored in SQLite. Existing v4 JSON files are migrated
+ * once, off the main thread, so an upgrade keeps the user's last valid provider catalogue without
+ * reconnecting to Xtream.
+ */
 class CatalogCache(context: Context) {
-    private val filesDir = context.filesDir
+    private val appContext = context.applicationContext
+    private val filesDir = appContext.filesDir
+    private val database = CatalogDatabase(appContext)
+    private val libraryStore = UserLibraryStore(appContext)
+    private val playlistStore = PlaylistStore(appContext)
     private val legacyFiles = listOf(File(filesDir, "catalog-v2.json"), File(filesDir, "catalog-v1.json"))
 
     suspend fun save(profileId: String, catalog: Catalog) = withContext(Dispatchers.IO) {
-        writeAtomically(fileFor(profileId)) { json ->
-            json.name("saved_at").value(System.currentTimeMillis())
-            writeCatalogBody(json, catalog)
-        }
+        database.replace(profileId, catalog)
+        deleteJsonCopies(profileId)
         legacyFiles.forEach(File::delete)
     }
 
     /**
-     * Catalogue déjà résolu (favoris/ordre appliqués par [fr.streamia.tv.data.applyUserLibraryToCatalog])
-     * tel qu'obtenu à la fin de la dernière réconciliation réussie, associé à l'empreinte du layout
-     * ([fr.streamia.tv.data.catalogLayoutFingerprint]) utilisé pour le produire. Permet à une
-     * réouverture de l'app de réafficher directement un catalogue déjà prêt à l'emploi sans repasser
-     * par [fr.streamia.tv.data.applyUserLibraryToCatalog] tant que l'organisation (favoris exclus,
-     * qui ne changent pas la structure du Catalog) n'a pas changé depuis — voir
-     * [loadResolved].
+     * The user layout already lives as lightweight deltas in [UserLibraryStore]. Keeping a second
+     * resolved copy of every provider row doubled disk usage and could force a second full parse on
+     * startup, so resolved catalogue snapshots are intentionally no longer persisted.
      */
-    suspend fun saveResolved(profileId: String, catalog: Catalog, layoutFingerprint: String) = withContext(Dispatchers.IO) {
-        writeAtomically(resolvedFileFor(profileId)) { json ->
-            json.name("layout_fingerprint").value(layoutFingerprint)
-            writeCatalogBody(json, catalog)
+    suspend fun saveResolved(profileId: String, catalog: Catalog, layoutFingerprint: String) =
+        withContext(Dispatchers.IO) {
+            // Keep parameters in the API while callers migrate; deleting the old file is the work.
+            @Suppress("UNUSED_VARIABLE") val ignoredCatalog = catalog
+            @Suppress("UNUSED_VARIABLE") val ignoredFingerprint = layoutFingerprint
+            resolvedFileFor(profileId).delete()
         }
-    }
 
-    /**
-     * Ne renvoie le catalogue déjà résolu que si [expectedLayoutFingerprint] correspond à celui
-     * enregistré avec lui : sinon l'organisation courante (chaînes déplacées, ordre des catégories)
-     * a changé depuis, et le réutiliser tel quel replacerait une entrée dans la mauvaise catégorie.
-     * L'appelant doit alors retomber sur le chemin normal (catalogue brut + réapplication).
-     */
     suspend fun loadResolved(profileId: String, expectedLayoutFingerprint: String): Catalog? =
         withContext(Dispatchers.IO) {
-            val file = resolvedFileFor(profileId)
-            if (!file.exists()) return@withContext null
-            runCatching {
-                var fingerprint = ""
-                val categories = ArrayList<MediaCategory>()
-                val entries = ArrayList<MediaEntry>()
-                file.inputStream().reader(StandardCharsets.UTF_8).buffered().use { input ->
-                    JsonReader(input).use { json ->
-                        json.beginObject()
-                        while (json.hasNext()) {
-                            when (json.nextName()) {
-                                "layout_fingerprint" -> fingerprint = json.nextString()
-                                "categories" -> readCategories(json, categories)
-                                "entries" -> readEntries(json, entries)
-                                else -> json.skipValue()
-                            }
-                        }
-                        json.endObject()
-                    }
-                }
-                if (fingerprint != expectedLayoutFingerprint) null else Catalog(categories, entries)
-            }.getOrNull()
+            @Suppress("UNUSED_VARIABLE") val ignoredFingerprint = expectedLayoutFingerprint
+            resolvedFileFor(profileId).delete()
+            null
         }
 
-    private inline fun writeAtomically(file: File, crossinline body: (JsonWriter) -> Unit) {
-        val temporary = File(file.parentFile, "${file.name}.tmp")
-        temporary.outputStream().writer(StandardCharsets.UTF_8).buffered().use { output ->
-            JsonWriter(output).use { json ->
-                json.beginObject()
-                body(json)
-                json.endObject()
-            }
+    suspend fun load(profileId: String, extraEntryKeys: Set<String> = emptySet()): Catalog? =
+        withContext(Dispatchers.IO) {
+            ensureMigrated(profileId)
+            val contextKeys = persistedContextKeys(profileId) + extraEntryKeys
+            database.loadLightweight(profileId, contextKeys)
         }
-        if (!temporary.renameTo(file)) {
-            temporary.copyTo(file, overwrite = true)
-            temporary.delete()
+
+    suspend fun loadFull(profileId: String): Catalog? = withContext(Dispatchers.IO) {
+        ensureMigrated(profileId)
+        database.loadFull(profileId)
+    }
+
+    suspend fun loadCategoryPage(
+        profileId: String,
+        type: MediaType,
+        categoryId: String,
+        offset: Int,
+        limit: Int,
+    ): CatalogPage = withContext(Dispatchers.IO) {
+        ensureMigrated(profileId)
+        if (limit <= 0) return@withContext CatalogPage(emptyList(), offset.coerceAtLeast(0), false)
+        val boundedLimit = limit.coerceAtMost(MAX_PAGE_SIZE)
+        val safeOffset = offset.coerceAtLeast(0)
+        val entries = database.loadCategoryPage(profileId, type, categoryId, safeOffset, boundedLimit)
+        CatalogPage(
+            entries = entries,
+            nextOffset = safeOffset + entries.size,
+            hasMore = entries.size == boundedLimit,
+        )
+    }
+
+    suspend fun loadAdjacent(
+        profileId: String,
+        current: MediaEntry,
+        categoryId: String,
+        delta: Int,
+    ): MediaEntry? = withContext(Dispatchers.IO) {
+        ensureMigrated(profileId)
+        database.loadAdjacent(profileId, current, categoryId, delta)
+    }
+
+    suspend fun loadType(profileId: String, type: MediaType): List<MediaEntry> = withContext(Dispatchers.IO) {
+        ensureMigrated(profileId)
+        database.loadType(profileId, type)
+    }
+
+    suspend fun search(
+        profileId: String,
+        query: String,
+        type: MediaType? = null,
+        limit: Int = 500,
+    ): List<MediaEntry> = withContext(Dispatchers.IO) {
+        ensureMigrated(profileId)
+        val moves = libraryStore.snapshot(profileId).movedEntries
+        database.search(profileId, query, type, limit).map { entry ->
+            moves[entry.key]?.let { destination -> entry.copy(categoryId = destination) } ?: entry
         }
     }
 
-    private fun writeCatalogBody(json: JsonWriter, catalog: Catalog) {
-        json.name("categories").beginArray()
-        for (category in catalog.categories) {
-            json.beginObject()
-            json.name("id").value(category.id)
-            json.name("name").value(category.name)
-            json.name("type").value(category.type.name)
-            json.endObject()
-        }
-        json.endArray()
-        json.name("entries").beginArray()
-        for (entry in catalog.entries) {
-            json.beginObject()
-            json.name("id").value(entry.id.toLong())
-            json.name("name").value(entry.name)
-            json.name("display_name").value(entry.displayName)
-            json.name("type").value(entry.type.name)
-            json.name("category_id").value(entry.categoryId)
-            json.name("icon").nullableValue(entry.iconUrl)
-            json.name("number").value(entry.number.toLong())
-            json.name("extension").value(entry.extension)
-            json.name("tvg_id").nullableValue(entry.tvgId)
-            json.name("plot").nullableValue(entry.plot)
-            json.name("rating").nullableValue(entry.rating)
-            json.name("playable").value(entry.playable)
-            json.name("added_at").nullableValue(entry.addedAtEpochSeconds)
-            json.endObject()
-        }
-        json.endArray()
-    }
-
-    suspend fun load(profileId: String): Catalog? = withContext(Dispatchers.IO) {
-        val file = fileFor(profileId)
-        if (!file.exists()) return@withContext null
-        runCatching {
-            val categories = ArrayList<MediaCategory>()
-            val entries = ArrayList<MediaEntry>()
-            file.inputStream().reader(StandardCharsets.UTF_8).buffered().use { input ->
-                JsonReader(input).use { json ->
-                    json.beginObject()
-                    while (json.hasNext()) {
-                        when (json.nextName()) {
-                            "categories" -> readCategories(json, categories)
-                            "entries" -> readEntries(json, entries)
-                            else -> json.skipValue()
-                        }
-                    }
-                    json.endObject()
-                }
-            }
-            Catalog(categories, entries)
-        }.getOrNull()
+    suspend fun loadEntriesByKeys(profileId: String, keys: Set<String>): List<MediaEntry> = withContext(Dispatchers.IO) {
+        ensureMigrated(profileId)
+        database.loadEntriesByKeys(profileId, keys)
     }
 
     suspend fun clear(profileId: String) = withContext(Dispatchers.IO) {
+        database.delete(profileId)
+        deleteJsonCopies(profileId)
+    }
+
+    private fun persistedContextKeys(profileId: String): Set<String> {
+        val library = libraryStore.snapshot(profileId)
+        return buildSet {
+            addAll(library.favoriteEntries)
+            addAll(library.movedEntries.keys)
+            library.history.forEach { add(it.entry.key) }
+            playlistStore.find(profileId)?.credentialsOrNull()?.let { credentials ->
+                val navigation = BrowserNavigationStore(appContext, credentials)
+                MediaType.entries.forEach { type -> navigation.entry(type)?.let(::add) }
+            }
+        }
+    }
+
+    private fun ensureMigrated(profileId: String) {
+        if (database.hasProfile(profileId)) return
+        val source = fileFor(profileId)
+        if (!source.exists()) return
+        val legacy = readLegacyCatalog(source) ?: return
+        database.replace(profileId, legacy)
+        deleteJsonCopies(profileId)
+        legacyFiles.forEach(File::delete)
+    }
+
+    private fun readLegacyCatalog(file: File): Catalog? = runCatching {
+        val categories = ArrayList<MediaCategory>()
+        val entries = ArrayList<MediaEntry>()
+        file.inputStream().reader(StandardCharsets.UTF_8).buffered().use { input ->
+            JsonReader(input).use { json ->
+                json.beginObject()
+                while (json.hasNext()) {
+                    when (json.nextName()) {
+                        "categories" -> readCategories(json, categories)
+                        "entries" -> readEntries(json, entries)
+                        else -> json.skipValue()
+                    }
+                }
+                json.endObject()
+            }
+        }
+        Catalog(categories, entries)
+    }.getOrNull()
+
+    private fun deleteJsonCopies(profileId: String) {
         fileFor(profileId).delete()
         resolvedFileFor(profileId).delete()
     }
@@ -237,11 +258,11 @@ class CatalogCache(context: Context) {
     }
 
     private fun String.toMediaType(): MediaType = MediaType.entries.firstOrNull { it.name == this } ?: MediaType.Live
-
-    private fun JsonWriter.nullableValue(value: String?) { if (value == null) nullValue() else value(value) }
-    private fun JsonWriter.nullableValue(value: Double?) { if (value == null) nullValue() else value(value) }
-    private fun JsonWriter.nullableValue(value: Long?) { if (value == null) nullValue() else value(value) }
     private fun JsonReader.nextNullableString(): String? = if (peek() == JsonToken.NULL) { nextNull(); null } else nextString()
     private fun JsonReader.nextNullableDouble(): Double? = if (peek() == JsonToken.NULL) { nextNull(); null } else nextDouble()
     private fun JsonReader.nextNullableLong(): Long? = if (peek() == JsonToken.NULL) { nextNull(); null } else nextLong()
+
+    private companion object {
+        const val MAX_PAGE_SIZE = 500
+    }
 }

@@ -6,6 +6,7 @@ import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.MediaType
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertSame
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class UserLibraryStoreApplyToCatalogTest {
@@ -36,6 +37,31 @@ class UserLibraryStoreApplyToCatalogTest {
 
         assertEquals("2", result.entry(moved.key)?.categoryId)
         assertEquals("1", result.entry(untouched.key)?.categoryId)
+    }
+
+    @Test
+    fun `lazy metadata survives customization and moved counts are adjusted`() {
+        val source = MediaCategory("1", "Sport", MediaType.Live)
+        val destination = MediaCategory("2", "News", MediaType.Live)
+        val moved = entry(1, "TF1", MediaType.Live, categoryId = source.id)
+        val catalog = Catalog(
+            categories = listOf(source, destination),
+            entries = listOf(moved),
+            totalCounts = mapOf(MediaType.Live to 100),
+            categoryCounts = mapOf(source.key to 60, destination.key to 40),
+            loadedCategoryKeys = setOf(source.key),
+        )
+
+        val result = applyUserLibraryToCatalog(
+            catalog,
+            UserLibrarySnapshot(movedEntries = mapOf(moved.key to destination.id)),
+        )
+
+        assertEquals(100, result.count(MediaType.Live))
+        assertEquals(59, result.countIn(MediaType.Live, source.id))
+        assertEquals(41, result.countIn(MediaType.Live, destination.id))
+        assertTrue(result.isCategoryLoaded(MediaType.Live, source.id))
+        assertEquals(destination.id, result.entry(moved.key)?.categoryId)
     }
 
     @Test

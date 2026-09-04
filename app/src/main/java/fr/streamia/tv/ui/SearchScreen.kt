@@ -28,7 +28,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
-import fr.streamia.tv.domain.Catalog
 import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.ui.theme.FocusBlueBright
@@ -40,14 +39,12 @@ import fr.streamia.tv.ui.theme.TypeBody
 import fr.streamia.tv.ui.theme.TypeLabel
 import fr.streamia.tv.ui.theme.TypeScreenTitle
 import fr.streamia.tv.ui.theme.TypeSectionTitle
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.withContext
 
 @Composable
 fun SearchScreen(
-    catalog: Catalog,
     favoriteEntries: Set<String>,
+    search: suspend (String, MediaType?) -> List<MediaEntry>,
     onOpenEntry: (MediaEntry) -> Unit,
     onToggleEntryFavorite: (MediaEntry) -> Unit,
     onBack: () -> Unit,
@@ -56,13 +53,13 @@ fun SearchScreen(
     var query by remember { mutableStateOf("") }
     var type by remember { mutableStateOf<MediaType?>(null) }
     val needle = query.trim().lowercase()
-    val entries by produceState(emptyList<MediaEntry>(), catalog, needle, type) {
+    val entries by produceState(emptyList<MediaEntry>(), needle, type) {
         if (needle.isBlank()) {
             value = emptyList()
             return@produceState
         }
         delay(220)
-        value = withContext(Dispatchers.Default) { catalog.search(needle, type, limit = 600) }
+        value = search(needle, type)
     }
 
     Column(Modifier.fillMaxSize().background(Night).padding(28.dp)) {

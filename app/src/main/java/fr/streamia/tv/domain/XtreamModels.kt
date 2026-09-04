@@ -137,15 +137,17 @@ data class Catalog(
     val categories: List<MediaCategory>,
     val entries: List<MediaEntry>,
     val account: AccountInfo? = null,
+    /** Total provider rows per section. Empty means this is a legacy/full in-memory catalogue. */
+    val totalCounts: Map<MediaType, Int> = emptyMap(),
+    /** Provider rows per category, keyed with [MediaCategory.key]. */
+    val categoryCounts: Map<String, Int> = emptyMap(),
+    /** Categories for which at least one database page is currently materialized in [entries]. */
+    val loadedCategoryKeys: Set<String> = emptySet(),
 ) {
     /**
-     * Index nettoyé une seule fois hors de l'UI, même pour les catalogues de plusieurs centaines
-     * de milliers d'entrées. entriesBySectionAndCategory dérive de entriesBySection (groupBy
-     * imbriqué par catégorie à l'intérieur de chaque type déjà partitionné) plutôt que d'un groupBy
-     * sur une clé "TYPE:catégorie" concaténée par entrée : cette reconstruction tourne à chaque
-     * réouverture de l'app sur un contenu Live restauré (resumeStartup) et à chaque rafraîchissement
-     * silencieux du catalogue, donc éviter une allocation de String par entrée ici réduit
-     * sensiblement le travail CPU/GC de ce chemin pour les gros catalogues IPTV.
+     * Index only the entries that are actually materialized. A SQLite-backed catalogue can carry
+     * accurate metadata for hundreds of thousands of provider rows while keeping only the current
+     * browser page, favourites/recent entries and the active playback context in memory.
      */
     private val navigableEntries = entries.filterNot(MediaEntry::isVisualSeparator)
     private val entriesBySection = navigableEntries.groupBy(MediaEntry::type)
@@ -159,6 +161,7 @@ data class Catalog(
             IndexedEntry(entry, "${entry.name}\u0000${entry.displayName}\u0000${entry.tvgId.orEmpty()}".lowercase())
         }
     }
+    private val lazyMetadata = totalCounts.isNotEmpty() || categoryCounts.isNotEmpty() || loadedCategoryKeys.isNotEmpty()
 
     fun categoriesFor(type: MediaType): List<MediaCategory> = categoriesBySection[type].orEmpty()
 
@@ -170,7 +173,50 @@ data class Catalog(
 
     fun entry(key: String): MediaEntry? = entriesByKey[key]
 
-    fun count(type: MediaType): Int = entriesBySection[type]?.size ?: 0
+    fun count(type: MediaType): Int = totalCounts[type] ?: (entriesBySection[type]?.size ?: 0)
+
+    fun countIn(type: MediaType, categoryId: String): Int =
+        if (categoryId == ALL_CATEGORY_ID) count(type)
+        else categoryCounts[categoryKey(type, categoryId)] ?: entriesIn(type, categoryId).size
+
+    fun isCategoryLoaded(type: MediaType, categoryId: String): Boolean =
+        !lazyMetadata || categoryKey(type, categoryId) in loadedCategoryKeys
+
+    /**
+     * Merges one freshly loaded database page into this lightweight catalogue without touching the
+     * rows already materialized elsewhere (favourites, recents, other categories' pages). Existing
+     * entries sharing a key with [newEntries] are replaced so a re-fetched row (e.g. after refresh)
+     * reflects the latest provider data; [totalCounts]/[categoryCounts] stay authoritative and are
+     * carried over unchanged since they describe the full provider catalogue, not what's in memory.
+     */
+    fun withMaterializedEntries(
+        newEntries: List<MediaEntry>,
+        loadedType: MediaType,
+        loadedCategoryId: String,
+    ): Catalog {
+        val merged = LinkedHashMap<String, MediaEntry>(entries.size + newEntries.size)
+        entries.forEach { merged[it.key] = it }
+        newEntries.forEach { merged[it.key] = it }
+        return copy(
+            entries = merged.values.toList(),
+            loadedCategoryKeys = loadedCategoryKeys + categoryKey(loadedType, loadedCategoryId),
+        )
+    }
+
+    /**
+     * Merges an entire section (e.g. every Live channel) fetched in one database query and marks
+     * every category of [type] — including "Tout" — as loaded, so later per-category selections in
+     * that section reuse it instead of re-querying. Used for the Live section, which stays small
+     * enough to hydrate eagerly right after startup so zapping, the channel-number jump and the EPG
+     * guide can rely on the full channel list without each patching a different lazy-loading gap.
+     */
+    fun withFullSectionMaterialized(newEntries: List<MediaEntry>, type: MediaType): Catalog {
+        val merged = LinkedHashMap<String, MediaEntry>(entries.size + newEntries.size)
+        entries.forEach { merged[it.key] = it }
+        newEntries.forEach { merged[it.key] = it }
+        val sectionKeys = categoriesFor(type).map { categoryKey(type, it.id) } + categoryKey(type, ALL_CATEGORY_ID)
+        return copy(entries = merged.values.toList(), loadedCategoryKeys = loadedCategoryKeys + sectionKeys)
+    }
 
     fun search(query: String, type: MediaType? = null, limit: Int = 500): List<MediaEntry> {
         val needle = query.trim().lowercase()
@@ -186,6 +232,7 @@ data class Catalog(
     companion object {
         const val ALL_CATEGORY_ID = "__all__"
         fun allCategory(type: MediaType) = MediaCategory(ALL_CATEGORY_ID, "Tout", type)
+        fun categoryKey(type: MediaType, categoryId: String): String = "${type.name}:$categoryId"
     }
 }
 
