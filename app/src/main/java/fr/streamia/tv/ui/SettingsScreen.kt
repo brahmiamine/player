@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
 import fr.streamia.tv.data.AppSettings
+import fr.streamia.tv.data.BufferMode
 import fr.streamia.tv.data.VideoAspectSetting
 import fr.streamia.tv.ui.theme.HeadingWeight
 import fr.streamia.tv.ui.theme.Ink
@@ -33,6 +34,7 @@ fun SettingsScreen(
     onCycleLivePreviewDelay: () -> Unit,
     onCycleVodSeekStep: () -> Unit,
     onCycleVideoAspect: () -> Unit,
+    onCycleBufferMode: () -> Unit,
     onTools: () -> Unit,
     onBack: () -> Unit,
 ) {
@@ -95,13 +97,23 @@ fun SettingsScreen(
             }
             Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 SettingsTile(
+                    glyph = StreamiaIconGlyph.Refresh,
+                    title = "Stabilité du flux",
+                    subtitle = when (settings.bufferMode) {
+                        BufferMode.LowLatency -> "Faible latence"
+                        BufferMode.Auto -> "Automatique"
+                        BufferMode.Stable -> "Stable"
+                    },
+                    onClick = onCycleBufferMode,
+                    modifier = Modifier.weight(1f),
+                )
+                SettingsTile(
                     glyph = StreamiaIconGlyph.Settings,
                     title = "Outils et gestion",
                     subtitle = "Recherche, EPG, organisation, actualisation et historiques",
                     onClick = onTools,
                     modifier = Modifier.weight(1f),
                 )
-                Spacer(Modifier.weight(1f))
             }
         }
     }
