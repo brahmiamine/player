@@ -316,7 +316,7 @@ fun BrowserScreen(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 3.dp).height(40.dp),
                 ) {
                     Text(
-                        "$message  ·  OK fermer",
+                        "$message  ·  OK pour fermer",
                         color = if (message.contains("média", ignoreCase = true) || message.contains("import", ignoreCase = true)) FocusBlueBright else MaterialTheme.colorScheme.error,
                         fontSize = 12.sp,
                         modifier = Modifier.padding(horizontal = 16.dp),

@@ -178,7 +178,7 @@ fun ToolsScreen(
             Spacer(Modifier.height(12.dp))
             FocusableSurface(onClick = { backupMessage = null }, modifier = Modifier.fillMaxWidth().height(48.dp)) {
                 Text(
-                    "$message  ·  OK fermer",
+                    "$message  ·  OK pour fermer",
                     color = Ink,
                     fontSize = 13.sp,
                     modifier = Modifier.padding(horizontal = 18.dp),

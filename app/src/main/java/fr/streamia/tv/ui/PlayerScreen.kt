@@ -293,7 +293,11 @@ fun PlayerScreen(
                         diagnosticsTracker.onBufferingEnded(now)
                     }
                 }
-                if (playbackState == Player.STATE_ENDED) playbackEnded = true
+                // Pas seulement à `true` sur STATE_ENDED : un seek en arrière après la fin (reprendre la
+                // lecture, rejouer) ramène le lecteur à STATE_READY/STATE_BUFFERING sans autre signal
+                // dédié — sans ce reset, le bandeau « épisode suivant » resterait affiché (et son
+                // interception clavier bloquée) alors que la lecture a repris.
+                playbackEnded = playbackState == Player.STATE_ENDED
                 diagnostics = diagnosticsTracker.snapshot(now)
             }
 

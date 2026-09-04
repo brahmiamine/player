@@ -27,6 +27,8 @@ import fr.streamia.tv.ui.theme.MutedInk
 import fr.streamia.tv.ui.theme.Night
 
 private sealed interface NewPinStep {
+    /** Uniquement quand un code est déjà actif : il faut le code actuel avant d'en accepter un nouveau. */
+    data object VerifyCurrent : NewPinStep
     data object EnterNew : NewPinStep
     data class ConfirmNew(val pending: String) : NewPinStep
 }
@@ -71,7 +73,7 @@ fun ParentalControlScreen(
                 glyph = StreamiaIconGlyph.Lock,
                 title = if (enabled) "Changer le code" else "Définir un code",
                 subtitle = "Code à 4 chiffres, saisi deux fois",
-                onClick = { newPinStep = NewPinStep.EnterNew },
+                onClick = { newPinStep = if (enabled) NewPinStep.VerifyCurrent else NewPinStep.EnterNew },
                 modifier = Modifier.width(260.dp).height(150.dp),
             )
             if (enabled) {
@@ -87,6 +89,16 @@ fun ParentalControlScreen(
     }
 
     when (val step = newPinStep) {
+        NewPinStep.VerifyCurrent -> ParentalPinDialog(
+            title = "Code actuel",
+            subtitle = "Entrez le code actuel pour pouvoir le changer",
+            onSubmit = { pin ->
+                val correct = onVerifyPin(pin)
+                if (correct) newPinStep = NewPinStep.EnterNew
+                correct
+            },
+            onCancel = { newPinStep = null },
+        )
         NewPinStep.EnterNew -> ParentalPinDialog(
             title = "Nouveau code",
             subtitle = "Choisissez un code à 4 chiffres",
