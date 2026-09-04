@@ -349,7 +349,10 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
 
         return runCatching { repository.search(profileId, query, type) }
             .getOrDefault(emptyList())
-            .filterNot { entry -> entry.categoryId in hiddenCategoryIdsByType[entry.type].orEmpty() }
+            .filterNot { entry ->
+                entry.key in state.library.hiddenEntries ||
+                    entry.categoryId in hiddenCategoryIdsByType[entry.type].orEmpty()
+            }
     }
 
     fun showHome() { _uiState.update { it.copy(screen = StreamiaScreen.Home, message = null) } }
@@ -558,6 +561,30 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         }
     }
 
+    fun toggleEntryHidden(entry: MediaEntry) {
+        val profileId = _uiState.value.activeProfileId ?: return
+        _uiState.update { state ->
+            val hidden = state.library.hiddenEntries.toMutableSet().apply {
+                if (!add(entry.key)) remove(entry.key)
+            }
+            state.copy(library = state.library.copy(hiddenEntries = hidden))
+        }
+        val sequence = ++libraryMutationSequence
+        viewModelScope.launch {
+            libraryMutation.withLock {
+                runCatching {
+                    withContext(Dispatchers.IO) {
+                        repository.toggleEntryHidden(profileId, entry)
+                        repository.library(profileId)
+                    }
+                }.onSuccess { library ->
+                    if (sequence != libraryMutationSequence) return@onSuccess
+                    _uiState.update { state -> if (state.activeProfileId == profileId) state.copy(library = library) else state }
+                }
+            }
+        }
+    }
+
     fun toggleCategoryHidden(category: MediaCategory) {
         val profileId = _uiState.value.activeProfileId ?: return
         _uiState.update { state ->
@@ -683,8 +710,13 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         val state = _uiState.value
         val current = (state.screen as? StreamiaScreen.Player)?.entry ?: return
         if (current.type != MediaType.Live) return
-        val sameCategory = state.catalog?.entriesIn(MediaType.Live, current.categoryId).orEmpty()
-        val pool = if (sameCategory.size > 1) sameCategory else state.catalog?.entriesFor(MediaType.Live).orEmpty()
+        val sameCategory = state.catalog?.entriesIn(MediaType.Live, current.categoryId)
+            .orEmpty()
+            .filterNot { it.key in state.library.hiddenEntries }
+        val allLive = state.catalog?.entriesFor(MediaType.Live)
+            .orEmpty()
+            .filterNot { it.key in state.library.hiddenEntries }
+        val pool = if (sameCategory.size > 1) sameCategory else allLive
         val next = pool.adjacentTo(current.key, delta) ?: return
         openPlayer(next, returnToSeries = false)
     }
