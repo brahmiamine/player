@@ -21,6 +21,7 @@ import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
 import fr.streamia.tv.data.AppSettings
 import fr.streamia.tv.data.BufferMode
+import fr.streamia.tv.data.LiveStreamFormat
 import fr.streamia.tv.data.VideoAspectSetting
 import fr.streamia.tv.ui.theme.HeadingWeight
 import fr.streamia.tv.ui.theme.Ink
@@ -35,6 +36,7 @@ fun SettingsScreen(
     onCycleVodSeekStep: () -> Unit,
     onCycleVideoAspect: () -> Unit,
     onCycleBufferMode: () -> Unit,
+    onCycleLiveStreamFormat: () -> Unit,
     onTools: () -> Unit,
     onBack: () -> Unit,
 ) {
@@ -97,6 +99,17 @@ fun SettingsScreen(
             }
             Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 SettingsTile(
+                    glyph = StreamiaIconGlyph.Live,
+                    title = "Format du flux Live",
+                    subtitle = when (settings.liveStreamFormat) {
+                        LiveStreamFormat.Auto -> "Automatique"
+                        LiveStreamFormat.Ts -> "MPEG-TS"
+                        LiveStreamFormat.Hls -> "HLS"
+                    },
+                    onClick = onCycleLiveStreamFormat,
+                    modifier = Modifier.weight(1f),
+                )
+                SettingsTile(
                     glyph = StreamiaIconGlyph.Refresh,
                     title = "Stabilité du flux",
                     subtitle = when (settings.bufferMode) {
@@ -107,6 +120,8 @@ fun SettingsScreen(
                     onClick = onCycleBufferMode,
                     modifier = Modifier.weight(1f),
                 )
+            }
+            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 SettingsTile(
                     glyph = StreamiaIconGlyph.Settings,
                     title = "Outils et gestion",
@@ -114,6 +129,7 @@ fun SettingsScreen(
                     onClick = onTools,
                     modifier = Modifier.weight(1f),
                 )
+                Spacer(Modifier.weight(1f))
             }
         }
     }
