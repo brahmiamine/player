@@ -65,6 +65,23 @@ class AppSettingsTest {
     }
 
     @Test
+    fun `live channel sort order cycles and wraps`() {
+        var settings = AppSettings(liveChannelSortOrder = LiveChannelSortOrder.Provider)
+        val observed = buildList {
+            repeat(LiveChannelSortOrder.entries.size) {
+                add(settings.liveChannelSortOrder)
+                settings = settings.copy(liveChannelSortOrder = settings.nextLiveChannelSortOrder())
+            }
+        }
+
+        assertEquals(
+            listOf(LiveChannelSortOrder.Provider, LiveChannelSortOrder.Number, LiveChannelSortOrder.Alphabetical),
+            observed,
+        )
+        assertEquals(LiveChannelSortOrder.Provider, settings.liveChannelSortOrder)
+    }
+
+    @Test
     fun `vod seek step cycles and exposes milliseconds`() {
         var settings = AppSettings(vodSeekStepSeconds = 10)
         val observed = buildList {

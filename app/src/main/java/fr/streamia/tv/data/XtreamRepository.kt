@@ -35,6 +35,7 @@ class XtreamRepository(context: Context) {
     private val appSettingsStore = AppSettingsStore(context)
     private val xmlTvRepository = XmlTvRepository()
     private val m3uParser = M3uParser()
+    private val updateChecker = UpdateChecker()
 
     fun profiles(): List<PlaylistProfile> = playlistStore.loadAll()
     fun profile(profileId: String): PlaylistProfile? = playlistStore.find(profileId)
@@ -42,6 +43,9 @@ class XtreamRepository(context: Context) {
     fun appSettings(): AppSettings = appSettingsStore.load()
     fun updateAppSettings(transform: (AppSettings) -> AppSettings): AppSettings = appSettingsStore.update(transform)
     fun customizedCatalog(profileId: String, catalog: Catalog): Catalog = libraryStore.applyToCatalog(profileId, catalog)
+
+    suspend fun checkForUpdate(currentVersion: String): UpdateCheckResult =
+        withContext(Dispatchers.IO) { updateChecker.checkForUpdate(currentVersion) }
 
     /**
      * Lecture rapide du cache disque, sans jamais contacter le fournisseur. Sert à afficher la
@@ -290,6 +294,7 @@ class XtreamRepository(context: Context) {
     fun toggleCategoryFavorite(profileId: String, category: MediaCategory): Boolean = libraryStore.toggleCategoryFavorite(profileId, category)
     fun toggleCategoryHidden(profileId: String, category: MediaCategory): Boolean = libraryStore.toggleCategoryHidden(profileId, category)
     fun toggleCategoryLocked(profileId: String, category: MediaCategory): Boolean = libraryStore.toggleCategoryLocked(profileId, category)
+    fun toggleEntryWatched(profileId: String, entry: MediaEntry): Boolean = libraryStore.toggleEntryWatched(profileId, entry)
     fun setParentalPin(pin: String): AppSettings = appSettingsStore.setParentalPin(pin)
     fun clearParentalPin(): AppSettings = appSettingsStore.clearParentalPin()
     fun verifyParentalPin(pin: String): Boolean = appSettingsStore.verifyParentalPin(pin)

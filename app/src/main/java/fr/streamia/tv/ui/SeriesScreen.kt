@@ -60,7 +60,9 @@ fun SeriesScreen(
     busy: Boolean,
     message: String?,
     favorite: Boolean,
+    watched: Boolean,
     onToggleFavorite: () -> Unit,
+    onToggleWatched: () -> Unit,
     onEpisodeSelected: (SeriesEpisode) -> Unit,
     onBack: () -> Unit,
     onRetry: () -> Unit,
@@ -93,6 +95,16 @@ fun SeriesScreen(
                         StreamiaIcon(if (favorite) StreamiaIconGlyph.Star else StreamiaIconGlyph.StarOutline, size = 20.dp)
                     }
                 }
+                FocusableSurface(
+                    onClick = onToggleWatched,
+                    selected = watched,
+                    modifier = Modifier.width(68.dp).height(48.dp),
+                    contentDescription = if (watched) "Marquer comme non vue" else "Marquer comme vue",
+                ) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        StreamiaIcon(if (watched) StreamiaIconGlyph.CheckboxOn else StreamiaIconGlyph.CheckboxOff, size = 18.dp)
+                    }
+                }
             }
             Spacer(Modifier.height(20.dp))
             ChannelLogo(details?.details?.posterUrl ?: series.iconUrl, series.name, Modifier.size(230.dp))
@@ -105,6 +117,7 @@ fun SeriesScreen(
                 info?.genre,
                 details?.seasons?.size?.let { "$it saisons" },
                 details?.episodes?.size?.let { "$it épisodes" },
+                "Vue".takeIf { watched },
             )
             if (meta.isNotEmpty()) {
                 Spacer(Modifier.height(8.dp))

@@ -4,10 +4,12 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import fr.streamia.tv.BuildConfig
 import fr.streamia.tv.data.AppSettings
 import fr.streamia.tv.data.CatalogSource
 import fr.streamia.tv.data.LoadedCatalog
 import fr.streamia.tv.data.PlaylistProfile
+import fr.streamia.tv.data.UpdateCheckResult
 import fr.streamia.tv.data.UserLibrarySnapshot
 import fr.streamia.tv.data.hasSameCatalogLayoutAs
 import fr.streamia.tv.data.XtreamRepository
@@ -295,6 +297,17 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         }
     }
 
+    fun checkForUpdate() {
+        if (_uiState.value.updateChecking) return
+        _uiState.update { it.copy(updateChecking = true, updateCheck = null) }
+        viewModelScope.launch {
+            val result = repository.checkForUpdate(BuildConfig.VERSION_NAME)
+            _uiState.update { it.copy(updateChecking = false, updateCheck = result) }
+        }
+    }
+
+    fun dismissUpdateCheck() { _uiState.update { it.copy(updateCheck = null) } }
+
     fun openEntry(entry: MediaEntry) {
         when {
             entry.type == MediaType.Live -> openPlayer(entry, returnToSeries = false)
@@ -391,6 +404,10 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
 
     fun cycleLiveStreamFormat() {
         updateAppSettings { it.copy(liveStreamFormat = it.nextLiveStreamFormat()) }
+    }
+
+    fun cycleLiveChannelSortOrder() {
+        updateAppSettings { it.copy(liveChannelSortOrder = it.nextLiveChannelSortOrder()) }
     }
 
     private fun updateAppSettings(transform: (AppSettings) -> AppSettings) {
@@ -632,6 +649,30 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 runCatching {
                     withContext(Dispatchers.IO) {
                         repository.toggleCategoryLocked(profileId, category)
+                        repository.library(profileId)
+                    }
+                }.onSuccess { library ->
+                    if (sequence != libraryMutationSequence) return@onSuccess
+                    _uiState.update { state -> if (state.activeProfileId == profileId) state.copy(library = library) else state }
+                }
+            }
+        }
+    }
+
+    fun toggleEntryWatched(entry: MediaEntry) {
+        val profileId = _uiState.value.activeProfileId ?: return
+        _uiState.update { state ->
+            val watched = state.library.watchedEntries.toMutableSet().apply {
+                if (!add(entry.key)) remove(entry.key)
+            }
+            state.copy(library = state.library.copy(watchedEntries = watched))
+        }
+        val sequence = ++libraryMutationSequence
+        viewModelScope.launch {
+            libraryMutation.withLock {
+                runCatching {
+                    withContext(Dispatchers.IO) {
+                        repository.toggleEntryWatched(profileId, entry)
                         repository.library(profileId)
                     }
                 }.onSuccess { library ->
@@ -1021,6 +1062,8 @@ data class StreamiaUiState(
     val appSettings: AppSettings = AppSettings(),
     /** Code parental saisi correctement pendant cette session (redevient false à la relance de l'app). */
     val parentalUnlocked: Boolean = false,
+    val updateChecking: Boolean = false,
+    val updateCheck: UpdateCheckResult? = null,
     val offline: Boolean = false,
     val message: String? = null,
     val mediaDetails: MediaDetails? = null,

@@ -21,6 +21,7 @@ import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
 import fr.streamia.tv.data.AppSettings
 import fr.streamia.tv.data.BufferMode
+import fr.streamia.tv.data.LiveChannelSortOrder
 import fr.streamia.tv.data.LiveStreamFormat
 import fr.streamia.tv.data.VideoAspectSetting
 import fr.streamia.tv.ui.theme.HeadingWeight
@@ -37,6 +38,7 @@ fun SettingsScreen(
     onCycleVideoAspect: () -> Unit,
     onCycleBufferMode: () -> Unit,
     onCycleLiveStreamFormat: () -> Unit,
+    onCycleLiveChannelSortOrder: () -> Unit,
     onTools: () -> Unit,
     onParentalControl: () -> Unit,
     onBack: () -> Unit,
@@ -121,6 +123,20 @@ fun SettingsScreen(
                     onClick = onCycleBufferMode,
                     modifier = Modifier.weight(1f),
                 )
+            }
+            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                SettingsTile(
+                    glyph = StreamiaIconGlyph.Reorder,
+                    title = "Tri des chaînes en direct",
+                    subtitle = when (settings.liveChannelSortOrder) {
+                        LiveChannelSortOrder.Provider -> "Ordre du fournisseur"
+                        LiveChannelSortOrder.Number -> "Par numéro"
+                        LiveChannelSortOrder.Alphabetical -> "Alphabétique"
+                    },
+                    onClick = onCycleLiveChannelSortOrder,
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.weight(1f))
             }
             Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 SettingsTile(

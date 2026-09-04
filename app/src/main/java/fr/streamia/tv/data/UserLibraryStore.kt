@@ -24,6 +24,7 @@ class UserLibraryStore(context: Context) {
             hiddenEntries = root.optJSONArray("hidden_entries").stringSet(),
             hiddenCategories = root.optJSONArray("hidden_categories").stringSet(),
             lockedCategories = root.optJSONArray("locked_categories").stringSet(),
+            watchedEntries = root.optJSONArray("watched_entries").stringSet(),
             categoryOrder = root.optJSONObject("category_order").stringListMap(),
             movedEntries = root.optJSONObject("moved_entries").stringMap(),
             history = root.optJSONArray("history").historyList(),
@@ -63,6 +64,13 @@ class UserLibraryStore(context: Context) {
         val locked = if (category.key in set) { set.remove(category.key); false } else { set.add(category.key); true }
         root.put("locked_categories", JSONArray(set.toList()))
         locked
+    }
+
+    fun toggleEntryWatched(profileId: String, entry: MediaEntry): Boolean = mutate(profileId) { root ->
+        val set = root.optJSONArray("watched_entries").stringSet().toMutableSet()
+        val watched = if (entry.key in set) { set.remove(entry.key); false } else { set.add(entry.key); true }
+        root.put("watched_entries", JSONArray(set.toList()))
+        watched
     }
 
     fun recordPlayback(
@@ -224,6 +232,7 @@ data class UserLibrarySnapshot(
     val hiddenEntries: Set<String> = emptySet(),
     val hiddenCategories: Set<String> = emptySet(),
     val lockedCategories: Set<String> = emptySet(),
+    val watchedEntries: Set<String> = emptySet(),
     val categoryOrder: Map<String, List<String>> = emptyMap(),
     val movedEntries: Map<String, String> = emptyMap(),
     val history: List<PlaybackHistoryItem> = emptyList(),

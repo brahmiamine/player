@@ -27,6 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.tv.material3.Text
+import fr.streamia.tv.BuildConfig
 import fr.streamia.tv.ui.theme.MutedInk
 import fr.streamia.tv.ui.theme.Night
 import fr.streamia.tv.ui.theme.StreamiaTheme
@@ -143,6 +144,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onCycleVideoAspect = viewModel::cycleVideoAspect,
                     onCycleBufferMode = viewModel::cycleBufferMode,
                     onCycleLiveStreamFormat = viewModel::cycleLiveStreamFormat,
+                    onCycleLiveChannelSortOrder = viewModel::cycleLiveChannelSortOrder,
                     onTools = viewModel::showTools,
                     onParentalControl = viewModel::showParentalControl,
                     onBack = viewModel::showHome,
@@ -161,6 +163,9 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     liveHistoryCount = state.library.history.count { it.entry.type == MediaType.Live },
                     movieHistoryCount = state.library.history.count { it.entry.type == MediaType.Movie },
                     seriesHistoryCount = state.library.history.count { it.entry.type == MediaType.Series },
+                    currentVersion = BuildConfig.VERSION_NAME,
+                    updateChecking = state.updateChecking,
+                    updateCheck = state.updateCheck,
                     onSearch = viewModel::showSearch,
                     onEpg = viewModel::showEpg,
                     onOrganizer = viewModel::showOrganizer,
@@ -170,6 +175,8 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onClearSeriesHistory = { viewModel.clearHistory(MediaType.Series) },
                     onClearAllHistory = { viewModel.clearHistory() },
                     onChangePlaylist = viewModel::logout,
+                    onCheckForUpdate = viewModel::checkForUpdate,
+                    onDismissUpdateCheck = viewModel::dismissUpdateCheck,
                     onBack = viewModel::showSettings,
                 )
 
@@ -220,9 +227,11 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                         busy = state.busy,
                         message = state.message,
                         favorite = movie.key in state.library.favoriteEntries,
+                        watched = movie.key in state.library.watchedEntries,
                         resumePositionMs = resume,
                         onPlay = { viewModel.playMovie(movie) },
                         onToggleFavorite = { viewModel.toggleEntryFavorite(movie) },
+                        onToggleWatched = { viewModel.toggleEntryWatched(movie) },
                         onBack = viewModel::closeDetails,
                     )
                 }
@@ -235,7 +244,9 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                         busy = state.busy,
                         message = state.message,
                         favorite = series.key in state.library.favoriteEntries,
+                        watched = series.key in state.library.watchedEntries,
                         onToggleFavorite = { viewModel.toggleEntryFavorite(series) },
+                        onToggleWatched = { viewModel.toggleEntryWatched(series) },
                         onEpisodeSelected = { episode -> viewModel.playEpisode(series, episode) },
                         onBack = viewModel::closeSeries,
                         onRetry = { viewModel.openEntry(series) },

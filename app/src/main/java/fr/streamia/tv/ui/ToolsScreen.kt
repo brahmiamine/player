@@ -19,6 +19,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
+import fr.streamia.tv.data.UpdateCheckResult
 import fr.streamia.tv.ui.theme.HeadingWeight
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
@@ -30,6 +31,9 @@ fun ToolsScreen(
     liveHistoryCount: Int,
     movieHistoryCount: Int,
     seriesHistoryCount: Int,
+    currentVersion: String,
+    updateChecking: Boolean,
+    updateCheck: UpdateCheckResult?,
     onSearch: () -> Unit,
     onEpg: () -> Unit,
     onOrganizer: () -> Unit,
@@ -39,6 +43,8 @@ fun ToolsScreen(
     onClearSeriesHistory: () -> Unit,
     onClearAllHistory: () -> Unit,
     onChangePlaylist: () -> Unit,
+    onCheckForUpdate: () -> Unit,
+    onDismissUpdateCheck: () -> Unit,
     onBack: () -> Unit,
 ) {
     BackHandler(onBack = onBack)
@@ -55,7 +61,10 @@ fun ToolsScreen(
         Text("OK ouvre l'outil sélectionné. Retour revient aux paramètres.", color = MutedInk, fontSize = 14.sp)
         Spacer(Modifier.height(16.dp))
 
-        Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        // weight(1f) plutôt que fillMaxSize() : cette grille de tuiles n'est plus le dernier élément
+        // de la colonne — le bandeau de résultat de mise à jour, sous condition, doit garder sa place
+        // sous elle plutôt que de se retrouver sans hauteur disponible (fillMaxSize aurait tout pris).
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 SettingsTile(StreamiaIconGlyph.Search, "Recherche", "Chaînes, films et séries", onSearch, Modifier.focusRequester(firstFocus).weight(1f))
                 SettingsTile(StreamiaIconGlyph.Guide, "Guide TV", "EPG et grille des chaînes", onEpg, Modifier.weight(1f))
@@ -78,6 +87,50 @@ fun ToolsScreen(
                     enabled = liveHistoryCount + movieHistoryCount + seriesHistoryCount > 0,
                 )
             }
+            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                SettingsTile(
+                    StreamiaIconGlyph.Refresh,
+                    if (updateChecking) "Vérification…" else "Vérifier les mises à jour",
+                    updateSubtitle(currentVersion, updateCheck),
+                    onCheckForUpdate,
+                    Modifier.weight(1f),
+                    enabled = !updateChecking,
+                )
+                Spacer(Modifier.weight(2f))
+            }
+        }
+
+        if (updateCheck != null) {
+            Spacer(Modifier.height(12.dp))
+            FocusableSurface(onClick = onDismissUpdateCheck, modifier = Modifier.fillMaxWidth().height(64.dp)) {
+                Column(Modifier.padding(horizontal = 18.dp, vertical = 10.dp)) {
+                    Text(updateResultTitle(updateCheck), color = Ink, fontSize = 14.sp, fontWeight = HeadingWeight)
+                    Text(updateResultSubtitle(updateCheck), color = MutedInk, fontSize = 12.sp, maxLines = 2)
+                }
+            }
         }
     }
+}
+
+private fun updateSubtitle(currentVersion: String, result: UpdateCheckResult?): String = when (result) {
+    is UpdateCheckResult.UpdateAvailable -> "Nouvelle version ${result.release.version} disponible"
+    is UpdateCheckResult.UpToDate -> "À jour · version $currentVersion"
+    is UpdateCheckResult.NoTaggedRelease -> "Aucune version publiée pour l'instant"
+    is UpdateCheckResult.Error -> result.message
+    null -> "Version actuelle : $currentVersion"
+}
+
+private fun updateResultTitle(result: UpdateCheckResult): String = when (result) {
+    is UpdateCheckResult.UpdateAvailable -> "Nouvelle version disponible : ${result.release.version}"
+    is UpdateCheckResult.UpToDate -> "Vous avez la dernière version"
+    is UpdateCheckResult.NoTaggedRelease -> "Aucune version publiée"
+    is UpdateCheckResult.Error -> "Vérification impossible"
+}
+
+private fun updateResultSubtitle(result: UpdateCheckResult): String = when (result) {
+    is UpdateCheckResult.UpdateAvailable -> result.release.notes.ifBlank { "Ouvrez ${result.release.htmlUrl} pour télécharger." }
+        .take(180)
+    is UpdateCheckResult.UpToDate -> "OK pour fermer."
+    is UpdateCheckResult.NoTaggedRelease -> "Le mainteneur n'a pas encore publié de release taguée sur GitHub."
+    is UpdateCheckResult.Error -> result.message
 }

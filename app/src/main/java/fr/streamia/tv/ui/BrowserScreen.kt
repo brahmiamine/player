@@ -52,6 +52,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import fr.streamia.tv.data.AppSettings
+import fr.streamia.tv.data.LiveChannelSortOrder
 import fr.streamia.tv.data.LiveStreamFormat
 import fr.streamia.tv.data.PlaybackHistoryItem
 import fr.streamia.tv.data.BrowserNavigationStore
@@ -206,12 +207,21 @@ fun BrowserScreen(
             hasHistory = historyForType.isNotEmpty(),
         )
     }
-    val entries = remember(catalog, selectedType, selectedCategoryId, favoriteEntriesForType, historyForType, excludedCategoryIds, library.hiddenEntries) {
+    val entries = remember(
+        catalog, selectedType, selectedCategoryId, favoriteEntriesForType, historyForType,
+        excludedCategoryIds, library.hiddenEntries, appSettings.liveChannelSortOrder,
+    ) {
         when (selectedCategoryId) {
             FAVORITES_CATEGORY_ID -> favoriteEntriesForType
             HISTORY_CATEGORY_ID -> historyForType.map { it.second }
-            else -> catalog.entriesIn(selectedType, selectedCategoryId).filterNot {
-                it.key in library.hiddenEntries || it.categoryId in excludedCategoryIds
+            else -> {
+                val filtered = catalog.entriesIn(selectedType, selectedCategoryId).filterNot {
+                    it.key in library.hiddenEntries || it.categoryId in excludedCategoryIds
+                }
+                // « Favoris »/« Historique » gardent leur propre ordre (ajout / dernière lecture),
+                // qui perdrait son sens sous un tri alphabétique ou par numéro : seule une vraie
+                // catégorie de chaînes suit la préférence de tri du Direct.
+                if (selectedType == MediaType.Live) sortedForLiveDisplay(filtered, appSettings.liveChannelSortOrder) else filtered
             }
         }
     }
@@ -1153,3 +1163,18 @@ private fun defaultCategoryId(catalog: Catalog, type: MediaType): String =
         ?: Catalog.ALL_CATEGORY_ID
 
 private fun PlaybackHistoryItem.progressPercent(): Int = (progress * 100).toInt().coerceIn(0, 100)
+
+/**
+ * Ordre d'affichage des chaînes Direct au sein d'une catégorie, choisi dans Paramètres. `Provider`
+ * conserve l'ordre déjà renvoyé par le fournisseur/SQLite (aucun tri, coût nul) ; `Alphabetical`
+ * réutilise `Collator` (comme le tri de catégories dans l'Organizer) pour rester correct avec les
+ * accents français plutôt que trier par point de code Unicode.
+ */
+internal fun sortedForLiveDisplay(entries: List<MediaEntry>, order: LiveChannelSortOrder): List<MediaEntry> = when (order) {
+    LiveChannelSortOrder.Provider -> entries
+    LiveChannelSortOrder.Number -> entries.sortedBy(MediaEntry::number)
+    LiveChannelSortOrder.Alphabetical -> {
+        val collator = java.text.Collator.getInstance(java.util.Locale.FRENCH)
+        entries.sortedWith(Comparator { a, b -> collator.compare(a.displayName, b.displayName) })
+    }
+}

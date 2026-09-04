@@ -7,6 +7,7 @@ import java.security.SecureRandom
 enum class VideoAspectSetting { Fit, Fill, Zoom }
 enum class BufferMode { LowLatency, Auto, Stable }
 enum class LiveStreamFormat { Auto, Ts, Hls }
+enum class LiveChannelSortOrder { Provider, Number, Alphabetical }
 
 data class AppSettings(
     val livePreviewEnabled: Boolean = true,
@@ -15,6 +16,7 @@ data class AppSettings(
     val videoAspect: VideoAspectSetting = VideoAspectSetting.Fit,
     val bufferMode: BufferMode = BufferMode.Auto,
     val liveStreamFormat: LiveStreamFormat = LiveStreamFormat.Auto,
+    val liveChannelSortOrder: LiveChannelSortOrder = LiveChannelSortOrder.Provider,
     /** Un code est enregistré (voir [AppSettingsStore.setParentalPin]) et le verrouillage est actif. */
     val parentalControlEnabled: Boolean = false,
 ) {
@@ -35,6 +37,9 @@ data class AppSettings(
 
     fun nextLiveStreamFormat(): LiveStreamFormat =
         LiveStreamFormat.entries[(liveStreamFormat.ordinal + 1) % LiveStreamFormat.entries.size]
+
+    fun nextLiveChannelSortOrder(): LiveChannelSortOrder =
+        LiveChannelSortOrder.entries[(liveChannelSortOrder.ordinal + 1) % LiveChannelSortOrder.entries.size]
 
     companion object {
         val LIVE_PREVIEW_DELAYS_MS = listOf(0, 250, 500, 1_000, 2_000)
@@ -81,6 +86,12 @@ class AppSettingsStore(context: Context) {
                     ?: LiveStreamFormat.Auto.name,
             )
         }.getOrDefault(LiveStreamFormat.Auto),
+        liveChannelSortOrder = runCatching {
+            LiveChannelSortOrder.valueOf(
+                preferences.getString(KEY_LIVE_CHANNEL_SORT_ORDER, LiveChannelSortOrder.Provider.name)
+                    ?: LiveChannelSortOrder.Provider.name,
+            )
+        }.getOrDefault(LiveChannelSortOrder.Provider),
         parentalControlEnabled = preferences.getBoolean(KEY_PARENTAL_ENABLED, false) &&
             preferences.getString(KEY_PARENTAL_PIN_HASH, null) != null,
     )
@@ -93,6 +104,7 @@ class AppSettingsStore(context: Context) {
             .putString(KEY_VIDEO_ASPECT, settings.videoAspect.name)
             .putString(KEY_BUFFER_MODE, settings.bufferMode.name)
             .putString(KEY_LIVE_STREAM_FORMAT, settings.liveStreamFormat.name)
+            .putString(KEY_LIVE_CHANNEL_SORT_ORDER, settings.liveChannelSortOrder.name)
             .putBoolean(KEY_PARENTAL_ENABLED, settings.parentalControlEnabled)
             .apply()
     }
@@ -143,6 +155,7 @@ class AppSettingsStore(context: Context) {
         const val KEY_VIDEO_ASPECT = "video_aspect"
         const val KEY_BUFFER_MODE = "buffer_mode"
         const val KEY_LIVE_STREAM_FORMAT = "live_stream_format"
+        const val KEY_LIVE_CHANNEL_SORT_ORDER = "live_channel_sort_order"
         const val KEY_PARENTAL_ENABLED = "parental_control_enabled"
         const val KEY_PARENTAL_PIN_SALT = "parental_pin_salt"
         const val KEY_PARENTAL_PIN_HASH = "parental_pin_hash"

@@ -87,12 +87,13 @@ fun HomeScreen(
     // Reprise en cours : uniquement le contenu VOD (Films/Séries) assez avancé pour être
     // reprenable — Direct n'a pas de notion de position de lecture. On relit l'entrée depuis le
     // catalogue courant (icône/nom à jour) tout en gardant l'item d'historique pour sa progression.
-    val resumeCards = remember(catalog, library.history, library.hiddenEntries, hiddenCategoryIdsByType) {
+    val resumeCards = remember(catalog, library.history, library.hiddenEntries, library.watchedEntries, hiddenCategoryIdsByType) {
         library.history.asSequence()
             .filter {
                 it.entry.type != MediaType.Live &&
                     it.isResumable() &&
                     it.entry.key !in library.hiddenEntries &&
+                    it.entry.key !in library.watchedEntries &&
                     it.entry.categoryId !in hiddenCategoryIdsByType[it.entry.type].orEmpty()
             }
             .map { item ->
