@@ -39,6 +39,8 @@ import fr.streamia.tv.ui.theme.Night
 import fr.streamia.tv.ui.theme.TypeLabel
 import fr.streamia.tv.ui.theme.TypeSectionTitle
 import fr.streamia.tv.ui.theme.TypeScreenTitle
+import java.text.Collator
+import java.util.Locale
 
 @Composable
 fun OrganizerScreen(
@@ -152,7 +154,7 @@ fun OrganizerScreen(
                     Spacer(Modifier.weight(1f))
                     FocusableSurface(
                         onClick = {
-                            val ordered = categories.sortedBy { it.name.lowercase() }
+                            val ordered = sortAlphabetically(categories)
                             localCategoryOrder = ordered.map(MediaCategory::key)
                             onCategoryOrderChanged(type, ordered.map(MediaCategory::key))
                         },
@@ -336,12 +338,22 @@ private fun moveSelected(categories: List<MediaCategory>, selected: Set<String>,
 /**
  * Envoie la sélection tout en tête ou tout en fin de liste en un seul geste, plutôt que pas à pas
  * comme [moveSelected] : indispensable dès que la liste compte des centaines/milliers de catégories.
- * [List.partition] conserve l'ordre relatif à l'intérieur de chacun des deux groupes.
+ * [Iterable.partition] conserve l'ordre relatif à l'intérieur de chacun des deux groupes.
  */
 private fun moveSelectedToEdge(categories: List<MediaCategory>, selected: Set<String>, toStart: Boolean): List<MediaCategory> {
     if (selected.isEmpty()) return categories
     val (chosen, rest) = categories.partition { it.key in selected }
     return if (toStart) chosen + rest else rest + chosen
+}
+
+/**
+ * Tri alphabétique conscient de la locale (accents/casse français inclus) plutôt qu'un simple
+ * `sortedBy { it.name.lowercase() }`, qui ordonne par point de code Unicode et placerait par
+ * exemple « Éducation » après tout ce qui commence par une lettre non accentuée.
+ */
+private fun sortAlphabetically(categories: List<MediaCategory>): List<MediaCategory> {
+    val collator = Collator.getInstance(Locale.FRENCH)
+    return categories.sortedWith(Comparator { a, b -> collator.compare(a.name, b.name) })
 }
 
 private fun previousDestination(categories: List<MediaCategory>, current: String?, source: String?): String? {
