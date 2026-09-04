@@ -107,6 +107,11 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             appSettings = repository.appSettings(),
             resumePositionMs = library.history.firstOrNull { it.entry.key == entry.key }?.positionMs ?: 0L,
         )
+        // Après une fermeture complète Android recrée le ViewModel, donc le petit cache RAM EPG
+        // repart vide. La base SQLite, elle, est persistante : la relire immédiatement ici remet
+        // la journée courante en mémoire sans aucun appel réseau, même quand le démarrage reprend
+        // directement le dernier flux Live et contourne openProfile()/showCatalog().
+        warmEpgGuideCache(profileId)
         viewModelScope.launch {
             // Catalogue déjà résolu (favoris/ordre déjà appliqués) persisté lors d'une précédente
             // réconciliation réussie pour ce profil : s'il est encore valide pour l'organisation
@@ -1415,9 +1420,10 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                             // l'instantané courant empêche l'actualisation de les faire régresser.
                             library = state.library,
                             offline = loaded.source == CatalogSource.Cache,
-                            epgGuide = null,
-                            epgAvailableDates = emptyList(),
-                            epgSelectedDate = null,
+                            // Le catalogue TV/Films/Séries et le cache EPG ont des cycles de vie
+                            // indépendants. Une réconciliation du catalogue ne doit jamais effacer
+                            // un guide déjà restauré depuis SQLite : c'était précisément ce qui
+                            // faisait disparaître l'EPG après une relance de l'application.
                             message = loaded.importSummary ?: state.message,
                         )
                     }
