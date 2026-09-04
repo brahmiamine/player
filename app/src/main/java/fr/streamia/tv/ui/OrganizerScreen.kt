@@ -45,7 +45,9 @@ import java.util.Locale
 @Composable
 fun OrganizerScreen(
     catalog: Catalog,
+    hiddenCategories: Set<String>,
     onCategoryOrderChanged: (MediaType, List<String>) -> Unit,
+    onToggleCategoryHidden: (MediaCategory) -> Unit,
     onMoveEntries: (Set<String>, String) -> Unit,
     onResetMoves: (Set<String>) -> Unit,
     onBack: () -> Unit,
@@ -154,6 +156,24 @@ fun OrganizerScreen(
                     Spacer(Modifier.weight(1f))
                     FocusableSurface(
                         onClick = {
+                            val selectedCategories = categories.filter { it.key in selectedCategoryKeys }
+                            val hideSelected = selectedCategories.any { it.key !in hiddenCategories }
+                            selectedCategories
+                                .filter { (it.key in hiddenCategories) == hideSelected }
+                                .forEach(onToggleCategoryHidden)
+                        },
+                        enabled = selectedCategoryKeys.isNotEmpty(),
+                        contentDescription = "Afficher ou masquer les catégories sélectionnées",
+                        modifier = Modifier.width(126.dp).height(44.dp),
+                    ) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            val allHidden = selectedCategoryKeys.isNotEmpty() && selectedCategoryKeys.all { it in hiddenCategories }
+                            Text(if (allHidden) "Afficher" else "Masquer", color = Ink, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    Spacer(Modifier.width(6.dp))
+                    FocusableSurface(
+                        onClick = {
                             val ordered = sortAlphabetically(categories)
                             localCategoryOrder = ordered.map(MediaCategory::key)
                             onCategoryOrderChanged(type, ordered.map(MediaCategory::key))
@@ -184,7 +204,12 @@ fun OrganizerScreen(
                             ) {
                                 Column(Modifier.padding(horizontal = 13.dp)) {
                                     Text(category.name, color = Ink, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    Text("${catalog.countIn(type, category.id)} éléments", color = MutedInk, fontSize = 11.sp)
+                                    Text(
+                                        (if (category.key in hiddenCategories) "Masquée · " else "") +
+                                            catalog.countIn(type, category.id) + " éléments",
+                                        color = if (category.key in hiddenCategories) FocusBlueBright else MutedInk,
+                                        fontSize = 11.sp,
+                                    )
                                 }
                             }
                             FocusableSurface(
