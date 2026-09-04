@@ -36,6 +36,7 @@ class XtreamRepository(context: Context) {
     private val xmlTvRepository = XmlTvRepository()
     private val m3uParser = M3uParser()
     private val updateChecker = UpdateChecker()
+    private val backupManager = BackupManager(context)
 
     fun profiles(): List<PlaylistProfile> = playlistStore.loadAll()
     fun profile(profileId: String): PlaylistProfile? = playlistStore.find(profileId)
@@ -46,6 +47,11 @@ class XtreamRepository(context: Context) {
 
     suspend fun checkForUpdate(currentVersion: String): UpdateCheckResult =
         withContext(Dispatchers.IO) { updateChecker.checkForUpdate(currentVersion) }
+
+    suspend fun exportBackup(profileId: String?): String = withContext(Dispatchers.IO) { backupManager.export(profileId) }
+
+    suspend fun importBackup(profileId: String?, json: String): String =
+        withContext(Dispatchers.IO) { backupManager.import(profileId, json) }
 
     /**
      * Lecture rapide du cache disque, sans jamais contacter le fournisseur. Sert à afficher la

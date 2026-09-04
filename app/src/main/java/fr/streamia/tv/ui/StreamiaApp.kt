@@ -183,6 +183,8 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onChangePlaylist = viewModel::logout,
                     onCheckForUpdate = viewModel::checkForUpdate,
                     onDismissUpdateCheck = viewModel::dismissUpdateCheck,
+                    onExportBackup = viewModel::exportBackup,
+                    onImportBackup = viewModel::importBackup,
                     onBack = viewModel::showSettings,
                 )
 

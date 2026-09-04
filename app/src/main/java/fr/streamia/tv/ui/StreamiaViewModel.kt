@@ -308,6 +308,26 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
 
     fun dismissUpdateCheck() { _uiState.update { it.copy(updateCheck = null) } }
 
+    suspend fun exportBackup(): String = repository.exportBackup(_uiState.value.activeProfileId)
+
+    /**
+     * Restaure réglages + préférences du profil actif, puis relit les stores pour que l'interface
+     * reflète immédiatement le contenu importé — [libraryPresentation] recalcule aussi le catalogue
+     * personnalisé (ordre des catégories, déplacements), pas seulement le [StreamiaUiState.library]
+     * brut, sans quoi le Browser garderait l'ancienne disposition jusqu'à une action qui la relit
+     * incidemment.
+     */
+    suspend fun importBackup(json: String): String {
+        val profileId = _uiState.value.activeProfileId
+        val message = repository.importBackup(profileId, json)
+        _uiState.update { it.copy(appSettings = repository.appSettings()) }
+        if (profileId != null) {
+            val presentation = withContext(Dispatchers.IO) { libraryPresentation(profileId) }
+            applyLibraryPresentation(profileId, presentation)
+        }
+        return message
+    }
+
     fun openEntry(entry: MediaEntry) {
         when {
             entry.type == MediaType.Live -> openPlayer(entry, returnToSeries = false)

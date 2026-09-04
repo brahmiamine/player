@@ -1,6 +1,7 @@
 package fr.streamia.tv.data
 
 import android.content.Context
+import org.json.JSONObject
 import java.security.MessageDigest
 import java.security.SecureRandom
 
@@ -210,3 +211,43 @@ internal fun hashPin(pin: String, salt: String): String =
     MessageDigest.getInstance("SHA-256").digest((salt + pin).toByteArray(Charsets.UTF_8)).toHex()
 
 private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it) }
+
+/**
+ * Pour une sauvegarde/restauration (voir [BackupManager]) : ne couvre volontairement pas
+ * [AppSettings.parentalControlEnabled], dérivé d'un code jamais exporté — le réimporter à `true`
+ * sans code fonctionnel verrouillerait l'utilisateur hors de son propre contenu.
+ */
+fun AppSettings.toBackupJson(): JSONObject = JSONObject().apply {
+    put("livePreviewEnabled", livePreviewEnabled)
+    put("livePreviewDelayMs", livePreviewDelayMs)
+    put("vodSeekStepSeconds", vodSeekStepSeconds)
+    put("videoAspect", videoAspect.name)
+    put("bufferMode", bufferMode.name)
+    put("liveStreamFormat", liveStreamFormat.name)
+    put("liveChannelSortOrder", liveChannelSortOrder.name)
+    put("vodSortOrder", vodSortOrder.name)
+    put("epgTimeOffsetHours", epgTimeOffsetHours)
+    put("autoPlayNextEpisode", autoPlayNextEpisode)
+    put("subtitleSizeScale", subtitleSizeScale.toDouble())
+    put("subtitleBackgroundEnabled", subtitleBackgroundEnabled)
+}
+
+fun appSettingsFromBackupJson(json: JSONObject, fallback: AppSettings): AppSettings = AppSettings(
+    livePreviewEnabled = json.optBoolean("livePreviewEnabled", fallback.livePreviewEnabled),
+    livePreviewDelayMs = json.optInt("livePreviewDelayMs", fallback.livePreviewDelayMs)
+        .takeIf { it in AppSettings.LIVE_PREVIEW_DELAYS_MS } ?: fallback.livePreviewDelayMs,
+    vodSeekStepSeconds = json.optInt("vodSeekStepSeconds", fallback.vodSeekStepSeconds)
+        .takeIf { it in AppSettings.VOD_SEEK_STEPS_SECONDS } ?: fallback.vodSeekStepSeconds,
+    videoAspect = runCatching { VideoAspectSetting.valueOf(json.getString("videoAspect")) }.getOrDefault(fallback.videoAspect),
+    bufferMode = runCatching { BufferMode.valueOf(json.getString("bufferMode")) }.getOrDefault(fallback.bufferMode),
+    liveStreamFormat = runCatching { LiveStreamFormat.valueOf(json.getString("liveStreamFormat")) }.getOrDefault(fallback.liveStreamFormat),
+    liveChannelSortOrder = runCatching { LiveChannelSortOrder.valueOf(json.getString("liveChannelSortOrder")) }.getOrDefault(fallback.liveChannelSortOrder),
+    vodSortOrder = runCatching { VodSortOrder.valueOf(json.getString("vodSortOrder")) }.getOrDefault(fallback.vodSortOrder),
+    epgTimeOffsetHours = json.optInt("epgTimeOffsetHours", fallback.epgTimeOffsetHours)
+        .takeIf { it in AppSettings.EPG_TIME_OFFSETS_HOURS } ?: fallback.epgTimeOffsetHours,
+    autoPlayNextEpisode = json.optBoolean("autoPlayNextEpisode", fallback.autoPlayNextEpisode),
+    subtitleSizeScale = json.optDouble("subtitleSizeScale", fallback.subtitleSizeScale.toDouble()).toFloat()
+        .takeIf { it in AppSettings.SUBTITLE_SIZE_SCALES } ?: fallback.subtitleSizeScale,
+    subtitleBackgroundEnabled = json.optBoolean("subtitleBackgroundEnabled", fallback.subtitleBackgroundEnabled),
+    parentalControlEnabled = fallback.parentalControlEnabled,
+)

@@ -1,6 +1,8 @@
 package fr.streamia.tv.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -12,10 +14,16 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
@@ -24,6 +32,10 @@ import fr.streamia.tv.ui.theme.HeadingWeight
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
 import fr.streamia.tv.ui.theme.Night
+import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @Composable
 fun ToolsScreen(
@@ -45,11 +57,39 @@ fun ToolsScreen(
     onChangePlaylist: () -> Unit,
     onCheckForUpdate: () -> Unit,
     onDismissUpdateCheck: () -> Unit,
+    onExportBackup: suspend () -> String,
+    onImportBackup: suspend (String) -> String,
     onBack: () -> Unit,
 ) {
     BackHandler(onBack = onBack)
     val firstFocus = androidx.compose.runtime.remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { firstFocus.requestFocus() } }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var backupMessage by remember { mutableStateOf<String?>(null) }
+
+    val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            runCatching {
+                val json = onExportBackup()
+                context.contentResolver.openOutputStream(uri)?.use { it.write(json.toByteArray(Charsets.UTF_8)) }
+                    ?: throw IllegalStateException("Impossible d'écrire à cet emplacement.")
+            }.onSuccess { backupMessage = "Sauvegarde enregistrée." }
+                .onFailure { error -> backupMessage = "Échec de la sauvegarde : ${error.message ?: "erreur inconnue"}." }
+        }
+    }
+    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            runCatching {
+                val json = context.contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+                    ?: throw IllegalStateException("Fichier illisible.")
+                onImportBackup(json)
+            }.onSuccess { message -> backupMessage = message }
+                .onFailure { error -> backupMessage = "Échec de la restauration : ${error.message ?: "fichier invalide"}." }
+        }
+    }
 
     Column(Modifier.fillMaxSize().background(Night).padding(horizontal = 42.dp, vertical = 28.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -98,6 +138,23 @@ fun ToolsScreen(
                 )
                 Spacer(Modifier.weight(2f))
             }
+            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                SettingsTile(
+                    StreamiaIconGlyph.Swap,
+                    "Sauvegarder les réglages",
+                    "Préférences et réglages de lecture, hors identifiants de connexion",
+                    { exportLauncher.launch(backupFileName()) },
+                    Modifier.weight(1f),
+                )
+                SettingsTile(
+                    StreamiaIconGlyph.Swap,
+                    "Restaurer les réglages",
+                    "Depuis un fichier de sauvegarde exporté précédemment",
+                    { importLauncher.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) },
+                    Modifier.weight(1f),
+                )
+                Spacer(Modifier.weight(1f))
+            }
         }
 
         if (updateCheck != null) {
@@ -109,7 +166,24 @@ fun ToolsScreen(
                 }
             }
         }
+
+        backupMessage?.let { message ->
+            Spacer(Modifier.height(12.dp))
+            FocusableSurface(onClick = { backupMessage = null }, modifier = Modifier.fillMaxWidth().height(48.dp)) {
+                Text(
+                    "$message  ·  OK fermer",
+                    color = Ink,
+                    fontSize = 13.sp,
+                    modifier = Modifier.padding(horizontal = 18.dp),
+                )
+            }
+        }
     }
+}
+
+private fun backupFileName(): String {
+    val stamp = SimpleDateFormat("yyyy-MM-dd_HHmm", Locale.FRANCE).format(Date())
+    return "streamia-sauvegarde-$stamp.json"
 }
 
 private fun updateSubtitle(currentVersion: String, result: UpdateCheckResult?): String = when (result) {

@@ -140,6 +140,19 @@ class UserLibraryStore(context: Context) {
     fun applyToCatalog(catalog: Catalog, snapshot: UserLibrarySnapshot): Catalog =
         applyUserLibraryToCatalog(catalog, snapshot)
 
+    /**
+     * Bloc JSON brut d'un profil (favoris, catégories masquées/verrouillées, ordre, historique…)
+     * pour une sauvegarde — jamais d'identifiant de connexion ici, ce store n'en contient pas.
+     */
+    fun exportRaw(profileId: String): JSONObject = loadRoot(profileId)
+
+    /** Remplace entièrement les préférences d'un profil par un bloc exporté via [exportRaw]. */
+    fun importRaw(profileId: String, raw: JSONObject) {
+        synchronized(mutationLock) {
+            preferences.edit().putString(key(profileId), raw.toString()).apply()
+        }
+    }
+
     private fun loadRoot(profileId: String): JSONObject = runCatching {
         JSONObject(preferences.getString(key(profileId), null) ?: "{}")
     }.getOrDefault(JSONObject())
