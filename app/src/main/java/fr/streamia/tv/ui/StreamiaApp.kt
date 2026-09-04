@@ -177,7 +177,9 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
 
                 state.screen is StreamiaScreen.Organizer && state.catalog != null -> OrganizerScreen(
                     catalog = state.catalog!!,
+                    hiddenCategories = state.library.hiddenCategories,
                     onCategoryOrderChanged = viewModel::setCategoryOrder,
+                    onToggleCategoryHidden = viewModel::toggleCategoryHidden,
                     onMoveEntries = viewModel::moveEntries,
                     onResetMoves = viewModel::resetEntryMoves,
                     onBack = viewModel::closeOrganizer,
