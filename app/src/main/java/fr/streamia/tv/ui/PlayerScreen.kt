@@ -416,7 +416,7 @@ fun PlayerScreen(
         if (sharedLivePlayer && livePlaybackSession.isCurrent(entry)) {
             activeStreamUrl = livePlaybackSession.activeUrl
             buffering = player.playbackState != Player.STATE_READY
-            player.play()
+            livePlaybackSession.continuePlayback()
         } else {
             val url = streamCandidates.firstOrNull() ?: baseUrl
             startCandidate(url, resumePositionMs)
