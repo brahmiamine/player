@@ -72,6 +72,14 @@ fun OrganizerScreen(
     var locallyMovedEntryKeys by remember(catalog, type, sourceCategoryId) { mutableStateOf(emptySet<String>()) }
     val categoriesByKey = remember(catalog, type) { catalog.categoriesFor(type).associateBy(MediaCategory::key) }
     val categories = remember(localCategoryOrder, categoriesByKey) { localCategoryOrder.mapNotNull(categoriesByKey::get) }
+    var categoryQuery by remember(type) { mutableStateOf("") }
+    // Le filtre ne restreint que l'affichage : le tri/déplacement en masse continue d'agir sur
+    // l'ordre réel (categories), indispensable pour un catalogue de plusieurs centaines de
+    // catégories où chercher un nom précis avant de le déplacer est bien plus rapide que défiler.
+    val visibleCategories = remember(categories, categoryQuery) {
+        val needle = categoryQuery.trim()
+        if (needle.isBlank()) categories else categories.filter { it.name.contains(needle, ignoreCase = true) }
+    }
     val sourceEntries = remember(catalog, type, sourceCategoryId, locallyMovedEntryKeys) {
         sourceCategoryId?.let { catalog.entriesIn(type, it) }.orEmpty()
             .filterNot { it.key in locallyMovedEntryKeys }
@@ -112,7 +120,16 @@ fun OrganizerScreen(
 
         Row(Modifier.fillMaxSize()) {
             Column(Modifier.width(420.dp).fillMaxHeight()) {
-                SectionLabel("Catégories (${categories.size})")
+                SectionLabel(
+                    if (categoryQuery.isBlank()) "Catégories (${categories.size})" else "Catégories (${visibleCategories.size}/${categories.size})",
+                )
+                Spacer(Modifier.height(9.dp))
+                TvTextField(
+                    value = categoryQuery,
+                    onValueChange = { categoryQuery = it },
+                    label = "Rechercher une catégorie",
+                    modifier = Modifier.fillMaxWidth(),
+                )
                 Spacer(Modifier.height(9.dp))
                 // Avec des centaines/milliers de catégories, remonter/descendre pas à pas jusqu'au
                 // bon endroit est beaucoup trop lent : ⇈/⇊ envoient directement la sélection en
@@ -225,7 +242,7 @@ fun OrganizerScreen(
                 }
                 Spacer(Modifier.height(9.dp))
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    items(categories, key = MediaCategory::key) { category ->
+                    items(visibleCategories, key = MediaCategory::key) { category ->
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                             FocusableSurface(
                                 onClick = {
