@@ -9,7 +9,7 @@ import fr.streamia.tv.domain.MediaEntry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-internal data class EpgCacheMetadata(
+data class EpgCacheMetadata(
     val syncedAtMillis: Long,
     val sourceUrl: String?,
     val minStartEpochSeconds: Long?,
