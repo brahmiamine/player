@@ -102,28 +102,68 @@ fun OrganizerScreen(
 
         Row(Modifier.fillMaxSize()) {
             Column(Modifier.width(420.dp).fillMaxHeight()) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    SectionLabel("Catégories (${categories.size})")
-                    Spacer(Modifier.weight(1f))
-                    FocusableSurface(
+                SectionLabel("Catégories (${categories.size})")
+                Spacer(Modifier.height(9.dp))
+                // Avec des centaines/milliers de catégories, remonter/descendre pas à pas jusqu'au
+                // bon endroit est beaucoup trop lent : ⇈/⇊ envoient directement la sélection en
+                // tête/en fin de liste, et « Trier A→Z » réordonne tout d'un coup — la plupart des
+                // besoins de tri manuel disparaissent une fois la liste déjà rangée par nom.
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    CategoryMoveButton(
+                        glyph = "↑",
+                        contentDescription = "Monter la sélection d'une position",
+                        enabled = selectedCategoryKeys.isNotEmpty(),
                         onClick = {
                             val ordered = moveSelected(categories, selectedCategoryKeys, -1)
                             localCategoryOrder = ordered.map(MediaCategory::key)
                             onCategoryOrderChanged(type, ordered.map(MediaCategory::key))
                         },
+                    )
+                    CategoryMoveButton(
+                        glyph = "↓",
+                        contentDescription = "Descendre la sélection d'une position",
                         enabled = selectedCategoryKeys.isNotEmpty(),
-                        modifier = Modifier.width(82.dp).height(44.dp),
-                    ) { Text("↑", color = Ink, fontSize = 19.sp, modifier = Modifier.padding(start = 31.dp)) }
-                    Spacer(Modifier.width(6.dp))
-                    FocusableSurface(
                         onClick = {
                             val ordered = moveSelected(categories, selectedCategoryKeys, 1)
                             localCategoryOrder = ordered.map(MediaCategory::key)
                             onCategoryOrderChanged(type, ordered.map(MediaCategory::key))
                         },
+                    )
+                    CategoryMoveButton(
+                        glyph = "⇈",
+                        contentDescription = "Envoyer la sélection tout en haut",
                         enabled = selectedCategoryKeys.isNotEmpty(),
-                        modifier = Modifier.width(82.dp).height(44.dp),
-                    ) { Text("↓", color = Ink, fontSize = 19.sp, modifier = Modifier.padding(start = 31.dp)) }
+                        onClick = {
+                            val ordered = moveSelectedToEdge(categories, selectedCategoryKeys, toStart = true)
+                            localCategoryOrder = ordered.map(MediaCategory::key)
+                            onCategoryOrderChanged(type, ordered.map(MediaCategory::key))
+                        },
+                    )
+                    CategoryMoveButton(
+                        glyph = "⇊",
+                        contentDescription = "Envoyer la sélection tout en bas",
+                        enabled = selectedCategoryKeys.isNotEmpty(),
+                        onClick = {
+                            val ordered = moveSelectedToEdge(categories, selectedCategoryKeys, toStart = false)
+                            localCategoryOrder = ordered.map(MediaCategory::key)
+                            onCategoryOrderChanged(type, ordered.map(MediaCategory::key))
+                        },
+                    )
+                    Spacer(Modifier.weight(1f))
+                    FocusableSurface(
+                        onClick = {
+                            val ordered = categories.sortedBy { it.name.lowercase() }
+                            localCategoryOrder = ordered.map(MediaCategory::key)
+                            onCategoryOrderChanged(type, ordered.map(MediaCategory::key))
+                        },
+                        enabled = categories.size > 1,
+                        contentDescription = "Trier toutes les catégories par ordre alphabétique",
+                        modifier = Modifier.width(112.dp).height(44.dp),
+                    ) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text("Trier A→Z", color = Ink, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
                 }
                 Spacer(Modifier.height(9.dp))
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -252,6 +292,25 @@ fun OrganizerScreen(
     }
 }
 
+@Composable
+private fun CategoryMoveButton(
+    glyph: String,
+    contentDescription: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    FocusableSurface(
+        onClick = onClick,
+        enabled = enabled,
+        contentDescription = contentDescription,
+        modifier = Modifier.width(48.dp).height(44.dp),
+    ) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text(glyph, color = Ink, fontSize = 17.sp)
+        }
+    }
+}
+
 private fun moveSelected(categories: List<MediaCategory>, selected: Set<String>, delta: Int): List<MediaCategory> {
     val result = categories.toMutableList()
     if (delta < 0) {
@@ -272,6 +331,17 @@ private fun moveSelected(categories: List<MediaCategory>, selected: Set<String>,
         }
     }
     return result
+}
+
+/**
+ * Envoie la sélection tout en tête ou tout en fin de liste en un seul geste, plutôt que pas à pas
+ * comme [moveSelected] : indispensable dès que la liste compte des centaines/milliers de catégories.
+ * [List.partition] conserve l'ordre relatif à l'intérieur de chacun des deux groupes.
+ */
+private fun moveSelectedToEdge(categories: List<MediaCategory>, selected: Set<String>, toStart: Boolean): List<MediaCategory> {
+    if (selected.isEmpty()) return categories
+    val (chosen, rest) = categories.partition { it.key in selected }
+    return if (toStart) chosen + rest else rest + chosen
 }
 
 private fun previousDestination(categories: List<MediaCategory>, current: String?, source: String?): String? {
