@@ -49,6 +49,19 @@ class EpgNowContextTest {
     }
 
     @Test
+    fun `ignores programs whose end is not after start`() {
+        val context = listOf(
+            program("Invalide", 260, 240),
+            program("En cours", 200, 300),
+            program("Après", 300, 400),
+        ).epgNowContextAt(nowEpochSeconds = 250)
+
+        assertEquals("En cours", context.current?.title)
+        assertNull(context.previous)
+        assertEquals("Après", context.next?.title)
+    }
+
+    @Test
     fun `returns an empty context when no timed program exists`() {
         val context = listOf(
             EpgProgram("Sans horaire", null, null, null),
