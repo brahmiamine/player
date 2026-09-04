@@ -49,6 +49,35 @@ class XtreamRepository(context: Context) {
         cache.load(profileId)?.takeIf { it.hasPlayableContent() }
 
     /**
+     * Charge une page bornée d'une catégorie (ou de « Tout » via [Catalog.ALL_CATEGORY_ID])
+     * directement depuis l'index SQLite, sans matérialiser le reste du catalogue fournisseur.
+     * [offset] doit correspondre au nombre d'entrées déjà chargées pour cette catégorie afin que
+     * les pages s'enchaînent sans trou ni doublon une fois fusionnées via [Catalog.withMaterializedEntries].
+     */
+    suspend fun loadCategoryPage(
+        profileId: String,
+        type: MediaType,
+        categoryId: String,
+        offset: Int,
+        limit: Int = DEFAULT_CATEGORY_PAGE_SIZE,
+    ): CatalogPage = cache.loadCategoryPage(profileId, type, categoryId, offset, limit)
+
+    /**
+     * Charge tout un type (ex. Live) en une requête. Réservé aux sections qu'on choisit d'hydrater
+     * entièrement — le Live proactivement au démarrage, ou Films/Séries à l'ouverture de
+     * l'organisateur qui a besoin des listes complètes pour réordonner/déplacer des entrées.
+     */
+    suspend fun loadSection(profileId: String, type: MediaType): List<MediaEntry> = cache.loadType(profileId, type)
+
+    /**
+     * Recherche indexée en base plutôt que dans le sous-ensemble matérialisé en mémoire : sous
+     * chargement paresseux, un film ou une série jamais parcouru par l'utilisateur n'existe pas
+     * encore dans `Catalog.entries`, donc [fr.streamia.tv.domain.Catalog.search] le raterait.
+     */
+    suspend fun search(profileId: String, query: String, type: MediaType?, limit: Int = 600): List<MediaEntry> =
+        cache.search(profileId, query, type, limit)
+
+    /**
      * Catalogue déjà résolu (favoris/ordre appliqués) tel qu'obtenu à la fin de la dernière
      * réconciliation réussie pour ce profil, réutilisable seulement si [librarySnapshot]
      * correspond toujours à l'organisation utilisée pour le produire (voir
@@ -410,6 +439,10 @@ class XtreamRepository(context: Context) {
     private fun Catalog.requirePlayableContent(): Catalog {
         if (!hasPlayableContent()) throw XtreamException("Le fournisseur a renvoyé un catalogue vide. Le cache existant est conservé.")
         return this
+    }
+
+    companion object {
+        const val DEFAULT_CATEGORY_PAGE_SIZE = 500
     }
 }
 

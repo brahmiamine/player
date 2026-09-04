@@ -80,6 +80,9 @@ import kotlinx.coroutines.yield
 private const val FAVORITES_CATEGORY_ID = "__favorites__"
 private const val HISTORY_CATEGORY_ID = "__history__"
 
+/** Distance (en éléments) à la fin de la liste/grille matérialisée à partir de laquelle la page suivante est demandée. */
+private const val LOAD_MORE_THRESHOLD = 20
+
 @Composable
 fun BrowserScreen(
     catalog: Catalog,
@@ -97,6 +100,8 @@ fun BrowserScreen(
     onToggleCategoryFavorite: (MediaCategory) -> Unit,
     onRememberContent: (MediaEntry) -> Unit,
     onLocationChanged: (MediaType, String?) -> Unit,
+    onEnsureCategoryLoaded: (MediaType, String) -> Unit,
+    onLoadMoreInCategory: (MediaType, String) -> Unit,
     onHome: () -> Unit,
     onSearch: () -> Unit,
     onEpg: () -> Unit,
@@ -181,6 +186,9 @@ fun BrowserScreen(
         if (selectedType != MediaType.Live) {
             navigationStore.saveCategory(selectedType, selectedCategoryId)
         }
+        if (selectedCategoryId != FAVORITES_CATEGORY_ID && selectedCategoryId != HISTORY_CATEGORY_ID) {
+            onEnsureCategoryLoaded(selectedType, selectedCategoryId)
+        }
     }
 
     Column(Modifier.fillMaxSize().background(Night)) {
@@ -242,6 +250,7 @@ fun BrowserScreen(
                 onToggleCategoryFavorite = onToggleCategoryFavorite,
                 onEntrySelected = onEntrySelected,
                 onToggleEntryFavorite = onToggleEntryFavorite,
+                onLoadMore = { onLoadMoreInCategory(MediaType.Live, selectedCategoryId) },
                 modifier = Modifier.fillMaxSize().padding(start = 18.dp, end = 18.dp, bottom = 18.dp),
             )
         } else {
@@ -260,6 +269,7 @@ fun BrowserScreen(
                 onEntrySelected = onEntrySelected,
                 onEntryFocused = { navigationStore.saveEntry(selectedType, it.key) },
                 onToggleEntryFavorite = onToggleEntryFavorite,
+                onLoadMore = { onLoadMoreInCategory(selectedType, selectedCategoryId) },
                 modifier = Modifier.fillMaxSize().padding(start = 18.dp, end = 18.dp, bottom = 18.dp),
             )
         }
@@ -365,6 +375,7 @@ private fun LiveCatalogLayout(
     onToggleCategoryFavorite: (MediaCategory) -> Unit,
     onEntrySelected: (MediaEntry) -> Unit,
     onToggleEntryFavorite: (MediaEntry) -> Unit,
+    onLoadMore: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var previewEntry by remember(catalog, initialPreviewKey) {
@@ -435,7 +446,7 @@ private fun LiveCatalogLayout(
                 when (category.id) {
                     FAVORITES_CATEGORY_ID -> favoriteEntries.count { it.startsWith("${MediaType.Live.name}:") }
                     HISTORY_CATEGORY_ID -> historyCount
-                    else -> catalog.entriesIn(MediaType.Live, category.id).size
+                    else -> catalog.countIn(MediaType.Live, category.id)
                 }
             },
             onSelected = onCategorySelected,
@@ -485,6 +496,7 @@ private fun LiveCatalogLayout(
                     }
                 },
                 onToggleFavorite = onToggleEntryFavorite,
+                onLoadMore = onLoadMore,
                 modifier = Modifier.width(340.dp).fillMaxHeight(),
             )
         }
@@ -506,6 +518,7 @@ private fun LiveChannelList(
     onListPositionChanged: (NavigationListPosition) -> Unit,
     onConfirm: (MediaEntry) -> Unit,
     onToggleFavorite: (MediaEntry) -> Unit,
+    onLoadMore: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val lastIndex = entries.lastIndex.coerceAtLeast(0)
@@ -513,6 +526,12 @@ private fun LiveChannelList(
         initialFirstVisibleItemIndex = initialListPosition.index.coerceIn(0, lastIndex),
         initialFirstVisibleItemScrollOffset = initialListPosition.offset.coerceAtLeast(0),
     )
+
+    LaunchedEffect(listState, entries.size) {
+        snapshotFlow { listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1 }
+            .distinctUntilChanged()
+            .collect { lastVisible -> if (lastVisible >= entries.size - LOAD_MORE_THRESHOLD) onLoadMore() }
+    }
     val channelFocus = selectedFocusRequester
     val entryIndexByKey = remember(entries) { entries.withIndex().associate { (index, entry) -> entry.key to index } }
     val previewIndex = previewKey?.let { entryIndexByKey[it] } ?: -1
@@ -749,6 +768,7 @@ private fun VodCatalogLayout(
     onEntrySelected: (MediaEntry) -> Unit,
     onEntryFocused: (MediaEntry) -> Unit,
     onToggleEntryFavorite: (MediaEntry) -> Unit,
+    onLoadMore: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Row(modifier, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -761,7 +781,7 @@ private fun VodCatalogLayout(
                 when (category.id) {
                     FAVORITES_CATEGORY_ID -> favoriteEntries.count { it.startsWith("${type.name}:") }
                     HISTORY_CATEGORY_ID -> historyCount
-                    else -> catalog.entriesIn(type, category.id).size
+                    else -> catalog.countIn(type, category.id)
                 }
             },
             onSelected = onCategorySelected,
@@ -772,12 +792,19 @@ private fun VodCatalogLayout(
         PosterGrid(
             type = type,
             categoryName = categories.firstOrNull { it.id == selectedCategoryId }?.name.orEmpty(),
+            // Favoris/Historique sont déjà entièrement matérialisés (dérivés de library.*), à la
+            // différence d'une vraie catégorie fournisseur dont le compte vient des métadonnées SQL.
+            totalCount = when (selectedCategoryId) {
+                FAVORITES_CATEGORY_ID, HISTORY_CATEGORY_ID -> entries.size
+                else -> catalog.countIn(type, selectedCategoryId)
+            },
             entries = entries,
             favoriteEntries = favoriteEntries,
             historyByKey = historyByKey,
             onEntrySelected = onEntrySelected,
             onEntryFocused = onEntryFocused,
             onToggleFavorite = onToggleEntryFavorite,
+            onLoadMore = onLoadMore,
             modifier = Modifier.weight(1f).fillMaxHeight(),
         )
     }
@@ -872,19 +899,28 @@ private fun CategoryRail(
 private fun PosterGrid(
     type: MediaType,
     categoryName: String,
+    totalCount: Int,
     entries: List<MediaEntry>,
     favoriteEntries: Set<String>,
     historyByKey: Map<String, PlaybackHistoryItem>,
     onEntrySelected: (MediaEntry) -> Unit,
     onEntryFocused: (MediaEntry) -> Unit,
     onToggleFavorite: (MediaEntry) -> Unit,
+    onLoadMore: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val gridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
+    LaunchedEffect(gridState, entries.size) {
+        snapshotFlow { gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1 }
+            .distinctUntilChanged()
+            .collect { lastVisible -> if (lastVisible >= entries.size - LOAD_MORE_THRESHOLD) onLoadMore() }
+    }
+
     Column(modifier) {
         Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(categoryName.ifBlank { type.displayName }, color = Ink, fontSize = TypeSectionTitle, fontWeight = HeadingWeight, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Spacer(Modifier.width(10.dp))
-            Text("${entries.size} ${type.pluralName}", color = MutedInk, fontSize = 12.sp)
+            Text("$totalCount ${type.pluralName}", color = MutedInk, fontSize = 12.sp)
             Spacer(Modifier.weight(1f))
             Text("OK ouvrir · OK long ajouter/retirer favori", color = MutedInk, fontSize = 12.sp)
         }
@@ -895,6 +931,7 @@ private fun PosterGrid(
             }
         } else {
             LazyVerticalGrid(
+                state = gridState,
                 columns = GridCells.Adaptive(155.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -965,7 +1002,7 @@ private fun PosterCard(
 }
 
 private fun defaultCategoryId(catalog: Catalog, type: MediaType): String =
-    catalog.categoriesFor(type).firstOrNull { catalog.entriesIn(type, it.id).isNotEmpty() }?.id
+    catalog.categoriesFor(type).firstOrNull { catalog.countIn(type, it.id) > 0 }?.id
         ?: Catalog.ALL_CATEGORY_ID
 
 private fun PlaybackHistoryItem.progressPercent(): Int = (progress * 100).toInt().coerceIn(0, 100)

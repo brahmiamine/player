@@ -52,11 +52,11 @@
 - Consumes: persisted browser location and playback session entry.
 - Produces: lightweight startup catalogue plus category page loading callbacks.
 
-- [ ] Reopen cached profiles from SQLite metadata/categories without hydrating Movies/Series.
-- [ ] Restore the last Live category first when resuming playback.
-- [ ] Load a browser category in bounded pages and merge pages into the presentation catalogue.
-- [ ] Trigger the next page when the TV list/grid approaches the end.
-- [ ] Keep counts accurate using database metadata rather than loaded-list size.
+- [x] Reopen cached profiles from SQLite metadata/categories without hydrating Movies/Series (`CatalogCache.load` now calls `database.loadLightweight`; `XtreamRepository.cachedCatalog`/`openProfile` were already reading through it, no change needed there).
+- [x] Restore the last Live category first when resuming playback — already handled: `BrowserScreen`'s `LaunchedEffect(selectedType, selectedCategoryId)` now calls `StreamiaViewModel.ensureCategoryLoaded` as soon as the initial (restored) category is selected, and the whole Live section is hydrated proactively right after profile open (see Task 3) so zapping/EPG/channel-number-jump never race a lazy category fetch for Live specifically.
+- [x] Load a browser category in bounded pages and merge pages into the presentation catalogue — `StreamiaViewModel.ensureCategoryLoaded`/`loadCategoryPage` call `XtreamRepository.loadCategoryPage` and merge via `Catalog.withMaterializedEntries`, applied to both `rawCatalog` and the customized `catalog`.
+- [x] Trigger the next page when the TV list/grid approaches the end — `BrowserScreen`'s `LiveChannelList`/`PosterGrid` watch `LazyListState`/`LazyGridState.layoutInfo` and call `onLoadMoreInCategory` → `StreamiaViewModel.loadMoreInCategory` within `LOAD_MORE_THRESHOLD` items of the materialized end.
+- [x] Keep counts accurate using database metadata rather than loaded-list size — `BrowserScreen`'s `CategoryRail` and `PosterGrid` header now read `Catalog.countIn`/`count` instead of `entriesIn(...).size`; `OrganizerScreen`'s per-category count fixed the same way.
 
 ### Task 3: Remove resolved full-catalog duplication and preserve user customization
 
@@ -69,9 +69,11 @@
 - Consumes: `UserLibrarySnapshot` deltas.
 - Produces: one supplier catalogue store plus existing lightweight user-library persistence.
 
-- [ ] Stop writing a second resolved copy of the full provider catalogue.
-- [ ] Apply category order/moved-entry deltas only to the rows/pages being presented.
-- [ ] Preserve organizer behavior by hydrating the requested section before organizer operations.
+- [x] Stop writing a second resolved copy of the full provider catalogue (`CatalogCache.saveResolved`/`loadResolved` now just delete the legacy file and return `null`).
+- [x] Apply category order/moved-entry deltas only to the rows/pages being presented — `applyUserLibraryToCatalog` already only touches `catalog.entries`, i.e. whatever is currently materialized; `StreamiaViewModel`'s new `loadCategoryPage`/`ensureSectionLoaded` re-run `XtreamRepository.customizedCatalog` after every merge so newly loaded rows get the same treatment.
+- [x] Preserve organizer behavior by hydrating the requested section before organizer operations — `StreamiaViewModel.showOrganizer()` now calls `ensureSectionLoaded` for Live/Movie/Series before switching screens, since the organizer lets the user reorder/move entries in any of the three types.
+
+**Known follow-up (not done in this PR):** search (`SearchScreen`) now queries SQLite directly (`XtreamRepository.search` → `CatalogDatabase.search`) instead of `Catalog.search`, since the in-memory index only covers materialized entries — this was a correctness gap the original plan didn't call out explicitly, fixed alongside Task 2/3. EPG (`EpgScreen`), zapping fallback and the numeric channel-jump (`PlayerScreen`) all rely on the Live section being fully materialized; this is covered by the proactive `ensureSectionLoaded(Live)` call after every profile open rather than by patching each call site individually. Movies/Series stay lazy per-category as intended; a category larger than one page (500 rows) now loads incrementally via `loadMoreInCategory` as the list/grid is scrolled.
 
 ### Task 4: Verification and CI
 

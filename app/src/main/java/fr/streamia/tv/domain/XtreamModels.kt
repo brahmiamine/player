@@ -203,6 +203,21 @@ data class Catalog(
         )
     }
 
+    /**
+     * Merges an entire section (e.g. every Live channel) fetched in one database query and marks
+     * every category of [type] — including "Tout" — as loaded, so later per-category selections in
+     * that section reuse it instead of re-querying. Used for the Live section, which stays small
+     * enough to hydrate eagerly right after startup so zapping, the channel-number jump and the EPG
+     * guide can rely on the full channel list without each patching a different lazy-loading gap.
+     */
+    fun withFullSectionMaterialized(newEntries: List<MediaEntry>, type: MediaType): Catalog {
+        val merged = LinkedHashMap<String, MediaEntry>(entries.size + newEntries.size)
+        entries.forEach { merged[it.key] = it }
+        newEntries.forEach { merged[it.key] = it }
+        val sectionKeys = categoriesFor(type).map { categoryKey(type, it.id) } + categoryKey(type, ALL_CATEGORY_ID)
+        return copy(entries = merged.values.toList(), loadedCategoryKeys = loadedCategoryKeys + sectionKeys)
+    }
+
     fun search(query: String, type: MediaType? = null, limit: Int = 500): List<MediaEntry> {
         val needle = query.trim().lowercase()
         if (needle.isBlank()) return emptyList()

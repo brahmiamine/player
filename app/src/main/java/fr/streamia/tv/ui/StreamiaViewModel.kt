@@ -41,6 +41,10 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     private val libraryMutation = Mutex()
     private var libraryMutationSequence = 0L
     private var connectionTestSequence = 0L
+    // Lu/écrit uniquement depuis le thread principal (appelants Compose) : évite de relancer une
+    // requête SQLite déjà en vol pour la même page quand plusieurs recompositions déclenchent le
+    // même chargement (ex. sélection rapide de catégories, LaunchedEffect qui se relance).
+    private val categoryLoadsInFlight = mutableSetOf<String>()
     val uiState: StateFlow<StreamiaUiState> = _uiState.asStateFlow()
 
     init {
@@ -325,10 +329,28 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         openPlayer(playable, returnToSeries = true)
     }
 
+    /**
+     * Interroge directement l'index SQLite plutôt que [fr.streamia.tv.domain.Catalog.search], qui
+     * ne voit que les entrées déjà matérialisées en mémoire : sous chargement paresseux, un
+     * contenu jamais parcouru serait invisible à une recherche purement en mémoire.
+     */
+    suspend fun searchCatalog(query: String, type: MediaType?): List<MediaEntry> {
+        val profileId = _uiState.value.activeProfileId ?: return emptyList()
+        return runCatching { repository.search(profileId, query, type) }.getOrDefault(emptyList())
+    }
+
     fun showHome() { _uiState.update { it.copy(screen = StreamiaScreen.Home, message = null) } }
     fun showSettings() { _uiState.update { it.copy(screen = StreamiaScreen.Settings, message = null) } }
     fun showSearch() { _uiState.update { it.copy(screen = StreamiaScreen.Search, message = null) } }
-    fun showOrganizer() { _uiState.update { it.copy(screen = StreamiaScreen.Organizer, message = null) } }
+    /**
+     * L'organisateur permet de réordonner des catégories et de déplacer des entrées entre elles
+     * pour n'importe quel type qu'on y sélectionne : contrairement au navigateur, il a donc besoin
+     * des listes complètes des trois types, pas seulement de la catégorie visitée.
+     */
+    fun showOrganizer() {
+        _uiState.update { it.copy(screen = StreamiaScreen.Organizer, message = null) }
+        MediaType.entries.forEach(::ensureSectionLoaded)
+    }
     fun showBrowser() { _uiState.update { it.copy(screen = StreamiaScreen.Browser, message = null) } }
 
     fun openSection(type: MediaType) {
@@ -344,6 +366,88 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
 
     fun rememberBrowserLocation(type: MediaType, categoryId: String?) {
         _uiState.update { it.copy(browserType = type, browserCategoryId = categoryId) }
+    }
+
+    /**
+     * Charge la première page d'une catégorie depuis SQLite si elle n'est pas déjà matérialisée.
+     * Le catalogue affiché reste léger (catégories + comptes + quelques entrées de contexte) tant
+     * que l'utilisateur n'a pas réellement ouvert une catégorie : c'est cet appel — déclenché par
+     * [fr.streamia.tv.ui.BrowserScreen] à la sélection — qui va chercher ses chaînes/films/séries.
+     * `Catalog.ALL_CATEGORY_ID` (« Tout ») est une catégorie comme une autre pour
+     * [XtreamRepository.loadCategoryPage] : elle charge simplement les premières entrées du type
+     * sans filtrer par category_id.
+     */
+    fun ensureCategoryLoaded(type: MediaType, categoryId: String) {
+        val profileId = _uiState.value.activeProfileId ?: return
+        val catalog = _uiState.value.catalog ?: return
+        if (catalog.isCategoryLoaded(type, categoryId)) return
+        loadCategoryPage(profileId, type, categoryId, offset = 0)
+    }
+
+    /**
+     * Charge la page suivante d'une catégorie déjà ouverte, à appeler quand la liste/grille
+     * approche de sa fin. L'offset se déduit du nombre d'entrées déjà matérialisées pour cette
+     * catégorie : les pages s'enchaînent sans trou tant qu'aucun appel ne saute une page.
+     */
+    fun loadMoreInCategory(type: MediaType, categoryId: String) {
+        val profileId = _uiState.value.activeProfileId ?: return
+        val catalog = _uiState.value.catalog ?: return
+        val loaded = catalog.entriesIn(type, categoryId).size
+        if (loaded > 0 && loaded >= catalog.countIn(type, categoryId)) return
+        loadCategoryPage(profileId, type, categoryId, offset = loaded)
+    }
+
+    private fun loadCategoryPage(profileId: String, type: MediaType, categoryId: String, offset: Int) {
+        val loadKey = "$profileId:${Catalog.categoryKey(type, categoryId)}:$offset"
+        if (!categoryLoadsInFlight.add(loadKey)) return
+        viewModelScope.launch {
+            try {
+                val page = runCatching { repository.loadCategoryPage(profileId, type, categoryId, offset) }.getOrNull() ?: return@launch
+                if (page.entries.isEmpty() && offset > 0) return@launch
+                _uiState.update { state ->
+                    if (state.activeProfileId != profileId) return@update state
+                    val rawBase = state.rawCatalog ?: state.catalog ?: return@update state
+                    val mergedRaw = rawBase.withMaterializedEntries(page.entries, type, categoryId)
+                    val mergedCatalog = repository.customizedCatalog(profileId, mergedRaw)
+                    state.copy(rawCatalog = mergedRaw, catalog = mergedCatalog)
+                }
+            } finally {
+                categoryLoadsInFlight.remove(loadKey)
+            }
+        }
+    }
+
+    /**
+     * Hydrate un type entier en une requête plutôt que catégorie par catégorie. Utilisé pour le
+     * Live (assez petit pour être chargé proactivement juste après l'ouverture du profil, ce qui
+     * évite de patcher séparément le zapping, le saut par numéro de chaîne et le guide EPG — tous
+     * lisent [fr.streamia.tv.domain.Catalog.entriesFor]/[fr.streamia.tv.domain.Catalog.entriesIn]
+     * directement) et pour Films/Séries à l'ouverture de l'organisateur, qui a besoin des listes
+     * complètes pour réordonner des catégories ou déplacer des entrées entre elles. Un catalogue
+     * déjà entièrement en mémoire (venant d'une connexion ou d'un rafraîchissement réseau) n'a pas
+     * de métadonnées légères : [fr.streamia.tv.domain.Catalog.isCategoryLoaded] y répond toujours
+     * vrai et cette fonction ne fait rien.
+     */
+    private fun ensureSectionLoaded(type: MediaType) {
+        val profileId = _uiState.value.activeProfileId ?: return
+        val catalog = _uiState.value.catalog ?: return
+        if (catalog.isCategoryLoaded(type, Catalog.ALL_CATEGORY_ID)) return
+        val loadKey = "$profileId:section:${type.name}"
+        if (!categoryLoadsInFlight.add(loadKey)) return
+        viewModelScope.launch {
+            try {
+                val section = runCatching { repository.loadSection(profileId, type) }.getOrNull() ?: return@launch
+                _uiState.update { state ->
+                    if (state.activeProfileId != profileId) return@update state
+                    val rawBase = state.rawCatalog ?: state.catalog ?: return@update state
+                    val mergedRaw = rawBase.withFullSectionMaterialized(section, type)
+                    val mergedCatalog = repository.customizedCatalog(profileId, mergedRaw)
+                    state.copy(rawCatalog = mergedRaw, catalog = mergedCatalog)
+                }
+            } finally {
+                categoryLoadsInFlight.remove(loadKey)
+            }
+        }
     }
 
     fun rememberLastContent(entry: MediaEntry) {
@@ -683,6 +787,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 if (committed && presentation.catalog !== loaded.catalog) {
                     runCatching { repository.saveResolvedCatalog(loaded.profileId, presentation.catalog, presentation.library) }
                 }
+                if (committed) ensureSectionLoaded(MediaType.Live)
                 return
             }
 
@@ -715,6 +820,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             offline = loaded.source == CatalogSource.Cache,
             message = loaded.importSummary,
         )
+        ensureSectionLoaded(MediaType.Live)
     }
 
     private fun showError(error: Throwable) {

@@ -61,6 +61,29 @@ class CatalogMetadataTest {
     }
 
     @Test
+    fun fullSectionMaterializationMarksEveryCategoryOfThatTypeLoaded() {
+        val liveA = MediaCategory("fr", "France", MediaType.Live)
+        val liveB = MediaCategory("uk", "UK", MediaType.Live)
+        val movieCategory = MediaCategory("action", "Action", MediaType.Movie)
+        val tf1 = entry(1, "TF1", liveA.id)
+        val bbc = entry(2, "BBC", liveB.id)
+        val catalog = Catalog(
+            categories = listOf(liveA, liveB, movieCategory),
+            entries = emptyList(),
+            totalCounts = mapOf(MediaType.Live to 2, MediaType.Movie to 500),
+            categoryCounts = mapOf(liveA.key to 1, liveB.key to 1),
+        )
+
+        val hydrated = catalog.withFullSectionMaterialized(listOf(tf1, bbc), MediaType.Live)
+
+        assertEquals(2, hydrated.entries.size)
+        assertTrue(hydrated.isCategoryLoaded(MediaType.Live, liveA.id))
+        assertTrue(hydrated.isCategoryLoaded(MediaType.Live, liveB.id))
+        assertTrue(hydrated.isCategoryLoaded(MediaType.Live, Catalog.ALL_CATEGORY_ID))
+        assertFalse(hydrated.isCategoryLoaded(MediaType.Movie, movieCategory.id))
+    }
+
+    @Test
     fun fullInMemoryCatalogKeepsLegacyCountBehaviorWithoutMetadata() {
         val movie = MediaEntry(
             id = 2,
