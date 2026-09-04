@@ -89,6 +89,10 @@ fun FocusableSurface(
     contentDescription: String? = null,
     onLongClick: (() -> Unit)? = null,
     onFocused: (() -> Unit)? = null,
+    // Permet à un panneau affiché par-dessus une vidéo plein écran (ex. catégories/chaînes du
+    // Direct) de rendre ses lignes au repos transparentes — seul le focus/la sélection reste plein
+    // — sans changer l'aspect opaque par défaut des autres écrans (Accueil, VOD, Organiser…).
+    idleBackground: Color = DeepSurface,
     content: @Composable () -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
@@ -103,7 +107,7 @@ fun FocusableSurface(
     val background = when {
         focused -> FocusBlue
         selected -> RaisedSurface
-        else -> DeepSurface
+        else -> idleBackground
     }
     val border = when {
         focused -> BorderStroke(3.dp, FocusBlueBright)
