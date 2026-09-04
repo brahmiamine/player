@@ -4,6 +4,7 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import fr.streamia.tv.data.AppSettings
 import fr.streamia.tv.data.CatalogSource
 import fr.streamia.tv.data.LoadedCatalog
 import fr.streamia.tv.data.PlaylistProfile
@@ -52,6 +53,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             booting = true,
             screen = StreamiaScreen.Login,
             profiles = repository.profiles(),
+            appSettings = repository.appSettings(),
         )
     }
 
@@ -83,6 +85,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             activeProfileId = profileId,
             profiles = repository.profiles(),
             library = library,
+            appSettings = repository.appSettings(),
             resumePositionMs = library.history.firstOrNull { it.entry.key == entry.key }?.positionMs ?: 0L,
         )
         viewModelScope.launch {
@@ -341,7 +344,25 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
 
     fun showHome() { _uiState.update { it.copy(screen = StreamiaScreen.Home, message = null) } }
     fun showSettings() { _uiState.update { it.copy(screen = StreamiaScreen.Settings, message = null) } }
+    fun showTools() { _uiState.update { it.copy(screen = StreamiaScreen.Tools, message = null) } }
     fun showSearch() { _uiState.update { it.copy(screen = StreamiaScreen.Search, message = null) } }
+
+    fun toggleLivePreview() {
+        updateAppSettings { it.copy(livePreviewEnabled = !it.livePreviewEnabled) }
+    }
+
+    fun cycleLivePreviewDelay() {
+        updateAppSettings { it.copy(livePreviewDelayMs = it.nextLivePreviewDelayMs()) }
+    }
+
+    fun cycleVodSeekStep() {
+        updateAppSettings { it.copy(vodSeekStepSeconds = it.nextVodSeekStepSeconds()) }
+    }
+
+    private fun updateAppSettings(transform: (AppSettings) -> AppSettings) {
+        val settings = repository.updateAppSettings(transform)
+        _uiState.update { it.copy(appSettings = settings) }
+    }
     /**
      * L'organisateur permet de réordonner des catégories et de déplacer des entrées entre elles
      * pour n'importe quel type qu'on y sélectionne : contrairement au navigateur, il a donc besoin
@@ -546,9 +567,9 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         }
     }
 
-    fun clearHistory() {
+    fun clearHistory(type: MediaType? = null) {
         val profileId = _uiState.value.activeProfileId ?: return
-        repository.clearHistory(profileId)
+        repository.clearHistory(profileId, type)
         refreshLibraryPresentation()
     }
 
@@ -582,7 +603,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     }
 
     fun closeOrganizer() {
-        showSettings()
+        showTools()
         val profileId = _uiState.value.activeProfileId ?: return
         viewModelScope.launch(Dispatchers.IO) {
             catalogLayoutMutation.withLock {
@@ -802,7 +823,12 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     }
 
     private fun showLogin() {
-        _uiState.value = StreamiaUiState(booting = false, screen = StreamiaScreen.Login, profiles = repository.profiles())
+        _uiState.value = StreamiaUiState(
+            booting = false,
+            screen = StreamiaScreen.Login,
+            profiles = repository.profiles(),
+            appSettings = repository.appSettings(),
+        )
     }
 
     private suspend fun showCatalog(loaded: LoadedCatalog) {
@@ -817,6 +843,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             activeProfileId = loaded.profileId,
             profiles = presentation.profiles,
             library = presentation.library,
+            appSettings = repository.appSettings(),
             offline = loaded.source == CatalogSource.Cache,
             message = loaded.importSummary,
         )
@@ -851,6 +878,7 @@ data class StreamiaUiState(
     val activeProfileId: String? = null,
     val profiles: List<PlaylistProfile> = emptyList(),
     val library: UserLibrarySnapshot = UserLibrarySnapshot(),
+    val appSettings: AppSettings = AppSettings(),
     val offline: Boolean = false,
     val message: String? = null,
     val mediaDetails: MediaDetails? = null,
@@ -869,6 +897,7 @@ sealed interface StreamiaScreen {
     data object Home : StreamiaScreen
     data object Browser : StreamiaScreen
     data object Settings : StreamiaScreen
+    data object Tools : StreamiaScreen
     data object Search : StreamiaScreen
     data object Epg : StreamiaScreen
     data object Organizer : StreamiaScreen
