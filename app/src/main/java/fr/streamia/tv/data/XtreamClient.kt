@@ -46,7 +46,20 @@ class XtreamClient {
      * d'entrées par type (issu de ce qui a réellement été écrit) plutôt que le catalogue lui-même :
      * l'appelant relit ensuite la version allégée depuis le cache une fois l'écriture validée.
      */
-    suspend fun loadCatalog(credentials: ServerCredentials, sink: CatalogWriteSink): CatalogFetchResult = withContext(Dispatchers.IO) {
+    suspend fun loadCatalog(credentials: ServerCredentials, sink: CatalogWriteSink): CatalogFetchResult =
+        withContext(Dispatchers.IO) { loadCatalogOnIo(credentials, sink) }
+
+    /**
+     * Suppose déjà être sur [Dispatchers.IO], comme [testConnectionOnIo] : appelée directement par
+     * [XtreamRepository.fetchAndStoreXtreamCatalog], qui doit garder toute la séquence
+     * begin-transaction → écriture par lots → commit/abort sur un seul thread (une transaction
+     * SQLite Android est confinée au thread qui l'a ouverte — voir
+     * [CatalogDatabase.ReplaceSession]). Repasser par un `suspend fun` avec son propre
+     * `withContext` ici referait dépendre cette garantie d'un détail d'implémentation de
+     * kotlinx.coroutines plutôt que de la structure du code ; cette variante synchrone élimine le
+     * risque en ne laissant aucun point de suspension entre le début et la fin de la transaction.
+     */
+    internal fun loadCatalogOnIo(credentials: ServerCredentials, sink: CatalogWriteSink): CatalogFetchResult {
         val urls = XtreamUrlBuilder(credentials)
         val account = testConnectionOnIo(credentials)
         if (!account.status.equals("Active", ignoreCase = true)) {
@@ -89,7 +102,7 @@ class XtreamClient {
                 }
         }
 
-        CatalogFetchResult(account, counts)
+        return CatalogFetchResult(account, counts)
     }
 
     suspend fun loadMovieDetails(

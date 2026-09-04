@@ -137,6 +137,7 @@ internal class CatalogDatabase(context: Context) :
     inner class ReplaceSession internal constructor(private val db: SQLiteDatabase, val profileId: String) : CatalogWriteSink {
         private var categoryStatement: android.database.sqlite.SQLiteStatement? = null
         private var entryStatement: android.database.sqlite.SQLiteStatement? = null
+        private val categoryPositions = HashMap<String, Int>()
         private var nextCategoryPosition = 0
         private var finished = false
 
@@ -144,6 +145,12 @@ internal class CatalogDatabase(context: Context) :
          * `INSERT OR REPLACE` rather than a plain `INSERT`: a network retry re-parses a section from
          * scratch (see [XtreamClient.fetchEntriesStreaming]), so a row already written by a partial
          * first attempt must be safely overwritten by the retry instead of tripping the primary key.
+         *
+         * [categoryPositions] keeps the position a category was first assigned rather than always
+         * incrementing: without it, a category rewritten later in the same session (the M3U fallback
+         * can rewrite one already written from broken provider metadata, see
+         * [XtreamClient.loadCatalogOnIo]) would jump to whatever position the counter had reached by
+         * then, reordering it in [loadCategories]' `ORDER BY position`.
          */
         override fun writeCategories(categories: List<MediaCategory>) {
             check(!finished) { "ReplaceSession already finished" }
@@ -152,14 +159,15 @@ internal class CatalogDatabase(context: Context) :
                 "INSERT OR REPLACE INTO catalog_categories(profile_id, media_type, category_id, name, position) VALUES(?,?,?,?,?)",
             ).also { categoryStatement = it }
             categories.forEach { category ->
+                val key = "${category.type.name}:${category.id}"
+                val position = categoryPositions.getOrPut(key) { nextCategoryPosition++ }
                 statement.clearBindings()
                 statement.bindString(1, profileId)
                 statement.bindString(2, category.type.name)
                 statement.bindString(3, category.id)
                 statement.bindString(4, category.name)
-                statement.bindLong(5, nextCategoryPosition.toLong())
+                statement.bindLong(5, position.toLong())
                 statement.executeInsert()
-                nextCategoryPosition += 1
             }
         }
 

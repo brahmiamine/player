@@ -313,33 +313,35 @@ class XtreamRepository(context: Context) {
 
     /**
      * Récupère le catalogue Xtream et l'écrit directement en base par lots pendant le parsing
-     * ([XtreamClient.loadCatalog]) plutôt que de matérialiser toutes les entrées en mémoire avant
-     * de les persister. La session n'est validée que si le fournisseur a bien renvoyé du contenu
-     * lisible ; sinon elle est annulée et l'ancien catalogue valide reste en place, exactement comme
-     * avant ce changement — voir [CatalogDatabase.ReplaceSession].
+     * ([XtreamClient.loadCatalogOnIo]) plutôt que de matérialiser toutes les entrées en mémoire
+     * avant de les persister. La session n'est validée que si le fournisseur a bien renvoyé du
+     * contenu lisible ; sinon elle est annulée et l'ancien catalogue valide reste en place,
+     * exactement comme avant ce changement — voir [CatalogDatabase.ReplaceSession].
      *
      * Le tout doit s'exécuter sur un seul et même thread : une transaction SQLite Android est
      * confinée au thread qui l'a ouverte (`beginTransaction`/`endTransaction` utilisent un état par
-     * thread), donc `beginReplace`, l'écriture des lots pendant [XtreamClient.loadCatalog] et
-     * `commit`/`abort` doivent tous tourner sur le même thread. Englober toute la fonction dans un
-     * seul [withContext] vers [Dispatchers.IO] garantit cela : les appels suspendus imbriqués vers
-     * ce même dispatcher restent sur le thread courant au lieu de redistribuer vers un autre thread
-     * du pool (kotlinx.coroutines ne redistribue que lorsque le dispatcher change réellement).
+     * thread), donc begin/écriture/commit/abort doivent tous tourner sur le même thread. Plutôt que
+     * de compter sur le fait que des `withContext(Dispatchers.IO)` imbriqués ne redistribuent pas
+     * quand le dispatcher ne change pas — un détail d'implémentation de kotlinx.coroutines, pas une
+     * garantie de son API publique — un seul [withContext] englobant est utilisé ici, et
+     * begin/commit/abort/[XtreamClient.loadCatalogOnIo] sont de simples fonctions synchrones :
+     * aucun point de suspension n'existe entre l'ouverture et la fin de la transaction, donc rien
+     * ne peut ni migrer de thread ni être interrompu par une annulation de coroutine au milieu.
      */
     private suspend fun fetchAndStoreXtreamCatalog(profileId: String, credentials: ServerCredentials): Catalog =
         withContext(Dispatchers.IO) {
-            val session = cache.beginReplace(profileId)
+            val session = cache.beginReplaceOnIo(profileId)
             val result = try {
-                client.loadCatalog(credentials, session)
+                client.loadCatalogOnIo(credentials, session)
             } catch (error: Throwable) {
-                cache.abortReplace(session)
+                cache.abortReplaceOnIo(session)
                 throw error
             }
             if (result.counts.values.none { it > 0 }) {
-                cache.abortReplace(session)
+                cache.abortReplaceOnIo(session)
                 throw XtreamException("Le fournisseur a renvoyé un catalogue vide. Le cache existant est conservé.")
             }
-            cache.commitReplace(session, result.account)
+            cache.commitReplaceOnIo(session, result.account)
             cache.load(profileId) ?: throw XtreamException("Le catalogue vient d'être enregistré mais ne peut pas être relu.")
         }
 
