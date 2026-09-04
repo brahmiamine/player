@@ -3,6 +3,7 @@ package fr.streamia.tv.data
 import android.content.Context
 import android.util.JsonReader
 import android.util.JsonToken
+import fr.streamia.tv.domain.AccountInfo
 import fr.streamia.tv.domain.Catalog
 import fr.streamia.tv.domain.MediaCategory
 import fr.streamia.tv.domain.MediaEntry
@@ -31,6 +32,28 @@ class CatalogCache(context: Context) {
         database.replace(profileId, catalog)
         deleteJsonCopies(profileId)
         legacyFiles.forEach(File::delete)
+    }
+
+    /**
+     * Démarre un remplacement transactionnel du catalogue d'un profil sans exiger que l'appelant
+     * ait déjà tout en mémoire : [XtreamClient.loadCatalog] écrit les catégories puis les entrées
+     * par lots au fil du parsing réseau via la session renvoyée. Rien n'est visible pour les
+     * lecteurs tant que [commitReplace] n'a pas été appelé.
+     */
+    suspend fun beginReplace(profileId: String): CatalogDatabase.ReplaceSession = withContext(Dispatchers.IO) {
+        database.beginReplace(profileId)
+    }
+
+    /** Valide la session : le nouveau catalogue devient visible et l'ancien cache JSON éventuel est purgé. */
+    suspend fun commitReplace(session: CatalogDatabase.ReplaceSession, account: AccountInfo?) = withContext(Dispatchers.IO) {
+        session.commit(account)
+        deleteJsonCopies(session.profileId)
+        legacyFiles.forEach(File::delete)
+    }
+
+    /** Annule la session : tout ce qui a été écrit est retiré, l'ancien catalogue valide reste en place. */
+    suspend fun abortReplace(session: CatalogDatabase.ReplaceSession) = withContext(Dispatchers.IO) {
+        session.abort()
     }
 
     /**

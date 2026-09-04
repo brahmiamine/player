@@ -4,7 +4,6 @@ import android.util.Base64
 import android.util.JsonReader
 import android.util.JsonToken
 import fr.streamia.tv.domain.AccountInfo
-import fr.streamia.tv.domain.Catalog
 import fr.streamia.tv.domain.EpgProgram
 import fr.streamia.tv.domain.MediaCategory
 import fr.streamia.tv.domain.MediaDetails
@@ -39,7 +38,15 @@ class XtreamClient {
     private fun testConnectionOnIo(credentials: ServerCredentials): AccountInfo =
         parseAccount(fetchObject(XtreamUrlBuilder(credentials).authentication()))
 
-    suspend fun loadCatalog(credentials: ServerCredentials): Catalog = withContext(Dispatchers.IO) {
+    /**
+     * Récupère le catalogue fournisseur et l'écrit directement dans [sink] au fil du parsing,
+     * plutôt que de renvoyer un catalogue avec toutes les entrées déjà en mémoire : sur un
+     * catalogue de plusieurs centaines de milliers de lignes, matérialiser la liste complète avant
+     * de la persister double inutilement le pic mémoire pendant l'actualisation. Renvoie le compte
+     * d'entrées par type (issu de ce qui a réellement été écrit) plutôt que le catalogue lui-même :
+     * l'appelant relit ensuite la version allégée depuis le cache une fois l'écriture validée.
+     */
+    suspend fun loadCatalog(credentials: ServerCredentials, sink: CatalogWriteSink): CatalogFetchResult = withContext(Dispatchers.IO) {
         val urls = XtreamUrlBuilder(credentials)
         val account = testConnectionOnIo(credentials)
         if (!account.status.equals("Active", ignoreCase = true)) {
@@ -50,41 +57,39 @@ class XtreamClient {
             addAll(parseCategories(fetchArray(urls.api("get_live_categories")), MediaType.Live))
             addAll(runCatching { parseCategories(fetchArray(urls.api("get_vod_categories")), MediaType.Movie) }.getOrDefault(emptyList()))
             addAll(runCatching { parseCategories(fetchArray(urls.api("get_series_categories")), MediaType.Series) }.getOrDefault(emptyList()))
-        }.toMutableList()
+        }.distinctBy(MediaCategory::key)
+        sink.writeCategories(categories)
 
-        // Les catalogues de certains fournisseurs dépassent largement 200 000 entrées.
-        // JsonReader traite le tableau objet par objet et évite de conserver une énorme chaîne JSON
-        // + JSONArray + tous les JSONObject simultanément en mémoire sur la TV.
-        val entries = buildList {
-            addAll(fetchEntriesStreaming(urls.api("get_live_streams"), MediaType.Live))
-            addAll(runCatching { fetchEntriesStreaming(urls.api("get_vod_streams"), MediaType.Movie) }.getOrDefault(emptyList()))
-            addAll(runCatching { fetchEntriesStreaming(urls.api("get_series"), MediaType.Series) }.getOrDefault(emptyList()))
-        }.toMutableList()
+        // Les catalogues de certains fournisseurs dépassent largement 200 000 entrées. JsonReader
+        // lit le tableau objet par objet et [sink] écrit par lots de [WRITE_CHUNK_SIZE] au fil du
+        // parsing, en base transactionnelle : le catalogue complet n'existe jamais comme une seule
+        // liste en mémoire, et un échec réseau en cours de route laisse l'ancien catalogue intact
+        // (la transaction n'est validée qu'après un succès complet, voir XtreamRepository).
+        val counts = linkedMapOf(
+            MediaType.Live to fetchEntriesStreaming(urls.api("get_live_streams"), MediaType.Live, sink),
+            MediaType.Movie to runCatching { fetchEntriesStreaming(urls.api("get_vod_streams"), MediaType.Movie, sink) }.getOrDefault(0),
+            MediaType.Series to runCatching { fetchEntriesStreaming(urls.api("get_series"), MediaType.Series, sink) }.getOrDefault(0),
+        )
 
         // Certains serveurs authentifient correctement player_api.php mais renvoient [] pour VOD
         // ou Séries alors que leur get.php contient bien ces médias. Dans ce cas uniquement, on lit
-        // le M3U en flux et seulement pour les sections manquantes afin de ne pas doubler la mémoire.
-        val missingTypes = setOf(MediaType.Movie, MediaType.Series).filterTo(linkedSetOf()) { type ->
-            entries.none { it.type == type }
-        }
+        // le M3U en flux et seulement pour les sections manquantes.
+        val missingTypes = setOf(MediaType.Movie, MediaType.Series).filterTo(linkedSetOf()) { type -> counts[type] == 0 }
         if (missingTypes.isNotEmpty()) {
             runCatching { fetchM3uFallback(urls.playlist(), missingTypes) }
                 .getOrNull()
                 ?.let { fallback ->
                     for (type in missingTypes) {
-                        categories.removeAll { it.type == type }
-                        entries.removeAll { it.type == type }
-                        categories += fallback.catalog.categoriesFor(type)
-                        entries += fallback.catalog.entriesFor(type)
+                        val fallbackEntries = fallback.catalog.entriesFor(type)
+                        if (fallbackEntries.isEmpty()) continue
+                        sink.writeCategories(fallback.catalog.categoriesFor(type))
+                        sink.writeEntries(fallbackEntries)
+                        counts[type] = fallbackEntries.size
                     }
                 }
         }
 
-        Catalog(
-            categories = categories.distinctBy(MediaCategory::key),
-            entries = entries.distinctBy(MediaEntry::key),
-            account = account,
-        )
+        CatalogFetchResult(account, counts)
     }
 
     suspend fun loadMovieDetails(
@@ -190,14 +195,20 @@ class XtreamClient {
     private fun fetchObject(url: String): JSONObject = JSONObject(fetch(url))
     private fun fetchArray(url: String): JSONArray = JSONArray(fetch(url))
 
-    private fun fetchEntriesStreaming(url: String, type: MediaType): List<MediaEntry> {
+    /**
+     * [sink] reçoit les entrées par lots de [WRITE_CHUNK_SIZE] au fil du parsing : en cas d'échec
+     * réseau après un premier lot déjà écrit, la nouvelle tentative (URL alternative http/https)
+     * reparse la réponse depuis le début et réécrit tout — `INSERT OR REPLACE` côté
+     * [CatalogDatabase.ReplaceSession] rend ces réécritures sans effet de bord.
+     */
+    private fun fetchEntriesStreaming(url: String, type: MediaType, sink: CatalogWriteSink): Int {
         return try {
-            fetchEntriesStreamingOnce(url, type)
+            fetchEntriesStreamingOnce(url, type, sink)
         } catch (first: IOException) {
             val alternate = XtreamUrlBuilder.alternateTransportUrl(url)
                 ?: throw XtreamException("Impossible de joindre le serveur. Vérifiez l'adresse et la connexion.")
             try {
-                fetchEntriesStreamingOnce(alternate, type)
+                fetchEntriesStreamingOnce(alternate, type, sink)
             } catch (_: IOException) {
                 throw XtreamException("Impossible de joindre le serveur en HTTP ou HTTPS. Vérifiez l'adresse et la connexion.")
             }
@@ -205,13 +216,13 @@ class XtreamClient {
     }
 
     @Throws(IOException::class)
-    private fun fetchEntriesStreamingOnce(url: String, type: MediaType): List<MediaEntry> {
+    private fun fetchEntriesStreamingOnce(url: String, type: MediaType, sink: CatalogWriteSink): Int {
         val connection = openConnection(url, "application/json")
         return try {
             val code = connection.responseCode
             if (code !in 200..299) throw XtreamException("Le serveur a répondu avec le code $code.")
             JsonReader(InputStreamReader(connection.inputStream, StandardCharsets.UTF_8)).use { reader ->
-                parseEntriesStreaming(reader, type)
+                parseEntriesStreaming(reader, type, sink)
             }
         } finally {
             connection.disconnect()
@@ -238,11 +249,20 @@ class XtreamClient {
         }
     }
 
-    private fun parseEntriesStreaming(reader: JsonReader, type: MediaType): List<MediaEntry> {
-        val entries = ArrayList<MediaEntry>()
+    /**
+     * Accumule au plus [WRITE_CHUNK_SIZE] entrées avant de les écrire dans [sink] et de vider le
+     * tampon, plutôt que de construire la liste complète d'une section (jusqu'à des centaines de
+     * milliers de lignes chez certains fournisseurs) avant de la persister. Ne trie plus le
+     * résultat : les lectures (`loadCategoryPage`/`loadType`/`loadFull`) trient déjà par
+     * `number, media_id` via l'index SQLite, donc un tri en mémoire ici serait un travail refait
+     * pour rien à chaque actualisation.
+     */
+    private fun parseEntriesStreaming(reader: JsonReader, type: MediaType, sink: CatalogWriteSink): Int {
+        var total = 0
+        val chunk = ArrayList<MediaEntry>(WRITE_CHUNK_SIZE)
         if (reader.peek() != JsonToken.BEGIN_ARRAY) {
             reader.skipValue()
-            return emptyList()
+            return 0
         }
         reader.beginArray()
         var index = 0
@@ -302,7 +322,7 @@ class XtreamClient {
                     MediaType.Series -> coverBig ?: cover ?: streamIcon
                     else -> streamIcon
                 }
-                entries += MediaEntry(
+                chunk += MediaEntry(
                     id = safeId,
                     name = safeName,
                     displayName = safeName,
@@ -317,11 +337,20 @@ class XtreamClient {
                     playable = type != MediaType.Series,
                     addedAtEpochSeconds = added,
                 )
+                if (chunk.size >= WRITE_CHUNK_SIZE) {
+                    sink.writeEntries(chunk)
+                    total += chunk.size
+                    chunk.clear()
+                }
             }
             index += 1
         }
         reader.endArray()
-        return entries.sortedWith(compareBy<MediaEntry> { it.number }.thenBy { it.name.lowercase() })
+        if (chunk.isNotEmpty()) {
+            sink.writeEntries(chunk)
+            total += chunk.size
+        }
+        return total
     }
 
     private fun JsonReader.scalarString(): String? = when (peek()) {
@@ -423,6 +452,13 @@ class XtreamClient {
 
     private fun JSONObject.optionalLong(key: String): Long? = optString(key).toLongOrNull()?.takeIf { it > 0 }
     private fun JSONObject.optionalInt(key: String): Int? = optString(key).toIntOrNull()?.takeIf { it >= 0 }
+
+    private companion object {
+        const val WRITE_CHUNK_SIZE = 1000
+    }
 }
+
+/** Résultat de [XtreamClient.loadCatalog] : le compte réellement écrit par section, pas les entrées elles-mêmes. */
+data class CatalogFetchResult(val account: AccountInfo, val counts: Map<MediaType, Int>)
 
 class XtreamException(message: String) : Exception(message)

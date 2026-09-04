@@ -99,73 +99,133 @@ internal class CatalogDatabase(context: Context) :
         arrayOf(profileId),
     ).use(Cursor::moveToFirst)
 
-    /** Replaces one profile atomically. A failed refresh rolls back to the previous valid rows. */
+    /** Replaces one profile atomically from a catalogue already fully in memory (used by M3U imports). */
     fun replace(profileId: String, catalog: Catalog) {
+        val session = beginReplace(profileId)
+        try {
+            session.writeCategories(catalog.categories)
+            session.writeEntries(catalog.entries)
+            session.commit(catalog.account)
+        } catch (error: Throwable) {
+            session.abort()
+            throw error
+        }
+    }
+
+    /**
+     * Starts a transactional replace of one profile's catalogue without requiring the caller to
+     * hold every row in memory at once: [ReplaceSession.writeCategories]/[ReplaceSession.writeEntries]
+     * can be called repeatedly with small batches as a provider response streams in, and only
+     * [ReplaceSession.commit] makes the new data visible to readers — [ReplaceSession.abort] (or an
+     * exception escaping before `commit`) rolls the whole transaction back, leaving the previous
+     * valid catalogue untouched.
+     */
+    fun beginReplace(profileId: String): ReplaceSession {
         val db = writableDatabase
         db.beginTransaction()
         try {
             db.delete("catalog_entries", "profile_id = ?", arrayOf(profileId))
             db.delete("catalog_categories", "profile_id = ?", arrayOf(profileId))
             db.delete("catalog_profiles", "profile_id = ?", arrayOf(profileId))
+        } catch (error: Throwable) {
+            db.endTransaction()
+            throw error
+        }
+        return ReplaceSession(db, profileId)
+    }
 
-            val profileValues = ContentValues().apply {
-                put("profile_id", profileId)
-                put("saved_at", System.currentTimeMillis())
-                catalog.account?.let { account ->
-                    put("account_username", account.username)
-                    put("account_status", account.status)
-                    putNullable("account_expires_at", account.expiresAtEpochSeconds)
-                    putNullable("account_active_connections", account.activeConnections)
-                    putNullable("account_maximum_connections", account.maximumConnections)
-                }
+    inner class ReplaceSession internal constructor(private val db: SQLiteDatabase, val profileId: String) : CatalogWriteSink {
+        private var categoryStatement: android.database.sqlite.SQLiteStatement? = null
+        private var entryStatement: android.database.sqlite.SQLiteStatement? = null
+        private var nextCategoryPosition = 0
+        private var finished = false
+
+        /**
+         * `INSERT OR REPLACE` rather than a plain `INSERT`: a network retry re-parses a section from
+         * scratch (see [XtreamClient.fetchEntriesStreaming]), so a row already written by a partial
+         * first attempt must be safely overwritten by the retry instead of tripping the primary key.
+         */
+        override fun writeCategories(categories: List<MediaCategory>) {
+            check(!finished) { "ReplaceSession already finished" }
+            if (categories.isEmpty()) return
+            val statement = categoryStatement ?: db.compileStatement(
+                "INSERT OR REPLACE INTO catalog_categories(profile_id, media_type, category_id, name, position) VALUES(?,?,?,?,?)",
+            ).also { categoryStatement = it }
+            categories.forEach { category ->
+                statement.clearBindings()
+                statement.bindString(1, profileId)
+                statement.bindString(2, category.type.name)
+                statement.bindString(3, category.id)
+                statement.bindString(4, category.name)
+                statement.bindLong(5, nextCategoryPosition.toLong())
+                statement.executeInsert()
+                nextCategoryPosition += 1
             }
-            check(db.insertOrThrow("catalog_profiles", null, profileValues) != -1L)
+        }
 
-            db.compileStatement(
-                "INSERT INTO catalog_categories(profile_id, media_type, category_id, name, position) VALUES(?,?,?,?,?)",
-            ).use { statement ->
-                catalog.categories.forEachIndexed { position, category ->
-                    statement.clearBindings()
-                    statement.bindString(1, profileId)
-                    statement.bindString(2, category.type.name)
-                    statement.bindString(3, category.id)
-                    statement.bindString(4, category.name)
-                    statement.bindLong(5, position.toLong())
-                    statement.executeInsert()
-                }
-            }
-
-            db.compileStatement(
+        override fun writeEntries(entries: List<MediaEntry>) {
+            check(!finished) { "ReplaceSession already finished" }
+            if (entries.isEmpty()) return
+            val statement = entryStatement ?: db.compileStatement(
                 """
-                INSERT INTO catalog_entries(
+                INSERT OR REPLACE INTO catalog_entries(
                     profile_id, media_type, media_id, name, display_name, category_id, icon_url,
                     number, extension, tvg_id, plot, rating, playable, added_at, navigable
                 ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """.trimIndent(),
-            ).use { statement ->
-                catalog.entries.forEach { entry ->
-                    statement.clearBindings()
-                    statement.bindString(1, profileId)
-                    statement.bindString(2, entry.type.name)
-                    statement.bindLong(3, entry.id.toLong())
-                    statement.bindString(4, entry.name)
-                    statement.bindString(5, entry.displayName)
-                    statement.bindString(6, entry.categoryId)
-                    statement.bindNullableString(7, entry.iconUrl)
-                    statement.bindLong(8, entry.number.toLong())
-                    statement.bindString(9, entry.extension)
-                    statement.bindNullableString(10, entry.tvgId)
-                    statement.bindNullableString(11, entry.plot)
-                    statement.bindNullableDouble(12, entry.rating)
-                    statement.bindLong(13, if (entry.playable) 1 else 0)
-                    statement.bindNullableLong(14, entry.addedAtEpochSeconds)
-                    statement.bindLong(15, if (entry.isVisualSeparator()) 0 else 1)
-                    statement.executeInsert()
-                }
+            ).also { entryStatement = it }
+            entries.forEach { entry ->
+                statement.clearBindings()
+                statement.bindString(1, profileId)
+                statement.bindString(2, entry.type.name)
+                statement.bindLong(3, entry.id.toLong())
+                statement.bindString(4, entry.name)
+                statement.bindString(5, entry.displayName)
+                statement.bindString(6, entry.categoryId)
+                statement.bindNullableString(7, entry.iconUrl)
+                statement.bindLong(8, entry.number.toLong())
+                statement.bindString(9, entry.extension)
+                statement.bindNullableString(10, entry.tvgId)
+                statement.bindNullableString(11, entry.plot)
+                statement.bindNullableDouble(12, entry.rating)
+                statement.bindLong(13, if (entry.playable) 1 else 0)
+                statement.bindNullableLong(14, entry.addedAtEpochSeconds)
+                statement.bindLong(15, if (entry.isVisualSeparator()) 0 else 1)
+                statement.executeInsert()
             }
+        }
 
-            db.setTransactionSuccessful()
-        } finally {
+        /** Writes the profile row and commits. Nothing written by this session is visible before this. */
+        fun commit(account: AccountInfo?) {
+            check(!finished) { "ReplaceSession already finished" }
+            finished = true
+            try {
+                val profileValues = ContentValues().apply {
+                    put("profile_id", profileId)
+                    put("saved_at", System.currentTimeMillis())
+                    account?.let {
+                        put("account_username", it.username)
+                        put("account_status", it.status)
+                        putNullable("account_expires_at", it.expiresAtEpochSeconds)
+                        putNullable("account_active_connections", it.activeConnections)
+                        putNullable("account_maximum_connections", it.maximumConnections)
+                    }
+                }
+                check(db.insertOrThrow("catalog_profiles", null, profileValues) != -1L)
+                db.setTransactionSuccessful()
+            } finally {
+                categoryStatement?.close()
+                entryStatement?.close()
+                db.endTransaction()
+            }
+        }
+
+        /** Rolls back everything written by this session, leaving the previous valid catalogue in place. */
+        fun abort() {
+            if (finished) return
+            finished = true
+            categoryStatement?.close()
+            entryStatement?.close()
             db.endTransaction()
         }
     }

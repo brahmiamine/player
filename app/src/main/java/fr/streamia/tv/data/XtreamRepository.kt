@@ -153,8 +153,8 @@ class XtreamRepository(context: Context) {
         profileName: String? = null,
     ): LoadedCatalog {
         XtreamUrlBuilder(credentials)
-        val catalog = client.loadCatalog(credentials).requirePlayableContent()
         val id = profileId ?: UUID.randomUUID().toString()
+        val catalog = fetchAndStoreXtreamCatalog(id, credentials)
         val previous = profileId?.let(playlistStore::find)
         val profile = PlaylistProfile(
             id = id,
@@ -169,7 +169,6 @@ class XtreamRepository(context: Context) {
         )
         playlistStore.upsert(profile)
         credentialsStore.save(credentials)
-        cache.save(id, catalog)
         return LoadedCatalog(catalog, credentials, CatalogSource.Network, id)
     }
 
@@ -178,8 +177,7 @@ class XtreamRepository(context: Context) {
         when (profile.kind) {
             PlaylistKind.Xtream -> {
                 val credentials = profile.credentialsOrNull() ?: throw XtreamException("Identifiants Xtream incomplets.")
-                val catalog = client.loadCatalog(credentials).requirePlayableContent()
-                cache.save(profileId, catalog)
+                val catalog = fetchAndStoreXtreamCatalog(profileId, credentials)
                 playlistStore.markRefreshed(profileId)
                 LoadedCatalog(catalog, credentials, CatalogSource.Network, profileId)
             }
@@ -302,9 +300,8 @@ class XtreamRepository(context: Context) {
         val credentials = profile.credentialsOrNull()
             ?: throw XtreamException("Les identifiants de cette liste Xtream sont incomplets.")
         return try {
-            val catalog = client.loadCatalog(credentials).requirePlayableContent()
+            val catalog = fetchAndStoreXtreamCatalog(profile.id, credentials)
             credentialsStore.save(credentials)
-            cache.save(profile.id, catalog)
             playlistStore.markRefreshed(profile.id)
             LoadedCatalog(catalog, credentials, CatalogSource.Network, profile.id)
         } catch (error: Exception) {
@@ -313,6 +310,38 @@ class XtreamRepository(context: Context) {
             LoadedCatalog(cached, credentials, CatalogSource.Cache, profile.id)
         }
     }
+
+    /**
+     * Récupère le catalogue Xtream et l'écrit directement en base par lots pendant le parsing
+     * ([XtreamClient.loadCatalog]) plutôt que de matérialiser toutes les entrées en mémoire avant
+     * de les persister. La session n'est validée que si le fournisseur a bien renvoyé du contenu
+     * lisible ; sinon elle est annulée et l'ancien catalogue valide reste en place, exactement comme
+     * avant ce changement — voir [CatalogDatabase.ReplaceSession].
+     *
+     * Le tout doit s'exécuter sur un seul et même thread : une transaction SQLite Android est
+     * confinée au thread qui l'a ouverte (`beginTransaction`/`endTransaction` utilisent un état par
+     * thread), donc `beginReplace`, l'écriture des lots pendant [XtreamClient.loadCatalog] et
+     * `commit`/`abort` doivent tous tourner sur le même thread. Englober toute la fonction dans un
+     * seul [withContext] vers [Dispatchers.IO] garantit cela : les appels suspendus imbriqués vers
+     * ce même dispatcher restent sur le thread courant au lieu de redistribuer vers un autre thread
+     * du pool (kotlinx.coroutines ne redistribue que lorsque le dispatcher change réellement).
+     */
+    private suspend fun fetchAndStoreXtreamCatalog(profileId: String, credentials: ServerCredentials): Catalog =
+        withContext(Dispatchers.IO) {
+            val session = cache.beginReplace(profileId)
+            val result = try {
+                client.loadCatalog(credentials, session)
+            } catch (error: Throwable) {
+                cache.abortReplace(session)
+                throw error
+            }
+            if (result.counts.values.none { it > 0 }) {
+                cache.abortReplace(session)
+                throw XtreamException("Le fournisseur a renvoyé un catalogue vide. Le cache existant est conservé.")
+            }
+            cache.commitReplace(session, result.account)
+            cache.load(profileId) ?: throw XtreamException("Le catalogue vient d'être enregistré mais ne peut pas être relu.")
+        }
 
     private suspend fun openM3uProfile(profile: PlaylistProfile): LoadedCatalog {
         if (profile.isRemoteM3u) {
@@ -435,11 +464,6 @@ class XtreamRepository(context: Context) {
     private fun String?.cleanName(defaultValue: String): String = this?.trim()?.takeIf(String::isNotBlank) ?: defaultValue
 
     private fun Catalog.hasPlayableContent(): Boolean = MediaType.entries.any { count(it) > 0 }
-
-    private fun Catalog.requirePlayableContent(): Catalog {
-        if (!hasPlayableContent()) throw XtreamException("Le fournisseur a renvoyé un catalogue vide. Le cache existant est conservé.")
-        return this
-    }
 
     companion object {
         const val DEFAULT_CATEGORY_PAGE_SIZE = 500
