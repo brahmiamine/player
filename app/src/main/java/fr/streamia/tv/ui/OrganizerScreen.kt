@@ -46,8 +46,10 @@ import java.util.Locale
 fun OrganizerScreen(
     catalog: Catalog,
     hiddenCategories: Set<String>,
+    hiddenEntries: Set<String>,
     onCategoryOrderChanged: (MediaType, List<String>) -> Unit,
     onToggleCategoryHidden: (MediaCategory) -> Unit,
+    onToggleEntryHidden: (MediaEntry) -> Unit,
     onMoveEntries: (Set<String>, String) -> Unit,
     onResetMoves: (Set<String>) -> Unit,
     onBack: () -> Unit,
@@ -260,7 +262,12 @@ fun OrganizerScreen(
                             ) {
                                 Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                                     Text(entry.number.toString(), color = MutedInk, fontSize = 11.sp, modifier = Modifier.width(48.dp))
-                                    Text(entry.displayName, color = Ink, fontSize = TypeLabel, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                                    Column(Modifier.weight(1f)) {
+                                        Text(entry.displayName, color = Ink, fontSize = TypeLabel, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        if (entry.key in hiddenEntries) {
+                                            Text("Masqué", color = FocusBlueBright, fontSize = 10.sp)
+                                        }
+                                    }
                                     StreamiaIcon(
                                         if (entry.key in selectedEntryKeys) StreamiaIconGlyph.CheckboxOn else StreamiaIconGlyph.CheckboxOff,
                                         size = 18.dp,
@@ -294,6 +301,24 @@ fun OrganizerScreen(
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             StreamiaIcon(StreamiaIconGlyph.ArrowForward, tint = Ink, size = 18.dp)
                         }
+                    }
+                    FocusableSurface(
+                        onClick = {
+                            val selectedEntries = sourceEntries.filter { it.key in selectedEntryKeys }
+                            val hideSelected = selectedEntries.any { it.key !in hiddenEntries }
+                            selectedEntries
+                                .filter { (it.key in hiddenEntries) != hideSelected }
+                                .forEach(onToggleEntryHidden)
+                        },
+                        enabled = selectedEntryKeys.isNotEmpty(),
+                        modifier = Modifier.width(128.dp).height(52.dp),
+                    ) {
+                        Text(
+                            if (selectedEntryKeys.isNotEmpty() && selectedEntryKeys.all { it in hiddenEntries }) "Afficher" else "Masquer",
+                            color = Ink,
+                            fontSize = TypeLabel,
+                            modifier = Modifier.padding(horizontal = 14.dp),
+                        )
                     }
                     FocusableSurface(
                         onClick = {
