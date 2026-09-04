@@ -55,6 +55,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     private var libraryMutationSequence = 0L
     private var connectionTestSequence = 0L
     private var epgGuideLoadSequence = 0L
+    private val epgGuideMemoryCache = EpgGuideMemoryCache()
     private var epgSyncJob: Job? = null
     private var epgSyncProfileId: String? = null
     private var epgChannelJob: Job? = null
@@ -223,6 +224,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                     library = repository.library(profileId),
                     appSettings = repository.appSettings(),
                 )
+                warmEpgGuideCache(profileId)
                 try {
                     mergeCatalog(repository.openProfile(profileId, knownCache = cachedCatalog))
                 } catch (error: Throwable) {
@@ -287,6 +289,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         val epgSourceChanged = previousEpgUrl != updated.xmlTvUrl
         if (epgSourceChanged) {
             viewModelScope.launch {
+                epgGuideMemoryCache.clearProfile(profileId)
                 repository.clearEpgCache(profileId)
                 if (_uiState.value.activeProfileId == profileId) {
                     _uiState.update {
@@ -325,7 +328,10 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         _uiState.update { it.copy(busy = true, message = null) }
         viewModelScope.launch {
             runCatching { repository.deleteProfile(profileId) }
-                .onSuccess { _uiState.update { it.copy(busy = false, profiles = repository.profiles(), message = "Liste supprimée.") } }
+                .onSuccess {
+                    epgGuideMemoryCache.clearProfile(profileId)
+                    _uiState.update { it.copy(busy = false, profiles = repository.profiles(), message = "Liste supprimée.") }
+                }
                 .onFailure(::showError)
         }
     }
@@ -443,16 +449,10 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     }
 
     fun showHome() {
-        _uiState.update {
-            it.copy(
-                screen = StreamiaScreen.Home,
-                message = null,
-                epgGuide = null,
-                epgAvailableDates = emptyList(),
-                epgSelectedDate = null,
-                epgLoading = false,
-            )
-        }
+        // Le guide EPG est volontairement conservé en mémoire quand on revient à l'accueil.
+        // SQLite reste la source persistante, mais garder la journée déjà matérialisée évite de
+        // refaire une grosse requête sur plusieurs milliers de chaînes à chaque aller-retour.
+        _uiState.update { it.copy(screen = StreamiaScreen.Home, message = null, epgLoading = false) }
     }
     fun showSettings() { _uiState.update { it.copy(screen = StreamiaScreen.Settings, message = null) } }
     fun showTools() { _uiState.update { it.copy(screen = StreamiaScreen.Tools, message = null) } }
@@ -497,6 +497,17 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
 
     fun cycleEpgTimeOffset() {
         updateAppSettings { it.copy(epgTimeOffsetHours = it.nextEpgTimeOffsetHours()) }
+        val profileId = _uiState.value.activeProfileId ?: return
+        epgGuideMemoryCache.clearProfile(profileId)
+        _uiState.update {
+            it.copy(
+                epgGuide = null,
+                epgAvailableDates = emptyList(),
+                epgSelectedDate = null,
+                epgLoading = false,
+            )
+        }
+        warmEpgGuideCache(profileId)
     }
 
     fun toggleAutoPlayNextEpisode() {
@@ -644,18 +655,48 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
 
     fun showEpg() {
         if (_uiState.value.activeProfileId == null) return
-        _uiState.update { it.copy(screen = StreamiaScreen.Epg, epgLoading = true, message = null) }
+        _uiState.update {
+            it.copy(
+                screen = StreamiaScreen.Epg,
+                // Si une journée est déjà matérialisée (retour depuis Accueil/Player), on l'affiche
+                // immédiatement. Une éventuelle lecture SQLite ou resynchro se fait derrière.
+                epgLoading = it.epgGuide == null,
+                message = null,
+            )
+        }
         ensureSectionLoaded(MediaType.Live)
         loadEpgGuideFromCache(_uiState.value.epgSelectedDate)
         startEpgBackgroundSync()
     }
 
     fun selectEpgDate(date: LocalDate) {
-        _uiState.update { it.copy(epgSelectedDate = date, epgGuide = null, epgLoading = true, message = null) }
+        val state = _uiState.value
+        val profileId = state.activeProfileId ?: return
+        val offsetHours = state.appSettings.epgTimeOffsetHours
+        val cached = epgGuideMemoryCache.get(profileId, date, offsetHours)
+        if (cached != null) {
+            _uiState.update {
+                it.copy(
+                    epgSelectedDate = date,
+                    epgGuide = cached,
+                    epgLoading = false,
+                    message = null,
+                )
+            }
+            prefetchEpgNeighbors(profileId, date, state.epgAvailableDates, offsetHours)
+            return
+        }
+
+        // Ne jamais effacer la grille courante pendant une simple navigation de jour. Si le jour
+        // n'est pas encore chaud en RAM, on garde l'ancien affichage quelques millisecondes puis on
+        // bascule atomiquement sur le résultat SQLite.
+        _uiState.update { it.copy(epgLoading = true, message = null) }
         loadEpgGuideFromCache(date)
     }
 
     fun reloadEpg() {
+        // Une actualisation manuelle peut être longue : l'ancien guide reste visible jusqu'au
+        // commit transactionnel du nouveau XMLTV.
         _uiState.update { it.copy(epgLoading = true, message = null) }
         startEpgBackgroundSync(force = true)
     }
@@ -956,9 +997,6 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 screen = StreamiaScreen.Player(entry, returnToSeries),
                 message = null,
                 epg = EpgNowContext(),
-                epgGuide = null,
-                epgAvailableDates = emptyList(),
-                epgSelectedDate = null,
                 resumePositionMs = resume,
                 lastViewedEntry = entry,
             )
@@ -1071,17 +1109,25 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         epgSyncProfileId = profileId
         epgSyncJob = viewModelScope.launch {
             try {
-                repository.refreshEpg(
+                val changed = repository.refreshEpg(
                     profileId = profileId,
                     credentials = credentials,
                     liveEntries = liveEntries,
                     force = force,
                 )
+                if (changed) epgGuideMemoryCache.clearProfile(profileId)
                 if (_uiState.value.activeProfileId != profileId) return@launch
                 val player = (_uiState.value.screen as? StreamiaScreen.Player)?.entry
                 if (player?.type == MediaType.Live) loadEpg(player)
                 if (_uiState.value.screen is StreamiaScreen.Epg) {
-                    loadEpgGuideFromCache(_uiState.value.epgSelectedDate)
+                    loadEpgGuideFromCache(
+                        preferredDate = _uiState.value.epgSelectedDate,
+                        forceMetadataRefresh = changed,
+                    )
+                } else if (changed) {
+                    // La nouvelle version du guide est déjà en SQLite : réchauffer silencieusement
+                    // aujourd'hui (+ voisins) pour la prochaine ouverture du Guide TV.
+                    warmEpgGuideCache(profileId, forceMetadataRefresh = true)
                 }
             } catch (error: Throwable) {
                 if (error is CancellationException) throw error
@@ -1094,52 +1140,74 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         }
     }
 
-    private fun loadEpgGuideFromCache(preferredDate: LocalDate?) {
+    private fun loadEpgGuideFromCache(
+        preferredDate: LocalDate?,
+        forceMetadataRefresh: Boolean = false,
+        prefetchNeighbors: Boolean = true,
+    ) {
         val state = _uiState.value
         val profileId = state.activeProfileId ?: return
         val offsetHours = state.appSettings.epgTimeOffsetHours
         val sequence = ++epgGuideLoadSequence
-        viewModelScope.launch {
-            val metadata = runCatching { repository.epgMetadata(profileId) }.getOrNull()
-            if (sequence != epgGuideLoadSequence || _uiState.value.activeProfileId != profileId) return@launch
-            if (metadata == null || metadata.programCount <= 0) {
+        val knownDates = if (forceMetadataRefresh) emptyList() else state.epgAvailableDates
+        val zone = ZoneId.systemDefault()
+        val today = LocalDate.now(zone)
+
+        val optimisticDate = preferredDate?.takeIf { knownDates.isEmpty() || it in knownDates }
+            ?: knownDates.firstOrNull { it == today }
+            ?: knownDates.firstOrNull()
+        if (optimisticDate != null && knownDates.isNotEmpty()) {
+            val memoryGuide = epgGuideMemoryCache.get(profileId, optimisticDate, offsetHours)
+            if (memoryGuide != null) {
                 if (_uiState.value.screen is StreamiaScreen.Epg) {
                     _uiState.update { current ->
-                        if (current.epgAvailableDates.isNotEmpty()) {
-                            // Une resynchro en arrière-plan (déclenchée à l'ouverture de l'écran) peut
-                            // encore être en train d'écrire dans le cache : cette lecture tombe alors
-                            // sur une fenêtre où les métadonnées semblent vides. Ce n'est pas une
-                            // absence réelle de cache — on connaît déjà les jours couverts par ce
-                            // profil — donc on les garde (selectEpgDate() a déjà mis epgGuide à null le
-                            // temps de ce rechargement ; les effacer aussi ferait retomber la navigation
-                            // sur « aujourd'hui » et casserait Jour suivant/précédent). On arrête juste
-                            // le spinner ; la fin de cette resynchro relance ce chargement et
-                            // l'actualisera correctement.
-                            current.copy(epgLoading = false)
-                        } else {
-                            // Premier chargement réel (aucun jour encore connu) : le cache est
-                            // effectivement vide pour l'instant, on l'indique sans rester bloqué si rien
-                            // ne relance jamais ce chargement.
-                            current.copy(epgGuide = null, epgAvailableDates = emptyList(), epgLoading = false)
-                        }
+                        if (current.activeProfileId == profileId) {
+                            current.copy(
+                                epgGuide = memoryGuide,
+                                epgAvailableDates = knownDates,
+                                epgSelectedDate = optimisticDate,
+                                epgLoading = false,
+                            )
+                        } else current
                     }
+                }
+                if (prefetchNeighbors) {
+                    prefetchEpgNeighbors(profileId, optimisticDate, knownDates, offsetHours)
+                }
+                return
+            }
+        }
+
+        viewModelScope.launch {
+            val dates = if (knownDates.isNotEmpty()) {
+                knownDates
+            } else {
+                val metadata = runCatching { repository.epgMetadata(profileId) }.getOrNull()
+                if (sequence != epgGuideLoadSequence || _uiState.value.activeProfileId != profileId) return@launch
+                if (metadata == null || metadata.programCount <= 0) {
+                    if (_uiState.value.screen is StreamiaScreen.Epg) {
+                        // Ne jamais jeter une grille déjà affichée sur une lecture transitoirement
+                        // vide (une resynchro peut être en train de remplacer les lignes).
+                        _uiState.update { current -> current.copy(epgLoading = false) }
+                    }
+                    return@launch
+                }
+                epgDates(metadata, offsetHours)
+            }
+
+            if (dates.isEmpty()) {
+                if (_uiState.value.screen is StreamiaScreen.Epg) {
+                    _uiState.update { it.copy(epgLoading = false) }
                 }
                 return@launch
             }
 
-            val dates = epgDates(metadata, offsetHours)
-            if (dates.isEmpty()) {
-                _uiState.update { it.copy(epgGuide = null, epgAvailableDates = emptyList(), epgLoading = false) }
-                return@launch
-            }
-            val zone = ZoneId.systemDefault()
-            val today = LocalDate.now(zone)
             val date = preferredDate?.takeIf { it in dates }
                 ?: dates.firstOrNull { it == today }
                 ?: dates.first()
-            val dayStart = date.atStartOfDay(zone).toEpochSecond()
-            val dayEnd = date.plusDays(1).atStartOfDay(zone).toEpochSecond()
-            val guide = runCatching {
+            val memoryGuide = epgGuideMemoryCache.get(profileId, date, offsetHours)
+            val guide = memoryGuide ?: runCatching {
+                val (dayStart, dayEnd) = epgDayBounds(date)
                 repository.cachedEpgGuide(
                     profileId = profileId,
                     displayStartEpochSeconds = dayStart,
@@ -1152,6 +1220,10 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 }
                 return@launch
             }
+            if (memoryGuide == null) {
+                epgGuideMemoryCache.put(profileId, date, offsetHours, guide)
+            }
+
             if (sequence != epgGuideLoadSequence || _uiState.value.activeProfileId != profileId) return@launch
             if (_uiState.value.screen is StreamiaScreen.Epg) {
                 _uiState.update {
@@ -1163,7 +1235,92 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                     )
                 }
             }
+            if (prefetchNeighbors) {
+                prefetchEpgNeighbors(profileId, date, dates, offsetHours)
+            }
         }
+    }
+
+    /**
+     * Au retour d'un profil, prépare la journée courante depuis SQLite avant même que l'utilisateur
+     * ouvre le Guide TV. Aucun réseau ici : si le cache disque n'existe pas encore, on sort.
+     */
+    private fun warmEpgGuideCache(profileId: String, forceMetadataRefresh: Boolean = false) {
+        val state = _uiState.value
+        if (state.activeProfileId != profileId) return
+        val offsetHours = state.appSettings.epgTimeOffsetHours
+        val preferredDate = state.epgSelectedDate
+
+        viewModelScope.launch {
+            val metadata = runCatching { repository.epgMetadata(profileId) }.getOrNull() ?: return@launch
+            if (metadata.programCount <= 0 || _uiState.value.activeProfileId != profileId) return@launch
+            val dates = epgDates(metadata, offsetHours)
+            if (dates.isEmpty()) return@launch
+
+            val today = LocalDate.now(ZoneId.systemDefault())
+            val date = preferredDate?.takeIf { it in dates }
+                ?: dates.firstOrNull { it == today }
+                ?: dates.first()
+            val guide = epgGuideMemoryCache.get(profileId, date, offsetHours) ?: runCatching {
+                val (dayStart, dayEnd) = epgDayBounds(date)
+                repository.cachedEpgGuide(
+                    profileId = profileId,
+                    displayStartEpochSeconds = dayStart,
+                    displayEndEpochSeconds = dayEnd,
+                    offsetHours = offsetHours,
+                )
+            }.getOrNull() ?: return@launch
+            epgGuideMemoryCache.put(profileId, date, offsetHours, guide)
+
+            _uiState.update { current ->
+                if (current.activeProfileId == profileId && current.screen !is StreamiaScreen.Epg) {
+                    current.copy(
+                        epgGuide = guide,
+                        epgAvailableDates = dates,
+                        epgSelectedDate = date,
+                        epgLoading = false,
+                    )
+                } else current
+            }
+            prefetchEpgNeighbors(profileId, date, dates, offsetHours)
+        }
+    }
+
+    private fun prefetchEpgNeighbors(
+        profileId: String,
+        date: LocalDate,
+        availableDates: List<LocalDate>,
+        offsetHours: Int,
+    ) {
+        val index = availableDates.indexOf(date)
+        if (index < 0) return
+        val neighbors = buildList {
+            availableDates.getOrNull(index - 1)?.let(::add)
+            availableDates.getOrNull(index + 1)?.let(::add)
+        }
+        neighbors.forEach { neighbor ->
+            if (epgGuideMemoryCache.get(profileId, neighbor, offsetHours) != null) return@forEach
+            viewModelScope.launch {
+                val (dayStart, dayEnd) = epgDayBounds(neighbor)
+                val guide = runCatching {
+                    repository.cachedEpgGuide(
+                        profileId = profileId,
+                        displayStartEpochSeconds = dayStart,
+                        displayEndEpochSeconds = dayEnd,
+                        offsetHours = offsetHours,
+                    )
+                }.getOrNull() ?: return@launch
+                if (_uiState.value.activeProfileId == profileId) {
+                    epgGuideMemoryCache.put(profileId, neighbor, offsetHours, guide)
+                }
+            }
+        }
+    }
+
+    private fun epgDayBounds(date: LocalDate): Pair<Long, Long> {
+        val zone = ZoneId.systemDefault()
+        return date.atStartOfDay(zone).toEpochSecond() to
+            date.plusDays(1).atStartOfDay(zone).toEpochSecond()
     }
 
     private fun epgDates(metadata: EpgCacheMetadata, offsetHours: Int): List<LocalDate> {
@@ -1287,6 +1444,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     }
 
     private fun showLogin() {
+        epgGuideMemoryCache.clear()
         epgSyncJob?.cancel()
         epgSyncJob = null
         epgSyncProfileId = null
@@ -1316,6 +1474,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             offline = loaded.source == CatalogSource.Cache,
             message = loaded.importSummary,
         )
+        warmEpgGuideCache(loaded.profileId)
         ensureSectionLoaded(MediaType.Live)
     }
 
