@@ -192,6 +192,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                 state.screen is StreamiaScreen.About -> AboutScreen(
                     versionName = BuildConfig.VERSION_NAME,
                     onLoadCacheSize = viewModel::cacheSizeBytes,
+                    onLoadEpgCacheSize = viewModel::epgCacheSizeBytes,
                     onBack = viewModel::showTools,
                 )
 
