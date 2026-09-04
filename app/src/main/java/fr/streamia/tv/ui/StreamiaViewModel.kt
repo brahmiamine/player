@@ -369,6 +369,10 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         updateAppSettings { it.copy(vodSeekStepSeconds = it.nextVodSeekStepSeconds()) }
     }
 
+    fun cycleVideoAspect() {
+        updateAppSettings { it.copy(videoAspect = it.nextVideoAspect()) }
+    }
+
     private fun updateAppSettings(transform: (AppSettings) -> AppSettings) {
         val settings = repository.updateAppSettings(transform)
         _uiState.update { it.copy(appSettings = settings) }
