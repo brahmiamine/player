@@ -12,6 +12,7 @@ import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
+import fr.streamia.tv.data.BufferMode
 import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.logging.CrashReporter
 import okhttp3.ConnectionPool
@@ -29,8 +30,8 @@ object StreamiaPlayerFactory {
             .build()
     }
 
-    fun create(context: Context, mediaType: MediaType): ExoPlayer {
-        val profile = PlaybackTuning.forType(mediaType)
+    fun create(context: Context, mediaType: MediaType, bufferMode: BufferMode = BufferMode.Auto): ExoPlayer {
+        val profile = PlaybackTuning.forType(mediaType, bufferMode)
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
                 profile.minBufferMs,
