@@ -31,6 +31,7 @@ import fr.streamia.tv.ui.theme.MutedInk
 import fr.streamia.tv.ui.theme.Night
 import fr.streamia.tv.ui.theme.StreamiaTheme
 import fr.streamia.tv.player.LivePlaybackSession
+import fr.streamia.tv.domain.MediaType
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.ui.PlayerView
 
@@ -101,6 +102,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     livePlaybackSession = livePlaybackSession,
                     liveVideoSurface = liveVideoSurface,
                     library = state.library,
+                    appSettings = state.appSettings,
                     offline = state.offline,
                     busy = state.busy,
                     message = state.message,
@@ -130,15 +132,29 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                 )
 
                 state.screen is StreamiaScreen.Settings -> SettingsScreen(
+                    settings = state.appSettings,
+                    onToggleLivePreview = viewModel::toggleLivePreview,
+                    onCycleLivePreviewDelay = viewModel::cycleLivePreviewDelay,
+                    onCycleVodSeekStep = viewModel::cycleVodSeekStep,
+                    onTools = viewModel::showTools,
+                    onBack = viewModel::showHome,
+                )
+
+                state.screen is StreamiaScreen.Tools -> ToolsScreen(
                     busy = state.busy,
-                    historyCount = state.library.history.size,
+                    liveHistoryCount = state.library.history.count { it.entry.type == MediaType.Live },
+                    movieHistoryCount = state.library.history.count { it.entry.type == MediaType.Movie },
+                    seriesHistoryCount = state.library.history.count { it.entry.type == MediaType.Series },
                     onSearch = viewModel::showSearch,
                     onEpg = viewModel::showEpg,
                     onOrganizer = viewModel::showOrganizer,
                     onRefresh = viewModel::refresh,
-                    onClearHistory = viewModel::clearHistory,
+                    onClearLiveHistory = { viewModel.clearHistory(MediaType.Live) },
+                    onClearMovieHistory = { viewModel.clearHistory(MediaType.Movie) },
+                    onClearSeriesHistory = { viewModel.clearHistory(MediaType.Series) },
+                    onClearAllHistory = { viewModel.clearHistory() },
                     onChangePlaylist = viewModel::logout,
-                    onBack = viewModel::showHome,
+                    onBack = viewModel::showSettings,
                 )
 
                 state.screen is StreamiaScreen.Search && state.catalog != null -> SearchScreen(
@@ -206,6 +222,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                         entry = playerScreen.entry,
                         epg = state.epg,
                         resumePositionMs = state.resumePositionMs,
+                        appSettings = state.appSettings,
                         livePlaybackSession = livePlaybackSession,
                         liveVideoSurface = liveVideoSurface,
                         onBack = {
