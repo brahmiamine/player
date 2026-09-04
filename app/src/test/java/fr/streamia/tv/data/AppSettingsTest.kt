@@ -37,6 +37,20 @@ class AppSettingsTest {
     }
 
     @Test
+    fun `buffer mode cycles and wraps`() {
+        var settings = AppSettings(bufferMode = BufferMode.LowLatency)
+        val observed = buildList {
+            repeat(BufferMode.entries.size) {
+                add(settings.bufferMode)
+                settings = settings.copy(bufferMode = settings.nextBufferMode())
+            }
+        }
+
+        assertEquals(listOf(BufferMode.LowLatency, BufferMode.Auto, BufferMode.Stable), observed)
+        assertEquals(BufferMode.LowLatency, settings.bufferMode)
+    }
+
+    @Test
     fun `vod seek step cycles and exposes milliseconds`() {
         var settings = AppSettings(vodSeekStepSeconds = 10)
         val observed = buildList {
