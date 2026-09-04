@@ -153,22 +153,22 @@ internal class EpgDatabase(context: Context) :
             ).also { programStatement = it }
             programs.forEach { program ->
                 val channelId = program.channelId?.takeIf(String::isNotBlank) ?: return@forEach
+                val start = program.startEpochSeconds ?: return@forEach
+                val end = program.endEpochSeconds ?: return@forEach
+                if (end <= start) return@forEach
+
                 statement.clearBindings()
                 statement.bindString(1, profileId)
                 statement.bindString(2, channelId)
                 statement.bindString(3, program.title)
                 statement.bindNullableString(4, program.description)
-                statement.bindNullableLong(5, program.startEpochSeconds)
-                statement.bindNullableLong(6, program.endEpochSeconds)
+                statement.bindLong(5, start)
+                statement.bindLong(6, end)
                 statement.bindNullableString(7, program.category)
                 statement.executeInsert()
                 programCount += 1
-                program.startEpochSeconds?.let { start ->
-                    minStart = minStart?.let { minOf(it, start) } ?: start
-                }
-                program.endEpochSeconds?.let { end ->
-                    maxEnd = maxEnd?.let { maxOf(it, end) } ?: end
-                }
+                minStart = minStart?.let { minOf(it, start) } ?: start
+                maxEnd = maxEnd?.let { maxOf(it, end) } ?: end
             }
         }
 
