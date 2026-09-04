@@ -24,6 +24,7 @@ import fr.streamia.tv.data.BufferMode
 import fr.streamia.tv.data.LiveChannelSortOrder
 import fr.streamia.tv.data.LiveStreamFormat
 import fr.streamia.tv.data.VideoAspectSetting
+import fr.streamia.tv.data.VodSortOrder
 import fr.streamia.tv.ui.theme.HeadingWeight
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
@@ -39,6 +40,7 @@ fun SettingsScreen(
     onCycleBufferMode: () -> Unit,
     onCycleLiveStreamFormat: () -> Unit,
     onCycleLiveChannelSortOrder: () -> Unit,
+    onCycleVodSortOrder: () -> Unit,
     onTools: () -> Unit,
     onParentalControl: () -> Unit,
     onBack: () -> Unit,
@@ -136,7 +138,18 @@ fun SettingsScreen(
                     onClick = onCycleLiveChannelSortOrder,
                     modifier = Modifier.weight(1f),
                 )
-                Spacer(Modifier.weight(1f))
+                SettingsTile(
+                    glyph = StreamiaIconGlyph.Reorder,
+                    title = "Tri Films / Séries",
+                    subtitle = when (settings.vodSortOrder) {
+                        VodSortOrder.Provider -> "Ordre du fournisseur"
+                        VodSortOrder.Alphabetical -> "Alphabétique"
+                        VodSortOrder.RecentlyAdded -> "Récemment ajoutés"
+                        VodSortOrder.Rating -> "Mieux notés"
+                    },
+                    onClick = onCycleVodSortOrder,
+                    modifier = Modifier.weight(1f),
+                )
             }
             Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 SettingsTile(

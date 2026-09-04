@@ -55,6 +55,7 @@ import fr.streamia.tv.data.AppSettings
 import fr.streamia.tv.data.LiveChannelSortOrder
 import fr.streamia.tv.data.LiveStreamFormat
 import fr.streamia.tv.data.PlaybackHistoryItem
+import fr.streamia.tv.data.VodSortOrder
 import fr.streamia.tv.data.BrowserNavigationStore
 import fr.streamia.tv.data.NavigationListPosition
 import fr.streamia.tv.data.UserLibrarySnapshot
@@ -209,7 +210,7 @@ fun BrowserScreen(
     }
     val entries = remember(
         catalog, selectedType, selectedCategoryId, favoriteEntriesForType, historyForType,
-        excludedCategoryIds, library.hiddenEntries, appSettings.liveChannelSortOrder,
+        excludedCategoryIds, library.hiddenEntries, appSettings.liveChannelSortOrder, appSettings.vodSortOrder,
     ) {
         when (selectedCategoryId) {
             FAVORITES_CATEGORY_ID -> favoriteEntriesForType
@@ -220,8 +221,11 @@ fun BrowserScreen(
                 }
                 // « Favoris »/« Historique » gardent leur propre ordre (ajout / dernière lecture),
                 // qui perdrait son sens sous un tri alphabétique ou par numéro : seule une vraie
-                // catégorie de chaînes suit la préférence de tri du Direct.
-                if (selectedType == MediaType.Live) sortedForLiveDisplay(filtered, appSettings.liveChannelSortOrder) else filtered
+                // catégorie suit la préférence de tri de son type.
+                when (selectedType) {
+                    MediaType.Live -> sortedForLiveDisplay(filtered, appSettings.liveChannelSortOrder)
+                    else -> sortedForVodDisplay(filtered, appSettings.vodSortOrder)
+                }
             }
         }
     }
@@ -1125,7 +1129,14 @@ private fun PosterCard(
         modifier = Modifier.fillMaxWidth().height(252.dp),
     ) {
         Column(Modifier.fillMaxSize().padding(8.dp)) {
-            MediaArtwork(entry.iconUrl, entry.displayName, Modifier.fillMaxWidth().height(175.dp))
+            Box(Modifier.fillMaxWidth().height(175.dp)) {
+                MediaArtwork(entry.iconUrl, entry.displayName, Modifier.fillMaxSize())
+                if (history != null && history.progress > 0.02f) {
+                    Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(4.dp).background(Color.Black.copy(alpha = 0.45f))) {
+                        Box(Modifier.fillMaxHeight().fillMaxWidth(history.progress).background(FocusBlueBright))
+                    }
+                }
+            }
             Spacer(Modifier.height(7.dp))
             Text(
                 entry.displayName,
@@ -1177,4 +1188,21 @@ internal fun sortedForLiveDisplay(entries: List<MediaEntry>, order: LiveChannelS
         val collator = java.text.Collator.getInstance(java.util.Locale.FRENCH)
         entries.sortedWith(Comparator { a, b -> collator.compare(a.displayName, b.displayName) })
     }
+}
+
+/**
+ * `RecentlyAdded`/`Rating` retombent en fin de liste pour une entrée sans date d'ajout / note (le
+ * fournisseur ne les fournit pas toujours) plutôt que de les faire remonter en tête par accident :
+ * `sortedByDescending` traite `null` comme la plus petite valeur, donc toujours en dernier ici.
+ * Pas d'option « année » : cette donnée vient de [fr.streamia.tv.domain.MediaDetails], récupérée
+ * à la demande pour un seul contenu, jamais en bloc pour toute une catégorie du catalogue léger.
+ */
+internal fun sortedForVodDisplay(entries: List<MediaEntry>, order: VodSortOrder): List<MediaEntry> = when (order) {
+    VodSortOrder.Provider -> entries
+    VodSortOrder.Alphabetical -> {
+        val collator = java.text.Collator.getInstance(java.util.Locale.FRENCH)
+        entries.sortedWith(Comparator { a, b -> collator.compare(a.displayName, b.displayName) })
+    }
+    VodSortOrder.RecentlyAdded -> entries.sortedByDescending(MediaEntry::addedAtEpochSeconds)
+    VodSortOrder.Rating -> entries.sortedByDescending(MediaEntry::rating)
 }

@@ -410,6 +410,10 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         updateAppSettings { it.copy(liveChannelSortOrder = it.nextLiveChannelSortOrder()) }
     }
 
+    fun cycleVodSortOrder() {
+        updateAppSettings { it.copy(vodSortOrder = it.nextVodSortOrder()) }
+    }
+
     private fun updateAppSettings(transform: (AppSettings) -> AppSettings) {
         val settings = repository.updateAppSettings(transform)
         _uiState.update { it.copy(appSettings = settings) }

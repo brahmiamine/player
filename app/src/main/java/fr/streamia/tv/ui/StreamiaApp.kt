@@ -145,6 +145,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onCycleBufferMode = viewModel::cycleBufferMode,
                     onCycleLiveStreamFormat = viewModel::cycleLiveStreamFormat,
                     onCycleLiveChannelSortOrder = viewModel::cycleLiveChannelSortOrder,
+                    onCycleVodSortOrder = viewModel::cycleVodSortOrder,
                     onTools = viewModel::showTools,
                     onParentalControl = viewModel::showParentalControl,
                     onBack = viewModel::showHome,

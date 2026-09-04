@@ -8,6 +8,7 @@ enum class VideoAspectSetting { Fit, Fill, Zoom }
 enum class BufferMode { LowLatency, Auto, Stable }
 enum class LiveStreamFormat { Auto, Ts, Hls }
 enum class LiveChannelSortOrder { Provider, Number, Alphabetical }
+enum class VodSortOrder { Provider, Alphabetical, RecentlyAdded, Rating }
 
 data class AppSettings(
     val livePreviewEnabled: Boolean = true,
@@ -17,6 +18,7 @@ data class AppSettings(
     val bufferMode: BufferMode = BufferMode.Auto,
     val liveStreamFormat: LiveStreamFormat = LiveStreamFormat.Auto,
     val liveChannelSortOrder: LiveChannelSortOrder = LiveChannelSortOrder.Provider,
+    val vodSortOrder: VodSortOrder = VodSortOrder.Provider,
     /** Un code est enregistré (voir [AppSettingsStore.setParentalPin]) et le verrouillage est actif. */
     val parentalControlEnabled: Boolean = false,
 ) {
@@ -40,6 +42,9 @@ data class AppSettings(
 
     fun nextLiveChannelSortOrder(): LiveChannelSortOrder =
         LiveChannelSortOrder.entries[(liveChannelSortOrder.ordinal + 1) % LiveChannelSortOrder.entries.size]
+
+    fun nextVodSortOrder(): VodSortOrder =
+        VodSortOrder.entries[(vodSortOrder.ordinal + 1) % VodSortOrder.entries.size]
 
     companion object {
         val LIVE_PREVIEW_DELAYS_MS = listOf(0, 250, 500, 1_000, 2_000)
@@ -92,6 +97,11 @@ class AppSettingsStore(context: Context) {
                     ?: LiveChannelSortOrder.Provider.name,
             )
         }.getOrDefault(LiveChannelSortOrder.Provider),
+        vodSortOrder = runCatching {
+            VodSortOrder.valueOf(
+                preferences.getString(KEY_VOD_SORT_ORDER, VodSortOrder.Provider.name) ?: VodSortOrder.Provider.name,
+            )
+        }.getOrDefault(VodSortOrder.Provider),
         parentalControlEnabled = preferences.getBoolean(KEY_PARENTAL_ENABLED, false) &&
             preferences.getString(KEY_PARENTAL_PIN_HASH, null) != null,
     )
@@ -105,6 +115,7 @@ class AppSettingsStore(context: Context) {
             .putString(KEY_BUFFER_MODE, settings.bufferMode.name)
             .putString(KEY_LIVE_STREAM_FORMAT, settings.liveStreamFormat.name)
             .putString(KEY_LIVE_CHANNEL_SORT_ORDER, settings.liveChannelSortOrder.name)
+            .putString(KEY_VOD_SORT_ORDER, settings.vodSortOrder.name)
             .putBoolean(KEY_PARENTAL_ENABLED, settings.parentalControlEnabled)
             .apply()
     }
@@ -156,6 +167,7 @@ class AppSettingsStore(context: Context) {
         const val KEY_BUFFER_MODE = "buffer_mode"
         const val KEY_LIVE_STREAM_FORMAT = "live_stream_format"
         const val KEY_LIVE_CHANNEL_SORT_ORDER = "live_channel_sort_order"
+        const val KEY_VOD_SORT_ORDER = "vod_sort_order"
         const val KEY_PARENTAL_ENABLED = "parental_control_enabled"
         const val KEY_PARENTAL_PIN_SALT = "parental_pin_salt"
         const val KEY_PARENTAL_PIN_HASH = "parental_pin_hash"
