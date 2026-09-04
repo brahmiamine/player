@@ -17,6 +17,8 @@ import fr.streamia.tv.domain.SeriesDetails
 import fr.streamia.tv.domain.ServerCredentials
 import fr.streamia.tv.domain.XtreamUrlBuilder
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
@@ -25,6 +27,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.charset.StandardCharsets
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 class XtreamRepository(context: Context) {
     private val appContext = context.applicationContext
@@ -324,36 +327,38 @@ class XtreamRepository(context: Context) {
         force: Boolean = false,
     ): Boolean = withContext(Dispatchers.IO) {
         if (liveEntries.isEmpty()) return@withContext false
-        val profile = playlistStore.find(profileId)
-        val maxAgeMillis = (profile?.autoRefreshHours ?: 6).coerceIn(1, 168) * 3_600_000L
-        val nowMillis = System.currentTimeMillis()
-        if (!force && epgCache.metadataOnIo(profileId)?.isFreshAt(nowMillis, maxAgeMillis) == true) {
-            return@withContext false
-        }
-
-        val preferred = profile?.xmlTvUrl?.trim()?.takeIf(String::isNotBlank)?.let(::normalizeRemoteUrl)
-        val provider = XtreamUrlBuilder(credentials).xmlTv()
-        val sources = buildList {
-            preferred?.let(::add)
-            add(provider)
-        }.distinct()
-
-        var lastError: Throwable? = null
-        for (source in sources) {
-            val session = epgCache.beginReplaceOnIo(profileId)
-            try {
-                xmlTvRepository.syncOnIo(source, liveEntries, session)
-                if (session.writtenProgramCount <= 0) {
-                    throw XtreamException("La source EPG ne contient aucun programme exploitable correspondant aux chaînes.")
-                }
-                epgCache.commitReplaceOnIo(session, source)
-                return@withContext true
-            } catch (error: Throwable) {
-                epgCache.abortReplaceOnIo(session)
-                lastError = error
+        epgSyncMutexFor(profileId).withLock {
+            val profile = playlistStore.find(profileId)
+            val maxAgeMillis = (profile?.autoRefreshHours ?: 6).coerceIn(1, 168) * 3_600_000L
+            val nowMillis = System.currentTimeMillis()
+            if (!force && epgCache.metadataOnIo(profileId)?.isFreshAt(nowMillis, maxAgeMillis) == true) {
+                return@withLock false
             }
+
+            val preferred = profile?.xmlTvUrl?.trim()?.takeIf(String::isNotBlank)?.let(::normalizeRemoteUrl)
+            val provider = XtreamUrlBuilder(credentials).xmlTv()
+            val sources = buildList {
+                preferred?.let(::add)
+                add(provider)
+            }.distinct()
+
+            var lastError: Throwable? = null
+            for (source in sources) {
+                val session = epgCache.beginReplaceOnIo(profileId)
+                try {
+                    xmlTvRepository.syncOnIo(source, liveEntries, session)
+                    if (session.writtenProgramCount <= 0) {
+                        throw XtreamException("La source EPG ne contient aucun programme exploitable correspondant aux chaînes.")
+                    }
+                    epgCache.commitReplaceOnIo(session, source)
+                    return@withLock true
+                } catch (error: Throwable) {
+                    epgCache.abortReplaceOnIo(session)
+                    lastError = error
+                }
+            }
+            throw lastError ?: XtreamException("Aucune source EPG disponible.")
         }
-        throw lastError ?: XtreamException("Aucune source EPG disponible.")
     }
 
     suspend fun fullEpg(profileId: String, credentials: ServerCredentials, catalog: Catalog): EpgGuide {
@@ -560,6 +565,23 @@ class XtreamRepository(context: Context) {
 
     companion object {
         const val DEFAULT_CATEGORY_PAGE_SIZE = 500
+
+        // Partagé par toutes les instances de XtreamRepository du process : le worker EPG en
+        // arrière-plan (EpgSyncWorker) et le ViewModel créent chacun leur propre instance, mais
+        // toutes deux visent le même fichier SQLite pour un profil donné. Sans ce verrou, un
+        // premier passage du worker au tout premier lancement de l'app (WorkManager exécute une
+        // périodique sans délai initial dès que le réseau est disponible) peut chevaucher la
+        // synchronisation au premier accès à l'écran EPG : les deux beginReplace() se marchent
+        // dessus, l'un vide la table pendant que l'autre la relit, ce qui fait réapparaître le
+        // spinner de chargement après un premier affichage réussi.
+        private val epgSyncMutexes = ConcurrentHashMap<String, Mutex>()
+
+        // computeIfAbsent (pas l'extension Kotlin getOrPut, qui fait un get()+put() non atomique
+        // et peut donc créer deux Mutex distincts pour le même profil sous contention, ce qui
+        // annulerait la garantie visée ici) : ConcurrentHashMap.computeIfAbsent garantit qu'un
+        // seul Mutex est créé et vu par tous les appelants pour un profileId donné.
+        private fun epgSyncMutexFor(profileId: String): Mutex =
+            epgSyncMutexes.computeIfAbsent(profileId) { Mutex() }
     }
 }
 
