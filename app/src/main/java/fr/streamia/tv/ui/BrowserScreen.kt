@@ -454,6 +454,7 @@ private fun LiveCatalogLayout(
             requestInitialFocus = false,
             selectedFocusRequester = categoryFocus,
             onRight = { runCatching { channelFocus.requestFocus() } },
+            translucent = true,
             modifier = Modifier.width(250.dp).fillMaxHeight(),
         )
 
@@ -574,14 +575,14 @@ private fun LiveChannelList(
         }
     }
 
-    Column(modifier) {
+    Column(modifier.background(Night.copy(alpha = 0.72f))) {
         Row(Modifier.fillMaxWidth().padding(start = 3.dp, bottom = 7.dp), verticalAlignment = Alignment.CenterVertically) {
             SectionLabel("Chaînes")
             Spacer(Modifier.weight(1f))
             Text("OK aperçu · OK encore plein écran", color = MutedInk, fontSize = 12.sp)
         }
         if (entries.isEmpty()) {
-            Box(Modifier.fillMaxSize().background(DeepSurface), contentAlignment = Alignment.Center) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text("Aucune chaîne", color = MutedInk, fontSize = TypeBody)
             }
         } else {
@@ -595,6 +596,7 @@ private fun LiveChannelList(
                         onLongClick = { onToggleFavorite(entry) },
                         selected = previewKey == entry.key,
                         enabled = !fullscreenPending,
+                        idleBackground = Color.Transparent,
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(48.dp)
@@ -822,6 +824,11 @@ private fun CategoryRail(
     requestInitialFocus: Boolean = true,
     selectedFocusRequester: FocusRequester? = null,
     onRight: (() -> Unit)? = null,
+    // Le Direct affiche ce panneau par-dessus la vidéo plein écran déjà en cours de lecture : les
+    // lignes au repos passent en transparent (le fond assombri du Column suffit à garder le texte
+    // lisible) plutôt que de masquer la vidéo derrière un aplat opaque. VOD (l'autre appelant) garde
+    // le panneau opaque par défaut, puisqu'il n'y a rien à voir derrière.
+    translucent: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
@@ -842,7 +849,7 @@ private fun CategoryRail(
         }
     }
 
-    Column(modifier) {
+    Column(modifier.then(if (translucent) Modifier.background(Night.copy(alpha = 0.72f)) else Modifier)) {
         Row(Modifier.fillMaxWidth().padding(start = 3.dp, bottom = 7.dp), verticalAlignment = Alignment.CenterVertically) {
             SectionLabel("Catégories")
             Spacer(Modifier.weight(1f))
@@ -858,6 +865,7 @@ private fun CategoryRail(
                     onClick = { onSelected(category) },
                     onLongClick = if (virtual) null else ({ onToggleFavorite(category) }),
                     selected = selectedCategoryId == category.id,
+                    idleBackground = if (translucent) Color.Transparent else DeepSurface,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(46.dp)
