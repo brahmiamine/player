@@ -136,6 +136,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onToggleLivePreview = viewModel::toggleLivePreview,
                     onCycleLivePreviewDelay = viewModel::cycleLivePreviewDelay,
                     onCycleVodSeekStep = viewModel::cycleVodSeekStep,
+                    onCycleVideoAspect = viewModel::cycleVideoAspect,
                     onTools = viewModel::showTools,
                     onBack = viewModel::showHome,
                 )
@@ -234,6 +235,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                         onZap = viewModel::zap,
                         onEntrySelected = viewModel::openEntry,
                         onProgress = viewModel::recordPlayback,
+                        onCycleVideoAspect = viewModel::cycleVideoAspect,
                     )
                 }
 
