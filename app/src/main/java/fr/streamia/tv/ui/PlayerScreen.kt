@@ -62,6 +62,7 @@ import androidx.media3.ui.PlayerView
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import fr.streamia.tv.data.AppSettings
+import fr.streamia.tv.data.LiveStreamFormat
 import fr.streamia.tv.data.VideoAspectSetting
 import fr.streamia.tv.domain.Catalog
 import fr.streamia.tv.domain.EpgProgram
@@ -361,7 +362,7 @@ fun PlayerScreen(
         }
     }
 
-    LaunchedEffect(entry.key, credentials) {
+    LaunchedEffect(entry.key, credentials, appSettings.liveStreamFormat) {
         playbackError = null
         buffering = true
         hudVisible = true
@@ -373,10 +374,16 @@ fun PlayerScreen(
         diagnostics = diagnosticsTracker.snapshot(SystemClock.elapsedRealtime())
 
         val baseUrl = XtreamUrlBuilder(credentials).stream(entry)
+        val storedPreference = transportStore.preferenceFor(baseUrl)
+        val preferredLiveExtension = when (appSettings.liveStreamFormat) {
+            LiveStreamFormat.Auto -> storedPreference.liveExtension
+            LiveStreamFormat.Ts -> "ts"
+            LiveStreamFormat.Hls -> "m3u8"
+        }
         streamCandidates = PlaybackUrlStrategy.candidates(
             initialUrl = baseUrl,
             type = entry.type,
-            preference = transportStore.preferenceFor(baseUrl),
+            preference = storedPreference.copy(liveExtension = preferredLiveExtension),
         )
         candidateIndex = 0
         if (sharedLivePlayer && livePlaybackSession.isCurrent(entry)) {
