@@ -90,24 +90,28 @@ internal fun rankRecommendations(candidates: List<RecommendationCandidate>): Lis
 internal fun chooseSecondarySlot(
     candidates: List<SecondarySlotCandidate>,
     minimumQuality: Double,
-): SecondarySlotCandidate? {
-    val priority = mapOf(
-        SecondarySlotKind.RecentStrongEvent to 0,
-        SecondarySlotKind.BecauseYouWatched to 1,
-        SecondarySlotKind.LiveNow to 2,
-        SecondarySlotKind.NewForYou to 3,
-        SecondarySlotKind.RecentTaste to 4,
+): SecondarySlotCandidate? = candidates
+    .asSequence()
+    .filter { it.quality >= minimumQuality }
+    .sortedWith(
+        compareBy<SecondarySlotCandidate> { it.kind.priority }
+            .thenByDescending { it.quality }
+            .thenByDescending { it.occurredAtMillis },
     )
-    return candidates
-        .asSequence()
-        .filter { it.quality >= minimumQuality }
-        .sortedWith(
-            compareBy<SecondarySlotCandidate> { priority.getValue(it.kind) }
-                .thenByDescending { it.quality }
-                .thenByDescending { it.occurredAtMillis },
-        )
-        .firstOrNull()
-}
+    .firstOrNull()
+
+/**
+ * `when` exhaustif plutôt qu'une map construite à chaque appel : un nouveau [SecondarySlotKind]
+ * fait échouer la compilation au lieu de lever une exception au runtime.
+ */
+private val SecondarySlotKind.priority: Int
+    get() = when (this) {
+        SecondarySlotKind.RecentStrongEvent -> 0
+        SecondarySlotKind.BecauseYouWatched -> 1
+        SecondarySlotKind.LiveNow -> 2
+        SecondarySlotKind.NewForYou -> 3
+        SecondarySlotKind.RecentTaste -> 4
+    }
 
 private const val EXPLICIT_EVIDENCE_MULTIPLIER = 1.5
 private const val MAX_SIGNAL_EVIDENCE = 1.5

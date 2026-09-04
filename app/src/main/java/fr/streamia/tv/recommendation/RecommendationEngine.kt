@@ -145,9 +145,16 @@ class RecommendationEngine(
                 } else {
                     SecondarySlotKind.BecauseYouWatched
                 }
+                // Un feedback "Plus comme ça" ne veut pas dire que l'utilisateur a regardé ce
+                // contenu : le libellé ne doit affirmer un visionnage que pour un signal de lecture.
+                val title = if (source.explicit) {
+                    "Parce que vous aimez ${source.features.entry.displayName}"
+                } else {
+                    "Parce que vous avez regardé ${source.features.entry.displayName}"
+                }
                 secondaryRows[slotKind] = RecommendationRow(
                     kind = RecommendationRowKind.BecauseYouWatched,
-                    title = "Parce que vous avez regardé ${source.features.entry.displayName}",
+                    title = title,
                     items = similar,
                 )
                 secondaryCandidates += SecondarySlotCandidate(
@@ -162,7 +169,10 @@ class RecommendationEngine(
         // déjà préparé ; il ne déclenche jamais une actualisation VOD pour rafraîchir le Live.
         val live = context.liveNow
             .asSequence()
-            .filterNot { it.entry.key in context.profile.hiddenEntries }
+            .filterNot {
+                it.entry.key in context.profile.hiddenEntries ||
+                    it.entry.categoryId in context.profile.hiddenCategoryIds
+            }
             .distinctBy { it.entry.key }
             .take(SECONDARY_LIMIT)
             .toList()
