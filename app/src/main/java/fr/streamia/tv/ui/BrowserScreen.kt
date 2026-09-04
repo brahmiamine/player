@@ -52,6 +52,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import fr.streamia.tv.data.AppSettings
+import fr.streamia.tv.data.LiveStreamFormat
 import fr.streamia.tv.data.PlaybackHistoryItem
 import fr.streamia.tv.data.BrowserNavigationStore
 import fr.streamia.tv.data.NavigationListPosition
@@ -63,6 +64,8 @@ import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.domain.ServerCredentials
 import fr.streamia.tv.domain.XtreamUrlBuilder
 import fr.streamia.tv.player.LivePlaybackSession
+import fr.streamia.tv.player.PlaybackTransportStore
+import fr.streamia.tv.player.PlaybackUrlStrategy
 import fr.streamia.tv.ui.theme.DeepSurface
 import fr.streamia.tv.ui.theme.FocusBlueBright
 import fr.streamia.tv.ui.theme.HeadingWeight
@@ -472,6 +475,7 @@ private fun LiveCatalogLayout(
             favorite = previewEntry?.key in favoriteEntries,
             enabled = appSettings.livePreviewEnabled,
             previewDelayMs = appSettings.livePreviewDelayMs,
+            liveStreamFormat = appSettings.liveStreamFormat,
             // Bord à bord, y compris sous le bandeau du haut (qui flotte par-dessus, translucide) :
             // seuls les panneaux catégories/chaînes ci-dessous en tiennent compte, via leur propre
             // padding, pour ne pas se faire recouvrir par ce bandeau.
@@ -699,13 +703,17 @@ private fun LivePreview(
     favorite: Boolean,
     enabled: Boolean,
     previewDelayMs: Int,
+    liveStreamFormat: LiveStreamFormat,
     modifier: Modifier = Modifier,
 ) {
     val player = livePlaybackSession.player
+    val context = LocalContext.current.applicationContext
+    val transportStore = remember { PlaybackTransportStore(context) }
     var buffering by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf(false) }
     var activeUrl by remember { mutableStateOf("") }
-    var fallbackAttempted by remember { mutableStateOf(false) }
+    var streamCandidates by remember { mutableStateOf(emptyList<String>()) }
+    var candidateIndex by remember { mutableStateOf(0) }
 
     DisposableEffect(player, entry?.key) {
         val listener = object : Player.Listener {
@@ -718,21 +726,20 @@ private fun LivePreview(
                 if (entry?.key == livePlaybackSession.entryKey) {
                     buffering = false
                     error = false
+                    transportStore.recordSuccess(activeUrl, MediaType.Live)
                 }
             }
 
             override fun onPlayerError(playbackException: PlaybackException) {
                 if (entry?.key != livePlaybackSession.entryKey) return
-                if (!fallbackAttempted) {
-                    val alternate = XtreamUrlBuilder.alternateTransportUrl(activeUrl)
-                    if (alternate != null) {
-                        fallbackAttempted = true
-                        activeUrl = alternate
-                        error = false
-                        buffering = true
-                        entry?.let { livePlaybackSession.playUrl(it.key, alternate) }
-                        return
-                    }
+                val next = candidateIndex + 1
+                if (next < streamCandidates.size) {
+                    candidateIndex = next
+                    activeUrl = streamCandidates[next]
+                    error = false
+                    buffering = true
+                    entry?.let { livePlaybackSession.playUrl(it.key, activeUrl) }
+                    return
                 }
                 error = true
                 buffering = false
@@ -748,7 +755,7 @@ private fun LivePreview(
         }
     }
 
-    androidx.compose.runtime.LaunchedEffect(entry?.key, credentials, enabled, previewDelayMs) {
+    androidx.compose.runtime.LaunchedEffect(entry?.key, credentials, enabled, previewDelayMs, liveStreamFormat) {
         val target = entry
         if (!enabled || target == null) {
             livePlaybackSession.stop(clearSession = true)
@@ -759,9 +766,21 @@ private fun LivePreview(
         if (previewDelayMs > 0) delay(previewDelayMs.toLong())
         error = false
         buffering = true
-        fallbackAttempted = false
-        livePlaybackSession.play(target, credentials)
-        activeUrl = livePlaybackSession.activeUrl
+        val baseUrl = XtreamUrlBuilder(credentials).stream(target)
+        val storedPreference = transportStore.preferenceFor(baseUrl)
+        val preferredExtension = when (liveStreamFormat) {
+            LiveStreamFormat.Auto -> storedPreference.liveExtension
+            LiveStreamFormat.Ts -> "ts"
+            LiveStreamFormat.Hls -> "m3u8"
+        }
+        streamCandidates = PlaybackUrlStrategy.candidates(
+            initialUrl = baseUrl,
+            type = MediaType.Live,
+            preference = storedPreference.copy(liveExtension = preferredExtension),
+        )
+        candidateIndex = 0
+        activeUrl = streamCandidates.firstOrNull() ?: baseUrl
+        livePlaybackSession.playUrl(target.key, activeUrl)
     }
 
     LaunchedEffect(entry?.key, buffering) {
