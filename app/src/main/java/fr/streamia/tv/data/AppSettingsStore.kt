@@ -3,12 +3,14 @@ package fr.streamia.tv.data
 import android.content.Context
 
 enum class VideoAspectSetting { Fit, Fill, Zoom }
+enum class BufferMode { LowLatency, Auto, Stable }
 
 data class AppSettings(
     val livePreviewEnabled: Boolean = true,
     val livePreviewDelayMs: Int = DEFAULT_LIVE_PREVIEW_DELAY_MS,
     val vodSeekStepSeconds: Int = DEFAULT_VOD_SEEK_STEP_SECONDS,
     val videoAspect: VideoAspectSetting = VideoAspectSetting.Fit,
+    val bufferMode: BufferMode = BufferMode.Auto,
 ) {
     val vodSeekStepMs: Long
         get() = vodSeekStepSeconds * 1_000L
@@ -21,6 +23,9 @@ data class AppSettings(
 
     fun nextVideoAspect(): VideoAspectSetting =
         VideoAspectSetting.entries[(videoAspect.ordinal + 1) % VideoAspectSetting.entries.size]
+
+    fun nextBufferMode(): BufferMode =
+        BufferMode.entries[(bufferMode.ordinal + 1) % BufferMode.entries.size]
 
     companion object {
         val LIVE_PREVIEW_DELAYS_MS = listOf(0, 250, 500, 1_000, 2_000)
@@ -56,6 +61,11 @@ class AppSettingsStore(context: Context) {
                     ?: VideoAspectSetting.Fit.name,
             )
         }.getOrDefault(VideoAspectSetting.Fit),
+        bufferMode = runCatching {
+            BufferMode.valueOf(
+                preferences.getString(KEY_BUFFER_MODE, BufferMode.Auto.name) ?: BufferMode.Auto.name,
+            )
+        }.getOrDefault(BufferMode.Auto),
     )
 
     fun save(settings: AppSettings) {
@@ -64,6 +74,7 @@ class AppSettingsStore(context: Context) {
             .putInt(KEY_LIVE_PREVIEW_DELAY_MS, settings.livePreviewDelayMs)
             .putInt(KEY_VOD_SEEK_STEP_SECONDS, settings.vodSeekStepSeconds)
             .putString(KEY_VIDEO_ASPECT, settings.videoAspect.name)
+            .putString(KEY_BUFFER_MODE, settings.bufferMode.name)
             .apply()
     }
 
@@ -79,5 +90,6 @@ class AppSettingsStore(context: Context) {
         const val KEY_LIVE_PREVIEW_DELAY_MS = "live_preview_delay_ms"
         const val KEY_VOD_SEEK_STEP_SECONDS = "vod_seek_step_seconds"
         const val KEY_VIDEO_ASPECT = "video_aspect"
+        const val KEY_BUFFER_MODE = "buffer_mode"
     }
 }
