@@ -32,11 +32,16 @@ import fr.streamia.tv.ui.theme.Night
 fun AboutScreen(
     versionName: String,
     onLoadCacheSize: suspend () -> Long,
+    onLoadEpgCacheSize: suspend () -> Long,
     onBack: () -> Unit,
 ) {
     BackHandler(onBack = onBack)
     var cacheSizeBytes by remember { mutableStateOf<Long?>(null) }
-    LaunchedEffect(Unit) { cacheSizeBytes = runCatching { onLoadCacheSize() }.getOrNull() }
+    var epgCacheSizeBytes by remember { mutableStateOf<Long?>(null) }
+    LaunchedEffect(Unit) {
+        cacheSizeBytes = runCatching { onLoadCacheSize() }.getOrNull()
+        epgCacheSizeBytes = runCatching { onLoadEpgCacheSize() }.getOrNull()
+    }
 
     Column(Modifier.fillMaxSize().background(Night).padding(horizontal = 48.dp, vertical = 32.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -53,6 +58,7 @@ fun AboutScreen(
             AboutLine("Appareil", "${Build.MANUFACTURER} ${Build.MODEL}".trim())
             AboutLine("Android", "${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
             AboutLine("Catalogue en cache", cacheSizeBytes?.let(::formatBytes) ?: "Calcul…")
+            AboutLine("EPG en cache", epgCacheSizeBytes?.let(::formatBytes) ?: "Calcul…")
         }
 
         Spacer(Modifier.height(28.dp))
