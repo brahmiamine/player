@@ -7,6 +7,7 @@ import android.provider.OpenableColumns
 import fr.streamia.tv.domain.AccountInfo
 import fr.streamia.tv.domain.Catalog
 import fr.streamia.tv.domain.EpgGuide
+import fr.streamia.tv.domain.EpgNowContext
 import fr.streamia.tv.domain.EpgProgram
 import fr.streamia.tv.domain.MediaCategory
 import fr.streamia.tv.domain.MediaDetails
@@ -29,6 +30,7 @@ class XtreamRepository(context: Context) {
     private val appContext = context.applicationContext
     private val client = XtreamClient()
     private val cache = CatalogCache(context)
+    private val epgCache = EpgCache(context)
     private val credentialsStore = CredentialsStore(context)
     private val playlistStore = PlaylistStore(context)
     private val libraryStore = UserLibraryStore(context)
@@ -49,6 +51,8 @@ class XtreamRepository(context: Context) {
         withContext(Dispatchers.IO) { updateChecker.checkForUpdate(currentVersion) }
 
     suspend fun cacheSizeBytes(): Long = withContext(Dispatchers.IO) { cache.databaseFileSizeBytes() }
+    suspend fun epgCacheSizeBytes(): Long = withContext(Dispatchers.IO) { epgCache.databaseFileSizeBytes() }
+    suspend fun clearEpgCache(profileId: String) = epgCache.clear(profileId)
 
     suspend fun exportBackup(profileId: String?): String = withContext(Dispatchers.IO) { backupManager.export(profileId) }
 
@@ -273,6 +277,7 @@ class XtreamRepository(context: Context) {
     suspend fun deleteProfile(profileId: String) {
         playlistStore.delete(profileId)
         cache.clear(profileId)
+        epgCache.clear(profileId)
     }
 
     /** Contrôle léger des identifiants (sans charger le catalogue), utilisé avant l'enregistrement. */
@@ -286,6 +291,70 @@ class XtreamRepository(context: Context) {
 
     suspend fun shortEpg(credentials: ServerCredentials, streamId: Int): List<EpgProgram> =
         client.loadShortEpg(credentials, streamId)
+
+    suspend fun epgMetadata(profileId: String): EpgCacheMetadata? = epgCache.metadata(profileId)
+
+    suspend fun cachedEpgNow(
+        profileId: String,
+        entry: MediaEntry,
+        nowEpochSeconds: Long,
+        offsetHours: Int,
+    ): EpgNowContext? = epgCache.nowContext(profileId, entry, nowEpochSeconds, offsetHours)
+
+    suspend fun cachedEpgGuide(
+        profileId: String,
+        displayStartEpochSeconds: Long,
+        displayEndEpochSeconds: Long,
+        offsetHours: Int,
+    ): EpgGuide = epgCache.guide(
+        profileId = profileId,
+        displayStartEpochSeconds = displayStartEpochSeconds,
+        displayEndEpochSeconds = displayEndEpochSeconds,
+        offsetHours = offsetHours,
+    )
+
+    /**
+     * Synchronise le XMLTV sans bloquer l'UI et sans matérialiser le guide complet en RAM. Le
+     * remplacement SQLite est transactionnel : une source cassée laisse l'ancien EPG intact.
+     */
+    suspend fun refreshEpg(
+        profileId: String,
+        credentials: ServerCredentials,
+        liveEntries: List<MediaEntry>,
+        force: Boolean = false,
+    ): Boolean = withContext(Dispatchers.IO) {
+        if (liveEntries.isEmpty()) return@withContext false
+        val profile = playlistStore.find(profileId)
+        val maxAgeMillis = (profile?.autoRefreshHours ?: 6).coerceIn(1, 168) * 3_600_000L
+        val nowMillis = System.currentTimeMillis()
+        if (!force && epgCache.metadataOnIo(profileId)?.isFreshAt(nowMillis, maxAgeMillis) == true) {
+            return@withContext false
+        }
+
+        val preferred = profile?.xmlTvUrl?.trim()?.takeIf(String::isNotBlank)?.let(::normalizeRemoteUrl)
+        val provider = XtreamUrlBuilder(credentials).xmlTv()
+        val sources = buildList {
+            preferred?.let(::add)
+            add(provider)
+        }.distinct()
+
+        var lastError: Throwable? = null
+        for (source in sources) {
+            val session = epgCache.beginReplaceOnIo(profileId)
+            try {
+                xmlTvRepository.syncOnIo(source, liveEntries, session)
+                if (session.writtenProgramCount <= 0) {
+                    throw XtreamException("La source EPG ne contient aucun programme exploitable correspondant aux chaînes.")
+                }
+                epgCache.commitReplaceOnIo(session, source)
+                return@withContext true
+            } catch (error: Throwable) {
+                epgCache.abortReplaceOnIo(session)
+                lastError = error
+            }
+        }
+        throw lastError ?: XtreamException("Aucune source EPG disponible.")
+    }
 
     suspend fun fullEpg(profileId: String, credentials: ServerCredentials, catalog: Catalog): EpgGuide {
         val profile = playlistStore.find(profileId)

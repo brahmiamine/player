@@ -65,6 +65,7 @@ import fr.streamia.tv.data.AppSettings
 import fr.streamia.tv.data.LiveStreamFormat
 import fr.streamia.tv.data.VideoAspectSetting
 import fr.streamia.tv.domain.Catalog
+import fr.streamia.tv.domain.EpgNowContext
 import fr.streamia.tv.domain.EpgProgram
 import fr.streamia.tv.domain.MediaCategory
 import fr.streamia.tv.domain.MediaEntry
@@ -119,7 +120,7 @@ fun PlayerScreen(
     catalog: Catalog,
     credentials: ServerCredentials,
     entry: MediaEntry,
-    epg: List<EpgProgram>,
+    epg: EpgNowContext,
     resumePositionMs: Long,
     appSettings: AppSettings,
     hiddenEntries: Set<String>,
@@ -835,7 +836,7 @@ private fun NextEpisodePrompt(
 private fun PlayerInfoBand(
     entry: MediaEntry,
     categoryName: String?,
-    epg: List<EpgProgram>,
+    epg: EpgNowContext,
     isPlaying: Boolean,
     numberBuffer: String,
     technicalInfo: StreamTechnicalInfo,
@@ -872,21 +873,31 @@ private fun PlayerInfoBand(
                 )
                 Spacer(Modifier.height(4.dp))
                 if (entry.type == MediaType.Live) {
-                    val current = epg.firstOrNull()
-                    if (current != null) {
-                        Text(
-                            listOfNotNull(current.timeRange(), current.title).joinToString(" · "),
-                            color = FocusBlueBright,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        epg.getOrNull(1)?.let { next ->
+                    if (!epg.isEmpty) {
+                        epg.previous?.let { previous ->
+                            Text(
+                                "Précédent ${previous.timeRange()?.let { "$it · " }.orEmpty()}${previous.title}",
+                                color = MutedInk,
+                                fontSize = 11.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        epg.current?.let { current ->
+                            Text(
+                                listOfNotNull(current.timeRange(), current.title).joinToString(" · "),
+                                color = FocusBlueBright,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        epg.next?.let { next ->
                             Text(
                                 "À suivre ${next.timeRange()?.let { "$it · " }.orEmpty()}${next.title}",
                                 color = MutedInk,
-                                fontSize = 12.sp,
+                                fontSize = 11.sp,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )

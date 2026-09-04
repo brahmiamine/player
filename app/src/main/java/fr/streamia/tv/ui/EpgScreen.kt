@@ -41,7 +41,6 @@ import fr.streamia.tv.domain.EpgProgram
 import fr.streamia.tv.domain.MediaCategory
 import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.MediaType
-import fr.streamia.tv.domain.withTimeOffset
 import fr.streamia.tv.ui.theme.DeepSurface
 import fr.streamia.tv.ui.theme.FocusBlueBright
 import fr.streamia.tv.ui.theme.HeadingWeight
@@ -53,16 +52,12 @@ import fr.streamia.tv.ui.theme.TypeSectionTitle
 import fr.streamia.tv.ui.theme.TypeScreenTitle
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
-import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import java.time.temporal.ChronoUnit
 import java.util.Date
 import java.util.Locale
 
-/** Nombre maximum de jours affichables par la navigation, en garde-fou contre un flux XMLTV malformé. */
-private const val MAX_DAY_SPAN = 30L
 private const val CLOCK_REFRESH_MS = 30_000L
 
 private val ChannelLabelWidth = 224.dp
@@ -83,16 +78,15 @@ fun EpgScreen(
     lockedCategories: Set<String>,
     parentalControlEnabled: Boolean,
     parentalUnlocked: Boolean,
-    epgTimeOffsetHours: Int,
+    availableDates: List<LocalDate>,
+    selectedDate: LocalDate?,
     loading: Boolean,
     message: String?,
     onOpenChannel: (MediaEntry) -> Unit,
+    onSelectDate: (LocalDate) -> Unit,
     onReload: () -> Unit,
     onBack: () -> Unit,
 ) {
-    // Appliqué à l'affichage (pas au chargement) : un changement du réglage dans Paramètres se
-    // reflète donc immédiatement au retour sur cet écran, sans repasser par "Actualiser".
-    val guide = remember(guide, epgTimeOffsetHours) { guide?.withTimeOffset(epgTimeOffsetHours) }
     val zone = remember { ZoneId.systemDefault() }
     var categoryId by remember { mutableStateOf(Catalog.ALL_CATEGORY_ID) }
     var selected by remember { mutableStateOf<SelectedProgram?>(null) }
@@ -126,25 +120,24 @@ fun EpgScreen(
         }
     }
 
-    val availableDates = remember(guide, zone) {
-        guide?.availableDates(zone)?.takeIf { it.isNotEmpty() } ?: listOf(LocalDate.now(zone))
+    val effectiveDates = remember(availableDates, zone) {
+        availableDates.takeIf { it.isNotEmpty() } ?: listOf(LocalDate.now(zone))
     }
-    var selectedDate by remember { mutableStateOf(availableDates.firstOrNull { it == LocalDate.now(zone) } ?: availableDates.first()) }
-    if (selectedDate !in availableDates) {
-        selectedDate = availableDates.firstOrNull { it == LocalDate.now(zone) } ?: availableDates.first()
-    }
+    val displayDate = selectedDate?.takeIf { it in effectiveDates }
+        ?: effectiveDates.firstOrNull { it == LocalDate.now(zone) }
+        ?: effectiveDates.first()
     if (selected != null &&
         (channels.none { it.key == selected!!.channel.key } || guide?.forEntry(selected!!.channel)?.contains(selected!!.program) != true)
     ) {
         selected = null
     }
 
-    val dayIndex = availableDates.indexOf(selectedDate).coerceAtLeast(0)
+    val dayIndex = effectiveDates.indexOf(displayDate).coerceAtLeast(0)
     val canGoPrev = dayIndex > 0
-    val canGoNext = dayIndex < availableDates.lastIndex
-    val isToday = selectedDate == LocalDate.now(zone)
-    val dayStart = selectedDate.atStartOfDay(zone).toEpochSecond()
-    val dayEnd = selectedDate.plusDays(1).atStartOfDay(zone).toEpochSecond()
+    val canGoNext = dayIndex < effectiveDates.lastIndex
+    val isToday = displayDate == LocalDate.now(zone)
+    val dayStart = displayDate.atStartOfDay(zone).toEpochSecond()
+    val dayEnd = displayDate.plusDays(1).atStartOfDay(zone).toEpochSecond()
 
     BackHandler {
         if (selected != null) selected = null else onBack()
@@ -192,13 +185,13 @@ fun EpgScreen(
             Spacer(Modifier.width(16.dp))
             Column(Modifier.weight(1f).fillMaxHeight()) {
                 DayNavigator(
-                    availableDates = availableDates,
+                    availableDates = effectiveDates,
                     dayIndex = dayIndex,
                     canGoPrev = canGoPrev,
                     canGoNext = canGoNext,
                     isToday = isToday,
                     nowEpoch = nowEpoch,
-                    onSelectDate = { selectedDate = it },
+                    onSelectDate = onSelectDate,
                 )
                 Spacer(Modifier.height(12.dp))
                 Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -470,30 +463,6 @@ private fun dayBlocksFor(programs: List<EpgProgram>, dayStart: Long, dayEnd: Lon
         }
         .sortedBy { it.clippedStart }
         .toList()
-
-/**
- * Journées couvertes par le guide chargé, calculées à partir des horaires réellement présents dans le
- * flux XMLTV (le fournisseur peut en servir un seul jour comme plusieurs semaines) : on ne fabrique jamais
- * de jour qui n'aurait aucune donnée dans le flux d'origine, on borne juste un flux malformé.
- */
-private fun EpgGuide.availableDates(zone: ZoneId): List<LocalDate> {
-    var minEpoch = Long.MAX_VALUE
-    var maxEpoch = Long.MIN_VALUE
-    channels.values.forEach { channel ->
-        channel.programs.forEach { program ->
-            program.startEpochSeconds?.let { if (it < minEpoch) minEpoch = it }
-            program.endEpochSeconds?.let { if (it > maxEpoch) maxEpoch = it }
-        }
-    }
-    if (minEpoch == Long.MAX_VALUE || maxEpoch == Long.MIN_VALUE || maxEpoch < minEpoch) return emptyList()
-    val minDate = Instant.ofEpochSecond(minEpoch).atZone(zone).toLocalDate()
-    // maxEpoch est une fin de programme, donc exclusive : un dernier programme se terminant pile à
-    // minuit ne doit pas ajouter le jour suivant, sous peine d'une journée finale entièrement vide
-    // (dayBlocksFor exclut déjà ce programme de ce jour-là via end <= dayStart).
-    val maxDate = Instant.ofEpochSecond((maxEpoch - 1).coerceAtLeast(minEpoch)).atZone(zone).toLocalDate()
-    val span = ChronoUnit.DAYS.between(minDate, maxDate).coerceIn(0L, MAX_DAY_SPAN)
-    return (0..span).map { minDate.plusDays(it) }
-}
 
 private fun EpgProgram.blockKey(channel: MediaEntry): String = "${channel.key}:${startEpochSeconds}:$title"
 

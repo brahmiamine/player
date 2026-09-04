@@ -192,6 +192,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                 state.screen is StreamiaScreen.About -> AboutScreen(
                     versionName = BuildConfig.VERSION_NAME,
                     onLoadCacheSize = viewModel::cacheSizeBytes,
+                    onLoadEpgCacheSize = viewModel::epgCacheSizeBytes,
                     onBack = viewModel::showTools,
                 )
 
@@ -211,10 +212,12 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     lockedCategories = state.library.lockedCategories,
                     parentalControlEnabled = state.appSettings.parentalControlEnabled,
                     parentalUnlocked = state.parentalUnlocked,
-                    epgTimeOffsetHours = state.appSettings.epgTimeOffsetHours,
+                    availableDates = state.epgAvailableDates,
+                    selectedDate = state.epgSelectedDate,
                     loading = state.epgLoading,
                     message = state.message,
                     onOpenChannel = viewModel::openEntry,
+                    onSelectDate = viewModel::selectEpgDate,
                     onReload = viewModel::reloadEpg,
                     onBack = viewModel::showHome,
                 )

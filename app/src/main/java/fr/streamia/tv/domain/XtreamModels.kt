@@ -109,6 +109,59 @@ data class EpgChannel(
     val programs: List<EpgProgram> = emptyList(),
 )
 
+data class EpgNowContext(
+    val previous: EpgProgram? = null,
+    val current: EpgProgram? = null,
+    val next: EpgProgram? = null,
+) {
+    val isEmpty: Boolean
+        get() = previous == null && current == null && next == null
+}
+
+/**
+ * Sélectionne uniquement le contexte utile autour de l'instant affiché. Le décalage EPG est
+ * appliqué sans muter la source : on compare d'abord l'heure d'affichage à l'heure fournisseur,
+ * puis on décale seulement les trois programmes renvoyés.
+ */
+fun List<EpgProgram>.epgNowContextAt(
+    nowEpochSeconds: Long,
+    offsetHours: Int = 0,
+): EpgNowContext {
+    val shiftSeconds = offsetHours * 3_600L
+    val sourceNow = nowEpochSeconds - shiftSeconds
+    val timed = asSequence().filter {
+        val start = it.startEpochSeconds
+        val end = it.endEpochSeconds
+        start != null && end != null && end > start
+    }.toList()
+
+    val current = timed
+        .filter { it.startEpochSeconds!! <= sourceNow && it.endEpochSeconds!! > sourceNow }
+        .maxByOrNull { it.startEpochSeconds!! }
+    val previous = timed
+        .filter { it.endEpochSeconds!! <= sourceNow }
+        .maxByOrNull { it.endEpochSeconds!! }
+    val next = timed
+        .filter { it.startEpochSeconds!! > sourceNow }
+        .minByOrNull { it.startEpochSeconds!! }
+
+    fun shifted(program: EpgProgram?): EpgProgram? = program?.withTimeOffset(offsetHours)
+    return EpgNowContext(
+        previous = shifted(previous),
+        current = shifted(current),
+        next = shifted(next),
+    )
+}
+
+fun EpgProgram.withTimeOffset(offsetHours: Int): EpgProgram {
+    if (offsetHours == 0) return this
+    val shiftSeconds = offsetHours * 3_600L
+    return copy(
+        startEpochSeconds = startEpochSeconds?.plus(shiftSeconds),
+        endEpochSeconds = endEpochSeconds?.plus(shiftSeconds),
+    )
+}
+
 data class EpgGuide(
     val channels: Map<String, EpgChannel>,
     val loadedAtEpochSeconds: Long = System.currentTimeMillis() / 1000,
@@ -145,17 +198,9 @@ private fun String.normalizedLookupKey(): String = trim().lowercase()
  */
 fun EpgGuide.withTimeOffset(offsetHours: Int): EpgGuide {
     if (offsetHours == 0) return this
-    val shiftSeconds = offsetHours * 3_600L
     return copy(
         channels = channels.mapValues { (_, channel) ->
-            channel.copy(
-                programs = channel.programs.map { program ->
-                    program.copy(
-                        startEpochSeconds = program.startEpochSeconds?.plus(shiftSeconds),
-                        endEpochSeconds = program.endEpochSeconds?.plus(shiftSeconds),
-                    )
-                },
-            )
+            channel.copy(programs = channel.programs.map { it.withTimeOffset(offsetHours) })
         },
     )
 }
