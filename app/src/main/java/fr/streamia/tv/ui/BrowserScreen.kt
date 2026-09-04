@@ -83,6 +83,13 @@ private const val HISTORY_CATEGORY_ID = "__history__"
 /** Distance (en éléments) à la fin de la liste/grille matérialisée à partir de laquelle la page suivante est demandée. */
 private const val LOAD_MORE_THRESHOLD = 20
 
+/**
+ * Hauteur du bandeau haut, partagée entre [BrowserHeader] (qui l'utilise comme hauteur réelle) et
+ * [LiveCatalogLayout] (qui décale ses panneaux catégories/chaînes de cette même valeur quand le
+ * bandeau flotte en transparence par-dessus la vidéo plein écran, pour ne pas se faire recouvrir).
+ */
+private val BROWSER_HEADER_HEIGHT = 74.dp
+
 @Composable
 fun BrowserScreen(
     catalog: Catalog,
@@ -191,40 +198,14 @@ fun BrowserScreen(
         }
     }
 
-    Column(Modifier.fillMaxSize().background(Night)) {
-        BrowserHeader(
-            catalog = catalog,
-            selectedType = selectedType,
-            offline = offline,
-            busy = busy,
-            onHome = ::leaveBrowserForHome,
-            onTypeSelected = {
-                if (it != MediaType.Live) livePlaybackSession.stop(clearSession = true)
-                selectedType = it
-                selectedCategoryId = navigationStore.category(it) ?: defaultCategoryId(catalog, it)
-            },
-            onSearch = onSearch,
-            onEpg = onEpg,
-            onSettings = onSettings,
-        )
+    val isLive = selectedType == MediaType.Live
 
-        if (message != null) {
-            FocusableSurface(
-                onClick = onDismissMessage,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 3.dp).height(40.dp),
-            ) {
-                Text(
-                    "$message  ·  OK fermer",
-                    color = if (message.contains("média", ignoreCase = true) || message.contains("import", ignoreCase = true)) FocusBlueBright else MaterialTheme.colorScheme.error,
-                    fontSize = 12.sp,
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
-
-        if (selectedType == MediaType.Live) {
+    // En Direct, la vidéo doit remplir tout l'écran, bandeau du haut compris : LiveCatalogLayout
+    // est donc posé en premier (plein écran) dans ce Box, et le bandeau + le message flottent
+    // ensuite par-dessus, translucides, plutôt que de réserver leur propre bande opaque en haut
+    // comme le fait la disposition Column classique utilisée par les autres écrans (VOD compris).
+    Box(Modifier.fillMaxSize().background(Night)) {
+        if (isLive) {
             LiveCatalogLayout(
                 catalog = catalog,
                 credentials = credentials,
@@ -251,27 +232,64 @@ fun BrowserScreen(
                 onEntrySelected = onEntrySelected,
                 onToggleEntryFavorite = onToggleEntryFavorite,
                 onLoadMore = { onLoadMoreInCategory(MediaType.Live, selectedCategoryId) },
-                modifier = Modifier.fillMaxSize().padding(start = 18.dp, end = 18.dp, bottom = 18.dp),
+                modifier = Modifier.fillMaxSize(),
             )
-        } else {
-            VodCatalogLayout(
-                type = selectedType,
+        }
+
+        Column(Modifier.fillMaxSize()) {
+            BrowserHeader(
                 catalog = catalog,
-                categories = categories,
-                selectedCategoryId = selectedCategoryId,
-                entries = entries,
-                favoriteCategories = library.favoriteCategories,
-                favoriteEntries = library.favoriteEntries,
-                historyCount = historyForType.size,
-                historyByKey = historyByKey,
-                onCategorySelected = { selectedCategoryId = it.id },
-                onToggleCategoryFavorite = onToggleCategoryFavorite,
-                onEntrySelected = onEntrySelected,
-                onEntryFocused = { navigationStore.saveEntry(selectedType, it.key) },
-                onToggleEntryFavorite = onToggleEntryFavorite,
-                onLoadMore = { onLoadMoreInCategory(selectedType, selectedCategoryId) },
-                modifier = Modifier.fillMaxSize().padding(start = 18.dp, end = 18.dp, bottom = 18.dp),
+                selectedType = selectedType,
+                offline = offline,
+                busy = busy,
+                translucent = isLive,
+                onHome = ::leaveBrowserForHome,
+                onTypeSelected = {
+                    if (it != MediaType.Live) livePlaybackSession.stop(clearSession = true)
+                    selectedType = it
+                    selectedCategoryId = navigationStore.category(it) ?: defaultCategoryId(catalog, it)
+                },
+                onSearch = onSearch,
+                onEpg = onEpg,
+                onSettings = onSettings,
             )
+
+            if (message != null) {
+                FocusableSurface(
+                    onClick = onDismissMessage,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 3.dp).height(40.dp),
+                ) {
+                    Text(
+                        "$message  ·  OK fermer",
+                        color = if (message.contains("média", ignoreCase = true) || message.contains("import", ignoreCase = true)) FocusBlueBright else MaterialTheme.colorScheme.error,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+
+            if (!isLive) {
+                VodCatalogLayout(
+                    type = selectedType,
+                    catalog = catalog,
+                    categories = categories,
+                    selectedCategoryId = selectedCategoryId,
+                    entries = entries,
+                    favoriteCategories = library.favoriteCategories,
+                    favoriteEntries = library.favoriteEntries,
+                    historyCount = historyForType.size,
+                    historyByKey = historyByKey,
+                    onCategorySelected = { selectedCategoryId = it.id },
+                    onToggleCategoryFavorite = onToggleCategoryFavorite,
+                    onEntrySelected = onEntrySelected,
+                    onEntryFocused = { navigationStore.saveEntry(selectedType, it.key) },
+                    onToggleEntryFavorite = onToggleEntryFavorite,
+                    onLoadMore = { onLoadMoreInCategory(selectedType, selectedCategoryId) },
+                    modifier = Modifier.fillMaxSize().padding(start = 18.dp, end = 18.dp, bottom = 18.dp),
+                )
+            }
         }
     }
 }
@@ -282,19 +300,29 @@ private fun BrowserHeader(
     selectedType: MediaType,
     offline: Boolean,
     busy: Boolean,
+    // Le Direct affiche ce bandeau flottant par-dessus la vidéo plein écran plutôt que dans sa
+    // propre bande opaque : il porte alors son propre fond assombri (même valeur que les panneaux
+    // catégories/chaînes) et ses boutons au repos deviennent transparents. VOD garde le bandeau
+    // opaque habituel, posé sur le fond plein de son écran.
+    translucent: Boolean = false,
     onHome: () -> Unit,
     onTypeSelected: (MediaType) -> Unit,
     onSearch: () -> Unit,
     onEpg: () -> Unit,
     onSettings: () -> Unit,
 ) {
+    val idleBackground = if (translucent) Color.Transparent else DeepSurface
     Row(
-        modifier = Modifier.fillMaxWidth().height(74.dp).padding(horizontal = 20.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(BROWSER_HEADER_HEIGHT)
+            .then(if (translucent) Modifier.background(Night.copy(alpha = 0.72f)) else Modifier)
+            .padding(horizontal = 20.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         StreamiaLogo(compact = true)
         Spacer(Modifier.width(16.dp))
-        HeaderAction("Accueil", 90.dp, onHome)
+        HeaderAction("Accueil", 90.dp, onHome, idleBackground = idleBackground)
         Spacer(Modifier.width(6.dp))
 
         for (type in MediaType.entries) {
@@ -302,6 +330,7 @@ private fun BrowserHeader(
                 onClick = { onTypeSelected(type) },
                 selected = selectedType == type,
                 enabled = catalog.count(type) > 0,
+                idleBackground = idleBackground,
                 modifier = Modifier.width(104.dp).height(44.dp),
             ) {
                 Column(Modifier.padding(horizontal = 10.dp)) {
@@ -313,11 +342,11 @@ private fun BrowserHeader(
         }
 
         Spacer(Modifier.weight(1f))
-        HeaderAction("Recherche", 52.dp, onSearch, glyph = StreamiaIconGlyph.Search)
+        HeaderAction("Recherche", 52.dp, onSearch, glyph = StreamiaIconGlyph.Search, idleBackground = idleBackground)
         Spacer(Modifier.width(6.dp))
-        HeaderAction("EPG", 68.dp, onEpg, catalog.count(MediaType.Live) > 0)
+        HeaderAction("EPG", 68.dp, onEpg, catalog.count(MediaType.Live) > 0, idleBackground = idleBackground)
         Spacer(Modifier.width(6.dp))
-        HeaderAction("Paramètres", 52.dp, onSettings, glyph = StreamiaIconGlyph.Settings)
+        HeaderAction("Paramètres", 52.dp, onSettings, glyph = StreamiaIconGlyph.Settings, idleBackground = idleBackground)
         Spacer(Modifier.width(10.dp))
         Box(Modifier.size(6.dp).background(if (offline) WarmSignal else Color(0xFF8FBFA0)))
         Spacer(Modifier.width(5.dp))
@@ -340,10 +369,12 @@ private fun HeaderAction(
     onClick: () -> Unit,
     enabled: Boolean = true,
     glyph: StreamiaIconGlyph? = null,
+    idleBackground: Color = DeepSurface,
 ) {
     FocusableSurface(
         onClick = onClick,
         enabled = enabled,
+        idleBackground = idleBackground,
         modifier = Modifier.width(width).height(44.dp),
         contentDescription = if (glyph != null) label else null,
     ) {
@@ -428,13 +459,19 @@ private fun LiveCatalogLayout(
             liveVideoSurface = liveVideoSurface,
             entry = previewEntry,
             favorite = previewEntry?.key in favoriteEntries,
+            // Bord à bord, y compris sous le bandeau du haut (qui flotte par-dessus, translucide) :
+            // seuls les panneaux catégories/chaînes ci-dessous en tiennent compte, via leur propre
+            // padding, pour ne pas se faire recouvrir par ce bandeau.
             modifier = Modifier.fillMaxSize(),
         )
         Row(
-            Modifier.fillMaxHeight().graphicsLayer {
-                translationX = controlsOffset
-                alpha = controlsAlpha
-            },
+            Modifier
+                .fillMaxHeight()
+                .padding(start = 18.dp, end = 18.dp, top = BROWSER_HEADER_HEIGHT + 8.dp, bottom = 18.dp)
+                .graphicsLayer {
+                    translationX = controlsOffset
+                    alpha = controlsAlpha
+                },
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
           CategoryRail(
@@ -746,8 +783,11 @@ private fun LivePreview(
             color = Ink,
             fontSize = 13.sp,
             fontWeight = FontWeight.Bold,
+            // Décalé sous le bandeau du haut, qui flotte maintenant par-dessus cette même vidéo
+            // plein écran (voir BrowserScreen) et couvrirait sinon ce badge.
             modifier = Modifier
                 .align(Alignment.TopEnd)
+                .padding(top = BROWSER_HEADER_HEIGHT)
                 .background(Night.copy(alpha = 0.82f))
                 .padding(horizontal = 12.dp, vertical = 7.dp),
         )
