@@ -58,6 +58,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     private val epgGuideMemoryCache = EpgGuideMemoryCache()
     private var epgSyncJob: Job? = null
     private var epgSyncProfileId: String? = null
+    private var epgPrefetchJob: Job? = null
     private var epgChannelJob: Job? = null
     private var epgTickerJob: Job? = null
     // Lu/écrit uniquement depuis le thread principal (appelants Compose) : évite de relancer une
@@ -1282,7 +1283,9 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                     )
                 } else current
             }
-            prefetchEpgNeighbors(profileId, date, dates, offsetHours)
+            // Le warm-up au démarrage se limite volontairement à une seule journée pour ne pas
+            // concurrencer le chargement du catalogue. Les jours voisins seront préchargés dès que
+            // l'utilisateur ouvre réellement le Guide TV.
         }
     }
 
@@ -1297,10 +1300,16 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         val neighbors = buildList {
             availableDates.getOrNull(index - 1)?.let(::add)
             availableDates.getOrNull(index + 1)?.let(::add)
-        }
-        neighbors.forEach { neighbor ->
-            if (epgGuideMemoryCache.get(profileId, neighbor, offsetHours) != null) return@forEach
-            viewModelScope.launch {
+        }.filter { epgGuideMemoryCache.get(profileId, it, offsetHours) == null }
+        if (neighbors.isEmpty()) return
+
+        // Une seule prélecture SQLite à la fois. Sur plusieurs milliers de chaînes, lancer J-1 et
+        // J+1 en parallèle augmente inutilement la pression I/O et mémoire sur les boîtiers TV.
+        epgPrefetchJob?.cancel()
+        epgPrefetchJob = viewModelScope.launch {
+            for (neighbor in neighbors) {
+                if (_uiState.value.activeProfileId != profileId) return@launch
+                if (epgGuideMemoryCache.get(profileId, neighbor, offsetHours) != null) continue
                 val (dayStart, dayEnd) = epgDayBounds(neighbor)
                 val guide = runCatching {
                     repository.cachedEpgGuide(
@@ -1309,7 +1318,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                         displayEndEpochSeconds = dayEnd,
                         offsetHours = offsetHours,
                     )
-                }.getOrNull() ?: return@launch
+                }.getOrNull() ?: continue
                 if (_uiState.value.activeProfileId == profileId) {
                     epgGuideMemoryCache.put(profileId, neighbor, offsetHours, guide)
                 }
@@ -1445,6 +1454,8 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
 
     private fun showLogin() {
         epgGuideMemoryCache.clear()
+        epgPrefetchJob?.cancel()
+        epgPrefetchJob = null
         epgSyncJob?.cancel()
         epgSyncJob = null
         epgSyncProfileId = null
