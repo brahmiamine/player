@@ -119,6 +119,7 @@ fun PlayerScreen(
     epg: List<EpgProgram>,
     resumePositionMs: Long,
     appSettings: AppSettings,
+    hiddenEntries: Set<String>,
     livePlaybackSession: LivePlaybackSession,
     liveVideoSurface: @Composable (LiveVideoSurfacePlacement) -> Unit,
     onBack: () -> Unit,
@@ -455,7 +456,9 @@ fun PlayerScreen(
         val number = numberBuffer.toIntOrNull()
         numberBuffer = ""
         if (number != null) {
-            catalog.entriesFor(MediaType.Live).firstOrNull { it.number == number }?.let(onEntrySelected)
+            catalog.entriesFor(MediaType.Live)
+                .firstOrNull { it.number == number && it.key !in hiddenEntries }
+                ?.let(onEntrySelected)
         }
     }
 
