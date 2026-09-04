@@ -14,6 +14,8 @@ class UserLibraryHistoryFilterTest {
             displayName = "item-$id",
             type = type,
             categoryId = "1",
+            iconUrl = null,
+            number = id,
             playable = true,
         ),
         positionMs = 1_000L,
