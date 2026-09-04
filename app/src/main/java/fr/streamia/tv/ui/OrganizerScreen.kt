@@ -159,7 +159,7 @@ fun OrganizerScreen(
                             val selectedCategories = categories.filter { it.key in selectedCategoryKeys }
                             val hideSelected = selectedCategories.any { it.key !in hiddenCategories }
                             selectedCategories
-                                .filter { (it.key in hiddenCategories) == hideSelected }
+                                .filter { (it.key in hiddenCategories) != hideSelected }
                                 .forEach(onToggleCategoryHidden)
                         },
                         enabled = selectedCategoryKeys.isNotEmpty(),
