@@ -211,10 +211,12 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     lockedCategories = state.library.lockedCategories,
                     parentalControlEnabled = state.appSettings.parentalControlEnabled,
                     parentalUnlocked = state.parentalUnlocked,
-                    epgTimeOffsetHours = state.appSettings.epgTimeOffsetHours,
+                    availableDates = state.epgAvailableDates,
+                    selectedDate = state.epgSelectedDate,
                     loading = state.epgLoading,
                     message = state.message,
                     onOpenChannel = viewModel::openEntry,
+                    onSelectDate = viewModel::selectEpgDate,
                     onReload = viewModel::reloadEpg,
                     onBack = viewModel::showHome,
                 )
