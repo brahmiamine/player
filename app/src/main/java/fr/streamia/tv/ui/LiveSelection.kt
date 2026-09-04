@@ -29,3 +29,22 @@ fun shouldRestartLivePreview(
     currentMediaItemCount: Int,
     targetEntryKey: String,
 ): Boolean = currentEntryKey != targetEntryKey || currentMediaItemCount <= 0
+
+
+/**
+ * Replace le flux réellement actif en tête de la stratégie de fallback.
+ *
+ * Lors d'un retour plein écran -> Browser, les candidats peuvent être régénérés avec un ordre
+ * différent de celui utilisé par la session partagée. Le flux courant devient donc explicitement
+ * le candidat 0, puis les autres fallbacks gardent leur ordre sans doublon.
+ */
+fun prioritizeActiveLiveCandidate(
+    candidates: List<String>,
+    activeUrl: String,
+): List<String> {
+    if (activeUrl.isBlank()) return candidates
+    return buildList {
+        add(activeUrl)
+        addAll(candidates.filterNot { it == activeUrl })
+    }
+}

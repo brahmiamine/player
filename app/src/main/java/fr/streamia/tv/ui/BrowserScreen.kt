@@ -852,8 +852,10 @@ private fun LivePreview(
             livePlaybackSession.playUrl(target.key, activeUrl)
         } else {
             activeUrl = livePlaybackSession.activeUrl
+            streamCandidates = prioritizeActiveLiveCandidate(streamCandidates, activeUrl)
+            candidateIndex = 0
             buffering = player.playbackState != Player.STATE_READY
-            player.play()
+            livePlaybackSession.continuePlayback()
         }
     }
 

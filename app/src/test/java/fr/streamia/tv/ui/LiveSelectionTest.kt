@@ -66,4 +66,44 @@ class LiveSelectionTest {
         )
     }
 
+
+    @Test
+    fun `active live url becomes first fallback candidate when reusing session`() {
+        assertEquals(
+            listOf(
+                "https://provider/live/11.ts",
+                "http://provider/live/11.ts",
+                "http://provider/live/11.m3u8",
+                "https://provider/live/11.m3u8",
+            ),
+            prioritizeActiveLiveCandidate(
+                candidates = listOf(
+                    "http://provider/live/11.ts",
+                    "http://provider/live/11.m3u8",
+                    "https://provider/live/11.ts",
+                    "https://provider/live/11.m3u8",
+                ),
+                activeUrl = "https://provider/live/11.ts",
+            ),
+        )
+    }
+
+    @Test
+    fun `active live url is prepended when current session url is not in regenerated candidates`() {
+        assertEquals(
+            listOf(
+                "https://provider/live/11.ts",
+                "http://provider/live/11.ts",
+                "http://provider/live/11.m3u8",
+            ),
+            prioritizeActiveLiveCandidate(
+                candidates = listOf(
+                    "http://provider/live/11.ts",
+                    "http://provider/live/11.m3u8",
+                ),
+                activeUrl = "https://provider/live/11.ts",
+            ),
+        )
+    }
+
 }
