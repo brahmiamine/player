@@ -138,6 +138,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onCycleVodSeekStep = viewModel::cycleVodSeekStep,
                     onCycleVideoAspect = viewModel::cycleVideoAspect,
                     onCycleBufferMode = viewModel::cycleBufferMode,
+                    onCycleLiveStreamFormat = viewModel::cycleLiveStreamFormat,
                     onTools = viewModel::showTools,
                     onBack = viewModel::showHome,
                 )
