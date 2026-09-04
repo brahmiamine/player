@@ -1104,7 +1104,25 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             if (sequence != epgGuideLoadSequence || _uiState.value.activeProfileId != profileId) return@launch
             if (metadata == null || metadata.programCount <= 0) {
                 if (_uiState.value.screen is StreamiaScreen.Epg) {
-                    _uiState.update { it.copy(epgGuide = null, epgAvailableDates = emptyList(), epgLoading = true) }
+                    _uiState.update { current ->
+                        if (current.epgAvailableDates.isNotEmpty()) {
+                            // Une resynchro en arrière-plan (déclenchée à l'ouverture de l'écran) peut
+                            // encore être en train d'écrire dans le cache : cette lecture tombe alors
+                            // sur une fenêtre où les métadonnées semblent vides. Ce n'est pas une
+                            // absence réelle de cache — on connaît déjà les jours couverts par ce
+                            // profil — donc on les garde (selectEpgDate() a déjà mis epgGuide à null le
+                            // temps de ce rechargement ; les effacer aussi ferait retomber la navigation
+                            // sur « aujourd'hui » et casserait Jour suivant/précédent). On arrête juste
+                            // le spinner ; la fin de cette resynchro relance ce chargement et
+                            // l'actualisera correctement.
+                            current.copy(epgLoading = false)
+                        } else {
+                            // Premier chargement réel (aucun jour encore connu) : le cache est
+                            // effectivement vide pour l'instant, on l'indique sans rester bloqué si rien
+                            // ne relance jamais ce chargement.
+                            current.copy(epgGuide = null, epgAvailableDates = emptyList(), epgLoading = false)
+                        }
+                    }
                 }
                 return@launch
             }
