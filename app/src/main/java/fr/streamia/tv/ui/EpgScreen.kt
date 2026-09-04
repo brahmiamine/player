@@ -52,16 +52,12 @@ import fr.streamia.tv.ui.theme.TypeSectionTitle
 import fr.streamia.tv.ui.theme.TypeScreenTitle
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
-import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import java.time.temporal.ChronoUnit
 import java.util.Date
 import java.util.Locale
 
-/** Nombre maximum de jours affichables par la navigation, en garde-fou contre un flux XMLTV malformé. */
-private const val MAX_DAY_SPAN = 30L
 private const val CLOCK_REFRESH_MS = 30_000L
 
 private val ChannelLabelWidth = 224.dp
@@ -467,30 +463,6 @@ private fun dayBlocksFor(programs: List<EpgProgram>, dayStart: Long, dayEnd: Lon
         }
         .sortedBy { it.clippedStart }
         .toList()
-
-/**
- * Journées couvertes par le guide chargé, calculées à partir des horaires réellement présents dans le
- * flux XMLTV (le fournisseur peut en servir un seul jour comme plusieurs semaines) : on ne fabrique jamais
- * de jour qui n'aurait aucune donnée dans le flux d'origine, on borne juste un flux malformé.
- */
-private fun EpgGuide.availableDates(zone: ZoneId): List<LocalDate> {
-    var minEpoch = Long.MAX_VALUE
-    var maxEpoch = Long.MIN_VALUE
-    channels.values.forEach { channel ->
-        channel.programs.forEach { program ->
-            program.startEpochSeconds?.let { if (it < minEpoch) minEpoch = it }
-            program.endEpochSeconds?.let { if (it > maxEpoch) maxEpoch = it }
-        }
-    }
-    if (minEpoch == Long.MAX_VALUE || maxEpoch == Long.MIN_VALUE || maxEpoch < minEpoch) return emptyList()
-    val minDate = Instant.ofEpochSecond(minEpoch).atZone(zone).toLocalDate()
-    // maxEpoch est une fin de programme, donc exclusive : un dernier programme se terminant pile à
-    // minuit ne doit pas ajouter le jour suivant, sous peine d'une journée finale entièrement vide
-    // (dayBlocksFor exclut déjà ce programme de ce jour-là via end <= dayStart).
-    val maxDate = Instant.ofEpochSecond((maxEpoch - 1).coerceAtLeast(minEpoch)).atZone(zone).toLocalDate()
-    val span = ChronoUnit.DAYS.between(minDate, maxDate).coerceIn(0L, MAX_DAY_SPAN)
-    return (0..span).map { minDate.plusDays(it) }
-}
 
 private fun EpgProgram.blockKey(channel: MediaEntry): String = "${channel.key}:${startEpochSeconds}:$title"
 
