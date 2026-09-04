@@ -1127,7 +1127,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 } else if (changed) {
                     // La nouvelle version du guide est déjà en SQLite : réchauffer silencieusement
                     // aujourd'hui (+ voisins) pour la prochaine ouverture du Guide TV.
-                    warmEpgGuideCache(profileId, forceMetadataRefresh = true)
+                    warmEpgGuideCache(profileId)
                 }
             } catch (error: Throwable) {
                 if (error is CancellationException) throw error
@@ -1245,7 +1245,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
      * Au retour d'un profil, prépare la journée courante depuis SQLite avant même que l'utilisateur
      * ouvre le Guide TV. Aucun réseau ici : si le cache disque n'existe pas encore, on sort.
      */
-    private fun warmEpgGuideCache(profileId: String, forceMetadataRefresh: Boolean = false) {
+    private fun warmEpgGuideCache(profileId: String) {
         val state = _uiState.value
         if (state.activeProfileId != profileId) return
         val offsetHours = state.appSettings.epgTimeOffsetHours
