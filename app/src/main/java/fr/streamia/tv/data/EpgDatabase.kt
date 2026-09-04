@@ -221,6 +221,7 @@ internal class EpgDatabase(context: Context) :
             FROM epg_programs
             WHERE profile_id = ? AND channel_id = ?
               AND start_time IS NOT NULL AND end_time IS NOT NULL
+              AND end_time > start_time
               AND end_time <= ?
             ORDER BY end_time DESC, start_time DESC
             LIMIT 1
@@ -233,6 +234,7 @@ internal class EpgDatabase(context: Context) :
             FROM epg_programs
             WHERE profile_id = ? AND channel_id = ?
               AND start_time IS NOT NULL AND end_time IS NOT NULL
+              AND end_time > start_time
               AND start_time <= ? AND end_time > ?
             ORDER BY start_time DESC
             LIMIT 1
@@ -245,6 +247,7 @@ internal class EpgDatabase(context: Context) :
             FROM epg_programs
             WHERE profile_id = ? AND channel_id = ?
               AND start_time IS NOT NULL AND end_time IS NOT NULL
+              AND end_time > start_time
               AND start_time > ?
             ORDER BY start_time ASC
             LIMIT 1
@@ -286,6 +289,7 @@ internal class EpgDatabase(context: Context) :
               ON c.profile_id = p.profile_id AND c.channel_id = p.channel_id
             WHERE p.profile_id = ?
               AND p.start_time IS NOT NULL AND p.end_time IS NOT NULL
+              AND p.end_time > p.start_time
               AND p.end_time > ? AND p.start_time < ?
             ORDER BY p.channel_id, p.start_time
             """.trimIndent(),
