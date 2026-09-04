@@ -4,6 +4,7 @@ import android.content.Context
 
 enum class VideoAspectSetting { Fit, Fill, Zoom }
 enum class BufferMode { LowLatency, Auto, Stable }
+enum class LiveStreamFormat { Auto, Ts, Hls }
 
 data class AppSettings(
     val livePreviewEnabled: Boolean = true,
@@ -11,6 +12,7 @@ data class AppSettings(
     val vodSeekStepSeconds: Int = DEFAULT_VOD_SEEK_STEP_SECONDS,
     val videoAspect: VideoAspectSetting = VideoAspectSetting.Fit,
     val bufferMode: BufferMode = BufferMode.Auto,
+    val liveStreamFormat: LiveStreamFormat = LiveStreamFormat.Auto,
 ) {
     val vodSeekStepMs: Long
         get() = vodSeekStepSeconds * 1_000L
@@ -26,6 +28,9 @@ data class AppSettings(
 
     fun nextBufferMode(): BufferMode =
         BufferMode.entries[(bufferMode.ordinal + 1) % BufferMode.entries.size]
+
+    fun nextLiveStreamFormat(): LiveStreamFormat =
+        LiveStreamFormat.entries[(liveStreamFormat.ordinal + 1) % LiveStreamFormat.entries.size]
 
     companion object {
         val LIVE_PREVIEW_DELAYS_MS = listOf(0, 250, 500, 1_000, 2_000)
@@ -66,6 +71,12 @@ class AppSettingsStore(context: Context) {
                 preferences.getString(KEY_BUFFER_MODE, BufferMode.Auto.name) ?: BufferMode.Auto.name,
             )
         }.getOrDefault(BufferMode.Auto),
+        liveStreamFormat = runCatching {
+            LiveStreamFormat.valueOf(
+                preferences.getString(KEY_LIVE_STREAM_FORMAT, LiveStreamFormat.Auto.name)
+                    ?: LiveStreamFormat.Auto.name,
+            )
+        }.getOrDefault(LiveStreamFormat.Auto),
     )
 
     fun save(settings: AppSettings) {
@@ -75,6 +86,7 @@ class AppSettingsStore(context: Context) {
             .putInt(KEY_VOD_SEEK_STEP_SECONDS, settings.vodSeekStepSeconds)
             .putString(KEY_VIDEO_ASPECT, settings.videoAspect.name)
             .putString(KEY_BUFFER_MODE, settings.bufferMode.name)
+            .putString(KEY_LIVE_STREAM_FORMAT, settings.liveStreamFormat.name)
             .apply()
     }
 
@@ -91,5 +103,6 @@ class AppSettingsStore(context: Context) {
         const val KEY_VOD_SEEK_STEP_SECONDS = "vod_seek_step_seconds"
         const val KEY_VIDEO_ASPECT = "video_aspect"
         const val KEY_BUFFER_MODE = "buffer_mode"
+        const val KEY_LIVE_STREAM_FORMAT = "live_stream_format"
     }
 }
