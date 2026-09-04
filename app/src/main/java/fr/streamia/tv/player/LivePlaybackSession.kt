@@ -5,14 +5,15 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Tracks
 import androidx.media3.exoplayer.ExoPlayer
+import fr.streamia.tv.data.BufferMode
 import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.domain.ServerCredentials
 import fr.streamia.tv.domain.XtreamUrlBuilder
 
 /** Un seul lecteur Live, partagé entre l'aperçu et le plein écran. */
-class LivePlaybackSession(context: Context) {
-    val player: ExoPlayer = StreamiaPlayerFactory.create(context.applicationContext, MediaType.Live)
+class LivePlaybackSession(context: Context, bufferMode: BufferMode = BufferMode.Auto) {
+    val player: ExoPlayer = StreamiaPlayerFactory.create(context.applicationContext, MediaType.Live, bufferMode)
     var entryKey: String? = null
         private set
     var activeUrl: String = ""
