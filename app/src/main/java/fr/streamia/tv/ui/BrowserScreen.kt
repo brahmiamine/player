@@ -51,6 +51,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
+import fr.streamia.tv.data.AppSettings
 import fr.streamia.tv.data.PlaybackHistoryItem
 import fr.streamia.tv.data.BrowserNavigationStore
 import fr.streamia.tv.data.NavigationListPosition
@@ -97,6 +98,7 @@ fun BrowserScreen(
     livePlaybackSession: LivePlaybackSession,
     liveVideoSurface: @Composable (LiveVideoSurfacePlacement) -> Unit,
     library: UserLibrarySnapshot,
+    appSettings: AppSettings,
     offline: Boolean,
     busy: Boolean,
     message: String?,
@@ -211,6 +213,7 @@ fun BrowserScreen(
                 credentials = credentials,
                 livePlaybackSession = livePlaybackSession,
                 liveVideoSurface = liveVideoSurface,
+                appSettings = appSettings,
                 categories = categories,
                 selectedCategoryId = selectedCategoryId,
                 entries = entries,
@@ -392,6 +395,7 @@ private fun LiveCatalogLayout(
     credentials: ServerCredentials,
     livePlaybackSession: LivePlaybackSession,
     liveVideoSurface: @Composable (LiveVideoSurfacePlacement) -> Unit,
+    appSettings: AppSettings,
     categories: List<MediaCategory>,
     selectedCategoryId: String,
     entries: List<MediaEntry>,
@@ -459,6 +463,8 @@ private fun LiveCatalogLayout(
             liveVideoSurface = liveVideoSurface,
             entry = previewEntry,
             favorite = previewEntry?.key in favoriteEntries,
+            enabled = appSettings.livePreviewEnabled,
+            previewDelayMs = appSettings.livePreviewDelayMs,
             // Bord à bord, y compris sous le bandeau du haut (qui flotte par-dessus, translucide) :
             // seuls les panneaux catégories/chaînes ci-dessous en tiennent compte, via leur propre
             // padding, pour ne pas se faire recouvrir par ce bandeau.
@@ -684,6 +690,8 @@ private fun LivePreview(
     liveVideoSurface: @Composable (LiveVideoSurfacePlacement) -> Unit,
     entry: MediaEntry?,
     favorite: Boolean,
+    enabled: Boolean,
+    previewDelayMs: Int,
     modifier: Modifier = Modifier,
 ) {
     val player = livePlaybackSession.player
@@ -733,10 +741,15 @@ private fun LivePreview(
         }
     }
 
-    androidx.compose.runtime.LaunchedEffect(entry?.key, credentials) {
+    androidx.compose.runtime.LaunchedEffect(entry?.key, credentials, enabled, previewDelayMs) {
         val target = entry
-        if (target == null) return@LaunchedEffect
-        delay(240)
+        if (!enabled || target == null) {
+            livePlaybackSession.stop(clearSession = true)
+            buffering = false
+            error = false
+            return@LaunchedEffect
+        }
+        if (previewDelayMs > 0) delay(previewDelayMs.toLong())
         error = false
         buffering = true
         fallbackAttempted = false
@@ -751,7 +764,7 @@ private fun LivePreview(
     }
 
     Box(modifier.background(Color.Black)) {
-            if (entry != null) {
+            if (entry != null && enabled) {
                 liveVideoSurface(LiveVideoSurfacePlacement(Modifier.fillMaxSize()))
                 if (buffering) {
                     Text("Chargement…", color = Ink, fontSize = TypeBody, modifier = Modifier.align(Alignment.Center))
@@ -776,10 +789,15 @@ private fun LivePreview(
                     )
                 }
             } else {
-                Text("Sélectionnez une chaîne puis appuyez sur OK", color = MutedInk, fontSize = TypeBody, modifier = Modifier.align(Alignment.Center))
+                Text(
+                    if (entry != null && !enabled) "Aperçu désactivé dans les paramètres" else "Sélectionnez une chaîne puis appuyez sur OK",
+                    color = MutedInk,
+                    fontSize = TypeBody,
+                    modifier = Modifier.align(Alignment.Center),
+                )
             }
         Text(
-            "Aperçu en direct",
+            if (enabled) "Aperçu en direct" else "Aperçu désactivé",
             color = Ink,
             fontSize = 13.sp,
             fontWeight = FontWeight.Bold,
