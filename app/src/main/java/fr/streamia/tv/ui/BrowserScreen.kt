@@ -842,7 +842,19 @@ private fun LivePreview(
         )
         candidateIndex = 0
         activeUrl = streamCandidates.firstOrNull() ?: baseUrl
-        livePlaybackSession.playUrl(target.key, activeUrl)
+        if (
+            shouldRestartLivePreview(
+                currentEntryKey = livePlaybackSession.entryKey,
+                currentMediaItemCount = player.mediaItemCount,
+                targetEntryKey = target.key,
+            )
+        ) {
+            livePlaybackSession.playUrl(target.key, activeUrl)
+        } else {
+            activeUrl = livePlaybackSession.activeUrl
+            buffering = player.playbackState != Player.STATE_READY
+            player.play()
+        }
     }
 
     LaunchedEffect(entry?.key, buffering) {
