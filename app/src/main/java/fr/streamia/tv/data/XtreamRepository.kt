@@ -32,12 +32,15 @@ class XtreamRepository(context: Context) {
     private val credentialsStore = CredentialsStore(context)
     private val playlistStore = PlaylistStore(context)
     private val libraryStore = UserLibraryStore(context)
+    private val appSettingsStore = AppSettingsStore(context)
     private val xmlTvRepository = XmlTvRepository()
     private val m3uParser = M3uParser()
 
     fun profiles(): List<PlaylistProfile> = playlistStore.loadAll()
     fun profile(profileId: String): PlaylistProfile? = playlistStore.find(profileId)
     fun library(profileId: String): UserLibrarySnapshot = libraryStore.snapshot(profileId)
+    fun appSettings(): AppSettings = appSettingsStore.load()
+    fun updateAppSettings(transform: (AppSettings) -> AppSettings): AppSettings = appSettingsStore.update(transform)
     fun customizedCatalog(profileId: String, catalog: Catalog): Catalog = libraryStore.applyToCatalog(profileId, catalog)
 
     /**
@@ -287,7 +290,7 @@ class XtreamRepository(context: Context) {
     fun recordPlayback(profileId: String, entry: MediaEntry, positionMs: Long, durationMs: Long) =
         libraryStore.recordPlayback(profileId, entry, positionMs, durationMs)
     fun resumePosition(profileId: String, entryKey: String): Long = libraryStore.resumePosition(profileId, entryKey)
-    fun clearHistory(profileId: String) = libraryStore.clearHistory(profileId)
+    fun clearHistory(profileId: String, type: MediaType? = null) = libraryStore.clearHistory(profileId, type)
     fun setCategoryOrder(profileId: String, type: MediaType, categoryKeys: List<String>) =
         libraryStore.setCategoryOrder(profileId, type, categoryKeys)
     fun moveEntries(profileId: String, entryKeys: Set<String>, targetCategoryId: String) =
