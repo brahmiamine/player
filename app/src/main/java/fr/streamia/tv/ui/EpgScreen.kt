@@ -79,6 +79,9 @@ fun EpgScreen(
     guide: EpgGuide?,
     hiddenCategories: Set<String>,
     hiddenEntries: Set<String>,
+    lockedCategories: Set<String>,
+    parentalControlEnabled: Boolean,
+    parentalUnlocked: Boolean,
     loading: Boolean,
     message: String?,
     onOpenChannel: (MediaEntry) -> Unit,
@@ -97,14 +100,20 @@ fun EpgScreen(
         }
     }
 
-    val hiddenCategoryIds = remember(catalog, hiddenCategories) {
+    // Un guide TV ne propose pas de saisir un code par chaîne : une catégorie verrouillée et pas
+    // encore déverrouillée cette session est donc traitée comme masquée ici, pas juste vidée de
+    // son contenu (contrairement au navigateur, qui affiche la catégorie et gate sa sélection).
+    val effectivelyHiddenCategories = remember(hiddenCategories, lockedCategories, parentalControlEnabled, parentalUnlocked) {
+        if (!parentalControlEnabled || parentalUnlocked) hiddenCategories else hiddenCategories + lockedCategories
+    }
+    val hiddenCategoryIds = remember(catalog, effectivelyHiddenCategories) {
         catalog.categoriesFor(MediaType.Live)
-            .filter { it.key in hiddenCategories }
+            .filter { it.key in effectivelyHiddenCategories }
             .mapTo(mutableSetOf(), MediaCategory::id)
     }
-    val categories = remember(catalog, hiddenCategories) {
+    val categories = remember(catalog, effectivelyHiddenCategories) {
         listOf(Catalog.allCategory(MediaType.Live)) +
-            catalog.categoriesFor(MediaType.Live).filterNot { it.key in hiddenCategories }
+            catalog.categoriesFor(MediaType.Live).filterNot { it.key in effectivelyHiddenCategories }
     }
     val channels = remember(catalog, categoryId, hiddenEntries, hiddenCategoryIds) {
         catalog.entriesIn(MediaType.Live, categoryId).filterNot {

@@ -66,6 +66,7 @@ import fr.streamia.tv.data.LiveStreamFormat
 import fr.streamia.tv.data.VideoAspectSetting
 import fr.streamia.tv.domain.Catalog
 import fr.streamia.tv.domain.EpgProgram
+import fr.streamia.tv.domain.MediaCategory
 import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.domain.ServerCredentials
@@ -120,6 +121,9 @@ fun PlayerScreen(
     resumePositionMs: Long,
     appSettings: AppSettings,
     hiddenEntries: Set<String>,
+    lockedCategories: Set<String>,
+    parentalControlEnabled: Boolean,
+    parentalUnlocked: Boolean,
     livePlaybackSession: LivePlaybackSession,
     liveVideoSurface: @Composable (LiveVideoSurfacePlacement) -> Unit,
     onBack: () -> Unit,
@@ -450,6 +454,15 @@ fun PlayerScreen(
         }
     }
 
+    // Comme pour le zapping CH+/CH-, la saisie directe d'un numéro n'a pas d'écran de code : une
+    // chaîne d'une catégorie verrouillée et pas encore déverrouillée cette session est donc exclue
+    // au même titre qu'une chaîne masquée plutôt que de silencieusement contourner le verrouillage.
+    val numericJumpLockedCategoryIds = remember(catalog, lockedCategories, parentalControlEnabled, parentalUnlocked) {
+        if (!parentalControlEnabled || parentalUnlocked) emptySet()
+        else catalog.categoriesFor(MediaType.Live)
+            .filter { it.key in lockedCategories }
+            .mapTo(mutableSetOf(), MediaCategory::id)
+    }
     LaunchedEffect(numberBuffer) {
         if (numberBuffer.isBlank()) return@LaunchedEffect
         delay(1_250)
@@ -457,7 +470,11 @@ fun PlayerScreen(
         numberBuffer = ""
         if (number != null) {
             catalog.entriesFor(MediaType.Live)
-                .firstOrNull { it.number == number && it.key !in hiddenEntries }
+                .firstOrNull {
+                    it.number == number &&
+                        it.key !in hiddenEntries &&
+                        it.categoryId !in numericJumpLockedCategoryIds
+                }
                 ?.let(onEntrySelected)
         }
     }

@@ -102,6 +102,7 @@ fun BrowserScreen(
     liveVideoSurface: @Composable (LiveVideoSurfacePlacement) -> Unit,
     library: UserLibrarySnapshot,
     appSettings: AppSettings,
+    parentalUnlocked: Boolean,
     offline: Boolean,
     busy: Boolean,
     message: String?,
@@ -110,6 +111,7 @@ fun BrowserScreen(
     onEntrySelected: (MediaEntry) -> Unit,
     onToggleEntryFavorite: (MediaEntry) -> Unit,
     onToggleCategoryFavorite: (MediaCategory) -> Unit,
+    onVerifyParentalPin: (String) -> Boolean,
     onRememberContent: (MediaEntry) -> Unit,
     onLocationChanged: (MediaType, String?) -> Unit,
     onEnsureCategoryLoaded: (MediaType, String) -> Unit,
@@ -162,26 +164,36 @@ fun BrowserScreen(
             .filter { it.key in library.hiddenCategories }
             .mapTo(mutableSetOf(), MediaCategory::id)
     }
+    // Une catégorie verrouillée reste visible dans le rail (l'utilisateur doit voir qu'elle
+    // existe pour pouvoir la déverrouiller) : seul son contenu disparaît des vues agrégées
+    // (Tout, favoris, historique) tant que le code n'a pas été saisi cette session.
+    val lockedCategoryIds = remember(catalog, selectedType, library.lockedCategories, appSettings.parentalControlEnabled, parentalUnlocked) {
+        if (!appSettings.parentalControlEnabled || parentalUnlocked) emptySet()
+        else catalog.categoriesFor(selectedType)
+            .filter { it.key in library.lockedCategories }
+            .mapTo(mutableSetOf(), MediaCategory::id)
+    }
+    val excludedCategoryIds = remember(hiddenCategoryIds, lockedCategoryIds) { hiddenCategoryIds + lockedCategoryIds }
     val baseCategories = remember(catalog, selectedType, library.hiddenCategories) {
         catalog.categoriesFor(selectedType).filterNot { it.key in library.hiddenCategories }
     }
-    val favoriteEntriesForType = remember(catalog, selectedType, library.favoriteEntries, library.hiddenEntries, hiddenCategoryIds) {
+    val favoriteEntriesForType = remember(catalog, selectedType, library.favoriteEntries, library.hiddenEntries, excludedCategoryIds) {
         library.favoriteEntries.asSequence()
             .mapNotNull(catalog::entry)
             .filter {
                 it.type == selectedType &&
                     it.key !in library.hiddenEntries &&
-                    it.categoryId !in hiddenCategoryIds
+                    it.categoryId !in excludedCategoryIds
             }
             .toList()
     }
-    val historyForType = remember(catalog, selectedType, library.history, library.hiddenEntries, hiddenCategoryIds) {
+    val historyForType = remember(catalog, selectedType, library.history, library.hiddenEntries, excludedCategoryIds) {
         library.history.asSequence()
             .map { item -> item to (catalog.entry(item.entry.key) ?: item.entry) }
             .filter { (_, entry) ->
                 entry.type == selectedType &&
                     entry.key !in library.hiddenEntries &&
-                    entry.categoryId !in hiddenCategoryIds
+                    entry.categoryId !in excludedCategoryIds
             }
             .toList()
     }
@@ -194,16 +206,22 @@ fun BrowserScreen(
             hasHistory = historyForType.isNotEmpty(),
         )
     }
-    val entries = remember(catalog, selectedType, selectedCategoryId, favoriteEntriesForType, historyForType, hiddenCategoryIds, library.hiddenEntries) {
+    val entries = remember(catalog, selectedType, selectedCategoryId, favoriteEntriesForType, historyForType, excludedCategoryIds, library.hiddenEntries) {
         when (selectedCategoryId) {
             FAVORITES_CATEGORY_ID -> favoriteEntriesForType
             HISTORY_CATEGORY_ID -> historyForType.map { it.second }
             else -> catalog.entriesIn(selectedType, selectedCategoryId).filterNot {
-                it.key in library.hiddenEntries || it.categoryId in hiddenCategoryIds
+                it.key in library.hiddenEntries || it.categoryId in excludedCategoryIds
             }
         }
     }
     val historyByKey = remember(historyForType) { historyForType.associate { it.second.key to it.first } }
+
+    var pendingLockedCategory by remember { mutableStateOf<MediaCategory?>(null) }
+    fun selectCategory(category: MediaCategory) {
+        val locked = appSettings.parentalControlEnabled && !parentalUnlocked && category.key in library.lockedCategories
+        if (locked) pendingLockedCategory = category else selectedCategoryId = category.id
+    }
 
     androidx.compose.runtime.LaunchedEffect(selectedType, categories) {
         if (categories.none { it.id == selectedCategoryId }) {
@@ -241,8 +259,9 @@ fun BrowserScreen(
                 initialListPosition = navigationStore.listPosition(MediaType.Live, selectedCategoryId),
                 favoriteCategories = library.favoriteCategories,
                 favoriteEntries = library.favoriteEntries,
+                lockedCategories = library.lockedCategories,
                 historyCount = historyForType.size,
-                onCategorySelected = { selectedCategoryId = it.id },
+                onCategorySelected = ::selectCategory,
                 onPreviewChanged = {
                     lastLiveEntryKey = it.key
                     navigationStore.saveLiveSelection(selectedCategoryId, it.key)
@@ -302,9 +321,10 @@ fun BrowserScreen(
                     entries = entries,
                     favoriteCategories = library.favoriteCategories,
                     favoriteEntries = library.favoriteEntries,
+                    lockedCategories = library.lockedCategories,
                     historyCount = historyForType.size,
                     historyByKey = historyByKey,
-                    onCategorySelected = { selectedCategoryId = it.id },
+                    onCategorySelected = ::selectCategory,
                     onToggleCategoryFavorite = onToggleCategoryFavorite,
                     onEntrySelected = onEntrySelected,
                     onEntryFocused = { navigationStore.saveEntry(selectedType, it.key) },
@@ -313,6 +333,22 @@ fun BrowserScreen(
                     modifier = Modifier.fillMaxSize().padding(start = 18.dp, end = 18.dp, bottom = 18.dp),
                 )
             }
+        }
+
+        pendingLockedCategory?.let { category ->
+            ParentalPinDialog(
+                title = "Contenu verrouillé",
+                subtitle = "Entrez le code parental pour accéder à « ${category.name} »",
+                onSubmit = { pin ->
+                    val correct = onVerifyParentalPin(pin)
+                    if (correct) {
+                        selectedCategoryId = category.id
+                        pendingLockedCategory = null
+                    }
+                    correct
+                },
+                onCancel = { pendingLockedCategory = null },
+            )
         }
     }
 }
@@ -423,6 +459,7 @@ private fun LiveCatalogLayout(
     initialListPosition: NavigationListPosition,
     favoriteCategories: Set<String>,
     favoriteEntries: Set<String>,
+    lockedCategories: Set<String>,
     historyCount: Int,
     onCategorySelected: (MediaCategory) -> Unit,
     onPreviewChanged: (MediaEntry) -> Unit,
@@ -506,6 +543,7 @@ private fun LiveCatalogLayout(
             categories = categories,
             selectedCategoryId = selectedCategoryId,
             favoriteCategories = favoriteCategories,
+            lockedCategories = lockedCategories,
             countFor = { category ->
                 when (category.id) {
                     FAVORITES_CATEGORY_ID -> favoriteEntries.count { it.startsWith("${MediaType.Live.name}:") }
@@ -857,6 +895,7 @@ private fun VodCatalogLayout(
     entries: List<MediaEntry>,
     favoriteCategories: Set<String>,
     favoriteEntries: Set<String>,
+    lockedCategories: Set<String>,
     historyCount: Int,
     historyByKey: Map<String, PlaybackHistoryItem>,
     onCategorySelected: (MediaCategory) -> Unit,
@@ -873,6 +912,7 @@ private fun VodCatalogLayout(
             categories = categories,
             selectedCategoryId = selectedCategoryId,
             favoriteCategories = favoriteCategories,
+            lockedCategories = lockedCategories,
             countFor = { category ->
                 when (category.id) {
                     FAVORITES_CATEGORY_ID -> favoriteEntries.count { it.startsWith("${type.name}:") }
@@ -912,6 +952,7 @@ private fun CategoryRail(
     categories: List<MediaCategory>,
     selectedCategoryId: String,
     favoriteCategories: Set<String>,
+    lockedCategories: Set<String>,
     countFor: (MediaCategory) -> Int,
     onSelected: (MediaCategory) -> Unit,
     onToggleFavorite: (MediaCategory) -> Unit,
@@ -978,6 +1019,10 @@ private fun CategoryRail(
                     Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                         if (!virtual && category.key in favoriteCategories) {
                             StreamiaIcon(StreamiaIconGlyph.Star, size = 12.dp)
+                            Spacer(Modifier.width(5.dp))
+                        }
+                        if (!virtual && category.key in lockedCategories) {
+                            StreamiaIcon(StreamiaIconGlyph.Lock, tint = FocusBlueBright, size = 12.dp)
                             Spacer(Modifier.width(5.dp))
                         }
                         Text(

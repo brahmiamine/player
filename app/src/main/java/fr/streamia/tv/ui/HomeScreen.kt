@@ -56,6 +56,8 @@ fun HomeScreen(
     offline: Boolean,
     busy: Boolean,
     library: UserLibrarySnapshot,
+    parentalControlEnabled: Boolean = false,
+    parentalUnlocked: Boolean = false,
     catalogLoading: Boolean = false,
     onOpenSection: (MediaType) -> Unit,
     onSettings: () -> Unit,
@@ -69,9 +71,15 @@ fun HomeScreen(
     val firstFocus = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { firstFocus.requestFocus() } }
 
-    val hiddenCategoryIdsByType = remember(catalog, library.hiddenCategories) {
+    // Comme pour le guide TV, une catégorie verrouillée et pas encore déverrouillée cette session
+    // est traitée comme masquée ici : l'accueil ouvre le contenu directement (reprise, favori),
+    // sans passer par le geste de sélection de catégorie qui déclenche le code dans le navigateur.
+    val excludedCategories = remember(library.hiddenCategories, library.lockedCategories, parentalControlEnabled, parentalUnlocked) {
+        if (!parentalControlEnabled || parentalUnlocked) library.hiddenCategories else library.hiddenCategories + library.lockedCategories
+    }
+    val hiddenCategoryIdsByType = remember(catalog, excludedCategories) {
         catalog.categories
-            .filter { it.key in library.hiddenCategories }
+            .filter { it.key in excludedCategories }
             .groupBy { it.type }
             .mapValues { (_, categories) -> categories.mapTo(mutableSetOf()) { it.id } }
     }

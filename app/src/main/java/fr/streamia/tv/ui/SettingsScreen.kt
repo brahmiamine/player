@@ -38,6 +38,7 @@ fun SettingsScreen(
     onCycleBufferMode: () -> Unit,
     onCycleLiveStreamFormat: () -> Unit,
     onTools: () -> Unit,
+    onParentalControl: () -> Unit,
     onBack: () -> Unit,
 ) {
     BackHandler(onBack = onBack)
@@ -129,7 +130,14 @@ fun SettingsScreen(
                     onClick = onTools,
                     modifier = Modifier.weight(1f),
                 )
-                Spacer(Modifier.weight(1f))
+                SettingsTile(
+                    glyph = StreamiaIconGlyph.Lock,
+                    title = "Contrôle parental",
+                    subtitle = if (settings.parentalControlEnabled) "Activé" else "Désactivé",
+                    onClick = onParentalControl,
+                    modifier = Modifier.weight(1f),
+                    selected = settings.parentalControlEnabled,
+                )
             }
         }
     }

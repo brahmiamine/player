@@ -289,6 +289,10 @@ class XtreamRepository(context: Context) {
     fun toggleEntryHidden(profileId: String, entry: MediaEntry): Boolean = libraryStore.toggleEntryHidden(profileId, entry)
     fun toggleCategoryFavorite(profileId: String, category: MediaCategory): Boolean = libraryStore.toggleCategoryFavorite(profileId, category)
     fun toggleCategoryHidden(profileId: String, category: MediaCategory): Boolean = libraryStore.toggleCategoryHidden(profileId, category)
+    fun toggleCategoryLocked(profileId: String, category: MediaCategory): Boolean = libraryStore.toggleCategoryLocked(profileId, category)
+    fun setParentalPin(pin: String): AppSettings = appSettingsStore.setParentalPin(pin)
+    fun clearParentalPin(): AppSettings = appSettingsStore.clearParentalPin()
+    fun verifyParentalPin(pin: String): Boolean = appSettingsStore.verifyParentalPin(pin)
     fun recordPlayback(profileId: String, entry: MediaEntry, positionMs: Long, durationMs: Long) =
         libraryStore.recordPlayback(profileId, entry, positionMs, durationMs)
     fun resumePosition(profileId: String, entryKey: String): Long = libraryStore.resumePosition(profileId, entryKey)

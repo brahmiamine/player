@@ -1,6 +1,8 @@
 package fr.streamia.tv.data
 
 import android.content.Context
+import java.security.MessageDigest
+import java.security.SecureRandom
 
 enum class VideoAspectSetting { Fit, Fill, Zoom }
 enum class BufferMode { LowLatency, Auto, Stable }
@@ -13,6 +15,8 @@ data class AppSettings(
     val videoAspect: VideoAspectSetting = VideoAspectSetting.Fit,
     val bufferMode: BufferMode = BufferMode.Auto,
     val liveStreamFormat: LiveStreamFormat = LiveStreamFormat.Auto,
+    /** Un code est enregistré (voir [AppSettingsStore.setParentalPin]) et le verrouillage est actif. */
+    val parentalControlEnabled: Boolean = false,
 ) {
     val vodSeekStepMs: Long
         get() = vodSeekStepSeconds * 1_000L
@@ -77,6 +81,8 @@ class AppSettingsStore(context: Context) {
                     ?: LiveStreamFormat.Auto.name,
             )
         }.getOrDefault(LiveStreamFormat.Auto),
+        parentalControlEnabled = preferences.getBoolean(KEY_PARENTAL_ENABLED, false) &&
+            preferences.getString(KEY_PARENTAL_PIN_HASH, null) != null,
     )
 
     fun save(settings: AppSettings) {
@@ -87,6 +93,7 @@ class AppSettingsStore(context: Context) {
             .putString(KEY_VIDEO_ASPECT, settings.videoAspect.name)
             .putString(KEY_BUFFER_MODE, settings.bufferMode.name)
             .putString(KEY_LIVE_STREAM_FORMAT, settings.liveStreamFormat.name)
+            .putBoolean(KEY_PARENTAL_ENABLED, settings.parentalControlEnabled)
             .apply()
     }
 
@@ -94,6 +101,38 @@ class AppSettingsStore(context: Context) {
         val updated = transform(load())
         save(updated)
         return updated
+    }
+
+    /**
+     * Enregistre un nouveau code parental et active le verrouillage. Le code lui-même n'est
+     * jamais stocké : seuls un sel aléatoire et le hachage salé sont conservés, en dehors de
+     * [AppSettings] (qui, lui, transite par l'état d'interface) pour qu'aucune empreinte du code
+     * ne circule au-delà de ce store.
+     */
+    fun setParentalPin(pin: String): AppSettings {
+        val salt = ByteArray(16).also(SecureRandom()::nextBytes).toHex()
+        preferences.edit()
+            .putString(KEY_PARENTAL_PIN_SALT, salt)
+            .putString(KEY_PARENTAL_PIN_HASH, hashPin(pin, salt))
+            .putBoolean(KEY_PARENTAL_ENABLED, true)
+            .apply()
+        return load()
+    }
+
+    /** Désactive le verrouillage parental et oublie le code enregistré. */
+    fun clearParentalPin(): AppSettings {
+        preferences.edit()
+            .remove(KEY_PARENTAL_PIN_SALT)
+            .remove(KEY_PARENTAL_PIN_HASH)
+            .putBoolean(KEY_PARENTAL_ENABLED, false)
+            .apply()
+        return load()
+    }
+
+    fun verifyParentalPin(pin: String): Boolean {
+        val salt = preferences.getString(KEY_PARENTAL_PIN_SALT, null) ?: return false
+        val storedHash = preferences.getString(KEY_PARENTAL_PIN_HASH, null) ?: return false
+        return hashPin(pin, salt) == storedHash
     }
 
     private companion object {
@@ -104,5 +143,17 @@ class AppSettingsStore(context: Context) {
         const val KEY_VIDEO_ASPECT = "video_aspect"
         const val KEY_BUFFER_MODE = "buffer_mode"
         const val KEY_LIVE_STREAM_FORMAT = "live_stream_format"
+        const val KEY_PARENTAL_ENABLED = "parental_control_enabled"
+        const val KEY_PARENTAL_PIN_SALT = "parental_pin_salt"
+        const val KEY_PARENTAL_PIN_HASH = "parental_pin_hash"
     }
 }
+
+/**
+ * Hachage salé d'un code parental, extrait en fonction pure (plutôt que méthode privée de
+ * [AppSettingsStore]) pour rester testable sans `Context` Android — ce module n'a pas Robolectric.
+ */
+internal fun hashPin(pin: String, salt: String): String =
+    MessageDigest.getInstance("SHA-256").digest((salt + pin).toByteArray(Charsets.UTF_8)).toHex()
+
+private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it) }

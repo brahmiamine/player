@@ -340,10 +340,18 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     suspend fun searchCatalog(query: String, type: MediaType?): List<MediaEntry> {
         val state = _uiState.value
         val profileId = state.activeProfileId ?: return emptyList()
-        val hiddenCategoryIdsByType = state.catalog
+        // Une catégorie verrouillée est traitée comme masquée pour la recherche : il n'y a pas
+        // d'écran de saisie de code depuis un résultat de recherche, donc son contenu ne doit tout
+        // simplement pas apparaître tant que le code n'a pas été saisi cette session ailleurs.
+        val excludedCategoryKeys = if (state.appSettings.parentalControlEnabled && !state.parentalUnlocked) {
+            state.library.hiddenCategories + state.library.lockedCategories
+        } else {
+            state.library.hiddenCategories
+        }
+        val excludedCategoryIdsByType = state.catalog
             ?.categories
             .orEmpty()
-            .filter { it.key in state.library.hiddenCategories }
+            .filter { it.key in excludedCategoryKeys }
             .groupBy(MediaCategory::type)
             .mapValues { (_, categories) -> categories.mapTo(mutableSetOf(), MediaCategory::id) }
 
@@ -351,13 +359,14 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             .getOrDefault(emptyList())
             .filterNot { entry ->
                 entry.key in state.library.hiddenEntries ||
-                    entry.categoryId in hiddenCategoryIdsByType[entry.type].orEmpty()
+                    entry.categoryId in excludedCategoryIdsByType[entry.type].orEmpty()
             }
     }
 
     fun showHome() { _uiState.update { it.copy(screen = StreamiaScreen.Home, message = null) } }
     fun showSettings() { _uiState.update { it.copy(screen = StreamiaScreen.Settings, message = null) } }
     fun showTools() { _uiState.update { it.copy(screen = StreamiaScreen.Tools, message = null) } }
+    fun showParentalControl() { _uiState.update { it.copy(screen = StreamiaScreen.ParentalControl, message = null) } }
     fun showSearch() { _uiState.update { it.copy(screen = StreamiaScreen.Search, message = null) } }
 
     fun toggleLivePreview() {
@@ -609,6 +618,48 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         }
     }
 
+    fun toggleCategoryLocked(category: MediaCategory) {
+        val profileId = _uiState.value.activeProfileId ?: return
+        _uiState.update { state ->
+            val locked = state.library.lockedCategories.toMutableSet().apply {
+                if (!add(category.key)) remove(category.key)
+            }
+            state.copy(library = state.library.copy(lockedCategories = locked))
+        }
+        val sequence = ++libraryMutationSequence
+        viewModelScope.launch {
+            libraryMutation.withLock {
+                runCatching {
+                    withContext(Dispatchers.IO) {
+                        repository.toggleCategoryLocked(profileId, category)
+                        repository.library(profileId)
+                    }
+                }.onSuccess { library ->
+                    if (sequence != libraryMutationSequence) return@onSuccess
+                    _uiState.update { state -> if (state.activeProfileId == profileId) state.copy(library = library) else state }
+                }
+            }
+        }
+    }
+
+    /** Enregistre un nouveau code parental et active le verrouillage — déverrouille aussi la session en cours puisque c'est l'utilisateur qui vient de le saisir. */
+    fun setParentalPin(pin: String) {
+        val settings = repository.setParentalPin(pin)
+        _uiState.update { it.copy(appSettings = settings, parentalUnlocked = true) }
+    }
+
+    fun disableParentalControl() {
+        val settings = repository.clearParentalPin()
+        _uiState.update { it.copy(appSettings = settings, parentalUnlocked = false) }
+    }
+
+    /** Code correct : déverrouille le contenu verrouillé pour le reste de la session (jusqu'à la fermeture de l'app). */
+    fun verifyParentalPin(pin: String): Boolean {
+        val correct = repository.verifyParentalPin(pin)
+        if (correct) _uiState.update { it.copy(parentalUnlocked = true) }
+        return correct
+    }
+
     fun toggleCategoryFavorite(category: MediaCategory) {
         val profileId = _uiState.value.activeProfileId ?: return
         _uiState.update { state ->
@@ -710,12 +761,23 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         val state = _uiState.value
         val current = (state.screen as? StreamiaScreen.Player)?.entry ?: return
         if (current.type != MediaType.Live) return
+        // Le repli sur allLive peut faire sauter le zapping dans une autre catégorie que celle en
+        // cours : si elle est verrouillée et pas encore déverrouillée cette session, elle doit être
+        // exclue comme si elle était masquée — il n'y a pas d'écran de code pendant le zapping.
+        val lockedCategoryIds = if (state.appSettings.parentalControlEnabled && !state.parentalUnlocked) {
+            state.catalog?.categoriesFor(MediaType.Live)
+                .orEmpty()
+                .filter { it.key in state.library.lockedCategories }
+                .mapTo(mutableSetOf(), MediaCategory::id)
+        } else {
+            emptySet()
+        }
         val sameCategory = state.catalog?.entriesIn(MediaType.Live, current.categoryId)
             .orEmpty()
             .filterNot { it.key in state.library.hiddenEntries }
         val allLive = state.catalog?.entriesFor(MediaType.Live)
             .orEmpty()
-            .filterNot { it.key in state.library.hiddenEntries }
+            .filterNot { it.key in state.library.hiddenEntries || it.categoryId in lockedCategoryIds }
         val pool = if (sameCategory.size > 1) sameCategory else allLive
         val next = pool.adjacentTo(current.key, delta) ?: return
         openPlayer(next, returnToSeries = false)
@@ -957,6 +1019,8 @@ data class StreamiaUiState(
     val profiles: List<PlaylistProfile> = emptyList(),
     val library: UserLibrarySnapshot = UserLibrarySnapshot(),
     val appSettings: AppSettings = AppSettings(),
+    /** Code parental saisi correctement pendant cette session (redevient false à la relance de l'app). */
+    val parentalUnlocked: Boolean = false,
     val offline: Boolean = false,
     val message: String? = null,
     val mediaDetails: MediaDetails? = null,
@@ -976,6 +1040,7 @@ sealed interface StreamiaScreen {
     data object Browser : StreamiaScreen
     data object Settings : StreamiaScreen
     data object Tools : StreamiaScreen
+    data object ParentalControl : StreamiaScreen
     data object Search : StreamiaScreen
     data object Epg : StreamiaScreen
     data object Organizer : StreamiaScreen
