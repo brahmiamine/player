@@ -41,6 +41,7 @@ fun SettingsScreen(
     onCycleLiveStreamFormat: () -> Unit,
     onCycleLiveChannelSortOrder: () -> Unit,
     onCycleVodSortOrder: () -> Unit,
+    onCycleEpgTimeOffset: () -> Unit,
     onTools: () -> Unit,
     onParentalControl: () -> Unit,
     onBack: () -> Unit,
@@ -150,6 +151,20 @@ fun SettingsScreen(
                     onClick = onCycleVodSortOrder,
                     modifier = Modifier.weight(1f),
                 )
+            }
+            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                SettingsTile(
+                    glyph = StreamiaIconGlyph.Guide,
+                    title = "Décalage horaire EPG",
+                    subtitle = if (settings.epgTimeOffsetHours == 0) {
+                        "Aucun"
+                    } else {
+                        "${if (settings.epgTimeOffsetHours > 0) "+" else ""}${settings.epgTimeOffsetHours} h"
+                    },
+                    onClick = onCycleEpgTimeOffset,
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.weight(1f))
             }
             Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 SettingsTile(

@@ -99,6 +99,20 @@ class AppSettingsTest {
     }
 
     @Test
+    fun `epg time offset cycles through negative and positive hours`() {
+        var settings = AppSettings(epgTimeOffsetHours = -3)
+        val observed = buildList {
+            repeat(AppSettings.EPG_TIME_OFFSETS_HOURS.size) {
+                add(settings.epgTimeOffsetHours)
+                settings = settings.copy(epgTimeOffsetHours = settings.nextEpgTimeOffsetHours())
+            }
+        }
+
+        assertEquals(AppSettings.EPG_TIME_OFFSETS_HOURS, observed)
+        assertEquals(-3, settings.epgTimeOffsetHours)
+    }
+
+    @Test
     fun `vod seek step cycles and exposes milliseconds`() {
         var settings = AppSettings(vodSeekStepSeconds = 10)
         val observed = buildList {

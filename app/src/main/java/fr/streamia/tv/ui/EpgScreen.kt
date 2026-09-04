@@ -41,6 +41,7 @@ import fr.streamia.tv.domain.EpgProgram
 import fr.streamia.tv.domain.MediaCategory
 import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.MediaType
+import fr.streamia.tv.domain.withTimeOffset
 import fr.streamia.tv.ui.theme.DeepSurface
 import fr.streamia.tv.ui.theme.FocusBlueBright
 import fr.streamia.tv.ui.theme.HeadingWeight
@@ -82,12 +83,16 @@ fun EpgScreen(
     lockedCategories: Set<String>,
     parentalControlEnabled: Boolean,
     parentalUnlocked: Boolean,
+    epgTimeOffsetHours: Int,
     loading: Boolean,
     message: String?,
     onOpenChannel: (MediaEntry) -> Unit,
     onReload: () -> Unit,
     onBack: () -> Unit,
 ) {
+    // Appliqué à l'affichage (pas au chargement) : un changement du réglage dans Paramètres se
+    // reflète donc immédiatement au retour sur cet écran, sans repasser par "Actualiser".
+    val guide = remember(guide, epgTimeOffsetHours) { guide?.withTimeOffset(epgTimeOffsetHours) }
     val zone = remember { ZoneId.systemDefault() }
     var categoryId by remember { mutableStateOf(Catalog.ALL_CATEGORY_ID) }
     var selected by remember { mutableStateOf<SelectedProgram?>(null) }

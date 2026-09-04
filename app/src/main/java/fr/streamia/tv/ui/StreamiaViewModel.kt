@@ -414,6 +414,10 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         updateAppSettings { it.copy(vodSortOrder = it.nextVodSortOrder()) }
     }
 
+    fun cycleEpgTimeOffset() {
+        updateAppSettings { it.copy(epgTimeOffsetHours = it.nextEpgTimeOffsetHours()) }
+    }
+
     private fun updateAppSettings(transform: (AppSettings) -> AppSettings) {
         val settings = repository.updateAppSettings(transform)
         _uiState.update { it.copy(appSettings = settings) }

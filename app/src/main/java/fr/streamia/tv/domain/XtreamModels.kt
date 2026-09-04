@@ -125,6 +125,29 @@ data class EpgGuide(
 
 private fun String.normalizedLookupKey(): String = trim().lowercase()
 
+/**
+ * Corrige un décalage horaire du flux XMLTV (fréquent : le fournisseur publie parfois dans un
+ * fuseau différent de celui attendu) en décalant les horaires de tous les programmes de [offsetHours]
+ * heures. Appliquée à l'affichage plutôt qu'au chargement pour rester réactive à un changement du
+ * réglage sans devoir recharger tout le guide.
+ */
+fun EpgGuide.withTimeOffset(offsetHours: Int): EpgGuide {
+    if (offsetHours == 0) return this
+    val shiftSeconds = offsetHours * 3_600L
+    return copy(
+        channels = channels.mapValues { (_, channel) ->
+            channel.copy(
+                programs = channel.programs.map { program ->
+                    program.copy(
+                        startEpochSeconds = program.startEpochSeconds?.plus(shiftSeconds),
+                        endEpochSeconds = program.endEpochSeconds?.plus(shiftSeconds),
+                    )
+                },
+            )
+        },
+    )
+}
+
 data class AccountInfo(
     val username: String,
     val status: String,

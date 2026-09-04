@@ -19,6 +19,7 @@ data class AppSettings(
     val liveStreamFormat: LiveStreamFormat = LiveStreamFormat.Auto,
     val liveChannelSortOrder: LiveChannelSortOrder = LiveChannelSortOrder.Provider,
     val vodSortOrder: VodSortOrder = VodSortOrder.Provider,
+    val epgTimeOffsetHours: Int = 0,
     /** Un code est enregistré (voir [AppSettingsStore.setParentalPin]) et le verrouillage est actif. */
     val parentalControlEnabled: Boolean = false,
 ) {
@@ -46,9 +47,13 @@ data class AppSettings(
     fun nextVodSortOrder(): VodSortOrder =
         VodSortOrder.entries[(vodSortOrder.ordinal + 1) % VodSortOrder.entries.size]
 
+    fun nextEpgTimeOffsetHours(): Int =
+        nextValue(EPG_TIME_OFFSETS_HOURS, epgTimeOffsetHours)
+
     companion object {
         val LIVE_PREVIEW_DELAYS_MS = listOf(0, 250, 500, 1_000, 2_000)
         val VOD_SEEK_STEPS_SECONDS = listOf(10, 30, 60)
+        val EPG_TIME_OFFSETS_HOURS = listOf(-3, -2, -1, 0, 1, 2, 3)
         const val DEFAULT_LIVE_PREVIEW_DELAY_MS = 250
         const val DEFAULT_VOD_SEEK_STEP_SECONDS = 10
 
@@ -102,6 +107,8 @@ class AppSettingsStore(context: Context) {
                 preferences.getString(KEY_VOD_SORT_ORDER, VodSortOrder.Provider.name) ?: VodSortOrder.Provider.name,
             )
         }.getOrDefault(VodSortOrder.Provider),
+        epgTimeOffsetHours = preferences.getInt(KEY_EPG_TIME_OFFSET_HOURS, 0)
+            .takeIf { it in AppSettings.EPG_TIME_OFFSETS_HOURS } ?: 0,
         parentalControlEnabled = preferences.getBoolean(KEY_PARENTAL_ENABLED, false) &&
             preferences.getString(KEY_PARENTAL_PIN_HASH, null) != null,
     )
@@ -116,6 +123,7 @@ class AppSettingsStore(context: Context) {
             .putString(KEY_LIVE_STREAM_FORMAT, settings.liveStreamFormat.name)
             .putString(KEY_LIVE_CHANNEL_SORT_ORDER, settings.liveChannelSortOrder.name)
             .putString(KEY_VOD_SORT_ORDER, settings.vodSortOrder.name)
+            .putInt(KEY_EPG_TIME_OFFSET_HOURS, settings.epgTimeOffsetHours)
             .putBoolean(KEY_PARENTAL_ENABLED, settings.parentalControlEnabled)
             .apply()
     }
@@ -168,6 +176,7 @@ class AppSettingsStore(context: Context) {
         const val KEY_LIVE_STREAM_FORMAT = "live_stream_format"
         const val KEY_LIVE_CHANNEL_SORT_ORDER = "live_channel_sort_order"
         const val KEY_VOD_SORT_ORDER = "vod_sort_order"
+        const val KEY_EPG_TIME_OFFSET_HOURS = "epg_time_offset_hours"
         const val KEY_PARENTAL_ENABLED = "parental_control_enabled"
         const val KEY_PARENTAL_PIN_SALT = "parental_pin_salt"
         const val KEY_PARENTAL_PIN_HASH = "parental_pin_hash"
