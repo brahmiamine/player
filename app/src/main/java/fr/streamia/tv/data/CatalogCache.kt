@@ -3,6 +3,7 @@ package fr.streamia.tv.data
 import android.content.Context
 import android.util.JsonReader
 import android.util.JsonToken
+import fr.streamia.tv.domain.AccountInfo
 import fr.streamia.tv.domain.Catalog
 import fr.streamia.tv.domain.MediaCategory
 import fr.streamia.tv.domain.MediaEntry
@@ -31,6 +32,33 @@ class CatalogCache(context: Context) {
         database.replace(profileId, catalog)
         deleteJsonCopies(profileId)
         legacyFiles.forEach(File::delete)
+    }
+
+    /**
+     * Démarre un remplacement transactionnel du catalogue d'un profil sans exiger que l'appelant
+     * ait déjà tout en mémoire : [XtreamClient.loadCatalogOnIo] écrit les catégories puis les
+     * entrées par lots au fil du parsing réseau via la session renvoyée. Rien n'est visible pour
+     * les lecteurs tant que [commitReplaceOnIo] n'a pas été appelé.
+     *
+     * Volontairement non-`suspend` : [XtreamRepository.fetchAndStoreXtreamCatalog] appelle
+     * begin/commit/abort comme de simples fonctions synchrones à l'intérieur d'un seul
+     * `withContext(Dispatchers.IO)`, pour que toute la séquence reste garantie sur un seul thread
+     * (exigence d'une transaction SQLite Android) sans dépendre d'un comportement d'optimisation de
+     * `withContext` ni risquer qu'une annulation de coroutine interrompe `commit`/`abort` en cours
+     * de route.
+     */
+    internal fun beginReplaceOnIo(profileId: String): CatalogDatabase.ReplaceSession = database.beginReplace(profileId)
+
+    /** Valide la session : le nouveau catalogue devient visible et l'ancien cache JSON éventuel est purgé. */
+    internal fun commitReplaceOnIo(session: CatalogDatabase.ReplaceSession, account: AccountInfo?) {
+        session.commit(account)
+        deleteJsonCopies(session.profileId)
+        legacyFiles.forEach(File::delete)
+    }
+
+    /** Annule la session : tout ce qui a été écrit est retiré, l'ancien catalogue valide reste en place. */
+    internal fun abortReplaceOnIo(session: CatalogDatabase.ReplaceSession) {
+        session.abort()
     }
 
     /**
