@@ -182,6 +182,27 @@ data class Catalog(
     fun isCategoryLoaded(type: MediaType, categoryId: String): Boolean =
         !lazyMetadata || categoryKey(type, categoryId) in loadedCategoryKeys
 
+    /**
+     * Merges one freshly loaded database page into this lightweight catalogue without touching the
+     * rows already materialized elsewhere (favourites, recents, other categories' pages). Existing
+     * entries sharing a key with [newEntries] are replaced so a re-fetched row (e.g. after refresh)
+     * reflects the latest provider data; [totalCounts]/[categoryCounts] stay authoritative and are
+     * carried over unchanged since they describe the full provider catalogue, not what's in memory.
+     */
+    fun withMaterializedEntries(
+        newEntries: List<MediaEntry>,
+        loadedType: MediaType,
+        loadedCategoryId: String,
+    ): Catalog {
+        val merged = LinkedHashMap<String, MediaEntry>(entries.size + newEntries.size)
+        entries.forEach { merged[it.key] = it }
+        newEntries.forEach { merged[it.key] = it }
+        return copy(
+            entries = merged.values.toList(),
+            loadedCategoryKeys = loadedCategoryKeys + categoryKey(loadedType, loadedCategoryId),
+        )
+    }
+
     fun search(query: String, type: MediaType? = null, limit: Int = 500): List<MediaEntry> {
         val needle = query.trim().lowercase()
         if (needle.isBlank()) return emptyList()

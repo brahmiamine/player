@@ -32,11 +32,12 @@
 - Consumes: `Catalog`, `MediaCategory`, `MediaEntry`, `MediaType`.
 - Produces: SQLite-backed save/load, total counts, per-category counts and paged entry reads.
 
-- [ ] Add a failing unit test proving `Catalog.count()` and category counts can represent rows not currently materialized in `entries`.
-- [ ] Implement catalogue metadata in `Catalog` without changing existing full-catalog behavior.
-- [ ] Create SQLite schema with profile-scoped category/entry tables and indexes on `(profile_id,type,category_id)`, `(profile_id,type,number)` and media key fields.
-- [ ] Make catalogue writes transactional and preserve the old cache until the SQLite transaction succeeds.
-- [ ] Verify existing catalogue/domain tests remain green.
+- [x] Add a failing unit test proving `Catalog.count()` and category counts can represent rows not currently materialized in `entries`.
+- [x] Implement catalogue metadata in `Catalog` without changing existing full-catalog behavior.
+- [x] Create SQLite schema with profile-scoped category/entry tables and indexes on `(profile_id,type,category_id)`, `(profile_id,type,number)` and media key fields.
+- [x] Make catalogue writes transactional and preserve the old cache until the SQLite transaction succeeds.
+- [x] Verify existing catalogue/domain tests remain green.
+- [x] Add `Catalog.withMaterializedEntries` to merge one loaded page into the lightweight catalogue without dropping metadata (`CatalogMetadataTest.pagedRowsMergeByKeyAndPreserveMetadata`).
 
 ### Task 2: Fast startup and lazy category hydration
 
