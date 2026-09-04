@@ -38,6 +38,7 @@ import androidx.tv.material3.Text
 import fr.streamia.tv.domain.Catalog
 import fr.streamia.tv.domain.EpgGuide
 import fr.streamia.tv.domain.EpgProgram
+import fr.streamia.tv.domain.MediaCategory
 import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.ui.theme.DeepSurface
