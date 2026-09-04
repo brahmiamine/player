@@ -64,8 +64,11 @@ class UserLibraryStore(context: Context) {
         }
     }
 
-    fun clearHistory(profileId: String) {
-        mutate<Unit>(profileId) { it.put("history", JSONArray()) }
+    fun clearHistory(profileId: String, type: MediaType? = null) {
+        mutate<Unit>(profileId) { root ->
+            val kept = historyAfterClearingType(root.optJSONArray("history").historyList(), type)
+            root.put("history", JSONArray().apply { kept.forEach { put(it.toJson()) } })
+        }
     }
 
     fun resumePosition(profileId: String, entryKey: String): Long {
@@ -265,6 +268,12 @@ fun applyUserLibraryToCatalog(catalog: Catalog, snapshot: UserLibrarySnapshot): 
         loadedCategoryKeys = catalog.loadedCategoryKeys,
     )
 }
+
+internal fun historyAfterClearingType(
+    history: List<PlaybackHistoryItem>,
+    type: MediaType?,
+): List<PlaybackHistoryItem> =
+    if (type == null) emptyList() else history.filterNot { it.entry.type == type }
 
 data class PlaybackHistoryItem(
     val entry: MediaEntry,
