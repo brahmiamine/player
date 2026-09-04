@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -105,18 +107,22 @@ fun ToolsScreen(
         // weight(1f) plutôt que fillMaxSize() : cette grille de tuiles n'est plus le dernier élément
         // de la colonne — le bandeau de résultat de mise à jour, sous condition, doit garder sa place
         // sous elle plutôt que de se retrouver sans hauteur disponible (fillMaxSize aurait tout pris).
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        // Lignes à hauteur fixe (150dp, comme ParentalControlScreen) + défilement plutôt que
+        // weight(1f) par ligne : sur un écran TV plus bas, répartir la hauteur disponible en 5
+        // lignes pouvait laisser moins de place par ligne que ce dont une tuile a besoin, et le
+        // surplus se retrouvait découpé silencieusement par FocusableSurface (voir SettingsScreen).
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(Modifier.fillMaxWidth().height(150.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 SettingsTile(StreamiaIconGlyph.Search, "Recherche", "Chaînes, films et séries", onSearch, Modifier.focusRequester(firstFocus).weight(1f))
                 SettingsTile(StreamiaIconGlyph.Guide, "Guide TV", "EPG et grille des chaînes", onEpg, Modifier.weight(1f))
                 SettingsTile(StreamiaIconGlyph.Reorder, "Organiser", "Catégories et contenus", onOrganizer, Modifier.weight(1f))
             }
-            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(Modifier.fillMaxWidth().height(150.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 SettingsTile(StreamiaIconGlyph.Refresh, if (busy) "Actualisation…" else "Actualiser", "Recharge la liste et le catalogue", onRefresh, Modifier.weight(1f), enabled = !busy)
                 SettingsTile(StreamiaIconGlyph.Swap, "Changer de liste", "Gestionnaire de playlists", onChangePlaylist, Modifier.weight(1f))
                 SettingsTile(StreamiaIconGlyph.Delete, "Historique Direct", "$liveHistoryCount élément(s)", onClearLiveHistory, Modifier.weight(1f), enabled = liveHistoryCount > 0)
             }
-            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(Modifier.fillMaxWidth().height(150.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 SettingsTile(StreamiaIconGlyph.Delete, "Historique Films", "$movieHistoryCount élément(s)", onClearMovieHistory, Modifier.weight(1f), enabled = movieHistoryCount > 0)
                 SettingsTile(StreamiaIconGlyph.Delete, "Historique Séries", "$seriesHistoryCount élément(s)", onClearSeriesHistory, Modifier.weight(1f), enabled = seriesHistoryCount > 0)
                 SettingsTile(
@@ -128,7 +134,7 @@ fun ToolsScreen(
                     enabled = liveHistoryCount + movieHistoryCount + seriesHistoryCount > 0,
                 )
             }
-            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(Modifier.fillMaxWidth().height(150.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 SettingsTile(
                     StreamiaIconGlyph.Refresh,
                     if (updateChecking) "Vérification…" else "Vérifier les mises à jour",
@@ -139,7 +145,7 @@ fun ToolsScreen(
                 )
                 Spacer(Modifier.weight(2f))
             }
-            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(Modifier.fillMaxWidth().height(150.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 SettingsTile(
                     StreamiaIconGlyph.Swap,
                     "Sauvegarder les réglages",
