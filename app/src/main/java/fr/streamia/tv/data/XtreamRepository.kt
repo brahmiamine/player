@@ -52,6 +52,7 @@ class XtreamRepository(context: Context) {
 
     suspend fun cacheSizeBytes(): Long = withContext(Dispatchers.IO) { cache.databaseFileSizeBytes() }
     suspend fun epgCacheSizeBytes(): Long = withContext(Dispatchers.IO) { epgCache.databaseFileSizeBytes() }
+    suspend fun clearEpgCache(profileId: String) = epgCache.clear(profileId)
 
     suspend fun exportBackup(profileId: String?): String = withContext(Dispatchers.IO) { backupManager.export(profileId) }
 
