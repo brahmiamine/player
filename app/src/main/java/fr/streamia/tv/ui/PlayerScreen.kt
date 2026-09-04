@@ -610,6 +610,7 @@ fun PlayerScreen(
                 update = {
                     it.player = player
                     it.resizeMode = aspect.resizeMode
+                    it.subtitleView?.applySubtitleStyle(appSettings.subtitleSizeScale, appSettings.subtitleBackgroundEnabled)
                 },
                 modifier = Modifier.fillMaxSize(),
             )
@@ -1160,6 +1161,25 @@ private fun diagnosticsText(value: PlaybackDiagnostics): String {
         "${value.rebufferCount} rebuffer · ${value.totalRebufferTimeMs} ms"
     }
     return "$startup · $rebuffer"
+}
+
+/**
+ * Style + taille des sous-titres pilotés depuis Paramètres. Noms de couleur/type pleinement
+ * qualifiés : `android.graphics.Color` entrerait en collision avec `androidx.compose.ui.graphics.Color`
+ * déjà importé dans ce fichier pour le reste de l'UI Compose.
+ */
+internal fun androidx.media3.ui.SubtitleView.applySubtitleStyle(sizeScale: Float, backgroundEnabled: Boolean) {
+    setFractionalTextSize(androidx.media3.ui.SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * sizeScale)
+    setStyle(
+        androidx.media3.ui.CaptionStyleCompat(
+            android.graphics.Color.WHITE,
+            if (backgroundEnabled) android.graphics.Color.argb(160, 0, 0, 0) else android.graphics.Color.TRANSPARENT,
+            android.graphics.Color.TRANSPARENT,
+            androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_OUTLINE,
+            android.graphics.Color.BLACK,
+            null,
+        ),
+    )
 }
 
 private fun subtitleMimeTypeFor(name: String): String? =

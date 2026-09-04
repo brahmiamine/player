@@ -113,6 +113,20 @@ class AppSettingsTest {
     }
 
     @Test
+    fun `subtitle size scale cycles and wraps`() {
+        var settings = AppSettings(subtitleSizeScale = 0.75f)
+        val observed = buildList {
+            repeat(AppSettings.SUBTITLE_SIZE_SCALES.size) {
+                add(settings.subtitleSizeScale)
+                settings = settings.copy(subtitleSizeScale = settings.nextSubtitleSizeScale())
+            }
+        }
+
+        assertEquals(AppSettings.SUBTITLE_SIZE_SCALES, observed)
+        assertEquals(0.75f, settings.subtitleSizeScale)
+    }
+
+    @Test
     fun `vod seek step cycles and exposes milliseconds`() {
         var settings = AppSettings(vodSeekStepSeconds = 10)
         val observed = buildList {

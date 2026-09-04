@@ -52,6 +52,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                 update = { view ->
                     view.player = livePlaybackSession.player
                     view.resizeMode = placement.resizeMode
+                    view.subtitleView?.applySubtitleStyle(state.appSettings.subtitleSizeScale, state.appSettings.subtitleBackgroundEnabled)
                 },
                 modifier = placement.modifier,
             )
@@ -148,6 +149,8 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onCycleVodSortOrder = viewModel::cycleVodSortOrder,
                     onCycleEpgTimeOffset = viewModel::cycleEpgTimeOffset,
                     onToggleAutoPlayNextEpisode = viewModel::toggleAutoPlayNextEpisode,
+                    onCycleSubtitleSizeScale = viewModel::cycleSubtitleSizeScale,
+                    onToggleSubtitleBackground = viewModel::toggleSubtitleBackground,
                     onTools = viewModel::showTools,
                     onParentalControl = viewModel::showParentalControl,
                     onBack = viewModel::showHome,

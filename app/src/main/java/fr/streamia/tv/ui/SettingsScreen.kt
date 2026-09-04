@@ -43,6 +43,8 @@ fun SettingsScreen(
     onCycleVodSortOrder: () -> Unit,
     onCycleEpgTimeOffset: () -> Unit,
     onToggleAutoPlayNextEpisode: () -> Unit,
+    onCycleSubtitleSizeScale: () -> Unit,
+    onToggleSubtitleBackground: () -> Unit,
     onTools: () -> Unit,
     onParentalControl: () -> Unit,
     onBack: () -> Unit,
@@ -172,6 +174,23 @@ fun SettingsScreen(
                     onClick = onToggleAutoPlayNextEpisode,
                     modifier = Modifier.weight(1f),
                     selected = settings.autoPlayNextEpisode,
+                )
+            }
+            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                SettingsTile(
+                    glyph = StreamiaIconGlyph.Reorder,
+                    title = "Taille des sous-titres",
+                    subtitle = "×${"%.2f".format(settings.subtitleSizeScale).trimEnd('0').trimEnd('.')}",
+                    onClick = onCycleSubtitleSizeScale,
+                    modifier = Modifier.weight(1f),
+                )
+                SettingsTile(
+                    glyph = StreamiaIconGlyph.Settings,
+                    title = "Fond des sous-titres",
+                    subtitle = if (settings.subtitleBackgroundEnabled) "Activé" else "Désactivé",
+                    onClick = onToggleSubtitleBackground,
+                    modifier = Modifier.weight(1f),
+                    selected = settings.subtitleBackgroundEnabled,
                 )
             }
             Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(16.dp)) {

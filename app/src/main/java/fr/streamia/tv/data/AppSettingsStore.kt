@@ -21,6 +21,8 @@ data class AppSettings(
     val vodSortOrder: VodSortOrder = VodSortOrder.Provider,
     val epgTimeOffsetHours: Int = 0,
     val autoPlayNextEpisode: Boolean = true,
+    val subtitleSizeScale: Float = 1.0f,
+    val subtitleBackgroundEnabled: Boolean = true,
     /** Un code est enregistré (voir [AppSettingsStore.setParentalPin]) et le verrouillage est actif. */
     val parentalControlEnabled: Boolean = false,
 ) {
@@ -51,10 +53,16 @@ data class AppSettings(
     fun nextEpgTimeOffsetHours(): Int =
         nextValue(EPG_TIME_OFFSETS_HOURS, epgTimeOffsetHours)
 
+    fun nextSubtitleSizeScale(): Float {
+        val index = SUBTITLE_SIZE_SCALES.indexOf(subtitleSizeScale)
+        return SUBTITLE_SIZE_SCALES[(if (index >= 0) index + 1 else 0) % SUBTITLE_SIZE_SCALES.size]
+    }
+
     companion object {
         val LIVE_PREVIEW_DELAYS_MS = listOf(0, 250, 500, 1_000, 2_000)
         val VOD_SEEK_STEPS_SECONDS = listOf(10, 30, 60)
         val EPG_TIME_OFFSETS_HOURS = listOf(-3, -2, -1, 0, 1, 2, 3)
+        val SUBTITLE_SIZE_SCALES = listOf(0.75f, 1.0f, 1.25f, 1.5f)
         const val DEFAULT_LIVE_PREVIEW_DELAY_MS = 250
         const val DEFAULT_VOD_SEEK_STEP_SECONDS = 10
 
@@ -111,6 +119,9 @@ class AppSettingsStore(context: Context) {
         epgTimeOffsetHours = preferences.getInt(KEY_EPG_TIME_OFFSET_HOURS, 0)
             .takeIf { it in AppSettings.EPG_TIME_OFFSETS_HOURS } ?: 0,
         autoPlayNextEpisode = preferences.getBoolean(KEY_AUTO_PLAY_NEXT_EPISODE, true),
+        subtitleSizeScale = preferences.getFloat(KEY_SUBTITLE_SIZE_SCALE, 1.0f)
+            .takeIf { it in AppSettings.SUBTITLE_SIZE_SCALES } ?: 1.0f,
+        subtitleBackgroundEnabled = preferences.getBoolean(KEY_SUBTITLE_BACKGROUND_ENABLED, true),
         parentalControlEnabled = preferences.getBoolean(KEY_PARENTAL_ENABLED, false) &&
             preferences.getString(KEY_PARENTAL_PIN_HASH, null) != null,
     )
@@ -127,6 +138,8 @@ class AppSettingsStore(context: Context) {
             .putString(KEY_VOD_SORT_ORDER, settings.vodSortOrder.name)
             .putInt(KEY_EPG_TIME_OFFSET_HOURS, settings.epgTimeOffsetHours)
             .putBoolean(KEY_AUTO_PLAY_NEXT_EPISODE, settings.autoPlayNextEpisode)
+            .putFloat(KEY_SUBTITLE_SIZE_SCALE, settings.subtitleSizeScale)
+            .putBoolean(KEY_SUBTITLE_BACKGROUND_ENABLED, settings.subtitleBackgroundEnabled)
             .putBoolean(KEY_PARENTAL_ENABLED, settings.parentalControlEnabled)
             .apply()
     }
@@ -181,6 +194,8 @@ class AppSettingsStore(context: Context) {
         const val KEY_VOD_SORT_ORDER = "vod_sort_order"
         const val KEY_EPG_TIME_OFFSET_HOURS = "epg_time_offset_hours"
         const val KEY_AUTO_PLAY_NEXT_EPISODE = "auto_play_next_episode"
+        const val KEY_SUBTITLE_SIZE_SCALE = "subtitle_size_scale"
+        const val KEY_SUBTITLE_BACKGROUND_ENABLED = "subtitle_background_enabled"
         const val KEY_PARENTAL_ENABLED = "parental_control_enabled"
         const val KEY_PARENTAL_PIN_SALT = "parental_pin_salt"
         const val KEY_PARENTAL_PIN_HASH = "parental_pin_hash"

@@ -422,6 +422,14 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         updateAppSettings { it.copy(autoPlayNextEpisode = !it.autoPlayNextEpisode) }
     }
 
+    fun cycleSubtitleSizeScale() {
+        updateAppSettings { it.copy(subtitleSizeScale = it.nextSubtitleSizeScale()) }
+    }
+
+    fun toggleSubtitleBackground() {
+        updateAppSettings { it.copy(subtitleBackgroundEnabled = !it.subtitleBackgroundEnabled) }
+    }
+
     /** Appelé depuis le lecteur (fin de lecture, ou bouton « Lire maintenant » du bandeau). */
     fun playNextEpisode() {
         val state = _uiState.value
