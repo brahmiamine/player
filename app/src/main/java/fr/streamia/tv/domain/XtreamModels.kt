@@ -79,6 +79,18 @@ data class SeriesDetails(
 ) {
     val seasons: List<Int> = episodes.map(SeriesEpisode::season).distinct().sorted()
     fun episodesIn(season: Int): List<SeriesEpisode> = episodes.filter { it.season == season }
+
+    /**
+     * Épisode suivant [currentEpisodeId] dans [episodes], qui reste dans l'ordre saison croissante
+     * puis position fournisseur au sein de la saison (voir [fr.streamia.tv.data.XtreamClient.loadSeriesDetails]) :
+     * franchir la fin d'une saison passe donc naturellement au premier épisode de la suivante.
+     * `null` si l'épisode courant est introuvable ou déjà le dernier.
+     */
+    fun nextEpisode(currentEpisodeId: Int): SeriesEpisode? {
+        val index = episodes.indexOfFirst { it.id == currentEpisodeId }
+        if (index < 0 || index + 1 >= episodes.size) return null
+        return episodes[index + 1]
+    }
 }
 
 data class EpgProgram(

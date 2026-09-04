@@ -20,6 +20,7 @@ data class AppSettings(
     val liveChannelSortOrder: LiveChannelSortOrder = LiveChannelSortOrder.Provider,
     val vodSortOrder: VodSortOrder = VodSortOrder.Provider,
     val epgTimeOffsetHours: Int = 0,
+    val autoPlayNextEpisode: Boolean = true,
     /** Un code est enregistré (voir [AppSettingsStore.setParentalPin]) et le verrouillage est actif. */
     val parentalControlEnabled: Boolean = false,
 ) {
@@ -109,6 +110,7 @@ class AppSettingsStore(context: Context) {
         }.getOrDefault(VodSortOrder.Provider),
         epgTimeOffsetHours = preferences.getInt(KEY_EPG_TIME_OFFSET_HOURS, 0)
             .takeIf { it in AppSettings.EPG_TIME_OFFSETS_HOURS } ?: 0,
+        autoPlayNextEpisode = preferences.getBoolean(KEY_AUTO_PLAY_NEXT_EPISODE, true),
         parentalControlEnabled = preferences.getBoolean(KEY_PARENTAL_ENABLED, false) &&
             preferences.getString(KEY_PARENTAL_PIN_HASH, null) != null,
     )
@@ -124,6 +126,7 @@ class AppSettingsStore(context: Context) {
             .putString(KEY_LIVE_CHANNEL_SORT_ORDER, settings.liveChannelSortOrder.name)
             .putString(KEY_VOD_SORT_ORDER, settings.vodSortOrder.name)
             .putInt(KEY_EPG_TIME_OFFSET_HOURS, settings.epgTimeOffsetHours)
+            .putBoolean(KEY_AUTO_PLAY_NEXT_EPISODE, settings.autoPlayNextEpisode)
             .putBoolean(KEY_PARENTAL_ENABLED, settings.parentalControlEnabled)
             .apply()
     }
@@ -177,6 +180,7 @@ class AppSettingsStore(context: Context) {
         const val KEY_LIVE_CHANNEL_SORT_ORDER = "live_channel_sort_order"
         const val KEY_VOD_SORT_ORDER = "vod_sort_order"
         const val KEY_EPG_TIME_OFFSET_HOURS = "epg_time_offset_hours"
+        const val KEY_AUTO_PLAY_NEXT_EPISODE = "auto_play_next_episode"
         const val KEY_PARENTAL_ENABLED = "parental_control_enabled"
         const val KEY_PARENTAL_PIN_SALT = "parental_pin_salt"
         const val KEY_PARENTAL_PIN_HASH = "parental_pin_hash"

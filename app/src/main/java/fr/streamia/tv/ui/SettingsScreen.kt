@@ -42,6 +42,7 @@ fun SettingsScreen(
     onCycleLiveChannelSortOrder: () -> Unit,
     onCycleVodSortOrder: () -> Unit,
     onCycleEpgTimeOffset: () -> Unit,
+    onToggleAutoPlayNextEpisode: () -> Unit,
     onTools: () -> Unit,
     onParentalControl: () -> Unit,
     onBack: () -> Unit,
@@ -164,7 +165,14 @@ fun SettingsScreen(
                     onClick = onCycleEpgTimeOffset,
                     modifier = Modifier.weight(1f),
                 )
-                Spacer(Modifier.weight(1f))
+                SettingsTile(
+                    glyph = StreamiaIconGlyph.Series,
+                    title = "Épisode suivant automatique",
+                    subtitle = if (settings.autoPlayNextEpisode) "Activé" else "Désactivé",
+                    onClick = onToggleAutoPlayNextEpisode,
+                    modifier = Modifier.weight(1f),
+                    selected = settings.autoPlayNextEpisode,
+                )
             }
             Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 SettingsTile(

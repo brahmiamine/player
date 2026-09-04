@@ -147,6 +147,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onCycleLiveChannelSortOrder = viewModel::cycleLiveChannelSortOrder,
                     onCycleVodSortOrder = viewModel::cycleVodSortOrder,
                     onCycleEpgTimeOffset = viewModel::cycleEpgTimeOffset,
+                    onToggleAutoPlayNextEpisode = viewModel::toggleAutoPlayNextEpisode,
                     onTools = viewModel::showTools,
                     onParentalControl = viewModel::showParentalControl,
                     onBack = viewModel::showHome,
@@ -269,6 +270,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                         lockedCategories = state.library.lockedCategories,
                         parentalControlEnabled = state.appSettings.parentalControlEnabled,
                         parentalUnlocked = state.parentalUnlocked,
+                        nextEpisode = state.seriesDetails?.nextEpisode(playerScreen.entry.id),
                         livePlaybackSession = livePlaybackSession,
                         liveVideoSurface = liveVideoSurface,
                         onBack = {
@@ -279,6 +281,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                         onEntrySelected = viewModel::openEntry,
                         onProgress = viewModel::recordPlayback,
                         onCycleVideoAspect = viewModel::cycleVideoAspect,
+                        onPlayNextEpisode = viewModel::playNextEpisode,
                     )
                 }
 

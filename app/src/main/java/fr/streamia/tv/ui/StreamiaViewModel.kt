@@ -418,6 +418,19 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         updateAppSettings { it.copy(epgTimeOffsetHours = it.nextEpgTimeOffsetHours()) }
     }
 
+    fun toggleAutoPlayNextEpisode() {
+        updateAppSettings { it.copy(autoPlayNextEpisode = !it.autoPlayNextEpisode) }
+    }
+
+    /** Appelé depuis le lecteur (fin de lecture, ou bouton « Lire maintenant » du bandeau). */
+    fun playNextEpisode() {
+        val state = _uiState.value
+        val series = state.seriesDetails ?: return
+        val current = (state.screen as? StreamiaScreen.Player)?.entry ?: return
+        val next = series.nextEpisode(current.id) ?: return
+        playEpisode(series.series, next)
+    }
+
     private fun updateAppSettings(transform: (AppSettings) -> AppSettings) {
         val settings = repository.updateAppSettings(transform)
         _uiState.update { it.copy(appSettings = settings) }

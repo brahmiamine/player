@@ -69,6 +69,7 @@ import fr.streamia.tv.domain.EpgProgram
 import fr.streamia.tv.domain.MediaCategory
 import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.MediaType
+import fr.streamia.tv.domain.SeriesEpisode
 import fr.streamia.tv.domain.ServerCredentials
 import fr.streamia.tv.domain.XtreamUrlBuilder
 import fr.streamia.tv.player.DolbyCapabilityDetector
@@ -110,6 +111,7 @@ internal data class TrackChoice(val label: String, val language: String?)
 
 /** Tag de langue "indéterminée" (BCP-47) posé sur tout sous-titre externe chargé manuellement. */
 private const val EXTERNAL_SUBTITLE_LANGUAGE_TAG = "und"
+private const val NEXT_EPISODE_COUNTDOWN_SECONDS = 8
 
 @androidx.annotation.OptIn(markerClass = [UnstableApi::class])
 @Composable
@@ -124,6 +126,7 @@ fun PlayerScreen(
     lockedCategories: Set<String>,
     parentalControlEnabled: Boolean,
     parentalUnlocked: Boolean,
+    nextEpisode: SeriesEpisode?,
     livePlaybackSession: LivePlaybackSession,
     liveVideoSurface: @Composable (LiveVideoSurfacePlacement) -> Unit,
     onBack: () -> Unit,
@@ -131,6 +134,7 @@ fun PlayerScreen(
     onEntrySelected: (MediaEntry) -> Unit,
     onProgress: (MediaEntry, Long, Long) -> Unit,
     onCycleVideoAspect: () -> Unit,
+    onPlayNextEpisode: () -> Unit,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val sharedLivePlayer = entry.type == MediaType.Live
@@ -166,6 +170,18 @@ fun PlayerScreen(
     var candidateIndex by remember { mutableStateOf(0) }
     var activeStreamUrl by remember { mutableStateOf("") }
     var numberBuffer by remember { mutableStateOf("") }
+    var playbackEnded by remember(entry.key) { mutableStateOf(false) }
+    val showNextEpisodePrompt = playbackEnded && entry.type == MediaType.Series &&
+        nextEpisode != null && appSettings.autoPlayNextEpisode
+    var nextEpisodeCountdown by remember(playbackEnded) { mutableStateOf(NEXT_EPISODE_COUNTDOWN_SECONDS) }
+    LaunchedEffect(showNextEpisodePrompt) {
+        if (!showNextEpisodePrompt) return@LaunchedEffect
+        while (nextEpisodeCountdown > 0) {
+            delay(1_000)
+            nextEpisodeCountdown -= 1
+        }
+        onPlayNextEpisode()
+    }
     val aspect = when (appSettings.videoAspect) {
         VideoAspectSetting.Fit -> VideoAspect.Fit
         VideoAspectSetting.Fill -> VideoAspect.Fill
@@ -277,6 +293,7 @@ fun PlayerScreen(
                         diagnosticsTracker.onBufferingEnded(now)
                     }
                 }
+                if (playbackState == Player.STATE_ENDED) playbackEnded = true
                 diagnostics = diagnosticsTracker.snapshot(now)
             }
 
@@ -538,7 +555,7 @@ fun PlayerScreen(
             .focusRequester(rootFocus)
             .focusable()
             .onPreviewKeyEvent { event ->
-                if (event.type != KeyEventType.KeyDown || guideOpen || settingsOpen || livePickerOpen || returningToBrowser) return@onPreviewKeyEvent false
+                if (event.type != KeyEventType.KeyDown || guideOpen || settingsOpen || livePickerOpen || returningToBrowser || showNextEpisodePrompt) return@onPreviewKeyEvent false
                 val keyCode = event.nativeKeyEvent.keyCode
                 val digit = keyCode.toTvDigit()
                 if (digit != null && entry.type == MediaType.Live) {
@@ -751,6 +768,60 @@ fun PlayerScreen(
                     }
                 },
             )
+        }
+
+        if (showNextEpisodePrompt) {
+            NextEpisodePrompt(
+                episode = nextEpisode,
+                secondsLeft = nextEpisodeCountdown,
+                onPlayNow = onPlayNextEpisode,
+                onCancel = { playbackEnded = false },
+            )
+        }
+    }
+}
+
+@Composable
+private fun NextEpisodePrompt(
+    episode: SeriesEpisode?,
+    secondsLeft: Int,
+    onPlayNow: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    if (episode == null) return
+    val playNowFocus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { runCatching { playNowFocus.requestFocus() } }
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.72f)), contentAlignment = Alignment.BottomEnd) {
+        Column(
+            Modifier
+                .padding(34.dp)
+                .width(420.dp)
+                .background(Night.copy(alpha = 0.97f), androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                .padding(22.dp),
+        ) {
+            Text("Épisode suivant dans ${secondsLeft}s", color = MutedInk, fontSize = 13.sp)
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "S${episode.season.toString().padStart(2, '0')}E${episode.number.toString().padStart(2, '0')} · ${episode.title}",
+                color = Ink,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(16.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                FocusableSurface(onClick = onPlayNow, modifier = Modifier.weight(1f).height(48.dp).focusRequester(playNowFocus)) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("Lire maintenant", color = Ink, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+                FocusableSurface(onClick = onCancel, modifier = Modifier.weight(1f).height(48.dp)) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("Annuler", color = Ink, fontSize = 14.sp)
+                    }
+                }
+            }
         }
     }
 }
