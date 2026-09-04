@@ -60,6 +60,7 @@ import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
+import fr.streamia.tv.data.AppSettings
 import fr.streamia.tv.domain.Catalog
 import fr.streamia.tv.domain.EpgProgram
 import fr.streamia.tv.domain.MediaEntry
@@ -103,8 +104,6 @@ internal enum class VideoAspect(val label: String, val resizeMode: Int) {
 
 internal data class TrackChoice(val label: String, val language: String?)
 
-private const val VOD_SEEK_STEP_MS = 10_000L
-
 /** Tag de langue "indéterminée" (BCP-47) posé sur tout sous-titre externe chargé manuellement. */
 private const val EXTERNAL_SUBTITLE_LANGUAGE_TAG = "und"
 
@@ -116,6 +115,7 @@ fun PlayerScreen(
     entry: MediaEntry,
     epg: List<EpgProgram>,
     resumePositionMs: Long,
+    appSettings: AppSettings,
     livePlaybackSession: LivePlaybackSession,
     liveVideoSurface: @Composable (LiveVideoSurfacePlacement) -> Unit,
     onBack: () -> Unit,
@@ -523,12 +523,12 @@ fun PlayerScreen(
                     PlaybackRemoteAction.SeekBackward,
                     PlaybackRemoteAction.SeekForward,
                     -> {
-                        val delta = if (remoteAction == PlaybackRemoteAction.SeekBackward) -VOD_SEEK_STEP_MS else VOD_SEEK_STEP_MS
+                        val delta = if (remoteAction == PlaybackRemoteAction.SeekBackward) -appSettings.vodSeekStepMs else appSettings.vodSeekStepMs
                         val duration = player.duration.takeIf { it > 0L && it != C.TIME_UNSET } ?: 0L
                         val target = resolveSeekPosition(player.currentPosition, duration, delta)
                         player.seekTo(target)
                         positionMs = target
-                        seekFeedback = if (delta < 0L) "−10 s" else "+10 s"
+                        seekFeedback = if (delta < 0L) "−${appSettings.vodSeekStepSeconds} s" else "+${appSettings.vodSeekStepSeconds} s"
                         hudVisible = true
                         true
                     }
