@@ -21,6 +21,10 @@ class UserLibraryStore(context: Context) {
         return UserLibrarySnapshot(
             favoriteEntries = root.optJSONArray("favorite_entries").stringSet(),
             favoriteCategories = root.optJSONArray("favorite_categories").stringSet(),
+            hiddenEntries = root.optJSONArray("hidden_entries").stringSet(),
+            hiddenCategories = root.optJSONArray("hidden_categories").stringSet(),
+            lockedCategories = root.optJSONArray("locked_categories").stringSet(),
+            watchedEntries = root.optJSONArray("watched_entries").stringSet(),
             categoryOrder = root.optJSONObject("category_order").stringListMap(),
             movedEntries = root.optJSONObject("moved_entries").stringMap(),
             history = root.optJSONArray("history").historyList(),
@@ -39,6 +43,34 @@ class UserLibraryStore(context: Context) {
         val added = if (category.key in set) { set.remove(category.key); false } else { set.add(category.key); true }
         root.put("favorite_categories", JSONArray(set.toList()))
         added
+    }
+
+    fun toggleEntryHidden(profileId: String, entry: MediaEntry): Boolean = mutate(profileId) { root ->
+        val set = root.optJSONArray("hidden_entries").stringSet().toMutableSet()
+        val hidden = if (entry.key in set) { set.remove(entry.key); false } else { set.add(entry.key); true }
+        root.put("hidden_entries", JSONArray(set.toList()))
+        hidden
+    }
+
+    fun toggleCategoryHidden(profileId: String, category: MediaCategory): Boolean = mutate(profileId) { root ->
+        val set = root.optJSONArray("hidden_categories").stringSet().toMutableSet()
+        val hidden = if (category.key in set) { set.remove(category.key); false } else { set.add(category.key); true }
+        root.put("hidden_categories", JSONArray(set.toList()))
+        hidden
+    }
+
+    fun toggleCategoryLocked(profileId: String, category: MediaCategory): Boolean = mutate(profileId) { root ->
+        val set = root.optJSONArray("locked_categories").stringSet().toMutableSet()
+        val locked = if (category.key in set) { set.remove(category.key); false } else { set.add(category.key); true }
+        root.put("locked_categories", JSONArray(set.toList()))
+        locked
+    }
+
+    fun toggleEntryWatched(profileId: String, entry: MediaEntry): Boolean = mutate(profileId) { root ->
+        val set = root.optJSONArray("watched_entries").stringSet().toMutableSet()
+        val watched = if (entry.key in set) { set.remove(entry.key); false } else { set.add(entry.key); true }
+        root.put("watched_entries", JSONArray(set.toList()))
+        watched
     }
 
     fun recordPlayback(
@@ -64,8 +96,11 @@ class UserLibraryStore(context: Context) {
         }
     }
 
-    fun clearHistory(profileId: String) {
-        mutate<Unit>(profileId) { it.put("history", JSONArray()) }
+    fun clearHistory(profileId: String, type: MediaType? = null) {
+        mutate<Unit>(profileId) { root ->
+            val kept = historyAfterClearingType(root.optJSONArray("history").historyList(), type)
+            root.put("history", JSONArray().apply { kept.forEach { put(it.toJson()) } })
+        }
     }
 
     fun resumePosition(profileId: String, entryKey: String): Long {
@@ -104,6 +139,19 @@ class UserLibraryStore(context: Context) {
 
     fun applyToCatalog(catalog: Catalog, snapshot: UserLibrarySnapshot): Catalog =
         applyUserLibraryToCatalog(catalog, snapshot)
+
+    /**
+     * Bloc JSON brut d'un profil (favoris, catégories masquées/verrouillées, ordre, historique…)
+     * pour une sauvegarde — jamais d'identifiant de connexion ici, ce store n'en contient pas.
+     */
+    fun exportRaw(profileId: String): JSONObject = loadRoot(profileId)
+
+    /** Remplace entièrement les préférences d'un profil par un bloc exporté via [exportRaw]. */
+    fun importRaw(profileId: String, raw: JSONObject) {
+        synchronized(mutationLock) {
+            preferences.edit().putString(key(profileId), raw.toString()).apply()
+        }
+    }
 
     private fun loadRoot(profileId: String): JSONObject = runCatching {
         JSONObject(preferences.getString(key(profileId), null) ?: "{}")
@@ -194,6 +242,10 @@ class UserLibraryStore(context: Context) {
 data class UserLibrarySnapshot(
     val favoriteEntries: Set<String> = emptySet(),
     val favoriteCategories: Set<String> = emptySet(),
+    val hiddenEntries: Set<String> = emptySet(),
+    val hiddenCategories: Set<String> = emptySet(),
+    val lockedCategories: Set<String> = emptySet(),
+    val watchedEntries: Set<String> = emptySet(),
     val categoryOrder: Map<String, List<String>> = emptyMap(),
     val movedEntries: Map<String, String> = emptyMap(),
     val history: List<PlaybackHistoryItem> = emptyList(),
@@ -265,6 +317,12 @@ fun applyUserLibraryToCatalog(catalog: Catalog, snapshot: UserLibrarySnapshot): 
         loadedCategoryKeys = catalog.loadedCategoryKeys,
     )
 }
+
+internal fun historyAfterClearingType(
+    history: List<PlaybackHistoryItem>,
+    type: MediaType?,
+): List<PlaybackHistoryItem> =
+    if (type == null) emptyList() else history.filterNot { it.entry.type == type }
 
 data class PlaybackHistoryItem(
     val entry: MediaEntry,

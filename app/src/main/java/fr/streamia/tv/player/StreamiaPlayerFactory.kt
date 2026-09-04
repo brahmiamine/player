@@ -1,6 +1,8 @@
 package fr.streamia.tv.player
 
 import android.content.Context
+import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.datasource.DefaultDataSource
@@ -10,6 +12,7 @@ import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
+import fr.streamia.tv.data.BufferMode
 import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.logging.CrashReporter
 import okhttp3.ConnectionPool
@@ -27,8 +30,8 @@ object StreamiaPlayerFactory {
             .build()
     }
 
-    fun create(context: Context, mediaType: MediaType): ExoPlayer {
-        val profile = PlaybackTuning.forType(mediaType)
+    fun create(context: Context, mediaType: MediaType, bufferMode: BufferMode = BufferMode.Auto): ExoPlayer {
+        val profile = PlaybackTuning.forType(mediaType, bufferMode)
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
                 profile.minBufferMs,
@@ -56,6 +59,13 @@ object StreamiaPlayerFactory {
             .setLoadControl(loadControl)
             .build()
             .apply {
+                setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(C.USAGE_MEDIA)
+                        .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
+                        .build(),
+                    true,
+                )
                 playWhenReady = true
                 setHandleAudioBecomingNoisy(true)
             }

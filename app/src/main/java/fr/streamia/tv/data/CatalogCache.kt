@@ -28,6 +28,8 @@ class CatalogCache(context: Context) {
     private val playlistStore = PlaylistStore(appContext)
     private val legacyFiles = listOf(File(filesDir, "catalog-v2.json"), File(filesDir, "catalog-v1.json"))
 
+    fun databaseFileSizeBytes(): Long = database.fileSizeBytes()
+
     suspend fun save(profileId: String, catalog: Catalog) = withContext(Dispatchers.IO) {
         database.replace(profileId, catalog)
         deleteJsonCopies(profileId)

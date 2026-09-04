@@ -51,7 +51,11 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
+import fr.streamia.tv.data.AppSettings
+import fr.streamia.tv.data.LiveChannelSortOrder
+import fr.streamia.tv.data.LiveStreamFormat
 import fr.streamia.tv.data.PlaybackHistoryItem
+import fr.streamia.tv.data.VodSortOrder
 import fr.streamia.tv.data.BrowserNavigationStore
 import fr.streamia.tv.data.NavigationListPosition
 import fr.streamia.tv.data.UserLibrarySnapshot
@@ -62,6 +66,8 @@ import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.domain.ServerCredentials
 import fr.streamia.tv.domain.XtreamUrlBuilder
 import fr.streamia.tv.player.LivePlaybackSession
+import fr.streamia.tv.player.PlaybackTransportStore
+import fr.streamia.tv.player.PlaybackUrlStrategy
 import fr.streamia.tv.ui.theme.DeepSurface
 import fr.streamia.tv.ui.theme.FocusBlueBright
 import fr.streamia.tv.ui.theme.HeadingWeight
@@ -97,6 +103,8 @@ fun BrowserScreen(
     livePlaybackSession: LivePlaybackSession,
     liveVideoSurface: @Composable (LiveVideoSurfacePlacement) -> Unit,
     library: UserLibrarySnapshot,
+    appSettings: AppSettings,
+    parentalUnlocked: Boolean,
     offline: Boolean,
     busy: Boolean,
     message: String?,
@@ -105,6 +113,7 @@ fun BrowserScreen(
     onEntrySelected: (MediaEntry) -> Unit,
     onToggleEntryFavorite: (MediaEntry) -> Unit,
     onToggleCategoryFavorite: (MediaCategory) -> Unit,
+    onVerifyParentalPin: (String) -> Boolean,
     onRememberContent: (MediaEntry) -> Unit,
     onLocationChanged: (MediaType, String?) -> Unit,
     onEnsureCategoryLoaded: (MediaType, String) -> Unit,
@@ -152,17 +161,42 @@ fun BrowserScreen(
         )
     }
 
-    val baseCategories = remember(catalog, selectedType) { catalog.categoriesFor(selectedType) }
-    val favoriteEntriesForType = remember(catalog, selectedType, library.favoriteEntries) {
+    val hiddenCategoryIds = remember(catalog, selectedType, library.hiddenCategories) {
+        catalog.categoriesFor(selectedType)
+            .filter { it.key in library.hiddenCategories }
+            .mapTo(mutableSetOf(), MediaCategory::id)
+    }
+    // Une catégorie verrouillée reste visible dans le rail (l'utilisateur doit voir qu'elle
+    // existe pour pouvoir la déverrouiller) : seul son contenu disparaît des vues agrégées
+    // (Tout, favoris, historique) tant que le code n'a pas été saisi cette session.
+    val lockedCategoryIds = remember(catalog, selectedType, library.lockedCategories, appSettings.parentalControlEnabled, parentalUnlocked) {
+        if (!appSettings.parentalControlEnabled || parentalUnlocked) emptySet()
+        else catalog.categoriesFor(selectedType)
+            .filter { it.key in library.lockedCategories }
+            .mapTo(mutableSetOf(), MediaCategory::id)
+    }
+    val excludedCategoryIds = remember(hiddenCategoryIds, lockedCategoryIds) { hiddenCategoryIds + lockedCategoryIds }
+    val baseCategories = remember(catalog, selectedType, library.hiddenCategories) {
+        catalog.categoriesFor(selectedType).filterNot { it.key in library.hiddenCategories }
+    }
+    val favoriteEntriesForType = remember(catalog, selectedType, library.favoriteEntries, library.hiddenEntries, excludedCategoryIds) {
         library.favoriteEntries.asSequence()
             .mapNotNull(catalog::entry)
-            .filter { it.type == selectedType }
+            .filter {
+                it.type == selectedType &&
+                    it.key !in library.hiddenEntries &&
+                    it.categoryId !in excludedCategoryIds
+            }
             .toList()
     }
-    val historyForType = remember(catalog, selectedType, library.history) {
+    val historyForType = remember(catalog, selectedType, library.history, library.hiddenEntries, excludedCategoryIds) {
         library.history.asSequence()
             .map { item -> item to (catalog.entry(item.entry.key) ?: item.entry) }
-            .filter { (_, entry) -> entry.type == selectedType }
+            .filter { (_, entry) ->
+                entry.type == selectedType &&
+                    entry.key !in library.hiddenEntries &&
+                    entry.categoryId !in excludedCategoryIds
+            }
             .toList()
     }
     val categories = remember(baseCategories, favoriteEntriesForType.size, historyForType.size, selectedType) {
@@ -174,14 +208,34 @@ fun BrowserScreen(
             hasHistory = historyForType.isNotEmpty(),
         )
     }
-    val entries = remember(catalog, selectedType, selectedCategoryId, favoriteEntriesForType, historyForType) {
+    val entries = remember(
+        catalog, selectedType, selectedCategoryId, favoriteEntriesForType, historyForType,
+        excludedCategoryIds, library.hiddenEntries, appSettings.liveChannelSortOrder, appSettings.vodSortOrder,
+    ) {
         when (selectedCategoryId) {
             FAVORITES_CATEGORY_ID -> favoriteEntriesForType
             HISTORY_CATEGORY_ID -> historyForType.map { it.second }
-            else -> catalog.entriesIn(selectedType, selectedCategoryId)
+            else -> {
+                val filtered = catalog.entriesIn(selectedType, selectedCategoryId).filterNot {
+                    it.key in library.hiddenEntries || it.categoryId in excludedCategoryIds
+                }
+                // « Favoris »/« Historique » gardent leur propre ordre (ajout / dernière lecture),
+                // qui perdrait son sens sous un tri alphabétique ou par numéro : seule une vraie
+                // catégorie suit la préférence de tri de son type.
+                when (selectedType) {
+                    MediaType.Live -> sortedForLiveDisplay(filtered, appSettings.liveChannelSortOrder)
+                    else -> sortedForVodDisplay(filtered, appSettings.vodSortOrder)
+                }
+            }
         }
     }
     val historyByKey = remember(historyForType) { historyForType.associate { it.second.key to it.first } }
+
+    var pendingLockedCategory by remember { mutableStateOf<MediaCategory?>(null) }
+    fun selectCategory(category: MediaCategory) {
+        val locked = appSettings.parentalControlEnabled && !parentalUnlocked && category.key in library.lockedCategories
+        if (locked) pendingLockedCategory = category else selectedCategoryId = category.id
+    }
 
     androidx.compose.runtime.LaunchedEffect(selectedType, categories) {
         if (categories.none { it.id == selectedCategoryId }) {
@@ -211,6 +265,7 @@ fun BrowserScreen(
                 credentials = credentials,
                 livePlaybackSession = livePlaybackSession,
                 liveVideoSurface = liveVideoSurface,
+                appSettings = appSettings,
                 categories = categories,
                 selectedCategoryId = selectedCategoryId,
                 entries = entries,
@@ -218,8 +273,9 @@ fun BrowserScreen(
                 initialListPosition = navigationStore.listPosition(MediaType.Live, selectedCategoryId),
                 favoriteCategories = library.favoriteCategories,
                 favoriteEntries = library.favoriteEntries,
+                lockedCategories = library.lockedCategories,
                 historyCount = historyForType.size,
-                onCategorySelected = { selectedCategoryId = it.id },
+                onCategorySelected = ::selectCategory,
                 onPreviewChanged = {
                     lastLiveEntryKey = it.key
                     navigationStore.saveLiveSelection(selectedCategoryId, it.key)
@@ -260,7 +316,7 @@ fun BrowserScreen(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 3.dp).height(40.dp),
                 ) {
                     Text(
-                        "$message  ·  OK fermer",
+                        "$message  ·  OK pour fermer",
                         color = if (message.contains("média", ignoreCase = true) || message.contains("import", ignoreCase = true)) FocusBlueBright else MaterialTheme.colorScheme.error,
                         fontSize = 12.sp,
                         modifier = Modifier.padding(horizontal = 16.dp),
@@ -279,9 +335,10 @@ fun BrowserScreen(
                     entries = entries,
                     favoriteCategories = library.favoriteCategories,
                     favoriteEntries = library.favoriteEntries,
+                    lockedCategories = library.lockedCategories,
                     historyCount = historyForType.size,
                     historyByKey = historyByKey,
-                    onCategorySelected = { selectedCategoryId = it.id },
+                    onCategorySelected = ::selectCategory,
                     onToggleCategoryFavorite = onToggleCategoryFavorite,
                     onEntrySelected = onEntrySelected,
                     onEntryFocused = { navigationStore.saveEntry(selectedType, it.key) },
@@ -290,6 +347,22 @@ fun BrowserScreen(
                     modifier = Modifier.fillMaxSize().padding(start = 18.dp, end = 18.dp, bottom = 18.dp),
                 )
             }
+        }
+
+        pendingLockedCategory?.let { category ->
+            ParentalPinDialog(
+                title = "Contenu verrouillé",
+                subtitle = "Entrez le code parental pour accéder à « ${category.name} »",
+                onSubmit = { pin ->
+                    val correct = onVerifyParentalPin(pin)
+                    if (correct) {
+                        selectedCategoryId = category.id
+                        pendingLockedCategory = null
+                    }
+                    correct
+                },
+                onCancel = { pendingLockedCategory = null },
+            )
         }
     }
 }
@@ -392,6 +465,7 @@ private fun LiveCatalogLayout(
     credentials: ServerCredentials,
     livePlaybackSession: LivePlaybackSession,
     liveVideoSurface: @Composable (LiveVideoSurfacePlacement) -> Unit,
+    appSettings: AppSettings,
     categories: List<MediaCategory>,
     selectedCategoryId: String,
     entries: List<MediaEntry>,
@@ -399,6 +473,7 @@ private fun LiveCatalogLayout(
     initialListPosition: NavigationListPosition,
     favoriteCategories: Set<String>,
     favoriteEntries: Set<String>,
+    lockedCategories: Set<String>,
     historyCount: Int,
     onCategorySelected: (MediaCategory) -> Unit,
     onPreviewChanged: (MediaEntry) -> Unit,
@@ -459,6 +534,9 @@ private fun LiveCatalogLayout(
             liveVideoSurface = liveVideoSurface,
             entry = previewEntry,
             favorite = previewEntry?.key in favoriteEntries,
+            enabled = appSettings.livePreviewEnabled,
+            previewDelayMs = appSettings.livePreviewDelayMs,
+            liveStreamFormat = appSettings.liveStreamFormat,
             // Bord à bord, y compris sous le bandeau du haut (qui flotte par-dessus, translucide) :
             // seuls les panneaux catégories/chaînes ci-dessous en tiennent compte, via leur propre
             // padding, pour ne pas se faire recouvrir par ce bandeau.
@@ -479,6 +557,7 @@ private fun LiveCatalogLayout(
             categories = categories,
             selectedCategoryId = selectedCategoryId,
             favoriteCategories = favoriteCategories,
+            lockedCategories = lockedCategories,
             countFor = { category ->
                 when (category.id) {
                     FAVORITES_CATEGORY_ID -> favoriteEntries.count { it.startsWith("${MediaType.Live.name}:") }
@@ -684,13 +763,19 @@ private fun LivePreview(
     liveVideoSurface: @Composable (LiveVideoSurfacePlacement) -> Unit,
     entry: MediaEntry?,
     favorite: Boolean,
+    enabled: Boolean,
+    previewDelayMs: Int,
+    liveStreamFormat: LiveStreamFormat,
     modifier: Modifier = Modifier,
 ) {
     val player = livePlaybackSession.player
+    val context = LocalContext.current.applicationContext
+    val transportStore = remember { PlaybackTransportStore(context) }
     var buffering by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf(false) }
     var activeUrl by remember { mutableStateOf("") }
-    var fallbackAttempted by remember { mutableStateOf(false) }
+    var streamCandidates by remember { mutableStateOf(emptyList<String>()) }
+    var candidateIndex by remember { mutableStateOf(0) }
 
     DisposableEffect(player, entry?.key) {
         val listener = object : Player.Listener {
@@ -703,21 +788,20 @@ private fun LivePreview(
                 if (entry?.key == livePlaybackSession.entryKey) {
                     buffering = false
                     error = false
+                    transportStore.recordSuccess(activeUrl, MediaType.Live)
                 }
             }
 
             override fun onPlayerError(playbackException: PlaybackException) {
                 if (entry?.key != livePlaybackSession.entryKey) return
-                if (!fallbackAttempted) {
-                    val alternate = XtreamUrlBuilder.alternateTransportUrl(activeUrl)
-                    if (alternate != null) {
-                        fallbackAttempted = true
-                        activeUrl = alternate
-                        error = false
-                        buffering = true
-                        entry?.let { livePlaybackSession.playUrl(it.key, alternate) }
-                        return
-                    }
+                val next = candidateIndex + 1
+                if (next < streamCandidates.size) {
+                    candidateIndex = next
+                    activeUrl = streamCandidates[next]
+                    error = false
+                    buffering = true
+                    entry?.let { livePlaybackSession.playUrl(it.key, activeUrl) }
+                    return
                 }
                 error = true
                 buffering = false
@@ -733,15 +817,32 @@ private fun LivePreview(
         }
     }
 
-    androidx.compose.runtime.LaunchedEffect(entry?.key, credentials) {
+    androidx.compose.runtime.LaunchedEffect(entry?.key, credentials, enabled, previewDelayMs, liveStreamFormat) {
         val target = entry
-        if (target == null) return@LaunchedEffect
-        delay(240)
+        if (!enabled || target == null) {
+            livePlaybackSession.stop(clearSession = true)
+            buffering = false
+            error = false
+            return@LaunchedEffect
+        }
+        if (previewDelayMs > 0) delay(previewDelayMs.toLong())
         error = false
         buffering = true
-        fallbackAttempted = false
-        livePlaybackSession.play(target, credentials)
-        activeUrl = livePlaybackSession.activeUrl
+        val baseUrl = XtreamUrlBuilder(credentials).stream(target)
+        val storedPreference = transportStore.preferenceFor(baseUrl)
+        val preferredExtension = when (liveStreamFormat) {
+            LiveStreamFormat.Auto -> storedPreference.liveExtension
+            LiveStreamFormat.Ts -> "ts"
+            LiveStreamFormat.Hls -> "m3u8"
+        }
+        streamCandidates = PlaybackUrlStrategy.candidates(
+            initialUrl = baseUrl,
+            type = MediaType.Live,
+            preference = storedPreference.copy(liveExtension = preferredExtension),
+        )
+        candidateIndex = 0
+        activeUrl = streamCandidates.firstOrNull() ?: baseUrl
+        livePlaybackSession.playUrl(target.key, activeUrl)
     }
 
     LaunchedEffect(entry?.key, buffering) {
@@ -751,7 +852,7 @@ private fun LivePreview(
     }
 
     Box(modifier.background(Color.Black)) {
-            if (entry != null) {
+            if (entry != null && enabled) {
                 liveVideoSurface(LiveVideoSurfacePlacement(Modifier.fillMaxSize()))
                 if (buffering) {
                     Text("Chargement…", color = Ink, fontSize = TypeBody, modifier = Modifier.align(Alignment.Center))
@@ -776,10 +877,15 @@ private fun LivePreview(
                     )
                 }
             } else {
-                Text("Sélectionnez une chaîne puis appuyez sur OK", color = MutedInk, fontSize = TypeBody, modifier = Modifier.align(Alignment.Center))
+                Text(
+                    if (entry != null && !enabled) "Aperçu désactivé dans les paramètres" else "Sélectionnez une chaîne puis appuyez sur OK",
+                    color = MutedInk,
+                    fontSize = TypeBody,
+                    modifier = Modifier.align(Alignment.Center),
+                )
             }
         Text(
-            "Aperçu en direct",
+            if (enabled) "Aperçu en direct" else "Aperçu désactivé",
             color = Ink,
             fontSize = 13.sp,
             fontWeight = FontWeight.Bold,
@@ -803,6 +909,7 @@ private fun VodCatalogLayout(
     entries: List<MediaEntry>,
     favoriteCategories: Set<String>,
     favoriteEntries: Set<String>,
+    lockedCategories: Set<String>,
     historyCount: Int,
     historyByKey: Map<String, PlaybackHistoryItem>,
     onCategorySelected: (MediaCategory) -> Unit,
@@ -819,6 +926,7 @@ private fun VodCatalogLayout(
             categories = categories,
             selectedCategoryId = selectedCategoryId,
             favoriteCategories = favoriteCategories,
+            lockedCategories = lockedCategories,
             countFor = { category ->
                 when (category.id) {
                     FAVORITES_CATEGORY_ID -> favoriteEntries.count { it.startsWith("${type.name}:") }
@@ -858,6 +966,7 @@ private fun CategoryRail(
     categories: List<MediaCategory>,
     selectedCategoryId: String,
     favoriteCategories: Set<String>,
+    lockedCategories: Set<String>,
     countFor: (MediaCategory) -> Int,
     onSelected: (MediaCategory) -> Unit,
     onToggleFavorite: (MediaCategory) -> Unit,
@@ -924,6 +1033,10 @@ private fun CategoryRail(
                     Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                         if (!virtual && category.key in favoriteCategories) {
                             StreamiaIcon(StreamiaIconGlyph.Star, size = 12.dp)
+                            Spacer(Modifier.width(5.dp))
+                        }
+                        if (!virtual && category.key in lockedCategories) {
+                            StreamiaIcon(StreamiaIconGlyph.Lock, tint = FocusBlueBright, size = 12.dp)
                             Spacer(Modifier.width(5.dp))
                         }
                         Text(
@@ -1016,7 +1129,14 @@ private fun PosterCard(
         modifier = Modifier.fillMaxWidth().height(252.dp),
     ) {
         Column(Modifier.fillMaxSize().padding(8.dp)) {
-            MediaArtwork(entry.iconUrl, entry.displayName, Modifier.fillMaxWidth().height(175.dp))
+            Box(Modifier.fillMaxWidth().height(175.dp)) {
+                MediaArtwork(entry.iconUrl, entry.displayName, Modifier.fillMaxSize())
+                if (history != null && history.progress > 0.02f) {
+                    Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(4.dp).background(Color.Black.copy(alpha = 0.45f))) {
+                        Box(Modifier.fillMaxHeight().fillMaxWidth(history.progress).background(FocusBlueBright))
+                    }
+                }
+            }
             Spacer(Modifier.height(7.dp))
             Text(
                 entry.displayName,
@@ -1054,3 +1174,35 @@ private fun defaultCategoryId(catalog: Catalog, type: MediaType): String =
         ?: Catalog.ALL_CATEGORY_ID
 
 private fun PlaybackHistoryItem.progressPercent(): Int = (progress * 100).toInt().coerceIn(0, 100)
+
+/**
+ * Ordre d'affichage des chaînes Direct au sein d'une catégorie, choisi dans Paramètres. `Provider`
+ * conserve l'ordre déjà renvoyé par le fournisseur/SQLite (aucun tri, coût nul) ; `Alphabetical`
+ * réutilise `Collator` (comme le tri de catégories dans l'Organizer) pour rester correct avec les
+ * accents français plutôt que trier par point de code Unicode.
+ */
+internal fun sortedForLiveDisplay(entries: List<MediaEntry>, order: LiveChannelSortOrder): List<MediaEntry> = when (order) {
+    LiveChannelSortOrder.Provider -> entries
+    LiveChannelSortOrder.Number -> entries.sortedBy(MediaEntry::number)
+    LiveChannelSortOrder.Alphabetical -> {
+        val collator = java.text.Collator.getInstance(java.util.Locale.FRENCH)
+        entries.sortedWith(Comparator { a, b -> collator.compare(a.displayName, b.displayName) })
+    }
+}
+
+/**
+ * `RecentlyAdded`/`Rating` retombent en fin de liste pour une entrée sans date d'ajout / note (le
+ * fournisseur ne les fournit pas toujours) plutôt que de les faire remonter en tête par accident :
+ * `sortedByDescending` traite `null` comme la plus petite valeur, donc toujours en dernier ici.
+ * Pas d'option « année » : cette donnée vient de [fr.streamia.tv.domain.MediaDetails], récupérée
+ * à la demande pour un seul contenu, jamais en bloc pour toute une catégorie du catalogue léger.
+ */
+internal fun sortedForVodDisplay(entries: List<MediaEntry>, order: VodSortOrder): List<MediaEntry> = when (order) {
+    VodSortOrder.Provider -> entries
+    VodSortOrder.Alphabetical -> {
+        val collator = java.text.Collator.getInstance(java.util.Locale.FRENCH)
+        entries.sortedWith(Comparator { a, b -> collator.compare(a.displayName, b.displayName) })
+    }
+    VodSortOrder.RecentlyAdded -> entries.sortedByDescending(MediaEntry::addedAtEpochSeconds)
+    VodSortOrder.Rating -> entries.sortedByDescending(MediaEntry::rating)
+}

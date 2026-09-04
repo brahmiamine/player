@@ -4,9 +4,12 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import fr.streamia.tv.BuildConfig
+import fr.streamia.tv.data.AppSettings
 import fr.streamia.tv.data.CatalogSource
 import fr.streamia.tv.data.LoadedCatalog
 import fr.streamia.tv.data.PlaylistProfile
+import fr.streamia.tv.data.UpdateCheckResult
 import fr.streamia.tv.data.UserLibrarySnapshot
 import fr.streamia.tv.data.hasSameCatalogLayoutAs
 import fr.streamia.tv.data.XtreamRepository
@@ -52,6 +55,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             booting = true,
             screen = StreamiaScreen.Login,
             profiles = repository.profiles(),
+            appSettings = repository.appSettings(),
         )
     }
 
@@ -83,6 +87,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             activeProfileId = profileId,
             profiles = repository.profiles(),
             library = library,
+            appSettings = repository.appSettings(),
             resumePositionMs = library.history.firstOrNull { it.entry.key == entry.key }?.positionMs ?: 0L,
         )
         viewModelScope.launch {
@@ -292,6 +297,37 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         }
     }
 
+    fun checkForUpdate() {
+        if (_uiState.value.updateChecking) return
+        _uiState.update { it.copy(updateChecking = true, updateCheck = null) }
+        viewModelScope.launch {
+            val result = repository.checkForUpdate(BuildConfig.VERSION_NAME)
+            _uiState.update { it.copy(updateChecking = false, updateCheck = result) }
+        }
+    }
+
+    fun dismissUpdateCheck() { _uiState.update { it.copy(updateCheck = null) } }
+
+    suspend fun exportBackup(): String = repository.exportBackup(_uiState.value.activeProfileId)
+
+    /**
+     * Restaure réglages + préférences du profil actif, puis relit les stores pour que l'interface
+     * reflète immédiatement le contenu importé — [libraryPresentation] recalcule aussi le catalogue
+     * personnalisé (ordre des catégories, déplacements), pas seulement le [StreamiaUiState.library]
+     * brut, sans quoi le Browser garderait l'ancienne disposition jusqu'à une action qui la relit
+     * incidemment.
+     */
+    suspend fun importBackup(json: String): String {
+        val profileId = _uiState.value.activeProfileId
+        val message = repository.importBackup(profileId, json)
+        _uiState.update { it.copy(appSettings = repository.appSettings()) }
+        if (profileId != null) {
+            val presentation = withContext(Dispatchers.IO) { libraryPresentation(profileId) }
+            applyLibraryPresentation(profileId, presentation)
+        }
+        return message
+    }
+
     fun openEntry(entry: MediaEntry) {
         when {
             entry.type == MediaType.Live -> openPlayer(entry, returnToSeries = false)
@@ -335,13 +371,101 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
      * contenu jamais parcouru serait invisible à une recherche purement en mémoire.
      */
     suspend fun searchCatalog(query: String, type: MediaType?): List<MediaEntry> {
-        val profileId = _uiState.value.activeProfileId ?: return emptyList()
-        return runCatching { repository.search(profileId, query, type) }.getOrDefault(emptyList())
+        val state = _uiState.value
+        val profileId = state.activeProfileId ?: return emptyList()
+        // Une catégorie verrouillée est traitée comme masquée pour la recherche : il n'y a pas
+        // d'écran de saisie de code depuis un résultat de recherche, donc son contenu ne doit tout
+        // simplement pas apparaître tant que le code n'a pas été saisi cette session ailleurs.
+        val excludedCategoryKeys = if (state.appSettings.parentalControlEnabled && !state.parentalUnlocked) {
+            state.library.hiddenCategories + state.library.lockedCategories
+        } else {
+            state.library.hiddenCategories
+        }
+        val excludedCategoryIdsByType = state.catalog
+            ?.categories
+            .orEmpty()
+            .filter { it.key in excludedCategoryKeys }
+            .groupBy(MediaCategory::type)
+            .mapValues { (_, categories) -> categories.mapTo(mutableSetOf(), MediaCategory::id) }
+
+        return runCatching { repository.search(profileId, query, type) }
+            .getOrDefault(emptyList())
+            .filterNot { entry ->
+                entry.key in state.library.hiddenEntries ||
+                    entry.categoryId in excludedCategoryIdsByType[entry.type].orEmpty()
+            }
     }
 
     fun showHome() { _uiState.update { it.copy(screen = StreamiaScreen.Home, message = null) } }
     fun showSettings() { _uiState.update { it.copy(screen = StreamiaScreen.Settings, message = null) } }
+    fun showTools() { _uiState.update { it.copy(screen = StreamiaScreen.Tools, message = null) } }
+    fun showAbout() { _uiState.update { it.copy(screen = StreamiaScreen.About, message = null) } }
+
+    suspend fun cacheSizeBytes(): Long = repository.cacheSizeBytes()
+    fun showParentalControl() { _uiState.update { it.copy(screen = StreamiaScreen.ParentalControl, message = null) } }
     fun showSearch() { _uiState.update { it.copy(screen = StreamiaScreen.Search, message = null) } }
+
+    fun toggleLivePreview() {
+        updateAppSettings { it.copy(livePreviewEnabled = !it.livePreviewEnabled) }
+    }
+
+    fun cycleLivePreviewDelay() {
+        updateAppSettings { it.copy(livePreviewDelayMs = it.nextLivePreviewDelayMs()) }
+    }
+
+    fun cycleVodSeekStep() {
+        updateAppSettings { it.copy(vodSeekStepSeconds = it.nextVodSeekStepSeconds()) }
+    }
+
+    fun cycleVideoAspect() {
+        updateAppSettings { it.copy(videoAspect = it.nextVideoAspect()) }
+    }
+
+    fun cycleBufferMode() {
+        updateAppSettings { it.copy(bufferMode = it.nextBufferMode()) }
+    }
+
+    fun cycleLiveStreamFormat() {
+        updateAppSettings { it.copy(liveStreamFormat = it.nextLiveStreamFormat()) }
+    }
+
+    fun cycleLiveChannelSortOrder() {
+        updateAppSettings { it.copy(liveChannelSortOrder = it.nextLiveChannelSortOrder()) }
+    }
+
+    fun cycleVodSortOrder() {
+        updateAppSettings { it.copy(vodSortOrder = it.nextVodSortOrder()) }
+    }
+
+    fun cycleEpgTimeOffset() {
+        updateAppSettings { it.copy(epgTimeOffsetHours = it.nextEpgTimeOffsetHours()) }
+    }
+
+    fun toggleAutoPlayNextEpisode() {
+        updateAppSettings { it.copy(autoPlayNextEpisode = !it.autoPlayNextEpisode) }
+    }
+
+    fun cycleSubtitleSizeScale() {
+        updateAppSettings { it.copy(subtitleSizeScale = it.nextSubtitleSizeScale()) }
+    }
+
+    fun toggleSubtitleBackground() {
+        updateAppSettings { it.copy(subtitleBackgroundEnabled = !it.subtitleBackgroundEnabled) }
+    }
+
+    /** Appelé depuis le lecteur (fin de lecture, ou bouton « Lire maintenant » du bandeau). */
+    fun playNextEpisode() {
+        val state = _uiState.value
+        val series = state.seriesDetails ?: return
+        val current = (state.screen as? StreamiaScreen.Player)?.entry ?: return
+        val next = series.nextEpisode(current.id) ?: return
+        playEpisode(series.series, next)
+    }
+
+    private fun updateAppSettings(transform: (AppSettings) -> AppSettings) {
+        val settings = repository.updateAppSettings(transform)
+        _uiState.update { it.copy(appSettings = settings) }
+    }
     /**
      * L'organisateur permet de réordonner des catégories et de déplacer des entrées entre elles
      * pour n'importe quel type qu'on y sélectionne : contrairement au navigateur, il a donc besoin
@@ -515,6 +639,120 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         }
     }
 
+    fun toggleEntryHidden(entry: MediaEntry) {
+        val profileId = _uiState.value.activeProfileId ?: return
+        _uiState.update { state ->
+            val hidden = state.library.hiddenEntries.toMutableSet().apply {
+                if (!add(entry.key)) remove(entry.key)
+            }
+            state.copy(library = state.library.copy(hiddenEntries = hidden))
+        }
+        val sequence = ++libraryMutationSequence
+        viewModelScope.launch {
+            libraryMutation.withLock {
+                runCatching {
+                    withContext(Dispatchers.IO) {
+                        repository.toggleEntryHidden(profileId, entry)
+                        repository.library(profileId)
+                    }
+                }.onSuccess { library ->
+                    if (sequence != libraryMutationSequence) return@onSuccess
+                    _uiState.update { state -> if (state.activeProfileId == profileId) state.copy(library = library) else state }
+                }
+            }
+        }
+    }
+
+    fun toggleCategoryHidden(category: MediaCategory) {
+        val profileId = _uiState.value.activeProfileId ?: return
+        _uiState.update { state ->
+            val hidden = state.library.hiddenCategories.toMutableSet().apply {
+                if (!add(category.key)) remove(category.key)
+            }
+            state.copy(library = state.library.copy(hiddenCategories = hidden))
+        }
+        val sequence = ++libraryMutationSequence
+        viewModelScope.launch {
+            libraryMutation.withLock {
+                runCatching {
+                    withContext(Dispatchers.IO) {
+                        repository.toggleCategoryHidden(profileId, category)
+                        repository.library(profileId)
+                    }
+                }.onSuccess { library ->
+                    if (sequence != libraryMutationSequence) return@onSuccess
+                    _uiState.update { state -> if (state.activeProfileId == profileId) state.copy(library = library) else state }
+                }
+            }
+        }
+    }
+
+    fun toggleCategoryLocked(category: MediaCategory) {
+        val profileId = _uiState.value.activeProfileId ?: return
+        _uiState.update { state ->
+            val locked = state.library.lockedCategories.toMutableSet().apply {
+                if (!add(category.key)) remove(category.key)
+            }
+            state.copy(library = state.library.copy(lockedCategories = locked))
+        }
+        val sequence = ++libraryMutationSequence
+        viewModelScope.launch {
+            libraryMutation.withLock {
+                runCatching {
+                    withContext(Dispatchers.IO) {
+                        repository.toggleCategoryLocked(profileId, category)
+                        repository.library(profileId)
+                    }
+                }.onSuccess { library ->
+                    if (sequence != libraryMutationSequence) return@onSuccess
+                    _uiState.update { state -> if (state.activeProfileId == profileId) state.copy(library = library) else state }
+                }
+            }
+        }
+    }
+
+    fun toggleEntryWatched(entry: MediaEntry) {
+        val profileId = _uiState.value.activeProfileId ?: return
+        _uiState.update { state ->
+            val watched = state.library.watchedEntries.toMutableSet().apply {
+                if (!add(entry.key)) remove(entry.key)
+            }
+            state.copy(library = state.library.copy(watchedEntries = watched))
+        }
+        val sequence = ++libraryMutationSequence
+        viewModelScope.launch {
+            libraryMutation.withLock {
+                runCatching {
+                    withContext(Dispatchers.IO) {
+                        repository.toggleEntryWatched(profileId, entry)
+                        repository.library(profileId)
+                    }
+                }.onSuccess { library ->
+                    if (sequence != libraryMutationSequence) return@onSuccess
+                    _uiState.update { state -> if (state.activeProfileId == profileId) state.copy(library = library) else state }
+                }
+            }
+        }
+    }
+
+    /** Enregistre un nouveau code parental et active le verrouillage — déverrouille aussi la session en cours puisque c'est l'utilisateur qui vient de le saisir. */
+    fun setParentalPin(pin: String) {
+        val settings = repository.setParentalPin(pin)
+        _uiState.update { it.copy(appSettings = settings, parentalUnlocked = true) }
+    }
+
+    fun disableParentalControl() {
+        val settings = repository.clearParentalPin()
+        _uiState.update { it.copy(appSettings = settings, parentalUnlocked = false) }
+    }
+
+    /** Code correct : déverrouille le contenu verrouillé pour le reste de la session (jusqu'à la fermeture de l'app). */
+    fun verifyParentalPin(pin: String): Boolean {
+        val correct = repository.verifyParentalPin(pin)
+        if (correct) _uiState.update { it.copy(parentalUnlocked = true) }
+        return correct
+    }
+
     fun toggleCategoryFavorite(category: MediaCategory) {
         val profileId = _uiState.value.activeProfileId ?: return
         _uiState.update { state ->
@@ -546,9 +784,9 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         }
     }
 
-    fun clearHistory() {
+    fun clearHistory(type: MediaType? = null) {
         val profileId = _uiState.value.activeProfileId ?: return
-        repository.clearHistory(profileId)
+        repository.clearHistory(profileId, type)
         refreshLibraryPresentation()
     }
 
@@ -582,7 +820,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     }
 
     fun closeOrganizer() {
-        showSettings()
+        showTools()
         val profileId = _uiState.value.activeProfileId ?: return
         viewModelScope.launch(Dispatchers.IO) {
             catalogLayoutMutation.withLock {
@@ -616,8 +854,24 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         val state = _uiState.value
         val current = (state.screen as? StreamiaScreen.Player)?.entry ?: return
         if (current.type != MediaType.Live) return
-        val sameCategory = state.catalog?.entriesIn(MediaType.Live, current.categoryId).orEmpty()
-        val pool = if (sameCategory.size > 1) sameCategory else state.catalog?.entriesFor(MediaType.Live).orEmpty()
+        // Le repli sur allLive peut faire sauter le zapping dans une autre catégorie que celle en
+        // cours : si elle est verrouillée et pas encore déverrouillée cette session, elle doit être
+        // exclue comme si elle était masquée — il n'y a pas d'écran de code pendant le zapping.
+        val lockedCategoryIds = if (state.appSettings.parentalControlEnabled && !state.parentalUnlocked) {
+            state.catalog?.categoriesFor(MediaType.Live)
+                .orEmpty()
+                .filter { it.key in state.library.lockedCategories }
+                .mapTo(mutableSetOf(), MediaCategory::id)
+        } else {
+            emptySet()
+        }
+        val sameCategory = state.catalog?.entriesIn(MediaType.Live, current.categoryId)
+            .orEmpty()
+            .filterNot { it.key in state.library.hiddenEntries }
+        val allLive = state.catalog?.entriesFor(MediaType.Live)
+            .orEmpty()
+            .filterNot { it.key in state.library.hiddenEntries || it.categoryId in lockedCategoryIds }
+        val pool = if (sameCategory.size > 1) sameCategory else allLive
         val next = pool.adjacentTo(current.key, delta) ?: return
         openPlayer(next, returnToSeries = false)
     }
@@ -802,7 +1056,12 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     }
 
     private fun showLogin() {
-        _uiState.value = StreamiaUiState(booting = false, screen = StreamiaScreen.Login, profiles = repository.profiles())
+        _uiState.value = StreamiaUiState(
+            booting = false,
+            screen = StreamiaScreen.Login,
+            profiles = repository.profiles(),
+            appSettings = repository.appSettings(),
+        )
     }
 
     private suspend fun showCatalog(loaded: LoadedCatalog) {
@@ -817,6 +1076,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             activeProfileId = loaded.profileId,
             profiles = presentation.profiles,
             library = presentation.library,
+            appSettings = repository.appSettings(),
             offline = loaded.source == CatalogSource.Cache,
             message = loaded.importSummary,
         )
@@ -851,6 +1111,11 @@ data class StreamiaUiState(
     val activeProfileId: String? = null,
     val profiles: List<PlaylistProfile> = emptyList(),
     val library: UserLibrarySnapshot = UserLibrarySnapshot(),
+    val appSettings: AppSettings = AppSettings(),
+    /** Code parental saisi correctement pendant cette session (redevient false à la relance de l'app). */
+    val parentalUnlocked: Boolean = false,
+    val updateChecking: Boolean = false,
+    val updateCheck: UpdateCheckResult? = null,
     val offline: Boolean = false,
     val message: String? = null,
     val mediaDetails: MediaDetails? = null,
@@ -869,6 +1134,9 @@ sealed interface StreamiaScreen {
     data object Home : StreamiaScreen
     data object Browser : StreamiaScreen
     data object Settings : StreamiaScreen
+    data object Tools : StreamiaScreen
+    data object About : StreamiaScreen
+    data object ParentalControl : StreamiaScreen
     data object Search : StreamiaScreen
     data object Epg : StreamiaScreen
     data object Organizer : StreamiaScreen

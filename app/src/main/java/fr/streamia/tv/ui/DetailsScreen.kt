@@ -44,9 +44,11 @@ fun MovieDetailsScreen(
     busy: Boolean,
     message: String?,
     favorite: Boolean,
+    watched: Boolean,
     resumePositionMs: Long,
     onPlay: () -> Unit,
     onToggleFavorite: () -> Unit,
+    onToggleWatched: () -> Unit,
     onBack: () -> Unit,
 ) {
     BackHandler(onBack = onBack)
@@ -84,6 +86,16 @@ fun MovieDetailsScreen(
                         StreamiaIcon(if (favorite) StreamiaIconGlyph.Star else StreamiaIconGlyph.StarOutline, size = 22.dp)
                     }
                 }
+                FocusableSurface(
+                    onClick = onToggleWatched,
+                    selected = watched,
+                    modifier = Modifier.width(72.dp).height(58.dp),
+                    contentDescription = if (watched) "Marquer comme non vu" else "Marquer comme vu",
+                ) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        StreamiaIcon(if (watched) StreamiaIconGlyph.CheckboxOn else StreamiaIconGlyph.CheckboxOff, size = 20.dp)
+                    }
+                }
             }
         }
         Spacer(Modifier.width(34.dp))
@@ -100,6 +112,7 @@ fun MovieDetailsScreen(
                 details?.duration,
                 details?.genre,
                 movie.extension.uppercase(),
+                "Vu".takeIf { watched },
             )
             if (meta.isNotEmpty()) Text(meta.joinToString("  ·  "), color = FocusBlueBright, fontSize = TypeLabel, fontWeight = FontWeight.SemiBold)
             if (!details?.plot.isNullOrBlank() || !movie.plot.isNullOrBlank()) {

@@ -56,6 +56,8 @@ fun HomeScreen(
     offline: Boolean,
     busy: Boolean,
     library: UserLibrarySnapshot,
+    parentalControlEnabled: Boolean = false,
+    parentalUnlocked: Boolean = false,
     catalogLoading: Boolean = false,
     onOpenSection: (MediaType) -> Unit,
     onSettings: () -> Unit,
@@ -69,12 +71,31 @@ fun HomeScreen(
     val firstFocus = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { firstFocus.requestFocus() } }
 
+    // Comme pour le guide TV, une catégorie verrouillée et pas encore déverrouillée cette session
+    // est traitée comme masquée ici : l'accueil ouvre le contenu directement (reprise, favori),
+    // sans passer par le geste de sélection de catégorie qui déclenche le code dans le navigateur.
+    val excludedCategories = remember(library.hiddenCategories, library.lockedCategories, parentalControlEnabled, parentalUnlocked) {
+        if (!parentalControlEnabled || parentalUnlocked) library.hiddenCategories else library.hiddenCategories + library.lockedCategories
+    }
+    val hiddenCategoryIdsByType = remember(catalog, excludedCategories) {
+        catalog.categories
+            .filter { it.key in excludedCategories }
+            .groupBy { it.type }
+            .mapValues { (_, categories) -> categories.mapTo(mutableSetOf()) { it.id } }
+    }
+
     // Reprise en cours : uniquement le contenu VOD (Films/Séries) assez avancé pour être
     // reprenable — Direct n'a pas de notion de position de lecture. On relit l'entrée depuis le
     // catalogue courant (icône/nom à jour) tout en gardant l'item d'historique pour sa progression.
-    val resumeCards = remember(catalog, library.history) {
+    val resumeCards = remember(catalog, library.history, library.hiddenEntries, library.watchedEntries, hiddenCategoryIdsByType) {
         library.history.asSequence()
-            .filter { it.entry.type != MediaType.Live && it.isResumable() }
+            .filter {
+                it.entry.type != MediaType.Live &&
+                    it.isResumable() &&
+                    it.entry.key !in library.hiddenEntries &&
+                    it.entry.key !in library.watchedEntries &&
+                    it.entry.categoryId !in hiddenCategoryIdsByType[it.entry.type].orEmpty()
+            }
             .map { item ->
                 // Les entrées Séries de l'historique sont des épisodes synthétisés à la lecture
                 // (playEpisode), absents du catalogue sous leur propre clé — celui-ci n'indexe que
@@ -91,10 +112,12 @@ fun HomeScreen(
     // Favoris : accès direct depuis l'accueil sans repasser par une catégorie. Si un favori est
     // aussi présent dans l'historique, sa progression est affichée pour rester cohérent avec le
     // reste de l'app plutôt que d'inventer un second indicateur.
-    val favoriteCards = remember(catalog, library.favoriteEntries, library.history) {
+    val favoriteCards = remember(catalog, library.favoriteEntries, library.history, library.hiddenEntries, hiddenCategoryIdsByType) {
         val historyByKey = library.history.associateBy { it.entry.key }
         library.favoriteEntries.asSequence()
+            .filterNot { it in library.hiddenEntries }
             .mapNotNull(catalog::entry)
+            .filter { it.categoryId !in hiddenCategoryIdsByType[it.type].orEmpty() }
             .map { entry -> entry to historyByKey[entry.key]?.progress?.takeIf { it > 0.02f } }
             .toList()
     }

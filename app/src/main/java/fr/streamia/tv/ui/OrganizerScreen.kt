@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -45,7 +46,14 @@ import java.util.Locale
 @Composable
 fun OrganizerScreen(
     catalog: Catalog,
+    hiddenCategories: Set<String>,
+    hiddenEntries: Set<String>,
+    lockedCategories: Set<String>,
+    parentalControlEnabled: Boolean,
     onCategoryOrderChanged: (MediaType, List<String>) -> Unit,
+    onToggleCategoryHidden: (MediaCategory) -> Unit,
+    onToggleEntryHidden: (MediaEntry) -> Unit,
+    onToggleCategoryLocked: (MediaCategory) -> Unit,
     onMoveEntries: (Set<String>, String) -> Unit,
     onResetMoves: (Set<String>) -> Unit,
     onBack: () -> Unit,
@@ -64,6 +72,14 @@ fun OrganizerScreen(
     var locallyMovedEntryKeys by remember(catalog, type, sourceCategoryId) { mutableStateOf(emptySet<String>()) }
     val categoriesByKey = remember(catalog, type) { catalog.categoriesFor(type).associateBy(MediaCategory::key) }
     val categories = remember(localCategoryOrder, categoriesByKey) { localCategoryOrder.mapNotNull(categoriesByKey::get) }
+    var categoryQuery by remember(type) { mutableStateOf("") }
+    // Le filtre ne restreint que l'affichage : le tri/déplacement en masse continue d'agir sur
+    // l'ordre réel (categories), indispensable pour un catalogue de plusieurs centaines de
+    // catégories où chercher un nom précis avant de le déplacer est bien plus rapide que défiler.
+    val visibleCategories = remember(categories, categoryQuery) {
+        val needle = categoryQuery.trim()
+        if (needle.isBlank()) categories else categories.filter { it.name.contains(needle, ignoreCase = true) }
+    }
     val sourceEntries = remember(catalog, type, sourceCategoryId, locallyMovedEntryKeys) {
         sourceCategoryId?.let { catalog.entriesIn(type, it) }.orEmpty()
             .filterNot { it.key in locallyMovedEntryKeys }
@@ -104,13 +120,25 @@ fun OrganizerScreen(
 
         Row(Modifier.fillMaxSize()) {
             Column(Modifier.width(420.dp).fillMaxHeight()) {
-                SectionLabel("Catégories (${categories.size})")
+                SectionLabel(
+                    if (categoryQuery.isBlank()) "Catégories (${categories.size})" else "Catégories (${visibleCategories.size}/${categories.size})",
+                )
+                Spacer(Modifier.height(9.dp))
+                TvTextField(
+                    value = categoryQuery,
+                    onValueChange = { categoryQuery = it },
+                    label = "Rechercher une catégorie",
+                    modifier = Modifier.fillMaxWidth(),
+                )
                 Spacer(Modifier.height(9.dp))
                 // Avec des centaines/milliers de catégories, remonter/descendre pas à pas jusqu'au
                 // bon endroit est beaucoup trop lent : ⇈/⇊ envoient directement la sélection en
                 // tête/en fin de liste, et « Trier A→Z » réordonne tout d'un coup — la plupart des
                 // besoins de tri manuel disparaissent une fois la liste déjà rangée par nom.
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                // FlowRow plutôt que Row : avec Masquer/Verrouiller/Trier en plus des 4 flèches, le
+                // total dépasse facilement les 420dp de ce panneau — FlowRow renvoie l'excédent à la
+                // ligne suivante au lieu de déborder silencieusement hors de l'écran.
+                FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     CategoryMoveButton(
                         glyph = "↑",
                         contentDescription = "Monter la sélection d'une position",
@@ -151,7 +179,52 @@ fun OrganizerScreen(
                             onCategoryOrderChanged(type, ordered.map(MediaCategory::key))
                         },
                     )
-                    Spacer(Modifier.weight(1f))
+                    FocusableSurface(
+                        onClick = {
+                            val selectedCategories = categories.filter { it.key in selectedCategoryKeys }
+                            val hideSelected = selectedCategories.any { it.key !in hiddenCategories }
+                            selectedCategories
+                                .filter { (it.key in hiddenCategories) != hideSelected }
+                                .forEach(onToggleCategoryHidden)
+                        },
+                        enabled = selectedCategoryKeys.isNotEmpty(),
+                        contentDescription = "Afficher ou masquer les catégories sélectionnées",
+                        modifier = Modifier.width(126.dp).height(44.dp),
+                    ) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            val allHidden = selectedCategoryKeys.isNotEmpty() && selectedCategoryKeys.all { it in hiddenCategories }
+                            Text(if (allHidden) "Afficher" else "Masquer", color = Ink, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    FocusableSurface(
+                        onClick = {
+                            val selectedCategories = categories.filter { it.key in selectedCategoryKeys }
+                            val lockSelected = selectedCategories.any { it.key !in lockedCategories }
+                            selectedCategories
+                                .filter { (it.key in lockedCategories) != lockSelected }
+                                .forEach(onToggleCategoryLocked)
+                        },
+                        enabled = selectedCategoryKeys.isNotEmpty() && parentalControlEnabled,
+                        contentDescription = if (parentalControlEnabled) {
+                            "Verrouiller ou déverrouiller les catégories sélectionnées"
+                        } else {
+                            "Définissez d'abord un code parental dans Paramètres pour verrouiller des catégories"
+                        },
+                        modifier = Modifier.width(126.dp).height(44.dp),
+                    ) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            val allLocked = selectedCategoryKeys.isNotEmpty() && selectedCategoryKeys.all { it in lockedCategories }
+                            Text(
+                                if (allLocked) "Déverrouiller" else "Verrouiller",
+                                color = Ink,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(horizontal = 4.dp),
+                            )
+                        }
+                    }
                     FocusableSurface(
                         onClick = {
                             val ordered = sortAlphabetically(categories)
@@ -169,7 +242,7 @@ fun OrganizerScreen(
                 }
                 Spacer(Modifier.height(9.dp))
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    items(categories, key = MediaCategory::key) { category ->
+                    items(visibleCategories, key = MediaCategory::key) { category ->
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                             FocusableSurface(
                                 onClick = {
@@ -184,7 +257,15 @@ fun OrganizerScreen(
                             ) {
                                 Column(Modifier.padding(horizontal = 13.dp)) {
                                     Text(category.name, color = Ink, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    Text("${catalog.countIn(type, category.id)} éléments", color = MutedInk, fontSize = 11.sp)
+                                    val badge = buildString {
+                                        if (category.key in hiddenCategories) append("Masquée · ")
+                                        if (category.key in lockedCategories) append("Verrouillée · ")
+                                    }
+                                    Text(
+                                        badge + catalog.countIn(type, category.id) + " éléments",
+                                        color = if (badge.isEmpty()) MutedInk else FocusBlueBright,
+                                        fontSize = 11.sp,
+                                    )
                                 }
                             }
                             FocusableSurface(
@@ -235,7 +316,12 @@ fun OrganizerScreen(
                             ) {
                                 Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                                     Text(entry.number.toString(), color = MutedInk, fontSize = 11.sp, modifier = Modifier.width(48.dp))
-                                    Text(entry.displayName, color = Ink, fontSize = TypeLabel, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                                    Column(Modifier.weight(1f)) {
+                                        Text(entry.displayName, color = Ink, fontSize = TypeLabel, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        if (entry.key in hiddenEntries) {
+                                            Text("Masqué", color = FocusBlueBright, fontSize = 10.sp)
+                                        }
+                                    }
                                     StreamiaIcon(
                                         if (entry.key in selectedEntryKeys) StreamiaIconGlyph.CheckboxOn else StreamiaIconGlyph.CheckboxOff,
                                         size = 18.dp,
@@ -269,6 +355,24 @@ fun OrganizerScreen(
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             StreamiaIcon(StreamiaIconGlyph.ArrowForward, tint = Ink, size = 18.dp)
                         }
+                    }
+                    FocusableSurface(
+                        onClick = {
+                            val selectedEntries = sourceEntries.filter { it.key in selectedEntryKeys }
+                            val hideSelected = selectedEntries.any { it.key !in hiddenEntries }
+                            selectedEntries
+                                .filter { (it.key in hiddenEntries) != hideSelected }
+                                .forEach(onToggleEntryHidden)
+                        },
+                        enabled = selectedEntryKeys.isNotEmpty(),
+                        modifier = Modifier.width(128.dp).height(52.dp),
+                    ) {
+                        Text(
+                            if (selectedEntryKeys.isNotEmpty() && selectedEntryKeys.all { it in hiddenEntries }) "Afficher" else "Masquer",
+                            color = Ink,
+                            fontSize = TypeLabel,
+                            modifier = Modifier.padding(horizontal = 14.dp),
+                        )
                     }
                     FocusableSurface(
                         onClick = {

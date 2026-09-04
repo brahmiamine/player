@@ -30,7 +30,7 @@ import kotlin.math.sin
 enum class StreamiaIconGlyph {
     Live, Movie, Series, Search, Guide, Settings, Refresh, Swap,
     Star, StarOutline, ChevronUp, ChevronDown, CheckboxOn, CheckboxOff, ArrowBack, ArrowForward,
-    Reorder, Delete,
+    Reorder, Delete, Lock,
 }
 
 @Composable
@@ -63,6 +63,7 @@ fun StreamiaIcon(
             StreamiaIconGlyph.ArrowForward -> drawArrow(tint, stroke, pointRight = true)
             StreamiaIconGlyph.Reorder -> drawReorder(tint, stroke)
             StreamiaIconGlyph.Delete -> drawDelete(tint, stroke)
+            StreamiaIconGlyph.Lock -> drawLock(tint, stroke)
         }
     }
 }
@@ -248,6 +249,25 @@ private fun DrawScope.drawDelete(tint: Color, stroke: Stroke) {
     val ribWidth = stroke.width * 0.75f
     drawLine(tint, pt(0.41f, 0.40f), pt(0.41f, 0.72f), ribWidth, cap = StrokeCap.Round)
     drawLine(tint, pt(0.59f, 0.40f), pt(0.59f, 0.72f), ribWidth, cap = StrokeCap.Round)
+}
+
+private fun DrawScope.drawLock(tint: Color, stroke: Stroke) {
+    drawArc(
+        tint,
+        startAngle = 180f,
+        sweepAngle = 180f,
+        useCenter = false,
+        topLeft = pt(0.28f, 0.16f),
+        size = Size(size.width * 0.44f, size.height * 0.40f),
+        style = stroke,
+    )
+    drawRoundRect(
+        tint,
+        topLeft = pt(0.22f, 0.44f),
+        size = Size(size.width * 0.56f, size.height * 0.40f),
+        cornerRadius = CornerRadius(size.minDimension * 0.10f),
+        style = Fill,
+    )
 }
 
 private fun DrawScope.drawCheckbox(tint: Color, stroke: Stroke, checked: Boolean) {

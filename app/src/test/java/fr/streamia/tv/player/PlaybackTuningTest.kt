@@ -1,5 +1,6 @@
 package fr.streamia.tv.player
 
+import fr.streamia.tv.data.BufferMode
 import fr.streamia.tv.domain.MediaType
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -14,6 +15,16 @@ class PlaybackTuningTest {
         assertEquals(12_000, profile.maxBufferMs)
         assertEquals(350, profile.bufferForPlaybackMs)
         assertEquals(900, profile.bufferForPlaybackAfterRebufferMs)
+    }
+
+    @Test
+    fun `stable live buffering is larger than low latency`() {
+        val low = PlaybackTuning.forType(MediaType.Live, BufferMode.LowLatency)
+        val stable = PlaybackTuning.forType(MediaType.Live, BufferMode.Stable)
+
+        assertTrue(stable.minBufferMs > low.minBufferMs)
+        assertTrue(stable.maxBufferMs > low.maxBufferMs)
+        assertTrue(stable.bufferForPlaybackAfterRebufferMs > low.bufferForPlaybackAfterRebufferMs)
     }
 
     @Test

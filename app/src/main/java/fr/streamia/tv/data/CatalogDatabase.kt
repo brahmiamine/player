@@ -238,6 +238,9 @@ internal class CatalogDatabase(context: Context) :
         }
     }
 
+    /** Taille du fichier SQLite sur disque, pour l'écran diagnostics — 0 si le fichier n'existe pas encore. */
+    fun fileSizeBytes(): Long = runCatching { java.io.File(readableDatabase.path).length() }.getOrDefault(0L)
+
     fun delete(profileId: String) {
         val db = writableDatabase
         db.beginTransaction()

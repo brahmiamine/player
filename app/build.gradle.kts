@@ -10,6 +10,30 @@ android {
     namespace = "fr.streamia.tv"
     compileSdk = 36
 
+    // Clé de release réelle, fournie via des variables d'environnement (secrets GitHub Actions en
+    // CI, ou export local pour une build manuelle) — jamais committée. Tant que ces variables sont
+    // absentes (build d'un contributeur sans les secrets, PR venant d'un fork) `releaseSigning`
+    // reste `null` et les variantes signées retombent sur la clé debug, comme avant : aucune build
+    // locale ne casse. Voir docs/release-signing.md pour la procédure de génération de la clé.
+    val releaseSigningEnv = listOfNotNull(
+        System.getenv("RELEASE_STORE_FILE")?.takeIf(String::isNotBlank),
+        System.getenv("RELEASE_STORE_PASSWORD")?.takeIf(String::isNotBlank),
+        System.getenv("RELEASE_KEY_ALIAS")?.takeIf(String::isNotBlank),
+        System.getenv("RELEASE_KEY_PASSWORD")?.takeIf(String::isNotBlank),
+    ).takeIf { it.size == 4 }
+
+    signingConfigs {
+        if (releaseSigningEnv != null) {
+            val (storeFilePath, storePasswordEnv, keyAliasEnv, keyPasswordEnv) = releaseSigningEnv
+            create("release") {
+                storeFile = file(storeFilePath)
+                storePassword = storePasswordEnv
+                keyAlias = keyAliasEnv
+                keyPassword = keyPasswordEnv
+            }
+        }
+    }
+
     defaultConfig {
         applicationId = "fr.streamia.tv"
         minSdk = 23
@@ -33,11 +57,12 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
         create("optimized") {
             initWith(getByName("release"))
             versionNameSuffix = "-optimized"
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
             matchingFallbacks += listOf("release")
         }
     }
@@ -110,6 +135,7 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer-hls:$media3Version")
     implementation("androidx.media3:media3-datasource-okhttp:$media3Version")
     implementation("androidx.media3:media3-ui:$media3Version")
+    implementation("androidx.media3:media3-session:$media3Version")
 
     implementation(platform("com.google.firebase:firebase-bom:34.18.0"))
     implementation("com.google.firebase:firebase-crashlytics")

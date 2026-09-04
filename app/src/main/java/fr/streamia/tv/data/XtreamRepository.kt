@@ -32,13 +32,28 @@ class XtreamRepository(context: Context) {
     private val credentialsStore = CredentialsStore(context)
     private val playlistStore = PlaylistStore(context)
     private val libraryStore = UserLibraryStore(context)
+    private val appSettingsStore = AppSettingsStore(context)
     private val xmlTvRepository = XmlTvRepository()
     private val m3uParser = M3uParser()
+    private val updateChecker = UpdateChecker()
+    private val backupManager = BackupManager(context)
 
     fun profiles(): List<PlaylistProfile> = playlistStore.loadAll()
     fun profile(profileId: String): PlaylistProfile? = playlistStore.find(profileId)
     fun library(profileId: String): UserLibrarySnapshot = libraryStore.snapshot(profileId)
+    fun appSettings(): AppSettings = appSettingsStore.load()
+    fun updateAppSettings(transform: (AppSettings) -> AppSettings): AppSettings = appSettingsStore.update(transform)
     fun customizedCatalog(profileId: String, catalog: Catalog): Catalog = libraryStore.applyToCatalog(profileId, catalog)
+
+    suspend fun checkForUpdate(currentVersion: String): UpdateCheckResult =
+        withContext(Dispatchers.IO) { updateChecker.checkForUpdate(currentVersion) }
+
+    suspend fun cacheSizeBytes(): Long = withContext(Dispatchers.IO) { cache.databaseFileSizeBytes() }
+
+    suspend fun exportBackup(profileId: String?): String = withContext(Dispatchers.IO) { backupManager.export(profileId) }
+
+    suspend fun importBackup(profileId: String?, json: String): String =
+        withContext(Dispatchers.IO) { backupManager.import(profileId, json) }
 
     /**
      * Lecture rapide du cache disque, sans jamais contacter le fournisseur. Sert à afficher la
@@ -283,11 +298,18 @@ class XtreamRepository(context: Context) {
     }
 
     fun toggleEntryFavorite(profileId: String, entry: MediaEntry): Boolean = libraryStore.toggleEntryFavorite(profileId, entry)
+    fun toggleEntryHidden(profileId: String, entry: MediaEntry): Boolean = libraryStore.toggleEntryHidden(profileId, entry)
     fun toggleCategoryFavorite(profileId: String, category: MediaCategory): Boolean = libraryStore.toggleCategoryFavorite(profileId, category)
+    fun toggleCategoryHidden(profileId: String, category: MediaCategory): Boolean = libraryStore.toggleCategoryHidden(profileId, category)
+    fun toggleCategoryLocked(profileId: String, category: MediaCategory): Boolean = libraryStore.toggleCategoryLocked(profileId, category)
+    fun toggleEntryWatched(profileId: String, entry: MediaEntry): Boolean = libraryStore.toggleEntryWatched(profileId, entry)
+    fun setParentalPin(pin: String): AppSettings = appSettingsStore.setParentalPin(pin)
+    fun clearParentalPin(): AppSettings = appSettingsStore.clearParentalPin()
+    fun verifyParentalPin(pin: String): Boolean = appSettingsStore.verifyParentalPin(pin)
     fun recordPlayback(profileId: String, entry: MediaEntry, positionMs: Long, durationMs: Long) =
         libraryStore.recordPlayback(profileId, entry, positionMs, durationMs)
     fun resumePosition(profileId: String, entryKey: String): Long = libraryStore.resumePosition(profileId, entryKey)
-    fun clearHistory(profileId: String) = libraryStore.clearHistory(profileId)
+    fun clearHistory(profileId: String, type: MediaType? = null) = libraryStore.clearHistory(profileId, type)
     fun setCategoryOrder(profileId: String, type: MediaType, categoryKeys: List<String>) =
         libraryStore.setCategoryOrder(profileId, type, categoryKeys)
     fun moveEntries(profileId: String, entryKeys: Set<String>, targetCategoryId: String) =

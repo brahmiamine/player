@@ -56,14 +56,20 @@ import androidx.media3.common.Player
 import androidx.media3.common.Tracks
 import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.session.MediaSession
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
+import fr.streamia.tv.data.AppSettings
+import fr.streamia.tv.data.LiveStreamFormat
+import fr.streamia.tv.data.VideoAspectSetting
 import fr.streamia.tv.domain.Catalog
 import fr.streamia.tv.domain.EpgProgram
+import fr.streamia.tv.domain.MediaCategory
 import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.MediaType
+import fr.streamia.tv.domain.SeriesEpisode
 import fr.streamia.tv.domain.ServerCredentials
 import fr.streamia.tv.domain.XtreamUrlBuilder
 import fr.streamia.tv.player.DolbyCapabilityDetector
@@ -103,10 +109,9 @@ internal enum class VideoAspect(val label: String, val resizeMode: Int) {
 
 internal data class TrackChoice(val label: String, val language: String?)
 
-private const val VOD_SEEK_STEP_MS = 10_000L
-
 /** Tag de langue "indéterminée" (BCP-47) posé sur tout sous-titre externe chargé manuellement. */
 private const val EXTERNAL_SUBTITLE_LANGUAGE_TAG = "und"
+private const val NEXT_EPISODE_COUNTDOWN_SECONDS = 8
 
 @androidx.annotation.OptIn(markerClass = [UnstableApi::class])
 @Composable
@@ -116,18 +121,31 @@ fun PlayerScreen(
     entry: MediaEntry,
     epg: List<EpgProgram>,
     resumePositionMs: Long,
+    appSettings: AppSettings,
+    hiddenEntries: Set<String>,
+    lockedCategories: Set<String>,
+    parentalControlEnabled: Boolean,
+    parentalUnlocked: Boolean,
+    nextEpisode: SeriesEpisode?,
     livePlaybackSession: LivePlaybackSession,
     liveVideoSurface: @Composable (LiveVideoSurfacePlacement) -> Unit,
     onBack: () -> Unit,
     onZap: (Int) -> Unit,
     onEntrySelected: (MediaEntry) -> Unit,
     onProgress: (MediaEntry, Long, Long) -> Unit,
+    onCycleVideoAspect: () -> Unit,
+    onPlayNextEpisode: () -> Unit,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val sharedLivePlayer = entry.type == MediaType.Live
-    val player = remember(entry.type, livePlaybackSession) {
-        if (sharedLivePlayer) livePlaybackSession.player else StreamiaPlayerFactory.create(context.applicationContext, entry.type)
+    val player = remember(entry.type, livePlaybackSession, appSettings.bufferMode) {
+        if (sharedLivePlayer) {
+            livePlaybackSession.player
+        } else {
+            StreamiaPlayerFactory.create(context.applicationContext, entry.type, appSettings.bufferMode)
+        }
     }
+    val mediaSession = remember(player) { MediaSession.Builder(context.applicationContext, player).build() }
     val transportStore = remember { PlaybackTransportStore(context.applicationContext) }
     val trackPreferenceStore = remember { PlaybackTrackPreferenceStore(context.applicationContext) }
     val diagnosticsTracker = remember { PlaybackDiagnosticsTracker() }
@@ -152,7 +170,23 @@ fun PlayerScreen(
     var candidateIndex by remember { mutableStateOf(0) }
     var activeStreamUrl by remember { mutableStateOf("") }
     var numberBuffer by remember { mutableStateOf("") }
-    var aspect by remember { mutableStateOf(VideoAspect.Fit) }
+    var playbackEnded by remember(entry.key) { mutableStateOf(false) }
+    val showNextEpisodePrompt = playbackEnded && entry.type == MediaType.Series &&
+        nextEpisode != null && appSettings.autoPlayNextEpisode
+    var nextEpisodeCountdown by remember(playbackEnded) { mutableStateOf(NEXT_EPISODE_COUNTDOWN_SECONDS) }
+    LaunchedEffect(showNextEpisodePrompt) {
+        if (!showNextEpisodePrompt) return@LaunchedEffect
+        while (nextEpisodeCountdown > 0) {
+            delay(1_000)
+            nextEpisodeCountdown -= 1
+        }
+        onPlayNextEpisode()
+    }
+    val aspect = when (appSettings.videoAspect) {
+        VideoAspectSetting.Fit -> VideoAspect.Fit
+        VideoAspectSetting.Fill -> VideoAspect.Fill
+        VideoAspectSetting.Zoom -> VideoAspect.Zoom
+    }
     var audioTracks by remember { mutableStateOf(listOf(TrackChoice("Auto", null))) }
     var subtitleTracks by remember { mutableStateOf(listOf(TrackChoice("Désactivés", null))) }
     var audioIndex by remember { mutableStateOf(0) }
@@ -233,6 +267,10 @@ fun PlayerScreen(
         loadExternalSubtitle(uri, displayName)
     }
 
+    DisposableEffect(mediaSession) {
+        onDispose { mediaSession.release() }
+    }
+
     DisposableEffect(player) {
         onDispose { if (!sharedLivePlayer) player.release() }
     }
@@ -255,6 +293,11 @@ fun PlayerScreen(
                         diagnosticsTracker.onBufferingEnded(now)
                     }
                 }
+                // Pas seulement à `true` sur STATE_ENDED : un seek en arrière après la fin (reprendre la
+                // lecture, rejouer) ramène le lecteur à STATE_READY/STATE_BUFFERING sans autre signal
+                // dédié — sans ce reset, le bandeau « épisode suivant » resterait affiché (et son
+                // interception clavier bloquée) alors que la lecture a repris.
+                playbackEnded = playbackState == Player.STATE_ENDED
                 diagnostics = diagnosticsTracker.snapshot(now)
             }
 
@@ -345,7 +388,7 @@ fun PlayerScreen(
         }
     }
 
-    LaunchedEffect(entry.key, credentials) {
+    LaunchedEffect(entry.key, credentials, appSettings.liveStreamFormat) {
         playbackError = null
         buffering = true
         hudVisible = true
@@ -357,10 +400,16 @@ fun PlayerScreen(
         diagnostics = diagnosticsTracker.snapshot(SystemClock.elapsedRealtime())
 
         val baseUrl = XtreamUrlBuilder(credentials).stream(entry)
+        val storedPreference = transportStore.preferenceFor(baseUrl)
+        val preferredLiveExtension = when (appSettings.liveStreamFormat) {
+            LiveStreamFormat.Auto -> storedPreference.liveExtension
+            LiveStreamFormat.Ts -> "ts"
+            LiveStreamFormat.Hls -> "m3u8"
+        }
         streamCandidates = PlaybackUrlStrategy.candidates(
             initialUrl = baseUrl,
             type = entry.type,
-            preference = transportStore.preferenceFor(baseUrl),
+            preference = storedPreference.copy(liveExtension = preferredLiveExtension),
         )
         candidateIndex = 0
         if (sharedLivePlayer && livePlaybackSession.isCurrent(entry)) {
@@ -426,13 +475,28 @@ fun PlayerScreen(
         }
     }
 
+    // Comme pour le zapping CH+/CH-, la saisie directe d'un numéro n'a pas d'écran de code : une
+    // chaîne d'une catégorie verrouillée et pas encore déverrouillée cette session est donc exclue
+    // au même titre qu'une chaîne masquée plutôt que de silencieusement contourner le verrouillage.
+    val numericJumpLockedCategoryIds = remember(catalog, lockedCategories, parentalControlEnabled, parentalUnlocked) {
+        if (!parentalControlEnabled || parentalUnlocked) emptySet()
+        else catalog.categoriesFor(MediaType.Live)
+            .filter { it.key in lockedCategories }
+            .mapTo(mutableSetOf(), MediaCategory::id)
+    }
     LaunchedEffect(numberBuffer) {
         if (numberBuffer.isBlank()) return@LaunchedEffect
         delay(1_250)
         val number = numberBuffer.toIntOrNull()
         numberBuffer = ""
         if (number != null) {
-            catalog.entriesFor(MediaType.Live).firstOrNull { it.number == number }?.let(onEntrySelected)
+            catalog.entriesFor(MediaType.Live)
+                .firstOrNull {
+                    it.number == number &&
+                        it.key !in hiddenEntries &&
+                        it.categoryId !in numericJumpLockedCategoryIds
+                }
+                ?.let(onEntrySelected)
         }
     }
 
@@ -495,7 +559,7 @@ fun PlayerScreen(
             .focusRequester(rootFocus)
             .focusable()
             .onPreviewKeyEvent { event ->
-                if (event.type != KeyEventType.KeyDown || guideOpen || settingsOpen || livePickerOpen || returningToBrowser) return@onPreviewKeyEvent false
+                if (event.type != KeyEventType.KeyDown || guideOpen || settingsOpen || livePickerOpen || returningToBrowser || showNextEpisodePrompt) return@onPreviewKeyEvent false
                 val keyCode = event.nativeKeyEvent.keyCode
                 val digit = keyCode.toTvDigit()
                 if (digit != null && entry.type == MediaType.Live) {
@@ -523,12 +587,12 @@ fun PlayerScreen(
                     PlaybackRemoteAction.SeekBackward,
                     PlaybackRemoteAction.SeekForward,
                     -> {
-                        val delta = if (remoteAction == PlaybackRemoteAction.SeekBackward) -VOD_SEEK_STEP_MS else VOD_SEEK_STEP_MS
+                        val delta = if (remoteAction == PlaybackRemoteAction.SeekBackward) -appSettings.vodSeekStepMs else appSettings.vodSeekStepMs
                         val duration = player.duration.takeIf { it > 0L && it != C.TIME_UNSET } ?: 0L
                         val target = resolveSeekPosition(player.currentPosition, duration, delta)
                         player.seekTo(target)
                         positionMs = target
-                        seekFeedback = if (delta < 0L) "−10 s" else "+10 s"
+                        seekFeedback = if (delta < 0L) "−${appSettings.vodSeekStepSeconds} s" else "+${appSettings.vodSeekStepSeconds} s"
                         hudVisible = true
                         true
                     }
@@ -550,6 +614,7 @@ fun PlayerScreen(
                 update = {
                     it.player = player
                     it.resizeMode = aspect.resizeMode
+                    it.subtitleView?.applySubtitleStyle(appSettings.subtitleSizeScale, appSettings.subtitleBackgroundEnabled)
                 },
                 modifier = Modifier.fillMaxSize(),
             )
@@ -685,7 +750,7 @@ fun PlayerScreen(
                     applySubtitle(subtitleTracks[subtitleIndex])
                     trackPreferenceStore.saveSubtitle(subtitleTracks[subtitleIndex].language)
                 },
-                onNextAspect = { aspect = VideoAspect.entries[(aspect.ordinal + 1) % VideoAspect.entries.size] },
+                onNextAspect = onCycleVideoAspect,
                 onClose = { settingsOpen = false; rootFocus.requestFocus() },
                 externalSubtitleAvailable = !sharedLivePlayer,
                 externalSubtitleLabel = externalSubtitle?.label,
@@ -708,6 +773,60 @@ fun PlayerScreen(
                     }
                 },
             )
+        }
+
+        if (showNextEpisodePrompt) {
+            NextEpisodePrompt(
+                episode = nextEpisode,
+                secondsLeft = nextEpisodeCountdown,
+                onPlayNow = onPlayNextEpisode,
+                onCancel = { playbackEnded = false },
+            )
+        }
+    }
+}
+
+@Composable
+private fun NextEpisodePrompt(
+    episode: SeriesEpisode?,
+    secondsLeft: Int,
+    onPlayNow: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    if (episode == null) return
+    val playNowFocus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { runCatching { playNowFocus.requestFocus() } }
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.72f)), contentAlignment = Alignment.BottomEnd) {
+        Column(
+            Modifier
+                .padding(34.dp)
+                .width(420.dp)
+                .background(Night.copy(alpha = 0.97f), androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                .padding(22.dp),
+        ) {
+            Text("Épisode suivant dans ${secondsLeft}s", color = MutedInk, fontSize = 13.sp)
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "S${episode.season.toString().padStart(2, '0')}E${episode.number.toString().padStart(2, '0')} · ${episode.title}",
+                color = Ink,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(16.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                FocusableSurface(onClick = onPlayNow, modifier = Modifier.weight(1f).height(48.dp).focusRequester(playNowFocus)) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("Lire maintenant", color = Ink, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+                FocusableSurface(onClick = onCancel, modifier = Modifier.weight(1f).height(48.dp)) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("Annuler", color = Ink, fontSize = 14.sp)
+                    }
+                }
+            }
         }
     }
 }
@@ -1046,6 +1165,25 @@ private fun diagnosticsText(value: PlaybackDiagnostics): String {
         "${value.rebufferCount} rebuffer · ${value.totalRebufferTimeMs} ms"
     }
     return "$startup · $rebuffer"
+}
+
+/**
+ * Style + taille des sous-titres pilotés depuis Paramètres. Noms de couleur/type pleinement
+ * qualifiés : `android.graphics.Color` entrerait en collision avec `androidx.compose.ui.graphics.Color`
+ * déjà importé dans ce fichier pour le reste de l'UI Compose.
+ */
+internal fun androidx.media3.ui.SubtitleView.applySubtitleStyle(sizeScale: Float, backgroundEnabled: Boolean) {
+    setFractionalTextSize(androidx.media3.ui.SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * sizeScale)
+    setStyle(
+        androidx.media3.ui.CaptionStyleCompat(
+            android.graphics.Color.WHITE,
+            if (backgroundEnabled) android.graphics.Color.argb(160, 0, 0, 0) else android.graphics.Color.TRANSPARENT,
+            android.graphics.Color.TRANSPARENT,
+            androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_OUTLINE,
+            android.graphics.Color.BLACK,
+            null,
+        ),
+    )
 }
 
 private fun subtitleMimeTypeFor(name: String): String? =

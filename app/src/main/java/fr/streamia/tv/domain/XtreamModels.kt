@@ -79,6 +79,18 @@ data class SeriesDetails(
 ) {
     val seasons: List<Int> = episodes.map(SeriesEpisode::season).distinct().sorted()
     fun episodesIn(season: Int): List<SeriesEpisode> = episodes.filter { it.season == season }
+
+    /**
+     * Épisode suivant [currentEpisodeId] dans [episodes], qui reste dans l'ordre saison croissante
+     * puis position fournisseur au sein de la saison (voir [fr.streamia.tv.data.XtreamClient.loadSeriesDetails]) :
+     * franchir la fin d'une saison passe donc naturellement au premier épisode de la suivante.
+     * `null` si l'épisode courant est introuvable ou déjà le dernier.
+     */
+    fun nextEpisode(currentEpisodeId: Int): SeriesEpisode? {
+        val index = episodes.indexOfFirst { it.id == currentEpisodeId }
+        if (index < 0 || index + 1 >= episodes.size) return null
+        return episodes[index + 1]
+    }
 }
 
 data class EpgProgram(
@@ -124,6 +136,29 @@ data class EpgGuide(
 }
 
 private fun String.normalizedLookupKey(): String = trim().lowercase()
+
+/**
+ * Corrige un décalage horaire du flux XMLTV (fréquent : le fournisseur publie parfois dans un
+ * fuseau différent de celui attendu) en décalant les horaires de tous les programmes de [offsetHours]
+ * heures. Appliquée à l'affichage plutôt qu'au chargement pour rester réactive à un changement du
+ * réglage sans devoir recharger tout le guide.
+ */
+fun EpgGuide.withTimeOffset(offsetHours: Int): EpgGuide {
+    if (offsetHours == 0) return this
+    val shiftSeconds = offsetHours * 3_600L
+    return copy(
+        channels = channels.mapValues { (_, channel) ->
+            channel.copy(
+                programs = channel.programs.map { program ->
+                    program.copy(
+                        startEpochSeconds = program.startEpochSeconds?.plus(shiftSeconds),
+                        endEpochSeconds = program.endEpochSeconds?.plus(shiftSeconds),
+                    )
+                },
+            )
+        },
+    )
+}
 
 data class AccountInfo(
     val username: String,

@@ -27,10 +27,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.tv.material3.Text
+import fr.streamia.tv.BuildConfig
 import fr.streamia.tv.ui.theme.MutedInk
 import fr.streamia.tv.ui.theme.Night
 import fr.streamia.tv.ui.theme.StreamiaTheme
 import fr.streamia.tv.player.LivePlaybackSession
+import fr.streamia.tv.domain.MediaType
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.ui.PlayerView
 
@@ -50,6 +52,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                 update = { view ->
                     view.player = livePlaybackSession.player
                     view.resizeMode = placement.resizeMode
+                    view.subtitleView?.applySubtitleStyle(state.appSettings.subtitleSizeScale, state.appSettings.subtitleBackgroundEnabled)
                 },
                 modifier = placement.modifier,
             )
@@ -84,6 +87,8 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     offline = state.offline,
                     busy = state.busy,
                     library = state.library,
+                    parentalControlEnabled = state.appSettings.parentalControlEnabled,
+                    parentalUnlocked = state.parentalUnlocked,
                     catalogLoading = state.catalogHydrating,
                     onOpenSection = viewModel::openSection,
                     onSettings = viewModel::showSettings,
@@ -101,6 +106,8 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     livePlaybackSession = livePlaybackSession,
                     liveVideoSurface = liveVideoSurface,
                     library = state.library,
+                    appSettings = state.appSettings,
+                    parentalUnlocked = state.parentalUnlocked,
                     offline = state.offline,
                     busy = state.busy,
                     message = state.message,
@@ -109,6 +116,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onEntrySelected = viewModel::openEntry,
                     onToggleEntryFavorite = viewModel::toggleEntryFavorite,
                     onToggleCategoryFavorite = viewModel::toggleCategoryFavorite,
+                    onVerifyParentalPin = viewModel::verifyParentalPin,
                     onRememberContent = viewModel::rememberLastContent,
                     onLocationChanged = viewModel::rememberBrowserLocation,
                     onEnsureCategoryLoaded = viewModel::ensureCategoryLoaded,
@@ -130,15 +138,61 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                 )
 
                 state.screen is StreamiaScreen.Settings -> SettingsScreen(
+                    settings = state.appSettings,
+                    onToggleLivePreview = viewModel::toggleLivePreview,
+                    onCycleLivePreviewDelay = viewModel::cycleLivePreviewDelay,
+                    onCycleVodSeekStep = viewModel::cycleVodSeekStep,
+                    onCycleVideoAspect = viewModel::cycleVideoAspect,
+                    onCycleBufferMode = viewModel::cycleBufferMode,
+                    onCycleLiveStreamFormat = viewModel::cycleLiveStreamFormat,
+                    onCycleLiveChannelSortOrder = viewModel::cycleLiveChannelSortOrder,
+                    onCycleVodSortOrder = viewModel::cycleVodSortOrder,
+                    onCycleEpgTimeOffset = viewModel::cycleEpgTimeOffset,
+                    onToggleAutoPlayNextEpisode = viewModel::toggleAutoPlayNextEpisode,
+                    onCycleSubtitleSizeScale = viewModel::cycleSubtitleSizeScale,
+                    onToggleSubtitleBackground = viewModel::toggleSubtitleBackground,
+                    onTools = viewModel::showTools,
+                    onParentalControl = viewModel::showParentalControl,
+                    onBack = viewModel::showHome,
+                )
+
+                state.screen is StreamiaScreen.ParentalControl -> ParentalControlScreen(
+                    enabled = state.appSettings.parentalControlEnabled,
+                    onSetPin = viewModel::setParentalPin,
+                    onVerifyPin = viewModel::verifyParentalPin,
+                    onDisable = viewModel::disableParentalControl,
+                    onBack = viewModel::showSettings,
+                )
+
+                state.screen is StreamiaScreen.Tools -> ToolsScreen(
                     busy = state.busy,
-                    historyCount = state.library.history.size,
+                    liveHistoryCount = state.library.history.count { it.entry.type == MediaType.Live },
+                    movieHistoryCount = state.library.history.count { it.entry.type == MediaType.Movie },
+                    seriesHistoryCount = state.library.history.count { it.entry.type == MediaType.Series },
+                    currentVersion = BuildConfig.VERSION_NAME,
+                    updateChecking = state.updateChecking,
+                    updateCheck = state.updateCheck,
                     onSearch = viewModel::showSearch,
                     onEpg = viewModel::showEpg,
                     onOrganizer = viewModel::showOrganizer,
                     onRefresh = viewModel::refresh,
-                    onClearHistory = viewModel::clearHistory,
+                    onClearLiveHistory = { viewModel.clearHistory(MediaType.Live) },
+                    onClearMovieHistory = { viewModel.clearHistory(MediaType.Movie) },
+                    onClearSeriesHistory = { viewModel.clearHistory(MediaType.Series) },
+                    onClearAllHistory = { viewModel.clearHistory() },
                     onChangePlaylist = viewModel::logout,
-                    onBack = viewModel::showHome,
+                    onCheckForUpdate = viewModel::checkForUpdate,
+                    onDismissUpdateCheck = viewModel::dismissUpdateCheck,
+                    onExportBackup = viewModel::exportBackup,
+                    onImportBackup = viewModel::importBackup,
+                    onAbout = viewModel::showAbout,
+                    onBack = viewModel::showSettings,
+                )
+
+                state.screen is StreamiaScreen.About -> AboutScreen(
+                    versionName = BuildConfig.VERSION_NAME,
+                    onLoadCacheSize = viewModel::cacheSizeBytes,
+                    onBack = viewModel::showTools,
                 )
 
                 state.screen is StreamiaScreen.Search && state.catalog != null -> SearchScreen(
@@ -152,6 +206,12 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                 state.screen is StreamiaScreen.Epg && state.catalog != null -> EpgScreen(
                     catalog = state.catalog!!,
                     guide = state.epgGuide,
+                    hiddenCategories = state.library.hiddenCategories,
+                    hiddenEntries = state.library.hiddenEntries,
+                    lockedCategories = state.library.lockedCategories,
+                    parentalControlEnabled = state.appSettings.parentalControlEnabled,
+                    parentalUnlocked = state.parentalUnlocked,
+                    epgTimeOffsetHours = state.appSettings.epgTimeOffsetHours,
                     loading = state.epgLoading,
                     message = state.message,
                     onOpenChannel = viewModel::openEntry,
@@ -161,7 +221,14 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
 
                 state.screen is StreamiaScreen.Organizer && state.catalog != null -> OrganizerScreen(
                     catalog = state.catalog!!,
+                    hiddenCategories = state.library.hiddenCategories,
+                    hiddenEntries = state.library.hiddenEntries,
+                    lockedCategories = state.library.lockedCategories,
+                    parentalControlEnabled = state.appSettings.parentalControlEnabled,
                     onCategoryOrderChanged = viewModel::setCategoryOrder,
+                    onToggleCategoryHidden = viewModel::toggleCategoryHidden,
+                    onToggleEntryHidden = viewModel::toggleEntryHidden,
+                    onToggleCategoryLocked = viewModel::toggleCategoryLocked,
                     onMoveEntries = viewModel::moveEntries,
                     onResetMoves = viewModel::resetEntryMoves,
                     onBack = viewModel::closeOrganizer,
@@ -176,9 +243,11 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                         busy = state.busy,
                         message = state.message,
                         favorite = movie.key in state.library.favoriteEntries,
+                        watched = movie.key in state.library.watchedEntries,
                         resumePositionMs = resume,
                         onPlay = { viewModel.playMovie(movie) },
                         onToggleFavorite = { viewModel.toggleEntryFavorite(movie) },
+                        onToggleWatched = { viewModel.toggleEntryWatched(movie) },
                         onBack = viewModel::closeDetails,
                     )
                 }
@@ -191,7 +260,9 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                         busy = state.busy,
                         message = state.message,
                         favorite = series.key in state.library.favoriteEntries,
+                        watched = series.key in state.library.watchedEntries,
                         onToggleFavorite = { viewModel.toggleEntryFavorite(series) },
+                        onToggleWatched = { viewModel.toggleEntryWatched(series) },
                         onEpisodeSelected = { episode -> viewModel.playEpisode(series, episode) },
                         onBack = viewModel::closeSeries,
                         onRetry = { viewModel.openEntry(series) },
@@ -206,6 +277,12 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                         entry = playerScreen.entry,
                         epg = state.epg,
                         resumePositionMs = state.resumePositionMs,
+                        appSettings = state.appSettings,
+                        hiddenEntries = state.library.hiddenEntries,
+                        lockedCategories = state.library.lockedCategories,
+                        parentalControlEnabled = state.appSettings.parentalControlEnabled,
+                        parentalUnlocked = state.parentalUnlocked,
+                        nextEpisode = state.seriesDetails?.nextEpisode(playerScreen.entry.id),
                         livePlaybackSession = livePlaybackSession,
                         liveVideoSurface = liveVideoSurface,
                         onBack = {
@@ -215,6 +292,8 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                         onZap = viewModel::zap,
                         onEntrySelected = viewModel::openEntry,
                         onProgress = viewModel::recordPlayback,
+                        onCycleVideoAspect = viewModel::cycleVideoAspect,
+                        onPlayNextEpisode = viewModel::playNextEpisode,
                     )
                 }
 
