@@ -536,6 +536,30 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         }
     }
 
+    fun toggleCategoryHidden(category: MediaCategory) {
+        val profileId = _uiState.value.activeProfileId ?: return
+        _uiState.update { state ->
+            val hidden = state.library.hiddenCategories.toMutableSet().apply {
+                if (!add(category.key)) remove(category.key)
+            }
+            state.copy(library = state.library.copy(hiddenCategories = hidden))
+        }
+        val sequence = ++libraryMutationSequence
+        viewModelScope.launch {
+            libraryMutation.withLock {
+                runCatching {
+                    withContext(Dispatchers.IO) {
+                        repository.toggleCategoryHidden(profileId, category)
+                        repository.library(profileId)
+                    }
+                }.onSuccess { library ->
+                    if (sequence != libraryMutationSequence) return@onSuccess
+                    _uiState.update { state -> if (state.activeProfileId == profileId) state.copy(library = library) else state }
+                }
+            }
+        }
+    }
+
     fun toggleCategoryFavorite(category: MediaCategory) {
         val profileId = _uiState.value.activeProfileId ?: return
         _uiState.update { state ->
