@@ -171,6 +171,8 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                 state.screen is StreamiaScreen.Epg && state.catalog != null -> EpgScreen(
                     catalog = state.catalog!!,
                     guide = state.epgGuide,
+                    hiddenCategories = state.library.hiddenCategories,
+                    hiddenEntries = state.library.hiddenEntries,
                     loading = state.epgLoading,
                     message = state.message,
                     onOpenChannel = viewModel::openEntry,
@@ -181,8 +183,10 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                 state.screen is StreamiaScreen.Organizer && state.catalog != null -> OrganizerScreen(
                     catalog = state.catalog!!,
                     hiddenCategories = state.library.hiddenCategories,
+                    hiddenEntries = state.library.hiddenEntries,
                     onCategoryOrderChanged = viewModel::setCategoryOrder,
                     onToggleCategoryHidden = viewModel::toggleCategoryHidden,
+                    onToggleEntryHidden = viewModel::toggleEntryHidden,
                     onMoveEntries = viewModel::moveEntries,
                     onResetMoves = viewModel::resetEntryMoves,
                     onBack = viewModel::closeOrganizer,
@@ -228,6 +232,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                         epg = state.epg,
                         resumePositionMs = state.resumePositionMs,
                         appSettings = state.appSettings,
+                        hiddenEntries = state.library.hiddenEntries,
                         livePlaybackSession = livePlaybackSession,
                         liveVideoSurface = liveVideoSurface,
                         onBack = {
