@@ -38,6 +38,28 @@ class MatchRowEngineTest {
     }
 
     @Test
+    fun `home rows keep only live matches in live and only upcoming matches today in next`() {
+        val channel = channel(1, "beIN Sports")
+        val programs = mapOf(
+            channel to listOf(
+                footballProgram("PSG - Marseille", now - 600, now + 3_000),
+                footballProgram("Arsenal vs Chelsea", now + 1_800, now + 5_400),
+                footballProgram("Lyon - Nice", now + 86_400, now + 90_000),
+            ),
+        )
+
+        val rows = engine.buildHomeRows(programs, now)
+
+        assertEquals("🔴 Matchs en direct", rows.live?.title)
+        assertEquals(listOf("PSG"), rows.live?.items?.map { it.event.participantA })
+        assertTrue(rows.live?.items?.all { it.temporalState == MatchTemporalState.Live } == true)
+
+        assertEquals("⚽ Matchs suivants", rows.upcomingToday?.title)
+        assertEquals(listOf("Arsenal"), rows.upcomingToday?.items?.map { it.event.participantA })
+        assertTrue(rows.upcomingToday?.items?.all { it.temporalState == MatchTemporalState.Today } == true)
+    }
+
+    @Test
     fun `real slash fixture is detected from sports channel context`() {
         val channel = channel(14300, "VIP: BEIN SPORTS MAX 8 HD")
         val program = EpgProgram(
