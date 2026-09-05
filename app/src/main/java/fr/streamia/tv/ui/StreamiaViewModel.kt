@@ -30,6 +30,13 @@ import fr.streamia.tv.domain.epgNowContextAt
 import fr.streamia.tv.domain.withTimeOffset
 import fr.streamia.tv.matches.MatchRow
 import fr.streamia.tv.matches.MatchRowEngine
+import fr.streamia.tv.recommendation.ContentFeatures
+import fr.streamia.tv.recommendation.RecommendationBuildContext
+import fr.streamia.tv.recommendation.RecommendationEngine
+import fr.streamia.tv.recommendation.RecommendationProfileInput
+import fr.streamia.tv.recommendation.RecommendationRow
+import fr.streamia.tv.recommendation.RecommendedMedia
+import fr.streamia.tv.recommendation.ViewingRecord
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -63,6 +70,11 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     private var homeMatchJob: Job? = null
     private var homeMatchLastBuiltProfileId: String? = null
     private var homeMatchLastBuiltAtEpochSeconds = 0L
+    private val recommendationEngine = RecommendationEngine()
+    private var homeRecommendationBuildSequence = 0L
+    private var homeRecommendationJob: Job? = null
+    private var homeRecommendationLastBuiltProfileId: String? = null
+    private var homeRecommendationLastBuiltAtMillis = 0L
     private var epgSyncJob: Job? = null
     private var epgSyncProfileId: String? = null
     private var epgPrefetchJob: Job? = null
@@ -242,6 +254,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 // pas forcer ici 55k+ chaînes dans le StateFlow du Home : cela augmente fortement
                 // le coût CPU/mémoire au démarrage sur Android TV.
                 refreshHomeMatchRow()
+                refreshHomeRecommendations()
                 try {
                     mergeCatalog(repository.openProfile(profileId, knownCache = cachedCatalog))
                 } catch (error: Throwable) {
@@ -472,6 +485,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         // réseau n'est déclenché par l'ouverture de l'accueil.
         _uiState.update { it.copy(screen = StreamiaScreen.Home, message = null, epgLoading = false) }
         refreshHomeMatchRow()
+        refreshHomeRecommendations()
     }
     fun showSettings() { _uiState.update { it.copy(screen = StreamiaScreen.Settings, message = null) } }
     fun showTools() { _uiState.update { it.copy(screen = StreamiaScreen.Tools, message = null) } }
@@ -990,8 +1004,12 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         if (profileId != null) refreshLibrarySnapshot(profileId)
     }
 
-    fun closeDetails() { _uiState.update { it.copy(screen = StreamiaScreen.Browser, mediaDetails = null, message = null) } }
-    fun closeSeries() { _uiState.update { it.copy(screen = StreamiaScreen.Browser, seriesDetails = null, message = null) } }
+    fun closeDetails() {
+        _uiState.update { it.copy(screen = StreamiaScreen.Browser, mediaDetails = null, similarMedia = emptyList(), message = null) }
+    }
+    fun closeSeries() {
+        _uiState.update { it.copy(screen = StreamiaScreen.Browser, seriesDetails = null, similarMedia = emptyList(), message = null) }
+    }
 
     fun zap(delta: Int) {
         val state = _uiState.value
@@ -1051,9 +1069,10 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
 
     private fun loadMovie(movie: MediaEntry) {
         val credentials = _uiState.value.credentials ?: return
-        _uiState.update { it.copy(busy = true, mediaDetails = null, screen = StreamiaScreen.MovieDetails(movie), message = null) }
+        val profileId = _uiState.value.activeProfileId
+        _uiState.update { it.copy(busy = true, mediaDetails = null, similarMedia = emptyList(), screen = StreamiaScreen.MovieDetails(movie), message = null) }
         viewModelScope.launch {
-            runCatching { repository.movieDetails(credentials, movie) }
+            val details = runCatching { repository.movieDetails(credentials, movie) }
                 .onSuccess { details -> _uiState.update { it.copy(busy = false, mediaDetails = details) } }
                 .onFailure { error ->
                     _uiState.update {
@@ -1064,15 +1083,28 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                         )
                     }
                 }
+                .getOrNull()
+            if (profileId != null) {
+                val resolvedDetails = details ?: _uiState.value.mediaDetails
+                resolvedDetails?.let { runCatching { repository.cacheRecommendationDetails(profileId, it) } }
+                loadSimilarMedia(profileId, movie, resolvedDetails)
+            }
         }
     }
 
     private fun loadSeries(series: MediaEntry) {
         val credentials = _uiState.value.credentials ?: return
-        _uiState.update { it.copy(busy = true, message = null, seriesDetails = null, screen = StreamiaScreen.Series(series)) }
+        val profileId = _uiState.value.activeProfileId
+        _uiState.update { it.copy(busy = true, message = null, seriesDetails = null, similarMedia = emptyList(), screen = StreamiaScreen.Series(series)) }
         viewModelScope.launch {
             runCatching { repository.seriesDetails(credentials, series) }
-                .onSuccess { details -> _uiState.update { it.copy(busy = false, seriesDetails = details) } }
+                .onSuccess { details ->
+                    _uiState.update { it.copy(busy = false, seriesDetails = details) }
+                    if (profileId != null) {
+                        details.details?.let { info -> runCatching { repository.cacheRecommendationDetails(profileId, info) } }
+                        loadSimilarMedia(profileId, series, details.details)
+                    }
+                }
                 .onFailure { error -> _uiState.update { it.copy(busy = false, message = error.safeMessage()) } }
         }
     }
@@ -1570,6 +1602,120 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         }
     }
 
+    /**
+     * Construit les rangées « Recommandé pour vous »/« Parce que vous avez regardé… » de l'accueil.
+     * Même philosophie que [refreshHomeMatchRow] : lecture bornée depuis SQLite, calcul CPU sur
+     * Dispatchers.Default, résultat jeté si le profil actif a changé pendant le calcul.
+     */
+    private fun refreshHomeRecommendations(force: Boolean = false) {
+        val state = _uiState.value
+        val profileId = state.activeProfileId ?: return
+        val catalog = state.catalog ?: return
+        val nowMillis = System.currentTimeMillis()
+
+        if (
+            !force &&
+            homeRecommendationLastBuiltProfileId == profileId &&
+            nowMillis - homeRecommendationLastBuiltAtMillis < HOME_RECOMMENDATION_REBUILD_INTERVAL_MS
+        ) return
+        if (!force && homeRecommendationJob?.isActive == true) return
+
+        val library = state.library
+        val excludedCategoryKeys = if (state.appSettings.parentalControlEnabled && !state.parentalUnlocked) {
+            library.hiddenCategories + library.lockedCategories
+        } else {
+            library.hiddenCategories
+        }
+        val excludedCategoryIds = catalog.categories.asSequence()
+            .filter { it.type != MediaType.Live && it.key in excludedCategoryKeys }
+            .mapTo(mutableSetOf()) { it.id }
+
+        val sequence = ++homeRecommendationBuildSequence
+        homeRecommendationJob?.cancel()
+
+        // Comme pour les Matchs : le scoring (similarité texte, décroissance des signaux) est du
+        // CPU pur sur potentiellement plusieurs centaines de candidats, donc jamais sur Main.
+        homeRecommendationJob = viewModelScope.launch(Dispatchers.Default) {
+            val candidates = listOf(MediaType.Movie, MediaType.Series).flatMap { type ->
+                runCatching {
+                    repository.recommendationCandidates(profileId, type, HOME_RECOMMENDATION_CANDIDATE_LIMIT)
+                }.getOrDefault(emptyList())
+            }
+            if (sequence != homeRecommendationBuildSequence || _uiState.value.activeProfileId != profileId) return@launch
+            if (candidates.isEmpty()) {
+                _uiState.update { current ->
+                    if (current.activeProfileId == profileId) current.copy(homeRecommendationRows = emptyList()) else current
+                }
+                return@launch
+            }
+
+            val historyEntries = library.history.map { it.entry }
+            val favoriteEntries = library.favoriteEntries.mapNotNull(catalog::entry)
+            val knownEntriesByKey = (historyEntries + favoriteEntries).associateBy(MediaEntry::key)
+            val detailsSource = (candidates + historyEntries + favoriteEntries).distinctBy(MediaEntry::key)
+            val detailsByKey = runCatching {
+                repository.recommendationContentFeatures(profileId, detailsSource)
+            }.getOrDefault(emptyMap())
+
+            if (sequence != homeRecommendationBuildSequence || _uiState.value.activeProfileId != profileId) return@launch
+
+            val context = RecommendationBuildContext(
+                candidates = candidates,
+                detailsByKey = detailsByKey,
+                profile = RecommendationProfileInput(
+                    history = library.history.map { item ->
+                        ViewingRecord(item.entry, item.positionMs, item.durationMs, item.updatedAt)
+                    },
+                    favoriteEntries = library.favoriteEntries,
+                    watchedEntries = library.watchedEntries,
+                    knownEntriesByKey = knownEntriesByKey,
+                    hiddenEntries = library.hiddenEntries,
+                    hiddenCategoryIds = excludedCategoryIds,
+                ),
+                nowMillis = nowMillis,
+            )
+            val snapshot = recommendationEngine.buildSnapshot(profileId, context)
+
+            if (sequence != homeRecommendationBuildSequence || _uiState.value.activeProfileId != profileId) return@launch
+            homeRecommendationLastBuiltProfileId = profileId
+            homeRecommendationLastBuiltAtMillis = System.currentTimeMillis()
+            _uiState.update { current ->
+                if (current.activeProfileId == profileId) current.copy(homeRecommendationRows = snapshot.rows) else current
+            }
+        }
+    }
+
+    /**
+     * Calcule « Films/Séries similaires » pour la fiche actuellement ouverte, à partir du même pool
+     * borné de candidats VOD que l'accueil. [details] fournit le synopsis/genre/casting quand
+     * disponibles ; à défaut, le moteur retombe sur les seuls champs du catalogue.
+     */
+    private suspend fun loadSimilarMedia(profileId: String, entry: MediaEntry, details: MediaDetails?) {
+        val hiddenEntries = _uiState.value.library.hiddenEntries
+        val candidates = runCatching {
+            repository.recommendationCandidates(profileId, entry.type, SIMILAR_CANDIDATE_LIMIT)
+        }.getOrDefault(emptyList())
+        if (candidates.isEmpty()) return
+
+        val sourceFeatures = ContentFeatures.from(entry, details)
+        val similar = withContext(Dispatchers.Default) {
+            recommendationEngine.similarTo(
+                source = sourceFeatures,
+                candidates = candidates,
+                hiddenEntries = hiddenEntries,
+            )
+        }
+
+        _uiState.update { state ->
+            val onSameScreen = when (val screen = state.screen) {
+                is StreamiaScreen.MovieDetails -> screen.movie.key == entry.key
+                is StreamiaScreen.Series -> screen.series.key == entry.key
+                else -> false
+            }
+            if (onSameScreen) state.copy(similarMedia = similar) else state
+        }
+    }
+
     private fun epgDayBounds(date: LocalDate): Pair<Long, Long> {
         val zone = ZoneId.systemDefault()
         return date.atStartOfDay(zone).toEpochSecond() to
@@ -1683,6 +1829,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 }
                 if (committed) {
                     ensureSectionLoaded(MediaType.Live)
+                    refreshHomeRecommendations()
                 }
                 return
             }
@@ -1704,6 +1851,11 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         homeMatchBuildSequence += 1
         homeMatchLastBuiltProfileId = null
         homeMatchLastBuiltAtEpochSeconds = 0L
+        homeRecommendationJob?.cancel()
+        homeRecommendationJob = null
+        homeRecommendationBuildSequence += 1
+        homeRecommendationLastBuiltProfileId = null
+        homeRecommendationLastBuiltAtMillis = 0L
         epgPrefetchJob?.cancel()
         epgPrefetchJob = null
         epgSyncJob?.cancel()
@@ -1737,6 +1889,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         )
         warmEpgGuideCache(loaded.profileId)
         ensureSectionLoaded(MediaType.Live)
+        refreshHomeRecommendations()
     }
 
     private fun showError(error: Throwable) {
@@ -1782,6 +1935,8 @@ data class StreamiaUiState(
     val epgSelectedDate: LocalDate? = null,
     val epgLoading: Boolean = false,
     val homeMatchRow: MatchRow? = null,
+    val homeRecommendationRows: List<RecommendationRow> = emptyList(),
+    val similarMedia: List<RecommendedMedia> = emptyList(),
     val resumePositionMs: Long = 0,
     val browserType: MediaType? = null,
     val browserCategoryId: String? = null,
@@ -1809,6 +1964,9 @@ private const val MAX_EPG_DAY_SPAN = 30L
 private const val HOME_MATCH_WINDOW_DAYS = 7L
 private const val HOME_MATCH_ROW_LIMIT = 12
 private const val HOME_MATCH_REBUILD_INTERVAL_SECONDS = 5 * 60L
+private const val HOME_RECOMMENDATION_CANDIDATE_LIMIT = 400
+private const val HOME_RECOMMENDATION_REBUILD_INTERVAL_MS = 5 * 60_000L
+private const val SIMILAR_CANDIDATE_LIMIT = 400
 
 class StreamiaViewModelFactory(private val repository: XtreamRepository) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")

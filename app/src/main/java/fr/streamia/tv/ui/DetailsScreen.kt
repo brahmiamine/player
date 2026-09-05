@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
 import fr.streamia.tv.domain.MediaDetails
 import fr.streamia.tv.domain.MediaEntry
+import fr.streamia.tv.recommendation.RecommendedMedia
 import fr.streamia.tv.ui.theme.FocusBlueBright
 import fr.streamia.tv.ui.theme.HeadingWeight
 import fr.streamia.tv.ui.theme.Ink
@@ -46,9 +47,11 @@ fun MovieDetailsScreen(
     favorite: Boolean,
     watched: Boolean,
     resumePositionMs: Long,
+    similarMedia: List<RecommendedMedia> = emptyList(),
     onPlay: () -> Unit,
     onToggleFavorite: () -> Unit,
     onToggleWatched: () -> Unit,
+    onOpenSimilar: (MediaEntry) -> Unit = {},
     onBack: () -> Unit,
 ) {
     BackHandler(onBack = onBack)
@@ -130,6 +133,12 @@ fun MovieDetailsScreen(
                 Spacer(Modifier.height(8.dp))
                 Text(message, color = MutedInk, fontSize = TypeLabel, maxLines = 4, overflow = TextOverflow.Ellipsis)
             }
+            SimilarMediaRow(
+                title = "Films similaires",
+                items = similarMedia,
+                onOpenSimilar = onOpenSimilar,
+                modifier = Modifier.padding(top = 18.dp),
+            )
             Spacer(Modifier.height(30.dp))
         }
     }
