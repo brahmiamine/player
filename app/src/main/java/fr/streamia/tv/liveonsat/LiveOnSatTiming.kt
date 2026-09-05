@@ -1,6 +1,7 @@
 package fr.streamia.tv.liveonsat
 
 import fr.streamia.tv.domain.EpgGuide
+import java.text.Normalizer
 import kotlin.math.abs
 
 /**
@@ -20,6 +21,9 @@ fun ResolvedLiveOnSatMatch.withEpgTiming(guide: EpgGuide?): ResolvedLiveOnSatMat
         .distinctBy { it.key }
         .flatMap { channel -> guide.forEntry(channel).asSequence() }
         .mapNotNull { program ->
+            if (!programMatchesParticipants(program.title, program.description, match.participantA, match.participantB)) {
+                return@mapNotNull null
+            }
             val start = program.startEpochSeconds ?: return@mapNotNull null
             val end = program.endEpochSeconds ?: return@mapNotNull null
             val duration = end - start
@@ -42,6 +46,31 @@ fun ResolvedLiveOnSatMatch.withEpgTiming(guide: EpgGuide?): ResolvedLiveOnSatMat
         copy(epgStartEpochSeconds = best.second, epgEndEpochSeconds = best.third)
     }
 }
+
+private fun programMatchesParticipants(
+    title: String,
+    description: String?,
+    participantA: String,
+    participantB: String,
+): Boolean {
+    val haystack = normalizeMatchText(title + " " + description.orEmpty())
+    return participantMatches(haystack, participantA) && participantMatches(haystack, participantB)
+}
+
+private fun participantMatches(haystack: String, participant: String): Boolean =
+    normalizeMatchText(participant)
+        .split(' ')
+        .asSequence()
+        .filter { it.length >= MATCH_TOKEN_MIN_LENGTH && it !in MATCH_TOKEN_NOISE }
+        .any { token -> Regex("(^| )" + Regex.escape(token) + "( |$)").containsMatchIn(haystack) }
+
+private fun normalizeMatchText(value: String): String =
+    Normalizer.normalize(value, Normalizer.Form.NFD)
+        .replace(COMBINING_MARKS, "")
+        .lowercase()
+        .replace(NON_ALNUM, " ")
+        .replace(WHITESPACE, " ")
+        .trim()
 
 fun ResolvedLiveOnSatMatch.effectiveStartEpochSeconds(): Long {
     val epgStart = epgStartEpochSeconds
@@ -69,3 +98,8 @@ private const val LIVE_FALLBACK_DURATION_SECONDS = 2 * 60 * 60L
 private const val MAX_EPG_START_DRIFT_SECONDS = 45 * 60L
 private const val MIN_RELIABLE_EPG_DURATION_SECONDS = 45 * 60L
 private const val MIN_REMAINING_AFTER_SOURCE_START_SECONDS = 30 * 60L
+private const val MATCH_TOKEN_MIN_LENGTH = 3
+private val MATCH_TOKEN_NOISE = setOf("the", "club", "football", "futbol")
+private val COMBINING_MARKS = Regex("\\p{M}+")
+private val NON_ALNUM = Regex("[^\\p{L}\\p{N}]+")
+private val WHITESPACE = Regex("\\s+")
