@@ -12,6 +12,8 @@ data class LiveOnSatMatch(
     val competition: String,
     val participantA: String,
     val participantB: String,
+    val participantALogoUrl: String? = null,
+    val participantBLogoUrl: String? = null,
     val startEpochSeconds: Long,
     val channels: List<LiveOnSatChannel>,
 )
@@ -24,4 +26,6 @@ data class LiveOnSatMatch(
 data class ResolvedLiveOnSatMatch(
     val match: LiveOnSatMatch,
     val matchedChannels: Map<String, MediaEntry>,
+    val epgStartEpochSeconds: Long? = null,
+    val epgEndEpochSeconds: Long? = null,
 )
