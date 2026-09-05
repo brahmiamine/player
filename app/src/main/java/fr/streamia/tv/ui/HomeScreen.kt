@@ -423,7 +423,7 @@ private fun matchTimingLabel(item: MatchRowItem): String {
         MatchTemporalState.Tomorrow -> "Demain · $time"
         MatchTemporalState.ThisWeek -> {
             val day = dateTime.format(DateTimeFormatter.ofPattern("EEE", Locale.getDefault()))
-                .replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
+                .replaceFirstChar { it.uppercaseChar() }
             "$day · $time"
         }
     }
