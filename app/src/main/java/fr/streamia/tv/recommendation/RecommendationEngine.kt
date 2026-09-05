@@ -229,6 +229,7 @@ class RecommendationEngine(
         limit: Int = 12,
     ): List<RecommendedMedia> = candidates
         .asSequence()
+        .filter { it.type == source.entry.type }
         .filterNot {
             it.key == source.entry.key ||
                 it.key in hiddenEntries ||
