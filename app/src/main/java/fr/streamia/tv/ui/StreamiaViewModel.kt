@@ -30,6 +30,7 @@ import fr.streamia.tv.domain.epgNowContextAt
 import fr.streamia.tv.domain.withTimeOffset
 import fr.streamia.tv.liveonsat.ChannelMatcher
 import fr.streamia.tv.liveonsat.ResolvedLiveOnSatMatch
+import fr.streamia.tv.liveonsat.withEpgTiming
 import fr.streamia.tv.matches.MatchRow
 import fr.streamia.tv.matches.MatchRowEngine
 import fr.streamia.tv.recommendation.ContentFeatures
@@ -1891,8 +1892,28 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                     }
                 }
 
+                val todayGuide = if (profileId != null && liveChannels.isNotEmpty()) {
+                    val today = LocalDate.now(ZoneId.systemDefault())
+                    val offsetHours = state.appSettings.epgTimeOffsetHours
+                    epgGuideMemoryCache.get(profileId, today, offsetHours) ?: runCatching {
+                        val (dayStart, dayEnd) = epgDayBounds(today)
+                        repository.cachedEpgGuide(
+                            profileId = profileId,
+                            displayStartEpochSeconds = dayStart,
+                            displayEndEpochSeconds = dayEnd,
+                            offsetHours = offsetHours,
+                        )
+                    }.getOrNull()?.also { guide ->
+                        epgGuideMemoryCache.put(profileId, today, offsetHours, guide)
+                    }
+                } else {
+                    null
+                }
+
                 val resolved = withContext(Dispatchers.Default) {
-                    liveOnSatChannelMatcher.resolve(fetch.matches, liveChannels)
+                    liveOnSatChannelMatcher
+                        .resolve(fetch.matches, liveChannels)
+                        .map { it.withEpgTiming(todayGuide) }
                 }
                 if (sequence != liveOnSatLoadSequence) return@launch
                 _uiState.update {
