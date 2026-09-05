@@ -5,6 +5,8 @@ import fr.streamia.tv.domain.Catalog
 import fr.streamia.tv.domain.MediaCategory
 import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.MediaType
+import fr.streamia.tv.domain.MIN_VOD_HISTORY_POSITION_MS
+import fr.streamia.tv.domain.shouldRecordPlaybackInHistory
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -79,6 +81,7 @@ class UserLibraryStore(context: Context) {
         positionMs: Long,
         durationMs: Long,
     ) {
+        if (!shouldRecordPlaybackInHistory(entry.type, positionMs)) return
         mutate<Unit>(profileId) { root ->
             val history = root.optJSONArray("history").historyList().toMutableList()
             history.removeAll { it.entry.key == entry.key }
@@ -335,11 +338,11 @@ data class PlaybackHistoryItem(
 }
 
 /**
- * Une lecture n'est reprenable que si elle a assez avancé (>= 30 s) sans être quasiment terminée
- * (à moins de 30 s de la fin). Logique partagée entre [UserLibraryStore.resumePosition] (reprise
- * exacte d'un contenu déjà ouvert) et la rangée « Reprendre la lecture » de l'accueil.
+ * Une lecture VOD devient reprenable après 5 s de lecture, sans conserver dans « Reprendre »
+ * un contenu quasiment terminé (à moins de 30 s de la fin). Logique partagée entre
+ * [UserLibraryStore.resumePosition] et la rangée « Reprendre la lecture » de l'accueil.
  */
 fun PlaybackHistoryItem.isResumable(): Boolean {
     if (durationMs > 0 && positionMs >= durationMs - 30_000) return false
-    return positionMs >= 30_000
+    return positionMs >= MIN_VOD_HISTORY_POSITION_MS
 }

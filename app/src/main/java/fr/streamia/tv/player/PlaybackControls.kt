@@ -1,6 +1,7 @@
 package fr.streamia.tv.player
 
 import fr.streamia.tv.domain.MediaType
+import fr.streamia.tv.domain.MIN_VOD_HISTORY_POSITION_MS
 
 enum class PlaybackRemoteButton {
     Up,
@@ -50,3 +51,9 @@ fun resolveSeekPosition(currentPositionMs: Long, durationMs: Long, deltaMs: Long
         minimumValue = 0L,
         maximumValue = durationMs.takeIf { it > 0L } ?: Long.MAX_VALUE,
     )
+
+private const val VOD_PROGRESS_SAVE_INTERVAL_MS = 15_000L
+
+fun shouldPersistVodProgress(positionMs: Long, lastSavedAtMs: Long, nowMs: Long): Boolean =
+    positionMs >= MIN_VOD_HISTORY_POSITION_MS &&
+        (lastSavedAtMs == 0L || nowMs - lastSavedAtMs >= VOD_PROGRESS_SAVE_INTERVAL_MS)

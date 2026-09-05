@@ -2,6 +2,7 @@ package fr.streamia.tv.data
 
 import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.MediaType
+import fr.streamia.tv.domain.shouldRecordPlaybackInHistory
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -15,13 +16,13 @@ class UserLibrarySnapshotTest {
     )
 
     @Test
-    fun `below 30 seconds is not resumable`() {
-        assertFalse(historyItem(positionMs = 29_999, durationMs = 6_000_000).isResumable())
+    fun `below 5 seconds is not resumable`() {
+        assertFalse(historyItem(positionMs = 4_999, durationMs = 6_000_000).isResumable())
     }
 
     @Test
-    fun `at 30 seconds with a duration left is resumable`() {
-        assertTrue(historyItem(positionMs = 30_000, durationMs = 6_000_000).isResumable())
+    fun `at 5 seconds with a duration left is resumable`() {
+        assertTrue(historyItem(positionMs = 5_000, durationMs = 6_000_000).isResumable())
     }
 
     @Test
@@ -30,8 +31,21 @@ class UserLibrarySnapshotTest {
     }
 
     @Test
-    fun `unknown duration is resumable once past 30 seconds`() {
-        assertTrue(historyItem(positionMs = 45_000, durationMs = 0).isResumable())
+    fun `unknown duration is resumable once past 5 seconds`() {
+        assertTrue(historyItem(positionMs = 5_000, durationMs = 0).isResumable())
+    }
+
+    @Test
+    fun `VOD history starts at five seconds for movies and series`() {
+        assertFalse(shouldRecordPlaybackInHistory(MediaType.Movie, 4_999L))
+        assertFalse(shouldRecordPlaybackInHistory(MediaType.Series, 4_999L))
+        assertTrue(shouldRecordPlaybackInHistory(MediaType.Movie, 5_000L))
+        assertTrue(shouldRecordPlaybackInHistory(MediaType.Series, 5_000L))
+    }
+
+    @Test
+    fun `live history remains eligible without a resumable position`() {
+        assertTrue(shouldRecordPlaybackInHistory(MediaType.Live, 0L))
     }
 
     @Test

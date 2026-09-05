@@ -90,6 +90,7 @@ import fr.streamia.tv.player.isDolbyAtmosFormat
 import fr.streamia.tv.player.isDolbyVisionFormat
 import fr.streamia.tv.player.playbackRemoteAction
 import fr.streamia.tv.player.resolveSeekPosition
+import fr.streamia.tv.player.shouldPersistVodProgress
 import fr.streamia.tv.player.LivePlaybackSession
 import fr.streamia.tv.ui.theme.FocusBlueBright
 import fr.streamia.tv.ui.theme.HeadingWeight
@@ -436,7 +437,7 @@ fun PlayerScreen(
                 positionMs = player.currentPosition.coerceAtLeast(0L)
                 durationMs = duration
                 val now = SystemClock.elapsedRealtime()
-                if (positionMs > 0 && now - lastSavedAt >= 15_000) {
+                if (shouldPersistVodProgress(positionMs, lastSavedAt, now)) {
                     lastSavedAt = now
                     onProgress(entry, positionMs, duration)
                 }
