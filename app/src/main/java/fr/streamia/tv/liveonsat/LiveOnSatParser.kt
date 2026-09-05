@@ -40,6 +40,10 @@ object LiveOnSatParser {
             ?.takeIf { it.size == 2 && it.all(String::isNotEmpty) }
             ?: return null
 
+        val teamLogos = block
+            .select("div.fix_text img")
+            .mapNotNull { image -> normalizeTeamLogoUrl(image.attr("src")) }
+
         val channels = block
             .select("a.chan_live_free, a.chan_live_not_free, a.chan_live_iptvcable")
             .mapNotNull { anchor ->
@@ -51,10 +55,24 @@ object LiveOnSatParser {
             competition = competition,
             participantA = teams[0],
             participantB = teams[1],
+            participantALogoUrl = teamLogos.getOrNull(0),
+            participantBLogoUrl = teamLogos.getOrNull(1),
             startEpochSeconds = startEpochSeconds,
             channels = channels,
         )
     }
 
+    private fun normalizeTeamLogoUrl(raw: String): String? {
+        val value = raw.trim()
+        if (value.isBlank() || !value.contains("img/team/", ignoreCase = true)) return null
+        return when {
+            value.startsWith("https://", ignoreCase = true) || value.startsWith("http://", ignoreCase = true) -> value
+            value.startsWith("//") -> "https:$value"
+            value.startsWith("/") -> "$LIVE_ONSAT_ORIGIN$value"
+            else -> "$LIVE_ONSAT_ORIGIN/$value"
+        }
+    }
+
+    private const val LIVE_ONSAT_ORIGIN = "https://liveonsat.com"
     private val TEAM_SEPARATOR = Regex("\\sv\\s")
 }
