@@ -413,7 +413,6 @@ private fun HomeMatchCard(
 }
 
 private fun matchTimingLabel(item: MatchRowItem): String {
-    if (item.temporalState == MatchTemporalState.Live) return "● EN DIRECT"
     val dateTime = Instant.ofEpochSecond(item.event.startEpochSeconds)
         .atZone(ZoneId.systemDefault())
     val time = dateTime.format(DateTimeFormatter.ofPattern("HH:mm", Locale.getDefault()))
