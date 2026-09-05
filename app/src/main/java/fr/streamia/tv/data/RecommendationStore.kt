@@ -338,5 +338,7 @@ internal data class StoredRecommendationFeatures(
         director = director,
         country = country,
         releaseDate = releaseDate,
+        rating = rating ?: entry.rating,
+        tmdbId = tmdbId,
     )
 }
