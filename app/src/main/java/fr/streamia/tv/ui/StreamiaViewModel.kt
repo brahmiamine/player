@@ -538,11 +538,23 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     fun showSearch() { _uiState.update { it.copy(screen = StreamiaScreen.Search, message = null) } }
 
     fun updateSearchQuery(query: String) {
-        _uiState.update { it.copy(searchQuery = query) }
+        _uiState.update {
+            it.copy(
+                searchQuery = query,
+                contentReturnContext = it.contentReturnContext
+                    ?.takeUnless { context -> context.origin == ContentReturnOrigin.Search },
+            )
+        }
     }
 
     fun updateSearchType(type: MediaType?) {
-        _uiState.update { it.copy(searchType = type) }
+        _uiState.update {
+            it.copy(
+                searchType = type,
+                contentReturnContext = it.contentReturnContext
+                    ?.takeUnless { context -> context.origin == ContentReturnOrigin.Search },
+            )
+        }
     }
 
     fun showLiveMatches() {
