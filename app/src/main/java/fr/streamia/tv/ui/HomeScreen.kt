@@ -37,6 +37,8 @@ import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.matches.MatchRow
 import fr.streamia.tv.matches.MatchRowItem
 import fr.streamia.tv.matches.MatchTemporalState
+import fr.streamia.tv.recommendation.RecommendationRow
+import fr.streamia.tv.recommendation.RecommendedMedia
 import fr.streamia.tv.ui.theme.FocusBlueBright
 import fr.streamia.tv.ui.theme.HeadingWeight
 import fr.streamia.tv.ui.theme.Ink
@@ -66,6 +68,7 @@ fun HomeScreen(
     parentalUnlocked: Boolean = false,
     catalogLoading: Boolean = false,
     matchRow: MatchRow? = null,
+    recommendationRows: List<RecommendationRow> = emptyList(),
     onOpenSection: (MediaType) -> Unit,
     onSettings: () -> Unit,
     onSearch: () -> Unit,
@@ -75,6 +78,7 @@ fun HomeScreen(
     onResumePlayback: (MediaEntry) -> Unit,
     onOpenFavorite: (MediaEntry) -> Unit,
     onOpenMatch: (MediaEntry) -> Unit,
+    onOpenRecommendation: (MediaEntry) -> Unit,
 ) {
     val firstFocus = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { firstFocus.requestFocus() } }
@@ -137,7 +141,8 @@ fun HomeScreen(
     val focusOnResume = resumeCards.isNotEmpty()
     val focusOnFavorites = !focusOnResume && favoriteCards.isNotEmpty()
     val focusOnMatches = !focusOnResume && !focusOnFavorites && matchRow?.items?.isNotEmpty() == true
-    val focusOnGrid = !focusOnResume && !focusOnFavorites && !focusOnMatches
+    val focusOnRecommendations = !focusOnResume && !focusOnFavorites && !focusOnMatches && recommendationRows.isNotEmpty()
+    val focusOnGrid = !focusOnResume && !focusOnFavorites && !focusOnMatches && !focusOnRecommendations
 
     LazyColumn(
         Modifier
@@ -208,6 +213,17 @@ fun HomeScreen(
                     )
                     Spacer(Modifier.height(CardRowSpacing))
                 }
+            }
+        }
+
+        itemsIndexed(recommendationRows, key = { _, row -> row.kind }) { index, row ->
+            Column(Modifier.fillMaxWidth()) {
+                HomeRecommendationRow(
+                    row = row,
+                    firstFocusRequester = if (focusOnRecommendations && index == 0) firstFocus else null,
+                    onOpenRecommendation = onOpenRecommendation,
+                )
+                Spacer(Modifier.height(CardRowSpacing))
             }
         }
 
@@ -405,6 +421,67 @@ private fun HomeMatchCard(
                 event.competition ?: event.channel.displayName,
                 color = MutedInk,
                 fontSize = 11.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun HomeRecommendationRow(
+    row: RecommendationRow,
+    firstFocusRequester: FocusRequester?,
+    onOpenRecommendation: (MediaEntry) -> Unit,
+) {
+    Column(Modifier.fillMaxWidth()) {
+        SectionLabel(row.title, fontSize = 16.sp)
+        Spacer(Modifier.height(10.dp))
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            itemsIndexed(row.items, key = { _, recommended -> recommended.entry.key }) { index, recommended ->
+                HomeRecommendationCard(
+                    recommended = recommended,
+                    onClick = { onOpenRecommendation(recommended.entry) },
+                    modifier = if (index == 0 && firstFocusRequester != null) {
+                        Modifier.focusRequester(firstFocusRequester)
+                    } else {
+                        Modifier
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun HomeRecommendationCard(
+    recommended: RecommendedMedia,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val entry = recommended.entry
+    FocusableSurface(
+        onClick = onClick,
+        modifier = modifier.width(HomeCardWidth).height(HomeCardHeight),
+    ) {
+        Column(Modifier.fillMaxSize().padding(9.dp)) {
+            MediaArtwork(entry.iconUrl, entry.displayName, Modifier.fillMaxWidth().height(128.dp))
+            Spacer(Modifier.height(7.dp))
+            Text(
+                entry.displayName,
+                color = Ink,
+                fontSize = 13.sp,
+                lineHeight = 16.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.weight(1f))
+            Text(
+                recommended.reason ?: entry.type.displayName,
+                color = FocusBlueBright,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )

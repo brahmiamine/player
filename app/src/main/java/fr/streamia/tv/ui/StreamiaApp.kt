@@ -91,6 +91,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     parentalUnlocked = state.parentalUnlocked,
                     catalogLoading = state.catalogHydrating,
                     matchRow = state.homeMatchRow,
+                    recommendationRows = state.homeRecommendationRows,
                     onOpenSection = viewModel::openSection,
                     onSettings = viewModel::showSettings,
                     onSearch = viewModel::showSearch,
@@ -100,6 +101,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onResumePlayback = viewModel::resumePlayback,
                     onOpenFavorite = viewModel::openEntry,
                     onOpenMatch = viewModel::openEntry,
+                    onOpenRecommendation = viewModel::openEntry,
                 )
 
                 state.screen is StreamiaScreen.Browser && state.catalog != null && state.credentials != null -> BrowserScreen(
@@ -250,9 +252,11 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                         favorite = movie.key in state.library.favoriteEntries,
                         watched = movie.key in state.library.watchedEntries,
                         resumePositionMs = resume,
+                        similarMedia = state.similarMedia,
                         onPlay = { viewModel.playMovie(movie) },
                         onToggleFavorite = { viewModel.toggleEntryFavorite(movie) },
                         onToggleWatched = { viewModel.toggleEntryWatched(movie) },
+                        onOpenSimilar = viewModel::openEntry,
                         onBack = viewModel::closeDetails,
                     )
                 }
@@ -266,9 +270,11 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                         message = state.message,
                         favorite = series.key in state.library.favoriteEntries,
                         watched = series.key in state.library.watchedEntries,
+                        similarMedia = state.similarMedia,
                         onToggleFavorite = { viewModel.toggleEntryFavorite(series) },
                         onToggleWatched = { viewModel.toggleEntryWatched(series) },
                         onEpisodeSelected = { episode -> viewModel.playEpisode(series, episode) },
+                        onOpenSimilar = viewModel::openEntry,
                         onBack = viewModel::closeSeries,
                         onRetry = { viewModel.openEntry(series) },
                     )

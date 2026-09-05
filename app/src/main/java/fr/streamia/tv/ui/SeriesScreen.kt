@@ -40,6 +40,7 @@ import androidx.tv.material3.Text
 import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.SeriesDetails
 import fr.streamia.tv.domain.SeriesEpisode
+import fr.streamia.tv.recommendation.RecommendedMedia
 import fr.streamia.tv.ui.theme.FocusBlueBright
 import fr.streamia.tv.ui.theme.HeadingWeight
 import fr.streamia.tv.ui.theme.Ink
@@ -61,9 +62,11 @@ fun SeriesScreen(
     message: String?,
     favorite: Boolean,
     watched: Boolean,
+    similarMedia: List<RecommendedMedia> = emptyList(),
     onToggleFavorite: () -> Unit,
     onToggleWatched: () -> Unit,
     onEpisodeSelected: (SeriesEpisode) -> Unit,
+    onOpenSimilar: (MediaEntry) -> Unit = {},
     onBack: () -> Unit,
     onRetry: () -> Unit,
 ) {
@@ -132,6 +135,12 @@ fun SeriesScreen(
             SeriesInfoLine("Distribution", info?.cast)
             SeriesInfoLine("Pays", info?.country)
             SeriesInfoLine("Bande-annonce", info?.youtubeTrailer)
+            SimilarMediaRow(
+                title = "Séries similaires",
+                items = similarMedia,
+                onOpenSimilar = onOpenSimilar,
+                modifier = Modifier.padding(top = 18.dp),
+            )
             Spacer(Modifier.height(28.dp))
         }
         Spacer(Modifier.width(28.dp))

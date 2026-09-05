@@ -16,6 +16,7 @@ import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.domain.SeriesDetails
 import fr.streamia.tv.domain.ServerCredentials
 import fr.streamia.tv.domain.XtreamUrlBuilder
+import fr.streamia.tv.recommendation.ContentFeatures
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -38,6 +39,7 @@ class XtreamRepository(context: Context) {
     private val playlistStore = PlaylistStore(context)
     private val libraryStore = UserLibraryStore(context)
     private val appSettingsStore = AppSettingsStore(context)
+    private val recommendationStore = RecommendationStore(context)
     private val xmlTvRepository = XmlTvRepository()
     private val m3uParser = M3uParser()
     private val updateChecker = UpdateChecker()
@@ -90,6 +92,27 @@ class XtreamRepository(context: Context) {
      * l'organisateur qui a besoin des listes complètes pour réordonner/déplacer des entrées.
      */
     suspend fun loadSection(profileId: String, type: MediaType): List<MediaEntry> = cache.loadType(profileId, type)
+
+    /** Pool borné de candidats VOD pour le moteur de recommandation (accueil et fiches détail). */
+    suspend fun recommendationCandidates(profileId: String, type: MediaType, limit: Int): List<MediaEntry> =
+        cache.loadRecommendationCandidates(profileId, type, limit)
+
+    /**
+     * Fusionne, pour les entrées demandées, les métadonnées enrichies (genre/casting/réalisateur…)
+     * déjà mises en cache lors d'une visite de fiche avec le reste du catalogue, qui ne connaît que
+     * les champs de base ([MediaEntry.plot]).
+     */
+    suspend fun recommendationContentFeatures(
+        profileId: String,
+        entries: Collection<MediaEntry>,
+    ): Map<String, ContentFeatures> = withContext(Dispatchers.IO) {
+        val stored = recommendationStore.features(profileId)
+        entries.associate { entry -> entry.key to (stored[entry.key]?.merge(entry) ?: ContentFeatures.from(entry)) }
+    }
+
+    /** Enrichit le moteur de recommandation dès qu'une fiche film/série est réellement consultée. */
+    suspend fun cacheRecommendationDetails(profileId: String, details: MediaDetails) =
+        withContext(Dispatchers.IO) { recommendationStore.saveDetails(profileId, details) }
 
     /**
      * Recherche indexée en base plutôt que dans le sous-ensemble matérialisé en mémoire : sous
