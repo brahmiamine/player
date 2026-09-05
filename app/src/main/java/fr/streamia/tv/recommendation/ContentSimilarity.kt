@@ -16,6 +16,7 @@ data class ContentFeatures(
     val releaseDate: String? = null,
     val rating: Double? = entry.rating,
     val tmdbId: String? = null,
+    val enriched: Boolean = false,
 ) {
     companion object {
         fun from(entry: MediaEntry, details: MediaDetails? = null): ContentFeatures = ContentFeatures(
@@ -28,6 +29,7 @@ data class ContentFeatures(
             releaseDate = details?.releaseDate,
             rating = details?.rating ?: entry.rating,
             tmdbId = details?.tmdbId,
+            enriched = details != null,
         )
     }
 }
