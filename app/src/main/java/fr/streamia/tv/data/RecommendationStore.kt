@@ -340,5 +340,6 @@ internal data class StoredRecommendationFeatures(
         releaseDate = releaseDate,
         rating = rating ?: entry.rating,
         tmdbId = tmdbId,
+        enriched = true,
     )
 }
