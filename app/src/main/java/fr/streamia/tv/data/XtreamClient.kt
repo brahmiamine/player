@@ -108,11 +108,37 @@ class XtreamClient {
     suspend fun loadMovieDetails(
         credentials: ServerCredentials,
         movie: MediaEntry,
+    ): MediaDetails = loadSimilarityDetails(credentials, movie)
+
+    /**
+     * Charge uniquement les métadonnées utiles au moteur de similarité. Pour une série on ignore
+     * volontairement le parsing des épisodes : le endpoint Xtream est le même, mais on évite de
+     * matérialiser des centaines d'épisodes juste pour comparer genre/synopsis/casting/réalisateur.
+     */
+    suspend fun loadSimilarityDetails(
+        credentials: ServerCredentials,
+        media: MediaEntry,
     ): MediaDetails = withContext(Dispatchers.IO) {
-        val root = fetchObject(XtreamUrlBuilder(credentials).vodInfo(movie.id))
-        val info = root.optJSONObject("info") ?: JSONObject()
-        val movieData = root.optJSONObject("movie_data") ?: JSONObject()
-        parseMediaDetails(movie, info, movieData)
+        val urls = XtreamUrlBuilder(credentials)
+        when (media.type) {
+            MediaType.Movie -> {
+                val root = fetchObject(urls.vodInfo(media.id))
+                parseMediaDetails(
+                    media,
+                    root.optJSONObject("info") ?: JSONObject(),
+                    root.optJSONObject("movie_data") ?: JSONObject(),
+                )
+            }
+            MediaType.Series -> {
+                val root = fetchObject(urls.seriesInfo(media.id))
+                parseMediaDetails(
+                    media,
+                    root.optJSONObject("info") ?: JSONObject(),
+                    root.optJSONObject("series_data") ?: JSONObject(),
+                )
+            }
+            MediaType.Live -> MediaDetails(media = media, plot = media.plot, rating = media.rating)
+        }
     }
 
     suspend fun loadSeriesDetails(
