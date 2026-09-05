@@ -19,7 +19,10 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -35,9 +38,11 @@ import fr.streamia.tv.data.isResumable
 import fr.streamia.tv.domain.Catalog
 import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.MediaType
+import fr.streamia.tv.matches.HomeMatchRows
 import fr.streamia.tv.matches.MatchRow
 import fr.streamia.tv.matches.MatchRowItem
 import fr.streamia.tv.matches.MatchTemporalState
+import fr.streamia.tv.matches.reclassifiedAt
 import fr.streamia.tv.recommendation.RecommendationRow
 import fr.streamia.tv.recommendation.RecommendedMedia
 import fr.streamia.tv.ui.theme.Danger
@@ -141,15 +146,29 @@ fun HomeScreen(
             .toList()
     }
 
+    var matchNowEpochSeconds by remember { mutableLongStateOf(System.currentTimeMillis() / 1000L) }
+    LaunchedEffect(liveMatchRow, upcomingMatchRow) {
+        if (liveMatchRow == null && upcomingMatchRow == null) return@LaunchedEffect
+        while (true) {
+            delay(HOME_MATCH_CLOCK_REFRESH_MS)
+            matchNowEpochSeconds = System.currentTimeMillis() / 1000L
+        }
+    }
+    val timedMatchRows = remember(liveMatchRow, upcomingMatchRow, matchNowEpochSeconds) {
+        HomeMatchRows(liveMatchRow, upcomingMatchRow).reclassifiedAt(matchNowEpochSeconds)
+    }
+    val displayedLiveMatchRow = timedMatchRows.live
+    val displayedUpcomingMatchRow = timedMatchRows.upcomingToday
+
     // Le focus initial va toujours à la rangée la plus haute réellement affichée, pour ne jamais
     // demander le focus d'un composant pas encore composé (grille hors écran si les deux rangées
     // sont présentes). Sans historique ni favori (cas courant après import), le comportement est
     // strictement identique à l'ancien écran fixe.
     val focusOnResume = resumeCards.isNotEmpty()
     val focusOnFavorites = !focusOnResume && favoriteCards.isNotEmpty()
-    val focusOnLiveMatches = !focusOnResume && !focusOnFavorites && liveMatchRow?.items?.isNotEmpty() == true
+    val focusOnLiveMatches = !focusOnResume && !focusOnFavorites && displayedLiveMatchRow?.items?.isNotEmpty() == true
     val focusOnUpcomingMatches =
-        !focusOnResume && !focusOnFavorites && !focusOnLiveMatches && upcomingMatchRow?.items?.isNotEmpty() == true
+        !focusOnResume && !focusOnFavorites && !focusOnLiveMatches && displayedUpcomingMatchRow?.items?.isNotEmpty() == true
     val focusOnMatches = focusOnLiveMatches || focusOnUpcomingMatches
     val focusOnRecommendations = !focusOnResume && !focusOnFavorites && !focusOnMatches && recommendationRows.isNotEmpty()
     val focusOnGrid = !focusOnResume && !focusOnFavorites && !focusOnMatches && !focusOnRecommendations
@@ -159,15 +178,15 @@ fun HomeScreen(
     val visibleRowKeys = remember(
         resumeCards,
         favoriteCards,
-        liveMatchRow,
-        upcomingMatchRow,
+        displayedLiveMatchRow,
+        displayedUpcomingMatchRow,
         recommendationRows,
     ) {
         buildList {
             if (resumeCards.isNotEmpty()) add(HomeRowKey.Resume)
             if (favoriteCards.isNotEmpty()) add(HomeRowKey.Favorites)
-            if (liveMatchRow?.items?.isNotEmpty() == true) add(HomeRowKey.LiveMatches)
-            if (upcomingMatchRow?.items?.isNotEmpty() == true) add(HomeRowKey.UpcomingMatches)
+            if (displayedLiveMatchRow?.items?.isNotEmpty() == true) add(HomeRowKey.LiveMatches)
+            if (displayedUpcomingMatchRow?.items?.isNotEmpty() == true) add(HomeRowKey.UpcomingMatches)
             recommendationRows.forEach { row -> add(HomeRowKey.recommendation(row.kind)) }
         }
     }
@@ -245,11 +264,11 @@ fun HomeScreen(
             }
         }
 
-        if (liveMatchRow?.items?.isNotEmpty() == true) {
+        if (displayedLiveMatchRow?.items?.isNotEmpty() == true) {
             item {
                 Column(Modifier.fillMaxWidth()) {
                     HomeMatchRow(
-                        row = liveMatchRow,
+                        row = displayedLiveMatchRow,
                         firstFocusRequester = if (focusOnLiveMatches) firstFocus else null,
                         restoreItemKey = restoreTarget
                             ?.takeIf { it.homeRowKey == HomeRowKey.LiveMatches }
@@ -263,11 +282,11 @@ fun HomeScreen(
             }
         }
 
-        if (upcomingMatchRow?.items?.isNotEmpty() == true) {
+        if (displayedUpcomingMatchRow?.items?.isNotEmpty() == true) {
             item {
                 Column(Modifier.fillMaxWidth()) {
                     HomeMatchRow(
-                        row = upcomingMatchRow,
+                        row = displayedUpcomingMatchRow,
                         firstFocusRequester = if (focusOnUpcomingMatches) firstFocus else null,
                         restoreItemKey = restoreTarget
                             ?.takeIf { it.homeRowKey == HomeRowKey.UpcomingMatches }
@@ -654,6 +673,7 @@ private fun matchTimingLabel(item: MatchRowItem): String {
 }
 
 private const val RESTORE_FOCUS_DELAY_MS = 60L
+private const val HOME_MATCH_CLOCK_REFRESH_MS = 30_000L
 
 private val HomeCardWidth = 172.dp
 // 128dp d'illustration + jusqu'à 2 lignes de titre en 13sp/16sp de lineHeight + le label de type
