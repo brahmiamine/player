@@ -60,6 +60,25 @@ class MatchRowEngineTest {
     }
 
     @Test
+    fun `cached upcoming match moves to live then disappears without an EPG rescan`() {
+        val channel = channel(1, "beIN Sports")
+        val start = now + 1_800
+        val end = now + 5_400
+        val initial = engine.buildHomeRows(
+            mapOf(channel to listOf(footballProgram("Arsenal vs Chelsea", start, end))),
+            now,
+        )
+
+        val during = initial.reclassifiedAt(start + 1)
+        val after = initial.reclassifiedAt(end)
+
+        assertNull(during.upcomingToday)
+        assertEquals("Arsenal", during.live?.items?.first()?.event?.participantA)
+        assertNull(after.live)
+        assertNull(after.upcomingToday)
+    }
+
+    @Test
     fun `real slash fixture is detected from sports channel context`() {
         val channel = channel(14300, "VIP: BEIN SPORTS MAX 8 HD")
         val program = EpgProgram(
