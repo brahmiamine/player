@@ -98,6 +98,37 @@ class RecommendationEngineTest {
     }
 
     @Test
+    fun `same IPTV category alone is not enough for detail similarity`() {
+        val sourceEntry = movie(
+            99,
+            "Valiant One (MULTI) FHD 2025",
+            6.7,
+            "vod-multi",
+            "soldats crash territoire ennemi guerre",
+        )
+        val source = ContentFeatures(
+            entry = sourceEntry,
+            plot = sourceEntry.plot,
+            genre = "Guerre, Thriller, Action",
+            releaseDate = "2025-01-30",
+        )
+        val unrelated = movie(
+            1,
+            "The Diary (MULTI) FHD 2025",
+            7.0,
+            "vod-multi",
+            "journal famille amour mariage",
+        )
+
+        val result = engine.similarTo(
+            source = source,
+            candidates = listOf(unrelated),
+        )
+
+        assertTrue(result.isEmpty())
+    }
+
+    @Test
     fun `similar results stay within the source media type`() {
         val source = ContentFeatures.from(movie(99, "Source", 8.0, "science", "mission espace terre"))
         val similarMovie = movie(1, "Movie", 8.0, "science", "mission espace terre")
