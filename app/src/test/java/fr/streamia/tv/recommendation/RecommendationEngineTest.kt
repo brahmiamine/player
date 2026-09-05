@@ -97,6 +97,32 @@ class RecommendationEngineTest {
         assertTrue(result.any { it.entry.key == visible.key })
     }
 
+    @Test
+    fun `similar results stay within the source media type`() {
+        val source = ContentFeatures.from(movie(99, "Source", 8.0, "science", "mission espace terre"))
+        val similarMovie = movie(1, "Movie", 8.0, "science", "mission espace terre")
+        val series = MediaEntry(
+            id = 2,
+            name = "Series",
+            displayName = "Series",
+            type = MediaType.Series,
+            categoryId = "science",
+            iconUrl = null,
+            number = 2,
+            plot = "mission espace terre",
+            rating = 8.0,
+        )
+
+        val result = engine.similarTo(
+            source = source,
+            candidates = listOf(series, similarMovie),
+        )
+
+        assertTrue(result.isNotEmpty())
+        assertTrue(result.all { it.entry.type == MediaType.Movie })
+        assertTrue(result.any { it.entry.key == similarMovie.key })
+    }
+
     private fun movie(
         id: Int,
         name: String,
