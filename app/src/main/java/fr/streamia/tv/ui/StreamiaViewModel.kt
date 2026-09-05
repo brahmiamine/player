@@ -39,6 +39,8 @@ import fr.streamia.tv.recommendation.RecommendedMedia
 import fr.streamia.tv.recommendation.ViewingRecord
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -47,6 +49,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -1686,33 +1689,119 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     }
 
     /**
-     * Calcule « Films/Séries similaires » pour la fiche actuellement ouverte, à partir du même pool
-     * borné de candidats VOD que l'accueil. [details] fournit le synopsis/genre/casting quand
-     * disponibles ; à défaut, le moteur retombe sur les seuls champs du catalogue.
+     * Calcule « Films/Séries similaires » en deux passes :
+     * 1) ranking immédiat sur toutes les métadonnées déjà disponibles en SQLite ;
+     * 2) si la rangée reste trop pauvre, enrichissement réseau borné de quelques candidats puis
+     *    nouveau ranking. Les détails récupérés sont persistés, donc ce coût disparaît ensuite.
+     *
+     * Le moteur exige une relation descriptive réelle (genre, intrigue, casting, réalisateur,
+     * saga ou similarité sémantique) : une simple catégorie IPTV commune ne suffit plus.
      */
     private suspend fun loadSimilarMedia(profileId: String, entry: MediaEntry, details: MediaDetails?) {
-        val hiddenEntries = _uiState.value.library.hiddenEntries
+        val initialState = _uiState.value
+        val hiddenEntries = initialState.library.hiddenEntries
+        val excludedCategoryKeys = if (
+            initialState.appSettings.parentalControlEnabled && !initialState.parentalUnlocked
+        ) {
+            initialState.library.hiddenCategories + initialState.library.lockedCategories
+        } else {
+            initialState.library.hiddenCategories
+        }
+        val hiddenCategoryIds = initialState.catalog
+            ?.categories
+            .orEmpty()
+            .asSequence()
+            .filter { it.key in excludedCategoryKeys }
+            .mapTo(mutableSetOf()) { it.id }
+
         val candidates = runCatching {
             repository.recommendationCandidates(profileId, entry.type, SIMILAR_CANDIDATE_LIMIT)
         }.getOrDefault(emptyList())
         if (candidates.isEmpty()) return
 
         val sourceFeatures = ContentFeatures.from(entry, details)
-        val similar = withContext(Dispatchers.Default) {
+        val detailsByKey = runCatching {
+            repository.recommendationContentFeatures(profileId, candidates)
+        }.getOrDefault(emptyMap()).toMutableMap()
+
+        fun isStillCurrent(): Boolean = when (val screen = _uiState.value.screen) {
+            is StreamiaScreen.MovieDetails -> screen.movie.key == entry.key
+            is StreamiaScreen.Series -> screen.series.key == entry.key
+            else -> false
+        }
+
+        fun publish(items: List<RecommendedMedia>) {
+            _uiState.update { state ->
+                val onSameScreen = when (val screen = state.screen) {
+                    is StreamiaScreen.MovieDetails -> screen.movie.key == entry.key
+                    is StreamiaScreen.Series -> screen.series.key == entry.key
+                    else -> false
+                }
+                if (onSameScreen) state.copy(similarMedia = items) else state
+            }
+        }
+
+        suspend fun rank(): List<RecommendedMedia> = withContext(Dispatchers.Default) {
             recommendationEngine.similarTo(
                 source = sourceFeatures,
                 candidates = candidates,
+                detailsByKey = detailsByKey,
                 hiddenEntries = hiddenEntries,
+                hiddenCategoryIds = hiddenCategoryIds,
+                limit = SIMILAR_RESULT_LIMIT,
+                minimumScore = SIMILAR_DETAIL_MIN_SCORE,
             )
         }
 
-        _uiState.update { state ->
-            val onSameScreen = when (val screen = state.screen) {
-                is StreamiaScreen.MovieDetails -> screen.movie.key == entry.key
-                is StreamiaScreen.Series -> screen.series.key == entry.key
-                else -> false
+        var similar = rank()
+        publish(similar)
+        if (similar.size >= SIMILAR_TARGET_COUNT || !isStillCurrent()) return
+
+        val credentials = _uiState.value.credentials ?: return
+        val currentResultKeys = similar.mapTo(mutableSetOf()) { it.entry.key }
+
+        // Priorité aux résultats déjà plausibles mais pas encore enrichis, puis à la catégorie
+        // source. La borne stricte évite de transformer l'ouverture d'une fiche en import massif.
+        val enrichmentCandidates = candidates
+            .asSequence()
+            .filter { it.type == entry.type }
+            .filterNot {
+                it.key == entry.key ||
+                    it.key in hiddenEntries ||
+                    it.categoryId in hiddenCategoryIds ||
+                    detailsByKey[it.key]?.enriched == true
             }
-            if (onSameScreen) state.copy(similarMedia = similar) else state
+            .sortedWith(
+                compareByDescending<MediaEntry> { it.key in currentResultKeys }
+                    .thenByDescending { it.categoryId == entry.categoryId }
+                    .thenByDescending { !it.plot.isNullOrBlank() }
+                    .thenByDescending { it.rating ?: Double.NEGATIVE_INFINITY }
+                    .thenByDescending { it.addedAtEpochSeconds ?: 0L },
+            )
+            .take(SIMILAR_ENRICH_LIMIT)
+            .toList()
+
+        for (batch in enrichmentCandidates.chunked(SIMILAR_ENRICH_CONCURRENCY)) {
+            if (!isStillCurrent()) return
+
+            val enriched = supervisorScope {
+                batch.map { candidate ->
+                    async {
+                        runCatching {
+                            repository.enrichRecommendationDetails(profileId, credentials, candidate)
+                        }.getOrNull()
+                    }
+                }.awaitAll()
+            }
+
+            enriched.filterNotNull().forEach { features ->
+                detailsByKey[features.entry.key] = features
+            }
+            if (enriched.none { it != null }) continue
+
+            similar = rank()
+            publish(similar)
+            if (similar.size >= SIMILAR_TARGET_COUNT) return
         }
     }
 
@@ -1967,6 +2056,11 @@ private const val HOME_MATCH_REBUILD_INTERVAL_SECONDS = 5 * 60L
 private const val HOME_RECOMMENDATION_CANDIDATE_LIMIT = 400
 private const val HOME_RECOMMENDATION_REBUILD_INTERVAL_MS = 5 * 60_000L
 private const val SIMILAR_CANDIDATE_LIMIT = 400
+private const val SIMILAR_RESULT_LIMIT = 12
+private const val SIMILAR_TARGET_COUNT = 8
+private const val SIMILAR_ENRICH_LIMIT = 15
+private const val SIMILAR_ENRICH_CONCURRENCY = 3
+private const val SIMILAR_DETAIL_MIN_SCORE = 0.18
 
 class StreamiaViewModelFactory(private val repository: XtreamRepository) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
