@@ -90,6 +90,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     parentalControlEnabled = state.appSettings.parentalControlEnabled,
                     parentalUnlocked = state.parentalUnlocked,
                     catalogLoading = state.catalogHydrating,
+                    matchRow = state.homeMatchRow,
                     onOpenSection = viewModel::openSection,
                     onSettings = viewModel::showSettings,
                     onSearch = viewModel::showSearch,
@@ -98,6 +99,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onChangePlaylist = viewModel::logout,
                     onResumePlayback = viewModel::resumePlayback,
                     onOpenFavorite = viewModel::openEntry,
+                    onOpenMatch = viewModel::openEntry,
                 )
 
                 state.screen is StreamiaScreen.Browser && state.catalog != null && state.credentials != null -> BrowserScreen(
