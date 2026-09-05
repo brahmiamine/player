@@ -27,6 +27,15 @@ class LiveOnSatParserTest {
     }
 
     @Test
+    fun `country flags are not exposed as club logos`() {
+        val matches = LiveOnSatParser.parse(HTML_WITH_COUNTRY_FLAGS)
+
+        assertEquals(1, matches.size)
+        assertEquals(null, matches.first().participantALogoUrl)
+        assertEquals(null, matches.first().participantBLogoUrl)
+    }
+
+    @Test
     fun `non-match entries such as draws are skipped`() {
         val matches = LiveOnSatParser.parse(HTML_WITH_DRAW)
 
@@ -73,6 +82,24 @@ class LiveOnSatParserTest {
                   </div>
                 </div>
               </div>
+            </div>
+            </body></html>
+        """.trimIndent()
+
+        val HTML_WITH_COUNTRY_FLAGS = """
+            <html><body>
+            <div><span class=comp_head>Friendly Club Match</span></div>
+            <div class=blockfix>
+              <div class=fix>
+                <div class=fix_text>
+                  <div class=imgCenter><img src="/img/team/england.gif"></div>
+                  <div class=fLeft>Manchester City v Atletico Madrid</div>
+                  <div class=imgCenter><img src="/img/team/spain.gif"></div>
+                </div>
+              </div>
+              <div class=fLeft><div>
+                <div class="dynamic-time" data-timestamp="1700000000">ST: 19:30</div>
+              </div></div>
             </div>
             </body></html>
         """.trimIndent()
