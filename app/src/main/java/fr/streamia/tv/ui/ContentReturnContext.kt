@@ -1,5 +1,7 @@
 package fr.streamia.tv.ui
 
+import fr.streamia.tv.recommendation.RecommendationRowKind
+
 enum class ContentReturnOrigin {
     Browser,
     Home,
@@ -51,5 +53,5 @@ internal object HomeRowKey {
     const val LiveMatches = "matches-live"
     const val UpcomingMatches = "matches-next"
 
-    fun recommendation(kind: Any): String = "recommendation:$kind"
+    fun recommendation(kind: RecommendationRowKind): String = "recommendation:$kind"
 }
