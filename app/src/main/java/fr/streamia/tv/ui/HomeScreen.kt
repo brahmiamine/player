@@ -410,22 +410,35 @@ private fun HomeCardRow(
     title: String,
     entries: List<Pair<MediaEntry, Float?>>,
     firstFocusRequester: FocusRequester?,
+    restoreItemKey: String?,
     onEntryClick: (MediaEntry) -> Unit,
 ) {
+    val rowState = rememberLazyListState()
+    val restoreFocus = remember { FocusRequester() }
+    LaunchedEffect(restoreItemKey, entries) {
+        val targetIndex = entries.indexOfFirst { (entry, _) -> entry.key == restoreItemKey }
+        if (targetIndex >= 0) {
+            rowState.scrollToItem(targetIndex)
+            delay(RESTORE_FOCUS_DELAY_MS)
+            runCatching { restoreFocus.requestFocus() }
+        }
+    }
+
     Column(Modifier.fillMaxWidth()) {
         SectionLabel(title, fontSize = 16.sp)
         Spacer(Modifier.height(10.dp))
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        LazyRow(state = rowState, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             itemsIndexed(entries, key = { _, (entry, _) -> entry.key }) { index, (entry, progress) ->
+                val cardModifier = when {
+                    entry.key == restoreItemKey -> Modifier.focusRequester(restoreFocus)
+                    index == 0 && firstFocusRequester != null -> Modifier.focusRequester(firstFocusRequester)
+                    else -> Modifier
+                }
                 HomeMediaCard(
                     entry = entry,
                     progress = progress,
                     onClick = { onEntryClick(entry) },
-                    modifier = if (index == 0 && firstFocusRequester != null) {
-                        Modifier.focusRequester(firstFocusRequester)
-                    } else {
-                        Modifier
-                    },
+                    modifier = cardModifier,
                 )
             }
         }
@@ -436,21 +449,34 @@ private fun HomeCardRow(
 private fun HomeMatchRow(
     row: MatchRow,
     firstFocusRequester: FocusRequester?,
-    onOpenMatch: (MediaEntry) -> Unit,
+    restoreItemKey: String?,
+    onOpenMatch: (MatchRowItem) -> Unit,
 ) {
+    val rowState = rememberLazyListState()
+    val restoreFocus = remember { FocusRequester() }
+    LaunchedEffect(restoreItemKey, row.items) {
+        val targetIndex = row.items.indexOfFirst { it.event.fingerprint == restoreItemKey }
+        if (targetIndex >= 0) {
+            rowState.scrollToItem(targetIndex)
+            delay(RESTORE_FOCUS_DELAY_MS)
+            runCatching { restoreFocus.requestFocus() }
+        }
+    }
+
     Column(Modifier.fillMaxWidth()) {
         SectionLabel(row.title, fontSize = 16.sp)
         Spacer(Modifier.height(10.dp))
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        LazyRow(state = rowState, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             itemsIndexed(row.items, key = { _, item -> item.event.fingerprint }) { index, item ->
+                val cardModifier = when {
+                    item.event.fingerprint == restoreItemKey -> Modifier.focusRequester(restoreFocus)
+                    index == 0 && firstFocusRequester != null -> Modifier.focusRequester(firstFocusRequester)
+                    else -> Modifier
+                }
                 HomeMatchCard(
                     item = item,
-                    onClick = { onOpenMatch(item.event.channel) },
-                    modifier = if (index == 0 && firstFocusRequester != null) {
-                        Modifier.focusRequester(firstFocusRequester)
-                    } else {
-                        Modifier
-                    },
+                    onClick = { onOpenMatch(item) },
+                    modifier = cardModifier,
                 )
             }
         }
@@ -466,7 +492,7 @@ private fun HomeMatchCard(
     val event = item.event
     FocusableSurface(
         onClick = onClick,
-        modifier = modifier.width(280.dp).height(136.dp),
+        modifier = modifier.width(280.dp).height(154.dp),
     ) {
         Box(Modifier.fillMaxSize()) {
             Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 13.dp)) {
@@ -488,13 +514,31 @@ private fun HomeMatchCard(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Spacer(Modifier.weight(1f))
-                Text(
-                    event.competition ?: event.channel.displayName,
-                    color = MutedInk,
-                    fontSize = 11.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                event.competition?.let { competition ->
+                    Text(
+                        competition,
+                        color = MutedInk,
+                        fontSize = 10.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    ChannelLogo(
+                        event.channel.iconUrl,
+                        event.channel.displayName,
+                        Modifier.width(24.dp).height(24.dp),
+                    )
+                    Spacer(Modifier.width(7.dp))
+                    Text(
+                        event.channel.displayName,
+                        color = MutedInk,
+                        fontSize = 11.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
             if (item.temporalState == MatchTemporalState.Live) {
                 LiveBadge(Modifier.align(Alignment.TopEnd).padding(top = 10.dp, end = 12.dp))
@@ -520,21 +564,34 @@ private fun LiveBadge(modifier: Modifier = Modifier) {
 private fun HomeRecommendationRow(
     row: RecommendationRow,
     firstFocusRequester: FocusRequester?,
+    restoreItemKey: String?,
     onOpenRecommendation: (MediaEntry) -> Unit,
 ) {
+    val rowState = rememberLazyListState()
+    val restoreFocus = remember { FocusRequester() }
+    LaunchedEffect(restoreItemKey, row.items) {
+        val targetIndex = row.items.indexOfFirst { it.entry.key == restoreItemKey }
+        if (targetIndex >= 0) {
+            rowState.scrollToItem(targetIndex)
+            delay(RESTORE_FOCUS_DELAY_MS)
+            runCatching { restoreFocus.requestFocus() }
+        }
+    }
+
     Column(Modifier.fillMaxWidth()) {
         SectionLabel(row.title, fontSize = 16.sp)
         Spacer(Modifier.height(10.dp))
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        LazyRow(state = rowState, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             itemsIndexed(row.items, key = { _, recommended -> recommended.entry.key }) { index, recommended ->
+                val cardModifier = when {
+                    recommended.entry.key == restoreItemKey -> Modifier.focusRequester(restoreFocus)
+                    index == 0 && firstFocusRequester != null -> Modifier.focusRequester(firstFocusRequester)
+                    else -> Modifier
+                }
                 HomeRecommendationCard(
                     recommended = recommended,
                     onClick = { onOpenRecommendation(recommended.entry) },
-                    modifier = if (index == 0 && firstFocusRequester != null) {
-                        Modifier.focusRequester(firstFocusRequester)
-                    } else {
-                        Modifier
-                    },
+                    modifier = cardModifier,
                 )
             }
         }
@@ -592,6 +649,8 @@ private fun matchTimingLabel(item: MatchRowItem): String {
         }
     }
 }
+
+private const val RESTORE_FOCUS_DELAY_MS = 60L
 
 private val HomeCardWidth = 172.dp
 // 128dp d'illustration + jusqu'à 2 lignes de titre en 13sp/16sp de lineHeight + le label de type
