@@ -72,6 +72,51 @@ class LiveOnSatTimingTest {
     }
 
     @Test
+    fun `nearby EPG programme for another event is ignored`() {
+        val channel = MediaEntry(
+            id = 9,
+            name = "beIN Sports 1",
+            displayName = "beIN Sports 1 HD",
+            type = MediaType.Live,
+            categoryId = "sport",
+            iconUrl = null,
+            number = 9,
+        )
+        val source = ResolvedLiveOnSatMatch(
+            match = LiveOnSatMatch(
+                competition = "Ligue 1",
+                participantA = "PSG",
+                participantB = "Marseille",
+                startEpochSeconds = 10_000,
+                channels = listOf(LiveOnSatChannel("beIN Sports 1 HD", free = false)),
+            ),
+            matchedChannels = mapOf("beIN Sports 1 HD" to channel),
+        )
+        val guide = EpgGuide(
+            channels = mapOf(
+                "beIN Sports 1" to EpgChannel(
+                    channelId = "beIN Sports 1",
+                    displayName = "beIN Sports 1 HD",
+                    programs = listOf(
+                        EpgProgram(
+                            title = "Avant-match Monaco - Lyon",
+                            description = null,
+                            startEpochSeconds = 9_900,
+                            endEpochSeconds = 13_500,
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        val enriched = source.withEpgTiming(guide)
+
+        assertEquals(null, enriched.epgEndEpochSeconds)
+        assertTrue(enriched.isLiveAt(10_100))
+        assertFalse(enriched.isLiveAt(17_200))
+    }
+
+    @Test
     fun `two hour fallback is used when EPG has no reliable end`() {
         val resolved = resolved(start = 1_000, epgStart = null, epgEnd = null)
 
