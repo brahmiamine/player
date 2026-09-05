@@ -34,12 +34,18 @@ import fr.streamia.tv.data.isResumable
 import fr.streamia.tv.domain.Catalog
 import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.MediaType
+import fr.streamia.tv.matches.MatchRow
+import fr.streamia.tv.matches.MatchRowItem
+import fr.streamia.tv.matches.MatchTemporalState
 import fr.streamia.tv.ui.theme.FocusBlueBright
 import fr.streamia.tv.ui.theme.HeadingWeight
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
 import fr.streamia.tv.ui.theme.Night
 import java.text.SimpleDateFormat
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.Date
 import java.util.Locale
 
@@ -59,6 +65,7 @@ fun HomeScreen(
     parentalControlEnabled: Boolean = false,
     parentalUnlocked: Boolean = false,
     catalogLoading: Boolean = false,
+    matchRow: MatchRow? = null,
     onOpenSection: (MediaType) -> Unit,
     onSettings: () -> Unit,
     onSearch: () -> Unit,
@@ -67,6 +74,7 @@ fun HomeScreen(
     onChangePlaylist: () -> Unit,
     onResumePlayback: (MediaEntry) -> Unit,
     onOpenFavorite: (MediaEntry) -> Unit,
+    onOpenMatch: (MediaEntry) -> Unit,
 ) {
     val firstFocus = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { firstFocus.requestFocus() } }
@@ -128,7 +136,8 @@ fun HomeScreen(
     // strictement identique à l'ancien écran fixe.
     val focusOnResume = resumeCards.isNotEmpty()
     val focusOnFavorites = !focusOnResume && favoriteCards.isNotEmpty()
-    val focusOnGrid = !focusOnResume && !focusOnFavorites
+    val focusOnMatches = !focusOnResume && !focusOnFavorites && matchRow?.items?.isNotEmpty() == true
+    val focusOnGrid = !focusOnResume && !focusOnFavorites && !focusOnMatches
 
     LazyColumn(
         Modifier
@@ -183,6 +192,19 @@ fun HomeScreen(
                         entries = favoriteCards,
                         firstFocusRequester = if (focusOnFavorites) firstFocus else null,
                         onEntryClick = onOpenFavorite,
+                    )
+                    Spacer(Modifier.height(CardRowSpacing))
+                }
+            }
+        }
+
+        if (matchRow?.items?.isNotEmpty() == true) {
+            item {
+                Column(Modifier.fillMaxWidth()) {
+                    HomeMatchRow(
+                        row = matchRow,
+                        firstFocusRequester = if (focusOnMatches) firstFocus else null,
+                        onOpenMatch = onOpenMatch,
                     )
                     Spacer(Modifier.height(CardRowSpacing))
                 }
@@ -320,6 +342,89 @@ private fun HomeCardRow(
                     },
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun HomeMatchRow(
+    row: MatchRow,
+    firstFocusRequester: FocusRequester?,
+    onOpenMatch: (MediaEntry) -> Unit,
+) {
+    Column(Modifier.fillMaxWidth()) {
+        SectionLabel(row.title, fontSize = 16.sp)
+        Spacer(Modifier.height(10.dp))
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            itemsIndexed(row.items, key = { _, item -> item.event.fingerprint }) { index, item ->
+                HomeMatchCard(
+                    item = item,
+                    onClick = { onOpenMatch(item.event.channel) },
+                    modifier = if (index == 0 && firstFocusRequester != null) {
+                        Modifier.focusRequester(firstFocusRequester)
+                    } else {
+                        Modifier
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun HomeMatchCard(
+    item: MatchRowItem,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val event = item.event
+    FocusableSurface(
+        onClick = onClick,
+        modifier = modifier.width(280.dp).height(136.dp),
+    ) {
+        Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 13.dp)) {
+            Text(
+                matchTimingLabel(item),
+                color = FocusBlueBright,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+            )
+            Spacer(Modifier.height(7.dp))
+            Text(
+                "${event.participantA} / ${event.participantB}",
+                color = Ink,
+                fontSize = 16.sp,
+                lineHeight = 20.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.weight(1f))
+            Text(
+                event.competition ?: event.channel.displayName,
+                color = MutedInk,
+                fontSize = 11.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+private fun matchTimingLabel(item: MatchRowItem): String {
+    if (item.temporalState == MatchTemporalState.Live) return "● EN DIRECT"
+    val dateTime = Instant.ofEpochSecond(item.event.startEpochSeconds)
+        .atZone(ZoneId.systemDefault())
+    val time = dateTime.format(DateTimeFormatter.ofPattern("HH:mm", Locale.getDefault()))
+    return when (item.temporalState) {
+        MatchTemporalState.Live -> "● EN DIRECT"
+        MatchTemporalState.Today -> "Aujourd'hui · $time"
+        MatchTemporalState.Tomorrow -> "Demain · $time"
+        MatchTemporalState.ThisWeek -> {
+            val day = dateTime.format(DateTimeFormatter.ofPattern("EEE", Locale.getDefault()))
+                .replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
+            "$day · $time"
         }
     }
 }
