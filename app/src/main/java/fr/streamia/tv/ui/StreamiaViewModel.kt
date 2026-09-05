@@ -236,6 +236,10 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                     appSettings = repository.appSettings(),
                 )
                 warmEpgGuideCache(profileId)
+                // Le Home est déjà visible à ce stade. Ne pas attendre la réconciliation de profil
+                // pour hydrater le Live : la rangée Matchs, le zapping et les numéros de chaîne
+                // doivent pouvoir travailler immédiatement depuis le SQLite catalogue local.
+                ensureSectionLoaded(MediaType.Live)
                 try {
                     mergeCatalog(repository.openProfile(profileId, knownCache = cachedCatalog))
                 } catch (error: Throwable) {
@@ -1426,7 +1430,14 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         val state = _uiState.value
         val profileId = state.activeProfileId ?: return
         val catalog = state.catalog ?: return
-        if (!catalog.isCategoryLoaded(MediaType.Live, Catalog.ALL_CATEGORY_ID)) return
+        if (!catalog.isCategoryLoaded(MediaType.Live, Catalog.ALL_CATEGORY_ID)) {
+            // refreshHomeMatchRow peut être appelé très tôt (showHome, warm-up EPG, fin de sync).
+            // Au lieu d'échouer silencieusement sur un catalogue lazy, rendre la dépendance
+            // auto-réparante : hydrate le Live depuis SQLite puis ensureSectionLoaded() rappellera
+            // refreshHomeMatchRow() une fois la section prête.
+            ensureSectionLoaded(MediaType.Live)
+            return
+        }
         val liveEntries = catalog.entriesFor(MediaType.Live)
         if (liveEntries.isEmpty()) return
 
