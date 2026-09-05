@@ -14,6 +14,8 @@ class LiveOnSatParserTest {
         assertEquals("Test League", match.competition)
         assertEquals("Team A", match.participantA)
         assertEquals("Team B", match.participantB)
+        assertEquals("https://liveonsat.com/img/team/team-a.gif", match.participantALogoUrl)
+        assertEquals("https://liveonsat.com/img/team/team-b.gif", match.participantBLogoUrl)
         assertEquals(1_700_000_000L, match.startEpochSeconds)
         assertEquals(
             listOf(
@@ -22,6 +24,15 @@ class LiveOnSatParserTest {
             ),
             match.channels,
         )
+    }
+
+    @Test
+    fun `country flags are not exposed as club logos`() {
+        val matches = LiveOnSatParser.parse(HTML_WITH_COUNTRY_FLAGS)
+
+        assertEquals(1, matches.size)
+        assertEquals(null, matches.first().participantALogoUrl)
+        assertEquals(null, matches.first().participantBLogoUrl)
     }
 
     @Test
@@ -55,9 +66,9 @@ class LiveOnSatParserTest {
             <div class=blockfix>
               <div class=fix>
                 <div class=fix_text>
-                  <div class = imgCenter><img src="a.gif"></div>
+                  <div class = imgCenter><img src="/img/team/team-a.gif"></div>
                   <div class = fLeft style="width:270px">Team A v Team B</div>
-                  <div class = imgCenter><img src="b.gif"></div>
+                  <div class = imgCenter><img src="img/team/team-b.gif"></div>
                 </div>
                 <div class=notes></div>
               </div>
@@ -71,6 +82,24 @@ class LiveOnSatParserTest {
                   </div>
                 </div>
               </div>
+            </div>
+            </body></html>
+        """.trimIndent()
+
+        val HTML_WITH_COUNTRY_FLAGS = """
+            <html><body>
+            <div><span class=comp_head>Friendly Club Match</span></div>
+            <div class=blockfix>
+              <div class=fix>
+                <div class=fix_text>
+                  <div class=imgCenter><img src="/img/team/england.gif"></div>
+                  <div class=fLeft>Manchester City v Atletico Madrid</div>
+                  <div class=imgCenter><img src="/img/team/spain.gif"></div>
+                </div>
+              </div>
+              <div class=fLeft><div>
+                <div class="dynamic-time" data-timestamp="1700000000">ST: 19:30</div>
+              </div></div>
             </div>
             </body></html>
         """.trimIndent()

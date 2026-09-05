@@ -15,14 +15,16 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.produceState
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -44,14 +46,17 @@ import kotlinx.coroutines.delay
 @Composable
 fun SearchScreen(
     favoriteEntries: Set<String>,
+    query: String,
+    type: MediaType?,
+    restoreEntryKey: String?,
     search: suspend (String, MediaType?) -> List<MediaEntry>,
+    onQueryChange: (String) -> Unit,
+    onTypeChange: (MediaType?) -> Unit,
     onOpenEntry: (MediaEntry) -> Unit,
     onToggleEntryFavorite: (MediaEntry) -> Unit,
     onBack: () -> Unit,
 ) {
     BackHandler(onBack = onBack)
-    var query by remember { mutableStateOf("") }
-    var type by remember { mutableStateOf<MediaType?>(null) }
     val needle = query.trim().lowercase()
     val entries by produceState(emptyList<MediaEntry>(), needle, type) {
         if (needle.isBlank()) {
@@ -60,6 +65,16 @@ fun SearchScreen(
         }
         delay(220)
         value = search(needle, type)
+    }
+    val resultListState = rememberLazyListState()
+    val restoreFocus = remember { FocusRequester() }
+    LaunchedEffect(restoreEntryKey, entries) {
+        val targetIndex = entries.indexOfFirst { it.key == restoreEntryKey }
+        if (targetIndex >= 0) {
+            resultListState.scrollToItem(targetIndex)
+            delay(RESTORE_SEARCH_FOCUS_DELAY_MS)
+            runCatching { restoreFocus.requestFocus() }
+        }
     }
 
     Column(Modifier.fillMaxSize().background(Night).padding(28.dp)) {
@@ -75,16 +90,16 @@ fun SearchScreen(
         Spacer(Modifier.height(18.dp))
         TvTextField(
             value = query,
-            onValueChange = { query = it },
+            onValueChange = onQueryChange,
             label = "Rechercher une chaîne, un film ou une série",
             supportingText = "Le clavier Android TV peut être utilisé. Recherche instantanée dans tout le catalogue.",
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-            SearchFilter("Tout", type == null) { type = null }
+            SearchFilter("Tout", type == null) { onTypeChange(null) }
             MediaType.entries.forEach { mediaType ->
-                SearchFilter(mediaType.displayName, type == mediaType) { type = mediaType }
+                SearchFilter(mediaType.displayName, type == mediaType) { onTypeChange(mediaType) }
             }
         }
         Spacer(Modifier.height(18.dp))
@@ -99,12 +114,18 @@ fun SearchScreen(
             Column(Modifier.fillMaxSize()) {
                 SectionLabel("Contenus (${entries.size})")
                 Spacer(Modifier.height(10.dp))
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                LazyColumn(state = resultListState, verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(entries, key = MediaEntry::key) { entry ->
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             FocusableSurface(
                                 onClick = { onOpenEntry(entry) },
-                                modifier = Modifier.weight(1f).height(76.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(76.dp)
+                                    .then(
+                                        if (entry.key == restoreEntryKey) Modifier.focusRequester(restoreFocus)
+                                        else Modifier,
+                                    ),
                             ) {
                                 Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                                     ChannelLogo(entry.iconUrl, entry.displayName, Modifier.size(52.dp))
@@ -150,3 +171,5 @@ private fun SearchFilter(label: String, selected: Boolean, onClick: () -> Unit) 
         Text(label, color = Ink, fontSize = TypeLabel, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 14.dp))
     }
 }
+
+private const val RESTORE_SEARCH_FOCUS_DELAY_MS = 60L

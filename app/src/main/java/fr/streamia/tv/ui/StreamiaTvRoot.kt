@@ -154,7 +154,7 @@ fun StreamiaTvRoot(viewModel: StreamiaViewModel) {
                     pendingLiveBrowserReturn = true
                 } else {
                     pendingLiveBrowserReturn = false
-                    viewModel.closePlayer()
+                    viewModel.closePlayer(forceBrowser = true)
                 }
             }
         }
@@ -170,7 +170,7 @@ fun StreamiaTvRoot(viewModel: StreamiaViewModel) {
         if (!state.catalogHydrating) {
             pendingLiveBrowserReturn = false
             LiveBrowserReturnState.remember(playerScreen.entry.key)
-            viewModel.closePlayer()
+            viewModel.closePlayer(forceBrowser = true)
         }
     }
 

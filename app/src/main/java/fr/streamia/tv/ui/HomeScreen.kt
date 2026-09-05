@@ -15,10 +15,14 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -34,9 +38,11 @@ import fr.streamia.tv.data.isResumable
 import fr.streamia.tv.domain.Catalog
 import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.MediaType
+import fr.streamia.tv.matches.HomeMatchRows
 import fr.streamia.tv.matches.MatchRow
 import fr.streamia.tv.matches.MatchRowItem
 import fr.streamia.tv.matches.MatchTemporalState
+import fr.streamia.tv.matches.reclassifiedAt
 import fr.streamia.tv.recommendation.RecommendationRow
 import fr.streamia.tv.recommendation.RecommendedMedia
 import fr.streamia.tv.ui.theme.Danger
@@ -45,6 +51,7 @@ import fr.streamia.tv.ui.theme.HeadingWeight
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
 import fr.streamia.tv.ui.theme.Night
+import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.time.Instant
 import java.time.ZoneId
@@ -68,8 +75,10 @@ fun HomeScreen(
     parentalControlEnabled: Boolean = false,
     parentalUnlocked: Boolean = false,
     catalogLoading: Boolean = false,
-    matchRow: MatchRow? = null,
+    liveMatchRow: MatchRow? = null,
+    upcomingMatchRow: MatchRow? = null,
     recommendationRows: List<RecommendationRow> = emptyList(),
+    restoreContext: ContentReturnContext? = null,
     onOpenSection: (MediaType) -> Unit,
     onSettings: () -> Unit,
     onSearch: () -> Unit,
@@ -77,13 +86,14 @@ fun HomeScreen(
     onRefresh: () -> Unit,
     onChangePlaylist: () -> Unit,
     onResumePlayback: (MediaEntry) -> Unit,
-    onOpenFavorite: (MediaEntry) -> Unit,
-    onOpenMatch: (MediaEntry) -> Unit,
-    onOpenRecommendation: (MediaEntry) -> Unit,
+    onOpenHomeEntry: (MediaEntry, String, String) -> Unit,
     onOpenLiveMatches: () -> Unit,
 ) {
     val firstFocus = remember { FocusRequester() }
-    LaunchedEffect(Unit) { runCatching { firstFocus.requestFocus() } }
+    val restoringHome = restoreContext?.origin == ContentReturnOrigin.Home
+    LaunchedEffect(restoringHome) {
+        if (!restoringHome) runCatching { firstFocus.requestFocus() }
+    }
 
     // Comme pour le guide TV, une catégorie verrouillée et pas encore déverrouillée cette session
     // est traitée comme masquée ici : l'accueil ouvre le contenu directement (reprise, favori),
@@ -136,18 +146,78 @@ fun HomeScreen(
             .toList()
     }
 
+    var matchNowEpochSeconds by remember { mutableLongStateOf(System.currentTimeMillis() / 1000L) }
+    LaunchedEffect(liveMatchRow, upcomingMatchRow) {
+        if (liveMatchRow == null && upcomingMatchRow == null) return@LaunchedEffect
+        while (true) {
+            delay(HOME_MATCH_CLOCK_REFRESH_MS)
+            matchNowEpochSeconds = System.currentTimeMillis() / 1000L
+        }
+    }
+    val timedMatchRows = remember(liveMatchRow, upcomingMatchRow, matchNowEpochSeconds) {
+        HomeMatchRows(liveMatchRow, upcomingMatchRow).reclassifiedAt(matchNowEpochSeconds)
+    }
+    val displayedLiveMatchRow = timedMatchRows.live
+    val displayedUpcomingMatchRow = timedMatchRows.upcomingToday
+
     // Le focus initial va toujours à la rangée la plus haute réellement affichée, pour ne jamais
     // demander le focus d'un composant pas encore composé (grille hors écran si les deux rangées
     // sont présentes). Sans historique ni favori (cas courant après import), le comportement est
     // strictement identique à l'ancien écran fixe.
     val focusOnResume = resumeCards.isNotEmpty()
     val focusOnFavorites = !focusOnResume && favoriteCards.isNotEmpty()
-    val focusOnMatches = !focusOnResume && !focusOnFavorites && matchRow?.items?.isNotEmpty() == true
+    val focusOnLiveMatches = !focusOnResume && !focusOnFavorites && displayedLiveMatchRow?.items?.isNotEmpty() == true
+    val focusOnUpcomingMatches =
+        !focusOnResume && !focusOnFavorites && !focusOnLiveMatches && displayedUpcomingMatchRow?.items?.isNotEmpty() == true
+    val focusOnMatches = focusOnLiveMatches || focusOnUpcomingMatches
     val focusOnRecommendations = !focusOnResume && !focusOnFavorites && !focusOnMatches && recommendationRows.isNotEmpty()
     val focusOnGrid = !focusOnResume && !focusOnFavorites && !focusOnMatches && !focusOnRecommendations
 
+    val homeListState = rememberLazyListState()
+    val restoreTarget = restoreContext?.takeIf { it.origin == ContentReturnOrigin.Home }
+    val effectiveRestoreRowKey = remember(
+        restoreTarget,
+        displayedLiveMatchRow,
+        displayedUpcomingMatchRow,
+    ) {
+        when (restoreTarget?.homeRowKey) {
+            HomeRowKey.LiveMatches, HomeRowKey.UpcomingMatches -> {
+                val matchKey = restoreTarget.itemKey
+                when {
+                    displayedLiveMatchRow?.items?.any { it.event.fingerprint == matchKey } == true ->
+                        HomeRowKey.LiveMatches
+                    displayedUpcomingMatchRow?.items?.any { it.event.fingerprint == matchKey } == true ->
+                        HomeRowKey.UpcomingMatches
+                    else -> restoreTarget.homeRowKey
+                }
+            }
+            else -> restoreTarget?.homeRowKey
+        }
+    }
+    val visibleRowKeys = remember(
+        resumeCards,
+        favoriteCards,
+        displayedLiveMatchRow,
+        displayedUpcomingMatchRow,
+        recommendationRows,
+    ) {
+        buildList {
+            if (resumeCards.isNotEmpty()) add(HomeRowKey.Resume)
+            if (favoriteCards.isNotEmpty()) add(HomeRowKey.Favorites)
+            if (displayedLiveMatchRow?.items?.isNotEmpty() == true) add(HomeRowKey.LiveMatches)
+            if (displayedUpcomingMatchRow?.items?.isNotEmpty() == true) add(HomeRowKey.UpcomingMatches)
+            recommendationRows.forEach { row -> add(HomeRowKey.recommendation(row.kind)) }
+        }
+    }
+    LaunchedEffect(effectiveRestoreRowKey, visibleRowKeys) {
+        val targetRow = effectiveRestoreRowKey ?: return@LaunchedEffect
+        val rowIndex = visibleRowKeys.indexOf(targetRow)
+        if (rowIndex >= 0) homeListState.scrollToItem(rowIndex + 1)
+    }
+
     LazyColumn(
-        Modifier
+        state = homeListState,
+        modifier = Modifier
             .fillMaxSize()
             .background(Night)
             .padding(horizontal = 46.dp, vertical = 30.dp),
@@ -184,6 +254,9 @@ fun HomeScreen(
                         title = "Reprendre la lecture",
                         entries = resumeCards,
                         firstFocusRequester = if (focusOnResume) firstFocus else null,
+                        restoreItemKey = restoreTarget
+                            ?.takeIf { it.homeRowKey == HomeRowKey.Resume }
+                            ?.itemKey,
                         onEntryClick = onResumePlayback,
                     )
                     Spacer(Modifier.height(CardRowSpacing))
@@ -198,20 +271,48 @@ fun HomeScreen(
                         title = "Favoris",
                         entries = favoriteCards,
                         firstFocusRequester = if (focusOnFavorites) firstFocus else null,
-                        onEntryClick = onOpenFavorite,
+                        restoreItemKey = restoreTarget
+                            ?.takeIf { it.homeRowKey == HomeRowKey.Favorites }
+                            ?.itemKey,
+                        onEntryClick = { entry ->
+                            onOpenHomeEntry(entry, HomeRowKey.Favorites, entry.key)
+                        },
                     )
                     Spacer(Modifier.height(CardRowSpacing))
                 }
             }
         }
 
-        if (matchRow?.items?.isNotEmpty() == true) {
+        if (displayedLiveMatchRow?.items?.isNotEmpty() == true) {
             item {
                 Column(Modifier.fillMaxWidth()) {
                     HomeMatchRow(
-                        row = matchRow,
-                        firstFocusRequester = if (focusOnMatches) firstFocus else null,
-                        onOpenMatch = onOpenMatch,
+                        row = displayedLiveMatchRow,
+                        firstFocusRequester = if (focusOnLiveMatches) firstFocus else null,
+                        restoreItemKey = restoreTarget
+                            ?.takeIf { effectiveRestoreRowKey == HomeRowKey.LiveMatches }
+                            ?.itemKey,
+                        onOpenMatch = { item ->
+                            onOpenHomeEntry(item.event.channel, HomeRowKey.LiveMatches, item.event.fingerprint)
+                        },
+                    )
+                    Spacer(Modifier.height(CardRowSpacing))
+                }
+            }
+        }
+
+        if (displayedUpcomingMatchRow?.items?.isNotEmpty() == true) {
+            item {
+                Column(Modifier.fillMaxWidth()) {
+                    HomeMatchRow(
+                        row = displayedUpcomingMatchRow,
+                        firstFocusRequester = if (focusOnUpcomingMatches) firstFocus else null,
+                        restoreItemKey = restoreTarget
+                            ?.takeIf { effectiveRestoreRowKey == HomeRowKey.UpcomingMatches }
+                            ?.itemKey,
+                        onOpenMatch = { item ->
+                            onOpenHomeEntry(item.event.channel, HomeRowKey.UpcomingMatches, item.event.fingerprint)
+                        },
                     )
                     Spacer(Modifier.height(CardRowSpacing))
                 }
@@ -223,7 +324,12 @@ fun HomeScreen(
                 HomeRecommendationRow(
                     row = row,
                     firstFocusRequester = if (focusOnRecommendations && index == 0) firstFocus else null,
-                    onOpenRecommendation = onOpenRecommendation,
+                    restoreItemKey = restoreTarget
+                        ?.takeIf { it.homeRowKey == HomeRowKey.recommendation(row.kind) }
+                        ?.itemKey,
+                    onOpenRecommendation = { entry ->
+                        onOpenHomeEntry(entry, HomeRowKey.recommendation(row.kind), entry.key)
+                    },
                 )
                 Spacer(Modifier.height(CardRowSpacing))
             }
@@ -345,22 +451,35 @@ private fun HomeCardRow(
     title: String,
     entries: List<Pair<MediaEntry, Float?>>,
     firstFocusRequester: FocusRequester?,
+    restoreItemKey: String?,
     onEntryClick: (MediaEntry) -> Unit,
 ) {
+    val rowState = rememberLazyListState()
+    val restoreFocus = remember { FocusRequester() }
+    LaunchedEffect(restoreItemKey, entries) {
+        val targetIndex = entries.indexOfFirst { (entry, _) -> entry.key == restoreItemKey }
+        if (targetIndex >= 0) {
+            rowState.scrollToItem(targetIndex)
+            delay(RESTORE_FOCUS_DELAY_MS)
+            runCatching { restoreFocus.requestFocus() }
+        }
+    }
+
     Column(Modifier.fillMaxWidth()) {
         SectionLabel(title, fontSize = 16.sp)
         Spacer(Modifier.height(10.dp))
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        LazyRow(state = rowState, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             itemsIndexed(entries, key = { _, (entry, _) -> entry.key }) { index, (entry, progress) ->
+                val cardModifier = when {
+                    entry.key == restoreItemKey -> Modifier.focusRequester(restoreFocus)
+                    index == 0 && firstFocusRequester != null -> Modifier.focusRequester(firstFocusRequester)
+                    else -> Modifier
+                }
                 HomeMediaCard(
                     entry = entry,
                     progress = progress,
                     onClick = { onEntryClick(entry) },
-                    modifier = if (index == 0 && firstFocusRequester != null) {
-                        Modifier.focusRequester(firstFocusRequester)
-                    } else {
-                        Modifier
-                    },
+                    modifier = cardModifier,
                 )
             }
         }
@@ -371,21 +490,34 @@ private fun HomeCardRow(
 private fun HomeMatchRow(
     row: MatchRow,
     firstFocusRequester: FocusRequester?,
-    onOpenMatch: (MediaEntry) -> Unit,
+    restoreItemKey: String?,
+    onOpenMatch: (MatchRowItem) -> Unit,
 ) {
+    val rowState = rememberLazyListState()
+    val restoreFocus = remember { FocusRequester() }
+    LaunchedEffect(restoreItemKey, row.items) {
+        val targetIndex = row.items.indexOfFirst { it.event.fingerprint == restoreItemKey }
+        if (targetIndex >= 0) {
+            rowState.scrollToItem(targetIndex)
+            delay(RESTORE_FOCUS_DELAY_MS)
+            runCatching { restoreFocus.requestFocus() }
+        }
+    }
+
     Column(Modifier.fillMaxWidth()) {
         SectionLabel(row.title, fontSize = 16.sp)
         Spacer(Modifier.height(10.dp))
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        LazyRow(state = rowState, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             itemsIndexed(row.items, key = { _, item -> item.event.fingerprint }) { index, item ->
+                val cardModifier = when {
+                    item.event.fingerprint == restoreItemKey -> Modifier.focusRequester(restoreFocus)
+                    index == 0 && firstFocusRequester != null -> Modifier.focusRequester(firstFocusRequester)
+                    else -> Modifier
+                }
                 HomeMatchCard(
                     item = item,
-                    onClick = { onOpenMatch(item.event.channel) },
-                    modifier = if (index == 0 && firstFocusRequester != null) {
-                        Modifier.focusRequester(firstFocusRequester)
-                    } else {
-                        Modifier
-                    },
+                    onClick = { onOpenMatch(item) },
+                    modifier = cardModifier,
                 )
             }
         }
@@ -401,7 +533,7 @@ private fun HomeMatchCard(
     val event = item.event
     FocusableSurface(
         onClick = onClick,
-        modifier = modifier.width(280.dp).height(136.dp),
+        modifier = modifier.width(280.dp).height(154.dp),
     ) {
         Box(Modifier.fillMaxSize()) {
             Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 13.dp)) {
@@ -423,13 +555,31 @@ private fun HomeMatchCard(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Spacer(Modifier.weight(1f))
-                Text(
-                    event.competition ?: event.channel.displayName,
-                    color = MutedInk,
-                    fontSize = 11.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                event.competition?.let { competition ->
+                    Text(
+                        competition,
+                        color = MutedInk,
+                        fontSize = 10.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    ChannelLogo(
+                        event.channel.iconUrl,
+                        event.channel.displayName,
+                        Modifier.width(24.dp).height(24.dp),
+                    )
+                    Spacer(Modifier.width(7.dp))
+                    Text(
+                        event.channel.displayName,
+                        color = MutedInk,
+                        fontSize = 11.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
             if (item.temporalState == MatchTemporalState.Live) {
                 LiveBadge(Modifier.align(Alignment.TopEnd).padding(top = 10.dp, end = 12.dp))
@@ -455,21 +605,34 @@ private fun LiveBadge(modifier: Modifier = Modifier) {
 private fun HomeRecommendationRow(
     row: RecommendationRow,
     firstFocusRequester: FocusRequester?,
+    restoreItemKey: String?,
     onOpenRecommendation: (MediaEntry) -> Unit,
 ) {
+    val rowState = rememberLazyListState()
+    val restoreFocus = remember { FocusRequester() }
+    LaunchedEffect(restoreItemKey, row.items) {
+        val targetIndex = row.items.indexOfFirst { it.entry.key == restoreItemKey }
+        if (targetIndex >= 0) {
+            rowState.scrollToItem(targetIndex)
+            delay(RESTORE_FOCUS_DELAY_MS)
+            runCatching { restoreFocus.requestFocus() }
+        }
+    }
+
     Column(Modifier.fillMaxWidth()) {
         SectionLabel(row.title, fontSize = 16.sp)
         Spacer(Modifier.height(10.dp))
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        LazyRow(state = rowState, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             itemsIndexed(row.items, key = { _, recommended -> recommended.entry.key }) { index, recommended ->
+                val cardModifier = when {
+                    recommended.entry.key == restoreItemKey -> Modifier.focusRequester(restoreFocus)
+                    index == 0 && firstFocusRequester != null -> Modifier.focusRequester(firstFocusRequester)
+                    else -> Modifier
+                }
                 HomeRecommendationCard(
                     recommended = recommended,
                     onClick = { onOpenRecommendation(recommended.entry) },
-                    modifier = if (index == 0 && firstFocusRequester != null) {
-                        Modifier.focusRequester(firstFocusRequester)
-                    } else {
-                        Modifier
-                    },
+                    modifier = cardModifier,
                 )
             }
         }
@@ -527,6 +690,9 @@ private fun matchTimingLabel(item: MatchRowItem): String {
         }
     }
 }
+
+private const val RESTORE_FOCUS_DELAY_MS = 60L
+private const val HOME_MATCH_CLOCK_REFRESH_MS = 30_000L
 
 private val HomeCardWidth = 172.dp
 // 128dp d'illustration + jusqu'à 2 lignes de titre en 13sp/16sp de lineHeight + le label de type

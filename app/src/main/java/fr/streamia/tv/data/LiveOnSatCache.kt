@@ -39,6 +39,8 @@ internal class LiveOnSatCache(context: Context) {
         put("competition", competition)
         put("participantA", participantA)
         put("participantB", participantB)
+        participantALogoUrl?.let { put("participantALogoUrl", it) }
+        participantBLogoUrl?.let { put("participantBLogoUrl", it) }
         put("startEpochSeconds", startEpochSeconds)
         put(
             "channels",
@@ -63,6 +65,8 @@ internal class LiveOnSatCache(context: Context) {
             competition = getString("competition"),
             participantA = getString("participantA"),
             participantB = getString("participantB"),
+            participantALogoUrl = optString("participantALogoUrl").takeIf(String::isNotBlank),
+            participantBLogoUrl = optString("participantBLogoUrl").takeIf(String::isNotBlank),
             startEpochSeconds = getLong("startEpochSeconds"),
             channels = channels,
         )

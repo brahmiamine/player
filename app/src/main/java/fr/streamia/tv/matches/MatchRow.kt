@@ -41,6 +41,45 @@ data class MatchRow(
     val items: List<MatchRowItem>,
 )
 
+data class HomeMatchRows(
+    val live: MatchRow?,
+    val upcomingToday: MatchRow?,
+)
+
+/**
+ * Reclasse les cartes déjà détectées sans rescanner l'EPG. Utile pendant que l'accueil reste
+ * ouvert : un match à venir passe en direct dès son coup d'envoi et disparaît dès sa fin.
+ */
+fun HomeMatchRows.reclassifiedAt(nowEpochSeconds: Long): HomeMatchRows {
+    val allItems = (live?.items.orEmpty() + upcomingToday?.items.orEmpty())
+        .distinctBy { it.event.fingerprint }
+
+    val liveItems = allItems.mapNotNull { item ->
+        val state = matchTemporalState(
+            item.event.startEpochSeconds,
+            item.event.endEpochSeconds,
+            nowEpochSeconds,
+        )
+        if (state == MatchTemporalState.Live) item.copy(temporalState = state) else null
+    }.sortedBy { it.event.startEpochSeconds }
+
+    val upcomingItems = allItems.mapNotNull { item ->
+        val state = matchTemporalState(
+            item.event.startEpochSeconds,
+            item.event.endEpochSeconds,
+            nowEpochSeconds,
+        )
+        if (state == MatchTemporalState.Today) item.copy(temporalState = state) else null
+    }.sortedBy { it.event.startEpochSeconds }
+
+    return HomeMatchRows(
+        live = liveItems.takeIf { it.isNotEmpty() }
+            ?.let { MatchRow(title = "🔴 Matchs en direct", items = it) },
+        upcomingToday = upcomingItems.takeIf { it.isNotEmpty() }
+            ?.let { MatchRow(title = "⚽ Matchs suivants", items = it) },
+    )
+}
+
 internal fun matchFingerprint(
     sport: MatchSport,
     participantA: String,
@@ -99,6 +138,62 @@ class MatchRowEngine(
         hiddenCategoryIds: Set<String> = emptySet(),
         limit: Int = ROW_LIMIT,
     ): MatchRow? {
+        val items = buildItems(
+            programsByChannel = programsByChannel,
+            nowEpochSeconds = nowEpochSeconds,
+            hiddenEntryKeys = hiddenEntryKeys,
+            hiddenCategoryIds = hiddenCategoryIds,
+        ).take(limit)
+
+        if (items.isEmpty()) return null
+        return MatchRow(title = rowTitle(items), items = items)
+    }
+
+    /**
+     * Accueil : deux rangées strictement séparées.
+     * live contient uniquement les programmes EPG réellement en cours.
+     * upcomingToday contient uniquement les matchs qui commencent plus tard aujourd'hui.
+     * Demain et le reste de la semaine restent volontairement hors de l'accueil.
+     */
+    fun buildHomeRows(
+        programsByChannel: Map<MediaEntry, List<EpgProgram>>,
+        nowEpochSeconds: Long,
+        hiddenEntryKeys: Set<String> = emptySet(),
+        hiddenCategoryIds: Set<String> = emptySet(),
+        limit: Int = ROW_LIMIT,
+    ): HomeMatchRows {
+        val items = buildItems(
+            programsByChannel = programsByChannel,
+            nowEpochSeconds = nowEpochSeconds,
+            hiddenEntryKeys = hiddenEntryKeys,
+            hiddenCategoryIds = hiddenCategoryIds,
+        )
+
+        val liveItems = items
+            .asSequence()
+            .filter { it.temporalState == MatchTemporalState.Live }
+            .take(limit)
+            .toList()
+        val upcomingItems = items
+            .asSequence()
+            .filter { it.temporalState == MatchTemporalState.Today }
+            .take(limit)
+            .toList()
+
+        return HomeMatchRows(
+            live = liveItems.takeIf { it.isNotEmpty() }
+                ?.let { MatchRow(title = "🔴 Matchs en direct", items = it) },
+            upcomingToday = upcomingItems.takeIf { it.isNotEmpty() }
+                ?.let { MatchRow(title = "⚽ Matchs suivants", items = it) },
+        )
+    }
+
+    private fun buildItems(
+        programsByChannel: Map<MediaEntry, List<EpgProgram>>,
+        nowEpochSeconds: Long,
+        hiddenEntryKeys: Set<String>,
+        hiddenCategoryIds: Set<String>,
+    ): List<MatchRowItem> {
         val events = programsByChannel
             .asSequence()
             .filterNot { (channel, _) -> channel.key in hiddenEntryKeys || channel.categoryId in hiddenCategoryIds }
@@ -107,15 +202,12 @@ class MatchRowEngine(
             }
             .toList()
 
-        val items = sortedItems(
+        return sortedItems(
             deduplicate(events).mapNotNull { event ->
                 matchTemporalState(event.startEpochSeconds, event.endEpochSeconds, nowEpochSeconds)
                     ?.let { state -> MatchRowItem(event, state) }
             },
-        ).take(limit)
-
-        if (items.isEmpty()) return null
-        return MatchRow(title = rowTitle(items), items = items)
+        )
     }
 
     /**

@@ -40,6 +40,14 @@ object LiveOnSatParser {
             ?.takeIf { it.size == 2 && it.all(String::isNotEmpty) }
             ?: return null
 
+        val teamImages = block.select("div.fix_text img")
+        val participantALogoUrl = teamImages.getOrNull(0)
+            ?.attr("src")
+            ?.let { normalizeTeamLogoUrl(it, teams[0]) }
+        val participantBLogoUrl = teamImages.getOrNull(1)
+            ?.attr("src")
+            ?.let { normalizeTeamLogoUrl(it, teams[1]) }
+
         val channels = block
             .select("a.chan_live_free, a.chan_live_not_free, a.chan_live_iptvcable")
             .mapNotNull { anchor ->
@@ -51,10 +59,40 @@ object LiveOnSatParser {
             competition = competition,
             participantA = teams[0],
             participantB = teams[1],
+            participantALogoUrl = participantALogoUrl,
+            participantBLogoUrl = participantBLogoUrl,
             startEpochSeconds = startEpochSeconds,
             channels = channels,
         )
     }
 
+    private fun normalizeTeamLogoUrl(raw: String, participant: String): String? {
+        val value = raw.trim()
+        if (value.isBlank() || !value.contains("img/team/", ignoreCase = true)) return null
+
+        // LiveOnSat place aussi des drapeaux de pays dans img/team/ (ex. england.gif,
+        // spain.gif). On ne doit pas les présenter comme logos de clubs. Une image n'est
+        // acceptée que si son nom de fichier partage un token significatif avec le participant.
+        val imageStem = value.substringAfterLast('/').substringBeforeLast('.')
+            .lowercase()
+            .replace(TEAM_LOGO_NON_ALNUM, " ")
+        val participantTokens = participant
+            .lowercase()
+            .replace(TEAM_LOGO_NON_ALNUM, " ")
+            .split(' ')
+            .filter { it.length >= TEAM_LOGO_MIN_TOKEN_LENGTH }
+        if (participantTokens.none { token -> imageStem.contains(token) }) return null
+
+        return when {
+            value.startsWith("https://", ignoreCase = true) || value.startsWith("http://", ignoreCase = true) -> value
+            value.startsWith("//") -> "https:$value"
+            value.startsWith("/") -> "$LIVE_ONSAT_ORIGIN$value"
+            else -> "$LIVE_ONSAT_ORIGIN/$value"
+        }
+    }
+
+    private const val LIVE_ONSAT_ORIGIN = "https://liveonsat.com"
+    private const val TEAM_LOGO_MIN_TOKEN_LENGTH = 4
+    private val TEAM_LOGO_NON_ALNUM = Regex("[^\\p{L}\\p{N}]+")
     private val TEAM_SEPARATOR = Regex("\\sv\\s")
 }
