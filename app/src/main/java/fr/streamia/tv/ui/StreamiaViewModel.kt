@@ -309,6 +309,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                             epgGuide = null,
                             epgAvailableDates = emptyList(),
                             epgSelectedDate = null,
+                            homeMatchRow = null,
                         )
                     }
                 }
@@ -517,9 +518,11 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 epgAvailableDates = emptyList(),
                 epgSelectedDate = null,
                 epgLoading = false,
+                homeMatchRow = null,
             )
         }
         warmEpgGuideCache(profileId)
+        refreshHomeMatchRow()
     }
 
     fun toggleAutoPlayNextEpisode() {
