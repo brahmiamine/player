@@ -179,20 +179,23 @@ data class EpgGuide(
         }
     }
 
-    fun forEntry(entry: MediaEntry): List<EpgProgram> {
+    fun channelForEntry(entry: MediaEntry): EpgChannel? {
         val candidates = buildList {
             entry.tvgId?.takeIf(String::isNotBlank)?.let(::add)
             add(entry.name)
             add(entry.displayName)
         }
         for (candidate in candidates) {
-            channels[candidate]?.programs?.let { if (it.isNotEmpty()) return it }
+            channels[candidate]?.let { return it }
             candidate.epgLookupAliases().forEach { alias ->
-                channelsByAlias[alias]?.programs?.let { if (it.isNotEmpty()) return it }
+                channelsByAlias[alias]?.let { return it }
             }
         }
-        return emptyList()
+        return null
     }
+
+    fun forEntry(entry: MediaEntry): List<EpgProgram> =
+        channelForEntry(entry)?.programs.orEmpty()
 }
 
 private fun String.epgLookupAliases(): List<String> {
@@ -200,8 +203,8 @@ private fun String.epgLookupAliases(): List<String> {
     if (raw.isBlank()) return emptyList()
 
     val normalized = raw
-        .replace(Regex("[^\\p{L}\\p{N}]+"), " ")
-        .replace(Regex("\\s+"), " ")
+        .replace(EPG_ALIAS_NON_ALNUM, " ")
+        .replace(EPG_ALIAS_WHITESPACE, " ")
         .trim()
 
     val cleaned = normalized
@@ -216,6 +219,9 @@ private fun String.epgLookupAliases(): List<String> {
         if (cleaned.isNotBlank() && cleaned != normalized) add(cleaned)
     }.distinct()
 }
+
+private val EPG_ALIAS_NON_ALNUM = Regex("[^\\p{L}\\p{N}]+")
+private val EPG_ALIAS_WHITESPACE = Regex("\\s+")
 
 private val EPG_DECORATION_TOKENS = setOf(
     "fr", "vip", "raw", "uhd", "hd", "fhd", "hevc", "h265", "h264",
