@@ -39,6 +39,7 @@ import fr.streamia.tv.matches.MatchRowItem
 import fr.streamia.tv.matches.MatchTemporalState
 import fr.streamia.tv.recommendation.RecommendationRow
 import fr.streamia.tv.recommendation.RecommendedMedia
+import fr.streamia.tv.ui.theme.Danger
 import fr.streamia.tv.ui.theme.FocusBlueBright
 import fr.streamia.tv.ui.theme.HeadingWeight
 import fr.streamia.tv.ui.theme.Ink
@@ -398,33 +399,51 @@ private fun HomeMatchCard(
         onClick = onClick,
         modifier = modifier.width(280.dp).height(136.dp),
     ) {
-        Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 13.dp)) {
-            Text(
-                matchTimingLabel(item),
-                color = FocusBlueBright,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-            )
-            Spacer(Modifier.height(7.dp))
-            Text(
-                "${event.participantA} / ${event.participantB}",
-                color = Ink,
-                fontSize = 16.sp,
-                lineHeight = 20.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Spacer(Modifier.weight(1f))
-            Text(
-                event.competition ?: event.channel.displayName,
-                color = MutedInk,
-                fontSize = 11.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+        Box(Modifier.fillMaxSize()) {
+            Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 13.dp)) {
+                Text(
+                    matchTimingLabel(item),
+                    color = FocusBlueBright,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                )
+                Spacer(Modifier.height(7.dp))
+                Text(
+                    "${event.participantA} / ${event.participantB}",
+                    color = Ink,
+                    fontSize = 16.sp,
+                    lineHeight = 20.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.weight(1f))
+                Text(
+                    event.competition ?: event.channel.displayName,
+                    color = MutedInk,
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (item.temporalState == MatchTemporalState.Live) {
+                LiveBadge(Modifier.align(Alignment.TopEnd).padding(top = 10.dp, end = 12.dp))
+            }
         }
+    }
+}
+
+/** Pastille distincte du libellé texte de la carte : signale le direct sans dépendre du texte. */
+@Composable
+private fun LiveBadge(modifier: Modifier = Modifier) {
+    Box(
+        modifier
+            .clip(RoundedCornerShape(4.dp))
+            .background(Danger)
+            .padding(horizontal = 7.dp, vertical = 3.dp),
+    ) {
+        Text("LIVE", color = Night, fontSize = 10.sp, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -494,7 +513,7 @@ private fun matchTimingLabel(item: MatchRowItem): String {
         .atZone(ZoneId.systemDefault())
     val time = dateTime.format(DateTimeFormatter.ofPattern("HH:mm", Locale.getDefault()))
     return when (item.temporalState) {
-        MatchTemporalState.Live -> "● EN DIRECT"
+        MatchTemporalState.Live -> "Match"
         MatchTemporalState.Today -> "Aujourd'hui · $time"
         MatchTemporalState.Tomorrow -> "Demain · $time"
         MatchTemporalState.ThisWeek -> {
