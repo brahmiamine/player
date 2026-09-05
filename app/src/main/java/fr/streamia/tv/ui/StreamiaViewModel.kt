@@ -908,8 +908,20 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
 
     fun recordPlayback(entry: MediaEntry, positionMs: Long, durationMs: Long) {
         val profileId = _uiState.value.activeProfileId ?: return
-        viewModelScope.launch(Dispatchers.IO) {
-            repository.recordPlayback(profileId, entry, positionMs, durationMs)
+        viewModelScope.launch {
+            libraryMutation.withLock {
+                val history = withContext(Dispatchers.IO) {
+                    repository.recordPlayback(profileId, entry, positionMs, durationMs)
+                    repository.library(profileId).history
+                }
+                _uiState.update { state ->
+                    if (state.activeProfileId == profileId) {
+                        state.copy(library = state.library.copy(history = history))
+                    } else {
+                        state
+                    }
+                }
+            }
         }
     }
 
