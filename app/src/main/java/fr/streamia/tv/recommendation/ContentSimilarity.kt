@@ -178,7 +178,7 @@ class MetadataSimilarityEngine(
 
     private fun titleTokens(value: String): Set<String> = rawTokens(value, minLength = 2)
         .filterNotTo(linkedSetOf()) { token ->
-            token in TITLE_NOISE_TOKENS || YEAR_TOKEN.matches(token)
+            token in TITLE_NOISE_TOKENS || token in STOP_WORDS || YEAR_TOKEN.matches(token)
         }
 
     private fun cleanTitle(value: String): String = titleTokens(value).joinToString(" ")
@@ -246,7 +246,8 @@ class MetadataSimilarityEngine(
 
         val TITLE_NOISE_TOKENS = setOf(
             "multi", "multilang", "multilingual", "fhd", "uhd", "hdr", "hdr10", "dolby",
-            "vostfr", "vost", "truefrench", "french", "vfq", "webrip", "webdl", "bluray",
+            "vostfr", "vost", "truefrench", "french", "vf", "vfq", "vo", "fr", "en", "de",
+            "it", "es", "ar", "pt", "ru", "tr", "webrip", "webdl", "bluray",
             "bdrip", "dvdrip", "remux", "x264", "x265", "hevc", "av1", "aac", "dts",
         )
 
