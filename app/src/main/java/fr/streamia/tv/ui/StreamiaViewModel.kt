@@ -236,10 +236,10 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                     appSettings = repository.appSettings(),
                 )
                 warmEpgGuideCache(profileId)
-                // Le Home est déjà visible à ce stade. Ne pas attendre la réconciliation de profil
-                // pour hydrater le Live : la rangée Matchs, le zapping et les numéros de chaîne
-                // doivent pouvoir travailler immédiatement depuis le SQLite catalogue local.
-                ensureSectionLoaded(MediaType.Live)
+                // La rangée Matchs lit sa propre vue Live depuis SQLite en arrière-plan. Ne surtout
+                // pas forcer ici 55k+ chaînes dans le StateFlow du Home : cela augmente fortement
+                // le coût CPU/mémoire au démarrage sur Android TV.
+                refreshHomeMatchRow()
                 try {
                     mergeCatalog(repository.openProfile(profileId, knownCache = cachedCatalog))
                 } catch (error: Throwable) {
@@ -1430,17 +1430,6 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         val state = _uiState.value
         val profileId = state.activeProfileId ?: return
         val catalog = state.catalog ?: return
-        if (!catalog.isCategoryLoaded(MediaType.Live, Catalog.ALL_CATEGORY_ID)) {
-            // refreshHomeMatchRow peut être appelé très tôt (showHome, warm-up EPG, fin de sync).
-            // Au lieu d'échouer silencieusement sur un catalogue lazy, rendre la dépendance
-            // auto-réparante : hydrate le Live depuis SQLite puis ensureSectionLoaded() rappellera
-            // refreshHomeMatchRow() une fois la section prête.
-            ensureSectionLoaded(MediaType.Live)
-            return
-        }
-        val liveEntries = catalog.entriesFor(MediaType.Live)
-        if (liveEntries.isEmpty()) return
-
         val offsetHours = state.appSettings.epgTimeOffsetHours
         val library = state.library
         val excludedCategoryKeys = if (
@@ -1456,13 +1445,34 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
 
         val sequence = ++homeMatchBuildSequence
         homeMatchJob?.cancel()
-        homeMatchJob = viewModelScope.launch {
+
+        // IMPORTANT : toute la construction Matchs est CPU-heavy (résolution d'alias, regex,
+        // classification EPG, dizaines de milliers de chaînes). Elle ne doit jamais tourner sur
+        // Dispatchers.Main. Les ANR Crashlytics montraient précisément refreshHomeMatchRow ->
+        // EpgGuide.forEntry -> epgLookupAliases sur le thread UI.
+        homeMatchJob = viewModelScope.launch(Dispatchers.Default) {
             val metadata = runCatching { repository.epgMetadata(profileId) }.getOrNull() ?: return@launch
             if (
                 metadata.programCount <= 0 ||
                 sequence != homeMatchBuildSequence ||
                 _uiState.value.activeProfileId != profileId
             ) return@launch
+
+            // Si le Live complet est déjà matérialisé on le réutilise. Sinon on lit directement la
+            // section depuis SQLite dans ce job de fond, SANS l'injecter dans le StateFlow de l'UI.
+            // La rangée Matchs ne doit pas obliger l'accueil à matérialiser 55k+ chaînes.
+            val liveEntries = if (catalog.isCategoryLoaded(MediaType.Live, Catalog.ALL_CATEGORY_ID)) {
+                catalog.entriesFor(MediaType.Live)
+            } else {
+                runCatching { repository.loadSection(profileId, MediaType.Live) }.getOrNull().orEmpty()
+            }
+            if (liveEntries.isEmpty()) return@launch
+
+            val eligibleLiveEntries = liveEntries.asSequence()
+                .filterNot { it.key in library.hiddenEntries }
+                .filterNot { it.categoryId in excludedCategoryIds }
+                .toList()
+            if (eligibleLiveEntries.isEmpty()) return@launch
 
             val today = LocalDate.now(ZoneId.systemDefault())
             val lastDay = today.plusDays(HOME_MATCH_WINDOW_DAYS)
@@ -1481,6 +1491,11 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             val rows = mutableListOf<MatchRow>()
             var merged: MatchRow? = null
 
+            // Les associations chaîne playlist <-> chaîne XMLTV sont stables d'un jour à l'autre.
+            // On fait donc le passage coûteux sur 55k chaînes UNE seule fois, sur le premier guide,
+            // puis les jours suivants ne repassent que sur ~nombre de chaînes réellement mappées EPG.
+            var mappedLiveEntries: List<MediaEntry>? = null
+
             for (date in dates) {
                 if (sequence != homeMatchBuildSequence || _uiState.value.activeProfileId != profileId) return@launch
 
@@ -1494,15 +1509,18 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                     )
                 }.getOrNull() ?: continue
 
-                // On ne remplit pas le LRU avec toute la semaine : aujourd'hui/demain seulement
-                // peuvent accélérer la navigation Guide TV ; les jours plus lointains sont jetés
-                // juste après extraction des matchs.
                 if (!date.isAfter(today.plusDays(1))) {
                     epgGuideMemoryCache.put(profileId, date, offsetHours, guide)
                 }
 
+                val candidates = mappedLiveEntries ?: eligibleLiveEntries
+                    .filter { guide.channelForEntry(it) != null }
+                    .also { mappedLiveEntries = it }
+
+                if (candidates.isEmpty()) break
+
                 val programsByChannel = linkedMapOf<MediaEntry, List<fr.streamia.tv.domain.EpgProgram>>()
-                liveEntries.forEach { channel ->
+                candidates.forEach { channel ->
                     val programs = guide.forEntry(channel)
                     if (programs.isNotEmpty()) programsByChannel[channel] = programs
                 }
@@ -1510,8 +1528,8 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 matchRowEngine.buildRow(
                     programsByChannel = programsByChannel,
                     nowEpochSeconds = now,
-                    hiddenEntryKeys = library.hiddenEntries,
-                    hiddenCategoryIds = excludedCategoryIds,
+                    hiddenEntryKeys = emptySet(),
+                    hiddenCategoryIds = emptySet(),
                 )?.let(rows::add)
 
                 merged = matchRowEngine.mergeRows(rows)
