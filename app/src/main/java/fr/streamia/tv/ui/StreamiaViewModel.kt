@@ -1738,8 +1738,10 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     private fun loadLiveOnSatMatches(forceRefresh: Boolean) {
         // Appelé à chaque ouverture de l'app (openProfile/resumeStartup/showCatalog) : un chargement
         // déjà en vol pour la même raison ne doit pas en déclencher un second en parallèle. Un
-        // forceRefresh explicite (bouton Actualiser) passe toujours devant.
+        // forceRefresh explicite (bouton Actualiser) passe toujours devant : il annule le chargement
+        // en cours plutôt que d'en laisser deux tourner (double scrape de liveonsat.com).
         if (!forceRefresh && liveOnSatLoadJob?.isActive == true) return
+        if (forceRefresh) liveOnSatLoadJob?.cancel()
         val sequence = ++liveOnSatLoadSequence
         _uiState.update { it.copy(liveOnSatLoading = true, liveOnSatError = null) }
         liveOnSatLoadJob = viewModelScope.launch {

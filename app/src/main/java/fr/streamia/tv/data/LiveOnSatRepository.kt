@@ -10,7 +10,11 @@ import java.io.IOException
 data class LiveOnSatFetchResult(
     val matches: List<LiveOnSatMatch>,
     val fetchedAtEpochMillis: Long,
-    /** `true` si le scrape a échoué et que ce sont les données d'un cycle précédent qui sont renvoyées. */
+    /**
+     * `true` quand [matches] vient du cache disque plutôt que d'un scrape qui vient de réussir —
+     * soit parce que le cache était encore assez récent (aucun scrape tenté), soit parce qu'un
+     * scrape a été tenté et a échoué, auquel cas ces données peuvent dater d'un cycle précédent.
+     */
     val fromCache: Boolean,
 )
 

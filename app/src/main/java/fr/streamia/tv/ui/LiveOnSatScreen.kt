@@ -17,7 +17,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -40,6 +44,7 @@ import fr.streamia.tv.ui.theme.TypeBody
 import fr.streamia.tv.ui.theme.TypeLabel
 import fr.streamia.tv.ui.theme.TypeScreenTitle
 import fr.streamia.tv.ui.theme.TypeSectionTitle
+import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.time.Instant
 import java.time.ZoneId
@@ -64,7 +69,13 @@ fun LiveOnSatScreen(
     onBack: () -> Unit,
 ) {
     BackHandler(onBack = onBack)
-    val nowEpochSeconds = System.currentTimeMillis() / 1000
+    var nowEpochSeconds by remember { mutableStateOf(System.currentTimeMillis() / 1000) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(CLOCK_REFRESH_MS)
+            nowEpochSeconds = System.currentTimeMillis() / 1000
+        }
+    }
     val visibleMatches = remember(matches, nowEpochSeconds) {
         matches
             .filter { nowEpochSeconds - it.match.startEpochSeconds < MATCH_STALE_AFTER_SECONDS }
@@ -224,3 +235,6 @@ private fun formatClockTime(epochMillis: Long): String =
 
 /** Un match reste affiché jusqu'à 3h après son coup d'envoi — liveonsat.com ne fournit pas d'heure de fin. */
 private const val MATCH_STALE_AFTER_SECONDS = 3 * 60 * 60L
+
+/** Assez fréquent pour que « EN DIRECT » et le filtrage des matchs périmés restent justes sur un écran laissé ouvert. */
+private const val CLOCK_REFRESH_MS = 30_000L
