@@ -1058,12 +1058,16 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         val profileId = _uiState.value.activeProfileId
         val player = _uiState.value.screen as? StreamiaScreen.Player
         _uiState.update {
+            val sourceDestination = it.contentReturnContext
+                ?.takeIf { context -> context.origin != ContentReturnOrigin.Browser }
+                ?.destinationScreen()
             it.copy(
                 screen = when {
-                    it.catalogHydrating -> StreamiaScreen.Home
                     forceBrowser -> StreamiaScreen.Browser
                     player?.returnToSeries == true && it.seriesDetails != null -> StreamiaScreen.Series(it.seriesDetails.series)
-                    else -> it.contentReturnContext?.destinationScreen() ?: StreamiaScreen.Browser
+                    sourceDestination != null -> sourceDestination
+                    it.catalogHydrating -> StreamiaScreen.Home
+                    else -> StreamiaScreen.Browser
                 },
                 epg = EpgNowContext(),
                 resumePositionMs = 0,
