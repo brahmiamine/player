@@ -2144,6 +2144,9 @@ data class StreamiaUiState(
     val resumePositionMs: Long = 0,
     val browserType: MediaType? = null,
     val browserCategoryId: String? = null,
+    val searchQuery: String = "",
+    val searchType: MediaType? = null,
+    val contentReturnContext: ContentReturnContext? = null,
     val lastViewedEntry: MediaEntry? = null,
 )
 
