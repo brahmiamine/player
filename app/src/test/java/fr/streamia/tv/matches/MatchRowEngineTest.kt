@@ -38,6 +38,24 @@ class MatchRowEngineTest {
     }
 
     @Test
+    fun `real slash fixture is detected from sports channel context`() {
+        val channel = channel(14300, "VIP: BEIN SPORTS MAX 8 HD")
+        val program = EpgProgram(
+            title = "Paderborn / Fribourg",
+            description = "beIN SPORTS, le plus grand des spectacles",
+            startEpochSeconds = now + 1_800,
+            endEpochSeconds = now + 7_200,
+            category = null,
+        )
+
+        val row = engine.buildRow(mapOf(channel to listOf(program)), now)
+
+        assertEquals(1, row?.items?.size)
+        assertEquals("Paderborn", row?.items?.first()?.event?.participantA)
+        assertEquals("Fribourg", row?.items?.first()?.event?.participantB)
+    }
+
+    @Test
     fun `no detected match means no row at all`() {
         val channel = channel(1, "Chaine Generaliste")
         val program = EpgProgram(
@@ -141,6 +159,24 @@ class MatchRowEngineTest {
 
         assertEquals(MatchTemporalState.Live, row?.items?.first()?.temporalState)
         assertEquals("PSG", row?.items?.first()?.event?.participantA)
+    }
+
+    @Test
+    fun `rows from multiple EPG days merge in chronological order`() {
+        val channel = channel(1, "beIN Sports")
+        val today = engine.buildRow(
+            mapOf(channel to listOf(footballProgram("PSG - Marseille", now + 1_800, now + 5_400))),
+            now,
+        )!!
+        val tomorrow = engine.buildRow(
+            mapOf(channel to listOf(footballProgram("Lyon - Nice", now + 86_400, now + 90_000))),
+            now,
+        )!!
+
+        val merged = engine.mergeRows(listOf(tomorrow, today))
+
+        assertEquals(2, merged?.items?.size)
+        assertEquals("PSG", merged?.items?.first()?.event?.participantA)
     }
 
     @Test
