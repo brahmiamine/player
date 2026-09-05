@@ -14,6 +14,8 @@ class LiveOnSatParserTest {
         assertEquals("Test League", match.competition)
         assertEquals("Team A", match.participantA)
         assertEquals("Team B", match.participantB)
+        assertEquals("https://liveonsat.com/img/team/team-a.gif", match.participantALogoUrl)
+        assertEquals("https://liveonsat.com/img/team/team-b.gif", match.participantBLogoUrl)
         assertEquals(1_700_000_000L, match.startEpochSeconds)
         assertEquals(
             listOf(
@@ -55,9 +57,9 @@ class LiveOnSatParserTest {
             <div class=blockfix>
               <div class=fix>
                 <div class=fix_text>
-                  <div class = imgCenter><img src="a.gif"></div>
+                  <div class = imgCenter><img src="/img/team/team-a.gif"></div>
                   <div class = fLeft style="width:270px">Team A v Team B</div>
-                  <div class = imgCenter><img src="b.gif"></div>
+                  <div class = imgCenter><img src="img/team/team-b.gif"></div>
                 </div>
                 <div class=notes></div>
               </div>
