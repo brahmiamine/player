@@ -61,6 +61,8 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     private val matchRowEngine = MatchRowEngine()
     private var homeMatchBuildSequence = 0L
     private var homeMatchJob: Job? = null
+    private var homeMatchLastBuiltProfileId: String? = null
+    private var homeMatchLastBuiltAtEpochSeconds = 0L
     private var epgSyncJob: Job? = null
     private var epgSyncProfileId: String? = null
     private var epgPrefetchJob: Job? = null
@@ -526,7 +528,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             )
         }
         warmEpgGuideCache(profileId)
-        refreshHomeMatchRow()
+        refreshHomeMatchRow(force = true)
     }
 
     fun toggleAutoPlayNextEpisode() {
@@ -1214,7 +1216,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                     warmEpgGuideCache(profileId)
                 }
                 if (changed || _uiState.value.homeMatchRow == null) {
-                    refreshHomeMatchRow()
+                    refreshHomeMatchRow(force = changed)
                 }
             } catch (error: Throwable) {
                 if (error is CancellationException) throw error
@@ -1426,10 +1428,21 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
      * lues une par une (aujourd'hui puis demain puis la semaine) et immédiatement réduites à
      * quelques événements : on ne garde jamais sept grosses grilles XMLTV simultanément en RAM.
      */
-    private fun refreshHomeMatchRow() {
+    private fun refreshHomeMatchRow(force: Boolean = false) {
         val state = _uiState.value
         val profileId = state.activeProfileId ?: return
         val catalog = state.catalog ?: return
+        val nowEpochSeconds = System.currentTimeMillis() / 1000L
+
+        // Revenir plusieurs fois à l'accueil ou ouvrir le Guide TV ne doit pas rescanner 55k+
+        // chaînes. Une rangée calculée récemment reste valable quelques minutes ; une vraie
+        // resynchronisation EPG ou un changement d'offset utilise force=true.
+        if (
+            !force &&
+            homeMatchLastBuiltProfileId == profileId &&
+            nowEpochSeconds - homeMatchLastBuiltAtEpochSeconds < HOME_MATCH_REBUILD_INTERVAL_SECONDS
+        ) return
+        if (!force && homeMatchJob?.isActive == true) return
         val offsetHours = state.appSettings.epgTimeOffsetHours
         val library = state.library
         val excludedCategoryKeys = if (
@@ -1487,7 +1500,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 return@launch
             }
 
-            val now = System.currentTimeMillis() / 1000L
+            val now = nowEpochSeconds
             val rows = mutableListOf<MatchRow>()
             var merged: MatchRow? = null
 
@@ -1537,6 +1550,8 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             }
 
             if (sequence != homeMatchBuildSequence || _uiState.value.activeProfileId != profileId) return@launch
+            homeMatchLastBuiltProfileId = profileId
+            homeMatchLastBuiltAtEpochSeconds = System.currentTimeMillis() / 1000L
             _uiState.update { current ->
                 if (current.activeProfileId == profileId) current.copy(homeMatchRow = merged) else current
             }
@@ -1675,6 +1690,8 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         homeMatchJob?.cancel()
         homeMatchJob = null
         homeMatchBuildSequence += 1
+        homeMatchLastBuiltProfileId = null
+        homeMatchLastBuiltAtEpochSeconds = 0L
         epgPrefetchJob?.cancel()
         epgPrefetchJob = null
         epgSyncJob?.cancel()
@@ -1779,6 +1796,7 @@ private const val EPG_PLAYER_REFRESH_MS = 30_000L
 private const val MAX_EPG_DAY_SPAN = 30L
 private const val HOME_MATCH_WINDOW_DAYS = 7L
 private const val HOME_MATCH_ROW_LIMIT = 12
+private const val HOME_MATCH_REBUILD_INTERVAL_SECONDS = 5 * 60L
 
 class StreamiaViewModelFactory(private val repository: XtreamRepository) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
