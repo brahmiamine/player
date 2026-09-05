@@ -45,6 +45,14 @@ class PlaybackControlsTest {
     }
 
     @Test
+    fun `VOD progress is first persisted at five seconds then throttled`() {
+        assertEquals(false, shouldPersistVodProgress(positionMs = 4_999L, lastSavedAtMs = 0L, nowMs = 4_999L))
+        assertEquals(true, shouldPersistVodProgress(positionMs = 5_000L, lastSavedAtMs = 0L, nowMs = 5_000L))
+        assertEquals(false, shouldPersistVodProgress(positionMs = 12_000L, lastSavedAtMs = 5_000L, nowMs = 19_999L))
+        assertEquals(true, shouldPersistVodProgress(positionMs = 20_000L, lastSavedAtMs = 5_000L, nowMs = 20_000L))
+    }
+
+    @Test
     fun `seek position is clamped to media boundaries`() {
         assertEquals(0L, resolveSeekPosition(currentPositionMs = 4_000L, durationMs = 60_000L, deltaMs = -10_000L))
         assertEquals(60_000L, resolveSeekPosition(currentPositionMs = 57_000L, durationMs = 60_000L, deltaMs = 10_000L))
