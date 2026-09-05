@@ -338,7 +338,8 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                             epgGuide = null,
                             epgAvailableDates = emptyList(),
                             epgSelectedDate = null,
-                            homeMatchRow = null,
+                            homeLiveMatchRow = null,
+                            homeUpcomingMatchRow = null,
                         )
                     }
                 }
@@ -592,7 +593,8 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 epgAvailableDates = emptyList(),
                 epgSelectedDate = null,
                 epgLoading = false,
-                homeMatchRow = null,
+                homeLiveMatchRow = null,
+                            homeUpcomingMatchRow = null,
             )
         }
         warmEpgGuideCache(profileId)
@@ -1328,7 +1330,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                     // aujourd'hui pour la prochaine ouverture du Guide TV.
                     warmEpgGuideCache(profileId)
                 }
-                if (changed || _uiState.value.homeMatchRow == null) {
+                if (changed || (_uiState.value.homeLiveMatchRow == null && _uiState.value.homeUpcomingMatchRow == null)) {
                     refreshHomeMatchRow(force = changed)
                 }
             } catch (error: Throwable) {
@@ -1537,9 +1539,9 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     }
 
     /**
-     * Construit la rangée Matchs directement depuis le cache EPG persistant. Les journées sont
-     * lues une par une (aujourd'hui puis demain puis la semaine) et immédiatement réduites à
-     * quelques événements : on ne garde jamais sept grosses grilles XMLTV simultanément en RAM.
+     * Construit les deux rangées Matchs de l'accueil uniquement depuis l'EPG d'aujourd'hui :
+     * programmes réellement en cours d'un côté, prochains matchs du jour de l'autre. Aucun match
+     * de demain ou de la semaine n'est lu pour l'accueil.
      */
     private fun refreshHomeMatchRow(force: Boolean = false) {
         val state = _uiState.value
@@ -1547,15 +1549,13 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         val catalog = state.catalog ?: return
         val nowEpochSeconds = System.currentTimeMillis() / 1000L
 
-        // Revenir plusieurs fois à l'accueil ou ouvrir le Guide TV ne doit pas rescanner 55k+
-        // chaînes. Une rangée calculée récemment reste valable quelques minutes ; une vraie
-        // resynchronisation EPG ou un changement d'offset utilise force=true.
         if (
             !force &&
             homeMatchLastBuiltProfileId == profileId &&
             nowEpochSeconds - homeMatchLastBuiltAtEpochSeconds < HOME_MATCH_REBUILD_INTERVAL_SECONDS
         ) return
         if (!force && homeMatchJob?.isActive == true) return
+
         val offsetHours = state.appSettings.epgTimeOffsetHours
         val library = state.library
         val excludedCategoryKeys = if (
@@ -1572,21 +1572,22 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         val sequence = ++homeMatchBuildSequence
         homeMatchJob?.cancel()
 
-        // IMPORTANT : toute la construction Matchs est CPU-heavy (résolution d'alias, regex,
-        // classification EPG, dizaines de milliers de chaînes). Elle ne doit jamais tourner sur
-        // Dispatchers.Main. Les ANR Crashlytics montraient précisément refreshHomeMatchRow ->
-        // EpgGuide.forEntry -> epgLookupAliases sur le thread UI.
         homeMatchJob = viewModelScope.launch(Dispatchers.Default) {
-            val metadata = runCatching { repository.epgMetadata(profileId) }.getOrNull() ?: return@launch
+            val metadata = runCatching { repository.epgMetadata(profileId) }.getOrNull()
             if (
+                metadata == null ||
                 metadata.programCount <= 0 ||
                 sequence != homeMatchBuildSequence ||
                 _uiState.value.activeProfileId != profileId
-            ) return@launch
+            ) {
+                if (sequence == homeMatchBuildSequence && _uiState.value.activeProfileId == profileId) {
+                    _uiState.update { current ->
+                        current.copy(homeLiveMatchRow = null, homeUpcomingMatchRow = null)
+                    }
+                }
+                return@launch
+            }
 
-            // Si le Live complet est déjà matérialisé on le réutilise. Sinon on lit directement la
-            // section depuis SQLite dans ce job de fond, SANS l'injecter dans le StateFlow de l'UI.
-            // La rangée Matchs ne doit pas obliger l'accueil à matérialiser 55k+ chaînes.
             val liveEntries = if (catalog.isCategoryLoaded(MediaType.Live, Catalog.ALL_CATEGORY_ID)) {
                 catalog.entriesFor(MediaType.Live)
             } else {
@@ -1598,75 +1599,63 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 .filterNot { it.key in library.hiddenEntries }
                 .filterNot { it.categoryId in excludedCategoryIds }
                 .toList()
-            if (eligibleLiveEntries.isEmpty()) return@launch
-
-            val today = LocalDate.now(ZoneId.systemDefault())
-            val lastDay = today.plusDays(HOME_MATCH_WINDOW_DAYS)
-            val dates = epgDates(metadata, offsetHours)
-                .asSequence()
-                .filter { !it.isBefore(today) && !it.isAfter(lastDay) }
-                .toList()
-            if (dates.isEmpty()) {
+            if (eligibleLiveEntries.isEmpty()) {
                 _uiState.update { current ->
-                    if (current.activeProfileId == profileId) current.copy(homeMatchRow = null) else current
+                    if (current.activeProfileId == profileId) {
+                        current.copy(homeLiveMatchRow = null, homeUpcomingMatchRow = null)
+                    } else current
                 }
                 return@launch
             }
 
-            val now = nowEpochSeconds
-            val rows = mutableListOf<MatchRow>()
-            var merged: MatchRow? = null
-
-            // Les associations chaîne playlist <-> chaîne XMLTV sont stables d'un jour à l'autre.
-            // On fait donc le passage coûteux sur 55k chaînes UNE seule fois, sur le premier guide,
-            // puis les jours suivants ne repassent que sur ~nombre de chaînes réellement mappées EPG.
-            var mappedLiveEntries: List<MediaEntry>? = null
-
-            for (date in dates) {
-                if (sequence != homeMatchBuildSequence || _uiState.value.activeProfileId != profileId) return@launch
-
-                val guide = epgGuideMemoryCache.get(profileId, date, offsetHours) ?: runCatching {
-                    val (dayStart, dayEnd) = epgDayBounds(date)
-                    repository.cachedEpgGuide(
-                        profileId = profileId,
-                        displayStartEpochSeconds = dayStart,
-                        displayEndEpochSeconds = dayEnd,
-                        offsetHours = offsetHours,
-                    )
-                }.getOrNull() ?: continue
-
-                if (!date.isAfter(today.plusDays(1))) {
-                    epgGuideMemoryCache.put(profileId, date, offsetHours, guide)
+            val today = LocalDate.now(ZoneId.systemDefault())
+            if (today !in epgDates(metadata, offsetHours)) {
+                _uiState.update { current ->
+                    if (current.activeProfileId == profileId) {
+                        current.copy(homeLiveMatchRow = null, homeUpcomingMatchRow = null)
+                    } else current
                 }
+                return@launch
+            }
 
-                val candidates = mappedLiveEntries ?: eligibleLiveEntries
-                    .filter { guide.channelForEntry(it) != null }
-                    .also { mappedLiveEntries = it }
+            val guide = epgGuideMemoryCache.get(profileId, today, offsetHours) ?: runCatching {
+                val (dayStart, dayEnd) = epgDayBounds(today)
+                repository.cachedEpgGuide(
+                    profileId = profileId,
+                    displayStartEpochSeconds = dayStart,
+                    displayEndEpochSeconds = dayEnd,
+                    offsetHours = offsetHours,
+                )
+            }.getOrNull() ?: return@launch
+            epgGuideMemoryCache.put(profileId, today, offsetHours, guide)
 
-                if (candidates.isEmpty()) break
-
-                val programsByChannel = linkedMapOf<MediaEntry, List<fr.streamia.tv.domain.EpgProgram>>()
-                candidates.forEach { channel ->
+            val programsByChannel = linkedMapOf<MediaEntry, List<fr.streamia.tv.domain.EpgProgram>>()
+            eligibleLiveEntries
+                .asSequence()
+                .filter { guide.channelForEntry(it) != null }
+                .forEach { channel ->
                     val programs = guide.forEntry(channel)
                     if (programs.isNotEmpty()) programsByChannel[channel] = programs
                 }
 
-                matchRowEngine.buildRow(
-                    programsByChannel = programsByChannel,
-                    nowEpochSeconds = now,
-                    hiddenEntryKeys = emptySet(),
-                    hiddenCategoryIds = emptySet(),
-                )?.let(rows::add)
-
-                merged = matchRowEngine.mergeRows(rows)
-                if (merged != null && (merged.items.size >= HOME_MATCH_ROW_LIMIT || date == lastDay)) break
-            }
+            val rows = matchRowEngine.buildHomeRows(
+                programsByChannel = programsByChannel,
+                nowEpochSeconds = nowEpochSeconds,
+                hiddenEntryKeys = emptySet(),
+                hiddenCategoryIds = emptySet(),
+                limit = HOME_MATCH_ROW_LIMIT,
+            )
 
             if (sequence != homeMatchBuildSequence || _uiState.value.activeProfileId != profileId) return@launch
             homeMatchLastBuiltProfileId = profileId
             homeMatchLastBuiltAtEpochSeconds = System.currentTimeMillis() / 1000L
             _uiState.update { current ->
-                if (current.activeProfileId == profileId) current.copy(homeMatchRow = merged) else current
+                if (current.activeProfileId == profileId) {
+                    current.copy(
+                        homeLiveMatchRow = rows.live,
+                        homeUpcomingMatchRow = rows.upcomingToday,
+                    )
+                } else current
             }
         }
     }
@@ -2144,7 +2133,8 @@ data class StreamiaUiState(
     val epgAvailableDates: List<LocalDate> = emptyList(),
     val epgSelectedDate: LocalDate? = null,
     val epgLoading: Boolean = false,
-    val homeMatchRow: MatchRow? = null,
+    val homeLiveMatchRow: MatchRow? = null,
+    val homeUpcomingMatchRow: MatchRow? = null,
     val homeRecommendationRows: List<RecommendationRow> = emptyList(),
     val similarMedia: List<RecommendedMedia> = emptyList(),
     val liveOnSatMatches: List<ResolvedLiveOnSatMatch> = emptyList(),
@@ -2176,7 +2166,6 @@ sealed interface StreamiaScreen {
 
 private const val EPG_PLAYER_REFRESH_MS = 30_000L
 private const val MAX_EPG_DAY_SPAN = 30L
-private const val HOME_MATCH_WINDOW_DAYS = 7L
 private const val HOME_MATCH_ROW_LIMIT = 12
 private const val HOME_MATCH_REBUILD_INTERVAL_SECONDS = 5 * 60L
 private const val HOME_RECOMMENDATION_CANDIDATE_LIMIT = 400
