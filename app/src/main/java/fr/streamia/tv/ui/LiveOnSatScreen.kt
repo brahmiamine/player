@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -24,6 +25,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -32,6 +35,8 @@ import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
 import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.liveonsat.ResolvedLiveOnSatMatch
+import fr.streamia.tv.liveonsat.isLiveAt
+import fr.streamia.tv.liveonsat.isVisibleAt
 import fr.streamia.tv.ui.theme.Danger
 import fr.streamia.tv.ui.theme.DeepSurface
 import fr.streamia.tv.ui.theme.FocusBlueBright
@@ -64,7 +69,9 @@ fun LiveOnSatScreen(
     loading: Boolean,
     error: String?,
     fetchedAtEpochMillis: Long?,
-    onOpenChannel: (MediaEntry) -> Unit,
+    restoreMatchKey: String? = null,
+    restoreChannelKey: String? = null,
+    onOpenChannel: (MediaEntry, String) -> Unit,
     onRefresh: () -> Unit,
     onBack: () -> Unit,
 ) {
@@ -78,8 +85,20 @@ fun LiveOnSatScreen(
     }
     val visibleMatches = remember(matches, nowEpochSeconds) {
         matches
-            .filter { nowEpochSeconds - it.match.startEpochSeconds < MATCH_STALE_AFTER_SECONDS }
+            .filter { it.isVisibleAt(nowEpochSeconds) }
             .sortedBy { it.match.startEpochSeconds }
+    }
+    val matchListState = rememberLazyListState()
+    val restoreChannelFocus = remember { FocusRequester() }
+    LaunchedEffect(restoreMatchKey, restoreChannelKey, visibleMatches) {
+        val targetIndex = visibleMatches.indexOfFirst { liveOnSatMatchKey(it) == restoreMatchKey }
+        if (targetIndex >= 0) {
+            matchListState.scrollToItem(targetIndex)
+            if (restoreChannelKey != null) {
+                delay(RESTORE_MATCH_FOCUS_DELAY_MS)
+                runCatching { restoreChannelFocus.requestFocus() }
+            }
+        }
     }
 
     Column(Modifier.fillMaxSize().background(Night).padding(28.dp)) {
@@ -131,12 +150,18 @@ fun LiveOnSatScreen(
                 if (error != null) {
                     Text(error, color = Danger, fontSize = TypeLabel, modifier = Modifier.padding(bottom = 10.dp))
                 }
-                LazyColumn(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                LazyColumn(state = matchListState, modifier = Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     items(
                         visibleMatches,
-                        key = { "${it.match.competition}|${it.match.participantA}|${it.match.participantB}|${it.match.startEpochSeconds}" },
+                        key = ::liveOnSatMatchKey,
                     ) { resolved ->
-                        LiveOnSatMatchCard(resolved = resolved, nowEpochSeconds = nowEpochSeconds, onOpenChannel = onOpenChannel)
+                        LiveOnSatMatchCard(
+                            resolved = resolved,
+                            nowEpochSeconds = nowEpochSeconds,
+                            restoreChannelKey = restoreChannelKey.takeIf { liveOnSatMatchKey(resolved) == restoreMatchKey },
+                            restoreChannelFocus = restoreChannelFocus,
+                            onOpenChannel = { entry -> onOpenChannel(entry, liveOnSatMatchKey(resolved)) },
+                        )
                     }
                 }
             }
@@ -148,10 +173,12 @@ fun LiveOnSatScreen(
 private fun LiveOnSatMatchCard(
     resolved: ResolvedLiveOnSatMatch,
     nowEpochSeconds: Long,
+    restoreChannelKey: String?,
+    restoreChannelFocus: FocusRequester,
     onOpenChannel: (MediaEntry) -> Unit,
 ) {
     val match = resolved.match
-    val isLive = nowEpochSeconds >= match.startEpochSeconds
+    val isLive = resolved.isLiveAt(nowEpochSeconds)
     Column(
         Modifier
             .fillMaxWidth()
@@ -176,17 +203,35 @@ private fun LiveOnSatMatchCard(
             )
         }
         Spacer(Modifier.height(7.dp))
-        Text(
-            "${match.participantA} – ${match.participantB}",
-            color = Ink,
-            fontSize = TypeSectionTitle,
-            fontWeight = FontWeight.SemiBold,
-        )
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            ChannelLogo(match.participantALogoUrl, match.participantA, Modifier.width(38.dp).height(38.dp))
+            Spacer(Modifier.width(10.dp))
+            Text(
+                "${match.participantA} – ${match.participantB}",
+                color = Ink,
+                fontSize = TypeSectionTitle,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.width(10.dp))
+            ChannelLogo(match.participantBLogoUrl, match.participantB, Modifier.width(38.dp).height(38.dp))
+        }
         if (match.channels.isNotEmpty()) {
             Spacer(Modifier.height(10.dp))
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 match.channels.forEach { channel ->
-                    ChannelChip(name = channel.name, entry = resolved.matchedChannels[channel.name], onOpenChannel = onOpenChannel)
+                    val entry = resolved.matchedChannels[channel.name]
+                    ChannelChip(
+                        name = channel.name,
+                        entry = entry,
+                        restoreFocusRequester = if (entry?.key == restoreChannelKey) restoreChannelFocus else null,
+                        onOpenChannel = onOpenChannel,
+                    )
                 }
             }
         }
@@ -197,17 +242,29 @@ private fun LiveOnSatMatchCard(
 private fun ChannelChip(
     name: String,
     entry: MediaEntry?,
+    restoreFocusRequester: FocusRequester?,
     onOpenChannel: (MediaEntry) -> Unit,
 ) {
     if (entry != null) {
-        FocusableSurface(onClick = { onOpenChannel(entry) }) {
-            Text(
-                name,
-                color = Ink,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-            )
+        FocusableSurface(
+            onClick = { onOpenChannel(entry) },
+            modifier = Modifier.then(
+                if (restoreFocusRequester != null) Modifier.focusRequester(restoreFocusRequester) else Modifier,
+            ),
+        ) {
+            Row(
+                Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                ChannelLogo(entry.iconUrl, entry.displayName, Modifier.width(24.dp).height(24.dp))
+                Spacer(Modifier.width(7.dp))
+                Text(
+                    name,
+                    color = Ink,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
         }
     } else {
         Box(
@@ -233,8 +290,9 @@ private fun formatMatchTime(startEpochSeconds: Long): String =
 private fun formatClockTime(epochMillis: Long): String =
     SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(epochMillis))
 
-/** Un match reste affiché jusqu'à 3h après son coup d'envoi — liveonsat.com ne fournit pas d'heure de fin. */
-private const val MATCH_STALE_AFTER_SECONDS = 3 * 60 * 60L
+private fun liveOnSatMatchKey(resolved: ResolvedLiveOnSatMatch): String =
+    with(resolved.match) { "$competition|$participantA|$participantB|$startEpochSeconds" }
 
 /** Assez fréquent pour que « EN DIRECT » et le filtrage des matchs périmés restent justes sur un écran laissé ouvert. */
 private const val CLOCK_REFRESH_MS = 30_000L
+private const val RESTORE_MATCH_FOCUS_DELAY_MS = 60L
