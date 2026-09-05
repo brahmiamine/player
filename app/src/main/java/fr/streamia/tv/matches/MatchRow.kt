@@ -127,7 +127,12 @@ class MatchRowEngine(
         val start = program.startEpochSeconds ?: return null
         val end = program.endEpochSeconds ?: return null
         if (end <= start || end <= nowEpochSeconds) return null
-        val detection = detector.detect(program.title, program.description, program.category)
+        val detection = detector.detect(
+            title = program.title,
+            description = program.description,
+            category = program.category,
+            channelName = "${channel.displayName} ${channel.name}",
+        )
         val sport = detection.sport
         val participantA = detection.participantA
         val participantB = detection.participantB
