@@ -3,6 +3,7 @@ package fr.streamia.tv.recommendation
 import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.MediaType
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -35,6 +36,56 @@ class ContentSimilarityTest {
 
         assertTrue(relatedScore > unrelatedScore)
         assertTrue(relatedScore >= 0.35)
+    }
+
+    @Test
+    fun `IPTV quality tags and year never create fake similarity`() {
+        val source = features(
+            1,
+            "Valiant One (MULTI) FHD 2025",
+            "Après un crash en Corée du Nord, des soldats américains doivent survivre en territoire ennemi.",
+            genre = "Guerre, Thriller, Action",
+        )
+        val unrelated = features(
+            2,
+            "The Diary (MULTI) FHD 2025",
+            "Une jeune femme retrouve le journal intime de sa mère et découvre une histoire d'amour familiale.",
+            genre = "Drame, Romance",
+        )
+
+        val result = engine.compare(source, unrelated)
+
+        assertEquals(0.0, result.score, 0.0001)
+        assertFalse(result.substantive)
+    }
+
+    @Test
+    fun `matching genres keep military action ahead of unrelated catalog items`() {
+        val source = features(
+            1,
+            "Valiant One (MULTI) FHD 2025",
+            "Des soldats américains survivent derrière les lignes ennemies après un crash.",
+            genre = "Guerre, Thriller, Action",
+        )
+        val military = features(
+            2,
+            "Behind Enemy Lines",
+            "Un pilote militaire doit survivre en territoire ennemi pendant une mission de sauvetage.",
+            genre = "Action, War, Thriller",
+        )
+        val drama = features(
+            3,
+            "Family Diary",
+            "Une famille se réunit pour préparer un mariage et affronter ses souvenirs.",
+            genre = "Drama, Romance",
+        )
+
+        val militaryScore = engine.compare(source, military)
+        val dramaScore = engine.compare(source, drama)
+
+        assertTrue(militaryScore.substantive)
+        assertTrue(militaryScore.score > dramaScore.score)
+        assertTrue(militaryScore.score >= 0.30)
     }
 
     @Test
