@@ -315,6 +315,20 @@ class XtreamRepository(context: Context) {
     suspend fun seriesDetails(credentials: ServerCredentials, series: MediaEntry): SeriesDetails =
         client.loadSeriesDetails(credentials, series)
 
+    /**
+     * Enrichissement à la demande des candidats "similaires". Les métadonnées récupérées sont
+     * immédiatement persistées pour que les ouvertures suivantes n'aient plus besoin du réseau.
+     */
+    suspend fun enrichRecommendationDetails(
+        profileId: String,
+        credentials: ServerCredentials,
+        media: MediaEntry,
+    ): ContentFeatures {
+        val details = client.loadSimilarityDetails(credentials, media)
+        withContext(Dispatchers.IO) { recommendationStore.saveDetails(profileId, details) }
+        return ContentFeatures.from(media, details)
+    }
+
     suspend fun shortEpg(credentials: ServerCredentials, streamId: Int): List<EpgProgram> =
         client.loadShortEpg(credentials, streamId)
 
