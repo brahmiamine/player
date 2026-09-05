@@ -431,8 +431,8 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         openEntryInternal(entry)
     }
 
-    fun openHomeEntry(entry: MediaEntry, rowKey: String) {
-        _uiState.update { it.copy(contentReturnContext = ContentReturnContext.home(rowKey, entry.key)) }
+    fun openHomeEntry(entry: MediaEntry, rowKey: String, itemKey: String = entry.key) {
+        _uiState.update { it.copy(contentReturnContext = ContentReturnContext.home(rowKey, itemKey)) }
         openEntryInternal(entry)
     }
 
