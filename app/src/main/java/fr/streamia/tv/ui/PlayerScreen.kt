@@ -113,6 +113,7 @@ internal data class TrackChoice(val label: String, val language: String?)
 /** Tag de langue "indéterminée" (BCP-47) posé sur tout sous-titre externe chargé manuellement. */
 private const val EXTERNAL_SUBTITLE_LANGUAGE_TAG = "und"
 private const val NEXT_EPISODE_COUNTDOWN_SECONDS = 8
+private const val LIVE_EPG_PROGRESS_REFRESH_MS = 5_000L
 
 @androidx.annotation.OptIn(markerClass = [UnstableApi::class])
 @Composable
@@ -851,6 +852,20 @@ private fun PlayerInfoBand(
     durationMs: Long,
     modifier: Modifier = Modifier,
 ) {
+    var epgClockEpochSeconds by remember(
+        entry.key,
+        epg.current?.startEpochSeconds,
+        epg.current?.endEpochSeconds,
+    ) { mutableStateOf(System.currentTimeMillis() / 1000L) }
+
+    LaunchedEffect(entry.key, epg.current?.startEpochSeconds, epg.current?.endEpochSeconds) {
+        if (entry.type != MediaType.Live || epg.current == null) return@LaunchedEffect
+        while (true) {
+            epgClockEpochSeconds = System.currentTimeMillis() / 1000L
+            delay(LIVE_EPG_PROGRESS_REFRESH_MS)
+        }
+    }
+
     Column(
         modifier
             .fillMaxWidth()
@@ -874,24 +889,28 @@ private fun PlayerInfoBand(
                 Spacer(Modifier.height(4.dp))
                 if (entry.type == MediaType.Live) {
                     if (!epg.isEmpty) {
-                        epg.previous?.let { previous ->
-                            Text(
-                                "Précédent ${previous.timeRange()?.let { "$it · " }.orEmpty()}${previous.title}",
-                                color = MutedInk,
-                                fontSize = 11.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
                         epg.current?.let { current ->
                             Text(
-                                listOfNotNull(current.timeRange(), current.title).joinToString(" · "),
+                                "EN CE MOMENT${current.timeRange()?.let { " · $it" }.orEmpty()}",
+                                color = MutedInk,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                            )
+                            Text(
+                                current.title,
                                 color = FocusBlueBright,
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
+                            Spacer(Modifier.height(6.dp))
+                            LiveProgramTimeline(
+                                program = current,
+                                nowEpochSeconds = epgClockEpochSeconds,
+                            )
+                            Spacer(Modifier.height(6.dp))
                         }
                         epg.next?.let { next ->
                             Text(
@@ -984,6 +1003,35 @@ private fun PlayerInfoBand(
                 Text("CH $numberBuffer", color = FocusBlueBright, fontSize = 14.sp, fontWeight = FontWeight.Bold)
             }
         }
+    }
+}
+
+@Composable
+private fun LiveProgramTimeline(
+    program: EpgProgram,
+    nowEpochSeconds: Long,
+) {
+    val start = program.startEpochSeconds ?: return
+    val end = program.endEpochSeconds ?: return
+    if (end <= start) return
+
+    val progress = ((nowEpochSeconds - start).toFloat() / (end - start).toFloat()).coerceIn(0f, 1f)
+    val formatter = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
+
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(formatter.format(Date(start * 1000L)), color = MutedInk, fontSize = 10.sp)
+        Spacer(Modifier.width(8.dp))
+        Canvas(Modifier.weight(1f).height(6.dp)) {
+            val radius = androidx.compose.ui.geometry.CornerRadius(size.height / 2)
+            drawRoundRect(Ink.copy(alpha = 0.18f), cornerRadius = radius)
+            drawRoundRect(
+                FocusBlueBright,
+                size = Size(size.width * progress, size.height),
+                cornerRadius = radius,
+            )
+        }
+        Spacer(Modifier.width(8.dp))
+        Text(formatter.format(Date(end * 1000L)), color = MutedInk, fontSize = 10.sp)
     }
 }
 
