@@ -102,6 +102,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onOpenFavorite = viewModel::openEntry,
                     onOpenMatch = viewModel::openEntry,
                     onOpenRecommendation = viewModel::openEntry,
+                    onOpenLiveMatches = viewModel::showLiveMatches,
                 )
 
                 state.screen is StreamiaScreen.Browser && state.catalog != null && state.credentials != null -> BrowserScreen(
@@ -205,6 +206,16 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     search = viewModel::searchCatalog,
                     onOpenEntry = viewModel::openEntry,
                     onToggleEntryFavorite = viewModel::toggleEntryFavorite,
+                    onBack = viewModel::showHome,
+                )
+
+                state.screen is StreamiaScreen.LiveMatches -> LiveOnSatScreen(
+                    matches = state.liveOnSatMatches,
+                    loading = state.liveOnSatLoading,
+                    error = state.liveOnSatError,
+                    fetchedAtEpochMillis = state.liveOnSatFetchedAtEpochMillis,
+                    onOpenChannel = viewModel::openEntry,
+                    onRefresh = viewModel::refreshLiveOnSatMatches,
                     onBack = viewModel::showHome,
                 )
 

@@ -28,6 +28,8 @@ import fr.streamia.tv.domain.ServerCredentials
 import fr.streamia.tv.domain.adjacentTo
 import fr.streamia.tv.domain.epgNowContextAt
 import fr.streamia.tv.domain.withTimeOffset
+import fr.streamia.tv.liveonsat.ChannelMatcher
+import fr.streamia.tv.liveonsat.ResolvedLiveOnSatMatch
 import fr.streamia.tv.matches.MatchRow
 import fr.streamia.tv.matches.MatchRowEngine
 import fr.streamia.tv.recommendation.ContentFeatures
@@ -75,6 +77,9 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     private var homeRecommendationJob: Job? = null
     private var homeRecommendationLastBuiltProfileId: String? = null
     private var homeRecommendationLastBuiltAtMillis = 0L
+    private val liveOnSatChannelMatcher = ChannelMatcher()
+    private var liveOnSatLoadSequence = 0L
+    private var liveOnSatLoadJob: Job? = null
     private var epgSyncJob: Job? = null
     private var epgSyncProfileId: String? = null
     private var epgPrefetchJob: Job? = null
@@ -131,6 +136,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         // la journée courante en mémoire sans aucun appel réseau, même quand le démarrage reprend
         // directement le dernier flux Live et contourne openProfile()/showCatalog().
         warmEpgGuideCache(profileId)
+        loadLiveOnSatMatches(forceRefresh = false)
         viewModelScope.launch {
             // Catalogue déjà résolu (favoris/ordre déjà appliqués) persisté lors d'une précédente
             // réconciliation réussie pour ce profil : s'il est encore valide pour l'organisation
@@ -255,6 +261,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 // le coût CPU/mémoire au démarrage sur Android TV.
                 refreshHomeMatchRow()
                 refreshHomeRecommendations()
+                loadLiveOnSatMatches(forceRefresh = false)
                 try {
                     mergeCatalog(repository.openProfile(profileId, knownCache = cachedCatalog))
                 } catch (error: Throwable) {
@@ -495,6 +502,13 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     suspend fun epgCacheSizeBytes(): Long = repository.epgCacheSizeBytes()
     fun showParentalControl() { _uiState.update { it.copy(screen = StreamiaScreen.ParentalControl, message = null) } }
     fun showSearch() { _uiState.update { it.copy(screen = StreamiaScreen.Search, message = null) } }
+
+    fun showLiveMatches() {
+        _uiState.update { it.copy(screen = StreamiaScreen.LiveMatches, message = null) }
+        loadLiveOnSatMatches(forceRefresh = false)
+    }
+
+    fun refreshLiveOnSatMatches() = loadLiveOnSatMatches(forceRefresh = true)
 
     fun toggleLivePreview() {
         updateAppSettings { it.copy(livePreviewEnabled = !it.livePreviewEnabled) }
@@ -1716,6 +1730,60 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         }
     }
 
+    /**
+     * Charge (ou réutilise le cache si assez récent) les matchs du jour scrapés depuis
+     * liveonsat.com, puis résout leurs diffuseurs contre les chaînes Direct de ce profil. Le scrape
+     * lui-même ne dépend d'aucun profil ; seule cette résolution en dépend.
+     */
+    private fun loadLiveOnSatMatches(forceRefresh: Boolean) {
+        // Appelé à chaque ouverture de l'app (openProfile/resumeStartup/showCatalog) : un chargement
+        // déjà en vol pour la même raison ne doit pas en déclencher un second en parallèle. Un
+        // forceRefresh explicite (bouton Actualiser) passe toujours devant : il annule le chargement
+        // en cours plutôt que d'en laisser deux tourner (double scrape de liveonsat.com).
+        if (!forceRefresh && liveOnSatLoadJob?.isActive == true) return
+        if (forceRefresh) liveOnSatLoadJob?.cancel()
+        val sequence = ++liveOnSatLoadSequence
+        _uiState.update { it.copy(liveOnSatLoading = true, liveOnSatError = null) }
+        liveOnSatLoadJob = viewModelScope.launch {
+            val result = runCatching { repository.loadLiveOnSatMatches(forceRefresh) }
+            if (sequence != liveOnSatLoadSequence) return@launch
+
+            result.onSuccess { fetch ->
+                val state = _uiState.value
+                val profileId = state.activeProfileId
+                val catalog = state.catalog
+                val liveChannels = when {
+                    profileId == null -> emptyList()
+                    catalog != null && catalog.isCategoryLoaded(MediaType.Live, Catalog.ALL_CATEGORY_ID) ->
+                        catalog.entriesFor(MediaType.Live)
+                    else -> withContext(Dispatchers.IO) {
+                        runCatching { repository.loadSection(profileId, MediaType.Live) }.getOrDefault(emptyList())
+                    }
+                }
+
+                val resolved = withContext(Dispatchers.Default) {
+                    liveOnSatChannelMatcher.resolve(fetch.matches, liveChannels)
+                }
+                if (sequence != liveOnSatLoadSequence) return@launch
+                _uiState.update {
+                    it.copy(
+                        liveOnSatLoading = false,
+                        liveOnSatMatches = resolved,
+                        liveOnSatFetchedAtEpochMillis = fetch.fetchedAtEpochMillis,
+                        liveOnSatError = if (forceRefresh && fetch.fromCache) {
+                            "Actualisation impossible, affichage des données précédentes."
+                        } else {
+                            null
+                        },
+                    )
+                }
+            }.onFailure { error ->
+                if (sequence != liveOnSatLoadSequence) return@launch
+                _uiState.update { it.copy(liveOnSatLoading = false, liveOnSatError = error.safeMessage()) }
+            }
+        }
+    }
+
     private fun epgDayBounds(date: LocalDate): Pair<Long, Long> {
         val zone = ZoneId.systemDefault()
         return date.atStartOfDay(zone).toEpochSecond() to
@@ -1890,6 +1958,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         warmEpgGuideCache(loaded.profileId)
         ensureSectionLoaded(MediaType.Live)
         refreshHomeRecommendations()
+        loadLiveOnSatMatches(forceRefresh = false)
     }
 
     private fun showError(error: Throwable) {
@@ -1937,6 +2006,10 @@ data class StreamiaUiState(
     val homeMatchRow: MatchRow? = null,
     val homeRecommendationRows: List<RecommendationRow> = emptyList(),
     val similarMedia: List<RecommendedMedia> = emptyList(),
+    val liveOnSatMatches: List<ResolvedLiveOnSatMatch> = emptyList(),
+    val liveOnSatLoading: Boolean = false,
+    val liveOnSatError: String? = null,
+    val liveOnSatFetchedAtEpochMillis: Long? = null,
     val resumePositionMs: Long = 0,
     val browserType: MediaType? = null,
     val browserCategoryId: String? = null,
@@ -1954,6 +2027,7 @@ sealed interface StreamiaScreen {
     data object Search : StreamiaScreen
     data object Epg : StreamiaScreen
     data object Organizer : StreamiaScreen
+    data object LiveMatches : StreamiaScreen
     data class MovieDetails(val movie: MediaEntry) : StreamiaScreen
     data class Series(val series: MediaEntry) : StreamiaScreen
     data class Player(val entry: MediaEntry, val returnToSeries: Boolean = false) : StreamiaScreen
