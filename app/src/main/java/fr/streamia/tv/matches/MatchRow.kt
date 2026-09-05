@@ -46,6 +46,40 @@ data class HomeMatchRows(
     val upcomingToday: MatchRow?,
 )
 
+/**
+ * Reclasse les cartes déjà détectées sans rescanner l'EPG. Utile pendant que l'accueil reste
+ * ouvert : un match à venir passe en direct dès son coup d'envoi et disparaît dès sa fin.
+ */
+fun HomeMatchRows.reclassifiedAt(nowEpochSeconds: Long): HomeMatchRows {
+    val allItems = (live?.items.orEmpty() + upcomingToday?.items.orEmpty())
+        .distinctBy { it.event.fingerprint }
+
+    val liveItems = allItems.mapNotNull { item ->
+        val state = matchTemporalState(
+            item.event.startEpochSeconds,
+            item.event.endEpochSeconds,
+            nowEpochSeconds,
+        )
+        if (state == MatchTemporalState.Live) item.copy(temporalState = state) else null
+    }.sortedBy { it.event.startEpochSeconds }
+
+    val upcomingItems = allItems.mapNotNull { item ->
+        val state = matchTemporalState(
+            item.event.startEpochSeconds,
+            item.event.endEpochSeconds,
+            nowEpochSeconds,
+        )
+        if (state == MatchTemporalState.Today) item.copy(temporalState = state) else null
+    }.sortedBy { it.event.startEpochSeconds }
+
+    return HomeMatchRows(
+        live = liveItems.takeIf { it.isNotEmpty() }
+            ?.let { MatchRow(title = "🔴 Matchs en direct", items = it) },
+        upcomingToday = upcomingItems.takeIf { it.isNotEmpty() }
+            ?.let { MatchRow(title = "⚽ Matchs suivants", items = it) },
+    )
+}
+
 internal fun matchFingerprint(
     sport: MatchSport,
     participantA: String,
