@@ -1370,7 +1370,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             // tomber sur un alias SQLite trop strict. Maintenant que le guide du jour est en RAM,
             // relancer immédiatement la résolution plutôt que d'attendre le ticker de 30 secondes.
             val player = (_uiState.value.screen as? StreamiaScreen.Player)?.entry
-            if (player?.type == MediaType.Live && _uiState.value.epg.isEmpty) {
+            if (player?.type == MediaType.Live && _uiState.value.epg.current == null) {
                 loadEpg(player)
             }
 
