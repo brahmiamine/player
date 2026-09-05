@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -45,6 +46,7 @@ import fr.streamia.tv.ui.theme.HeadingWeight
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
 import fr.streamia.tv.ui.theme.Night
+import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.time.Instant
 import java.time.ZoneId
@@ -68,8 +70,10 @@ fun HomeScreen(
     parentalControlEnabled: Boolean = false,
     parentalUnlocked: Boolean = false,
     catalogLoading: Boolean = false,
-    matchRow: MatchRow? = null,
+    liveMatchRow: MatchRow? = null,
+    upcomingMatchRow: MatchRow? = null,
     recommendationRows: List<RecommendationRow> = emptyList(),
+    restoreContext: ContentReturnContext? = null,
     onOpenSection: (MediaType) -> Unit,
     onSettings: () -> Unit,
     onSearch: () -> Unit,
@@ -77,9 +81,7 @@ fun HomeScreen(
     onRefresh: () -> Unit,
     onChangePlaylist: () -> Unit,
     onResumePlayback: (MediaEntry) -> Unit,
-    onOpenFavorite: (MediaEntry) -> Unit,
-    onOpenMatch: (MediaEntry) -> Unit,
-    onOpenRecommendation: (MediaEntry) -> Unit,
+    onOpenHomeEntry: (MediaEntry, String, String) -> Unit,
     onOpenLiveMatches: () -> Unit,
 ) {
     val firstFocus = remember { FocusRequester() }
@@ -142,12 +144,39 @@ fun HomeScreen(
     // strictement identique à l'ancien écran fixe.
     val focusOnResume = resumeCards.isNotEmpty()
     val focusOnFavorites = !focusOnResume && favoriteCards.isNotEmpty()
-    val focusOnMatches = !focusOnResume && !focusOnFavorites && matchRow?.items?.isNotEmpty() == true
+    val focusOnLiveMatches = !focusOnResume && !focusOnFavorites && liveMatchRow?.items?.isNotEmpty() == true
+    val focusOnUpcomingMatches =
+        !focusOnResume && !focusOnFavorites && !focusOnLiveMatches && upcomingMatchRow?.items?.isNotEmpty() == true
+    val focusOnMatches = focusOnLiveMatches || focusOnUpcomingMatches
     val focusOnRecommendations = !focusOnResume && !focusOnFavorites && !focusOnMatches && recommendationRows.isNotEmpty()
     val focusOnGrid = !focusOnResume && !focusOnFavorites && !focusOnMatches && !focusOnRecommendations
 
+    val homeListState = rememberLazyListState()
+    val restoreTarget = restoreContext?.takeIf { it.origin == ContentReturnOrigin.Home }
+    val visibleRowKeys = remember(
+        resumeCards,
+        favoriteCards,
+        liveMatchRow,
+        upcomingMatchRow,
+        recommendationRows,
+    ) {
+        buildList {
+            if (resumeCards.isNotEmpty()) add(HomeRowKey.Resume)
+            if (favoriteCards.isNotEmpty()) add(HomeRowKey.Favorites)
+            if (liveMatchRow?.items?.isNotEmpty() == true) add(HomeRowKey.LiveMatches)
+            if (upcomingMatchRow?.items?.isNotEmpty() == true) add(HomeRowKey.UpcomingMatches)
+            recommendationRows.forEach { row -> add(HomeRowKey.recommendation(row.kind)) }
+        }
+    }
+    LaunchedEffect(restoreTarget?.homeRowKey, visibleRowKeys) {
+        val targetRow = restoreTarget?.homeRowKey ?: return@LaunchedEffect
+        val rowIndex = visibleRowKeys.indexOf(targetRow)
+        if (rowIndex >= 0) homeListState.scrollToItem(rowIndex + 1)
+    }
+
     LazyColumn(
-        Modifier
+        state = homeListState,
+        modifier = Modifier
             .fillMaxSize()
             .background(Night)
             .padding(horizontal = 46.dp, vertical = 30.dp),
@@ -184,6 +213,9 @@ fun HomeScreen(
                         title = "Reprendre la lecture",
                         entries = resumeCards,
                         firstFocusRequester = if (focusOnResume) firstFocus else null,
+                        restoreItemKey = restoreTarget
+                            ?.takeIf { it.homeRowKey == HomeRowKey.Resume }
+                            ?.itemKey,
                         onEntryClick = onResumePlayback,
                     )
                     Spacer(Modifier.height(CardRowSpacing))
@@ -198,20 +230,48 @@ fun HomeScreen(
                         title = "Favoris",
                         entries = favoriteCards,
                         firstFocusRequester = if (focusOnFavorites) firstFocus else null,
-                        onEntryClick = onOpenFavorite,
+                        restoreItemKey = restoreTarget
+                            ?.takeIf { it.homeRowKey == HomeRowKey.Favorites }
+                            ?.itemKey,
+                        onEntryClick = { entry ->
+                            onOpenHomeEntry(entry, HomeRowKey.Favorites, entry.key)
+                        },
                     )
                     Spacer(Modifier.height(CardRowSpacing))
                 }
             }
         }
 
-        if (matchRow?.items?.isNotEmpty() == true) {
+        if (liveMatchRow?.items?.isNotEmpty() == true) {
             item {
                 Column(Modifier.fillMaxWidth()) {
                     HomeMatchRow(
-                        row = matchRow,
-                        firstFocusRequester = if (focusOnMatches) firstFocus else null,
-                        onOpenMatch = onOpenMatch,
+                        row = liveMatchRow,
+                        firstFocusRequester = if (focusOnLiveMatches) firstFocus else null,
+                        restoreItemKey = restoreTarget
+                            ?.takeIf { it.homeRowKey == HomeRowKey.LiveMatches }
+                            ?.itemKey,
+                        onOpenMatch = { item ->
+                            onOpenHomeEntry(item.event.channel, HomeRowKey.LiveMatches, item.event.fingerprint)
+                        },
+                    )
+                    Spacer(Modifier.height(CardRowSpacing))
+                }
+            }
+        }
+
+        if (upcomingMatchRow?.items?.isNotEmpty() == true) {
+            item {
+                Column(Modifier.fillMaxWidth()) {
+                    HomeMatchRow(
+                        row = upcomingMatchRow,
+                        firstFocusRequester = if (focusOnUpcomingMatches) firstFocus else null,
+                        restoreItemKey = restoreTarget
+                            ?.takeIf { it.homeRowKey == HomeRowKey.UpcomingMatches }
+                            ?.itemKey,
+                        onOpenMatch = { item ->
+                            onOpenHomeEntry(item.event.channel, HomeRowKey.UpcomingMatches, item.event.fingerprint)
+                        },
                     )
                     Spacer(Modifier.height(CardRowSpacing))
                 }
@@ -223,7 +283,12 @@ fun HomeScreen(
                 HomeRecommendationRow(
                     row = row,
                     firstFocusRequester = if (focusOnRecommendations && index == 0) firstFocus else null,
-                    onOpenRecommendation = onOpenRecommendation,
+                    restoreItemKey = restoreTarget
+                        ?.takeIf { it.homeRowKey == HomeRowKey.recommendation(row.kind) }
+                        ?.itemKey,
+                    onOpenRecommendation = { entry ->
+                        onOpenHomeEntry(entry, HomeRowKey.recommendation(row.kind), entry.key)
+                    },
                 )
                 Spacer(Modifier.height(CardRowSpacing))
             }
