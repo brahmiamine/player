@@ -168,9 +168,14 @@ data class EpgGuide(
 ) {
     private val channelsByAlias: Map<String, EpgChannel> = buildMap {
         channels.forEach { (key, channel) ->
-            put(key.normalizedLookupKey(), channel)
-            put(channel.channelId.normalizedLookupKey(), channel)
-            channel.displayName?.takeIf(String::isNotBlank)?.let { put(it.normalizedLookupKey(), channel) }
+            sequenceOf(key, channel.channelId, channel.displayName.orEmpty())
+                .flatMap { it.epgLookupAliases().asSequence() }
+                .forEach { alias ->
+                    // Garder le premier alias "nettoyé" rencontré évite qu'une variante 4K/HD
+                    // écrase arbitrairement une autre chaîne. Les correspondances exactes restent
+                    // prioritaires dans [forEntry].
+                    if (alias !in this) put(alias, channel)
+                }
         }
     }
 
@@ -182,13 +187,41 @@ data class EpgGuide(
         }
         for (candidate in candidates) {
             channels[candidate]?.programs?.let { if (it.isNotEmpty()) return it }
-            channelsByAlias[candidate.normalizedLookupKey()]?.programs?.let { if (it.isNotEmpty()) return it }
+            candidate.epgLookupAliases().forEach { alias ->
+                channelsByAlias[alias]?.programs?.let { if (it.isNotEmpty()) return it }
+            }
         }
         return emptyList()
     }
 }
 
-private fun String.normalizedLookupKey(): String = trim().lowercase()
+private fun String.epgLookupAliases(): List<String> {
+    val raw = trim().lowercase()
+    if (raw.isBlank()) return emptyList()
+
+    val normalized = raw
+        .replace(Regex("[^\\p{L}\\p{N}]+"), " ")
+        .replace(Regex("\\s+"), " ")
+        .trim()
+
+    val cleaned = normalized
+        .split(' ')
+        .filterNot { token -> token in EPG_DECORATION_TOKENS || EPG_QUALITY_TOKEN.matches(token) }
+        .joinToString(" ")
+        .trim()
+
+    return buildList {
+        add(raw)
+        if (normalized.isNotBlank() && normalized != raw) add(normalized)
+        if (cleaned.isNotBlank() && cleaned != normalized) add(cleaned)
+    }.distinct()
+}
+
+private val EPG_DECORATION_TOKENS = setOf(
+    "fr", "france", "vip", "raw", "uhd", "hd", "fhd", "hevc", "h265", "h264",
+)
+
+private val EPG_QUALITY_TOKEN = Regex("^(?:4k|8k|2160p|1080p|720p|\\d{2,3}fps)$")
 
 /**
  * Corrige un décalage horaire du flux XMLTV (fréquent : le fournisseur publie parfois dans un
