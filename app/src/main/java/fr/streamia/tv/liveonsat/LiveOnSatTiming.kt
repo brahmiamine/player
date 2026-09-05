@@ -75,7 +75,11 @@ private fun normalizeMatchText(value: String): String =
 fun ResolvedLiveOnSatMatch.effectiveStartEpochSeconds(): Long {
     val epgStart = epgStartEpochSeconds
     val epgEnd = epgEndEpochSeconds
-    return if (epgStart != null && epgEnd != null && epgEnd > epgStart) epgStart else match.startEpochSeconds
+    return if (epgStart != null && epgEnd != null && epgEnd > epgStart) {
+        maxOf(match.startEpochSeconds, epgStart)
+    } else {
+        match.startEpochSeconds
+    }
 }
 
 fun ResolvedLiveOnSatMatch.effectiveEndEpochSeconds(): Long {
