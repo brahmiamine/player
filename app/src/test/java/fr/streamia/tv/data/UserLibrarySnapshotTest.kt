@@ -15,13 +15,13 @@ class UserLibrarySnapshotTest {
     )
 
     @Test
-    fun `below 30 seconds is not resumable`() {
-        assertFalse(historyItem(positionMs = 29_999, durationMs = 6_000_000).isResumable())
+    fun `below 5 seconds is not resumable`() {
+        assertFalse(historyItem(positionMs = 4_999, durationMs = 6_000_000).isResumable())
     }
 
     @Test
-    fun `at 30 seconds with a duration left is resumable`() {
-        assertTrue(historyItem(positionMs = 30_000, durationMs = 6_000_000).isResumable())
+    fun `at 5 seconds with a duration left is resumable`() {
+        assertTrue(historyItem(positionMs = 5_000, durationMs = 6_000_000).isResumable())
     }
 
     @Test
@@ -30,8 +30,8 @@ class UserLibrarySnapshotTest {
     }
 
     @Test
-    fun `unknown duration is resumable once past 30 seconds`() {
-        assertTrue(historyItem(positionMs = 45_000, durationMs = 0).isResumable())
+    fun `unknown duration is resumable once past 5 seconds`() {
+        assertTrue(historyItem(positionMs = 5_000, durationMs = 0).isResumable())
     }
 
     @Test
