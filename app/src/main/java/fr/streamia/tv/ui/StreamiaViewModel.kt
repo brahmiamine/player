@@ -1157,12 +1157,12 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                         val fromGuide = state.epgGuide
                             ?.forEntry(current)
                             ?.epgNowContextAt(nowEpochSeconds = now)
-                            ?.takeUnless(EpgNowContext::isEmpty)
+                            ?.takeUnless { it.isEmpty }
                             ?: epgGuideMemoryCache
                                 .get(profileId, LocalDate.now(ZoneId.systemDefault()), state.appSettings.epgTimeOffsetHours)
                                 ?.forEntry(current)
                                 ?.epgNowContextAt(nowEpochSeconds = now)
-                                ?.takeUnless(EpgNowContext::isEmpty)
+                                ?.takeUnless { it.isEmpty }
                         if (fromGuide != null) {
                             updatePlayerEpgIfCurrent(current, fromGuide)
                         }
