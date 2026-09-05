@@ -1067,6 +1067,9 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         epgChannelJob?.cancel()
         epgChannelJob = viewModelScope.launch {
             val now = System.currentTimeMillis() / 1000
+
+            // 1) Requête SQLite ultra-courte par chaîne quand l'alias fournisseur correspond
+            // exactement au XMLTV.
             val cached = runCatching {
                 repository.cachedEpgNow(profileId, entry, now, offsetHours)
             }.getOrNull()
@@ -1075,6 +1078,19 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 return@launch
             }
 
+            // 2) Le guide du jour est déjà chargé/persisté pour l'écran EPG. Il contient des alias
+            // plus tolérants ("FR: TF1 4K" ↔ "TF1.fr"/"TF1 HD") et permet donc de récupérer le
+            // programme courant sans refaire de réseau. Ses horaires sont déjà décalés : offset 0.
+            val guideContext = _uiState.value.epgGuide
+                ?.forEntry(entry)
+                ?.epgNowContextAt(nowEpochSeconds = now)
+            if (guideContext != null && !guideContext.isEmpty) {
+                updatePlayerEpgIfCurrent(entry, guideContext)
+                return@launch
+            }
+
+            // 3) Dernier repli : l'EPG court Xtream, utile lors d'un tout premier démarrage avant
+            // que le XMLTV local ait fini d'être réchauffé.
             val programs = runCatching { repository.shortEpg(credentials, entry.id) }.getOrNull().orEmpty()
             if (programs.isEmpty()) return@launch
             val selected = programs.epgNowContextAt(nowEpochSeconds = now, offsetHours = offsetHours)
@@ -1100,15 +1116,29 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 val current = (state.screen as? StreamiaScreen.Player)?.entry ?: return@launch
                 if (current.key != entry.key || current.type != MediaType.Live) return@launch
                 val profileId = state.activeProfileId ?: return@launch
+                val now = System.currentTimeMillis() / 1000
                 val cached = runCatching {
                     repository.cachedEpgNow(
                         profileId = profileId,
                         entry = current,
-                        nowEpochSeconds = System.currentTimeMillis() / 1000,
+                        nowEpochSeconds = now,
                         offsetHours = state.appSettings.epgTimeOffsetHours,
                     )
                 }.getOrNull()
-                if (cached != null && !cached.isEmpty) updatePlayerEpgIfCurrent(current, cached)
+                when {
+                    cached != null && !cached.isEmpty -> updatePlayerEpgIfCurrent(current, cached)
+                    else -> {
+                        // Même repli tolérant que [loadEpg] : indispensable pour les chaînes dont
+                        // le nom playlist est décoré (pays, VIP, 4K...) mais dont le XMLTV est déjà
+                        // correctement visible dans le Guide TV.
+                        val fromGuide = state.epgGuide
+                            ?.forEntry(current)
+                            ?.epgNowContextAt(nowEpochSeconds = now)
+                        if (fromGuide != null && !fromGuide.isEmpty) {
+                            updatePlayerEpgIfCurrent(current, fromGuide)
+                        }
+                    }
+                }
             }
         }
     }
@@ -1306,6 +1336,15 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                     )
                 } else current
             }
+
+            // Si le player Live a été ouvert avant la fin du warm-up, son premier loadEpg() a pu
+            // tomber sur un alias SQLite trop strict. Maintenant que le guide du jour est en RAM,
+            // relancer immédiatement la résolution plutôt que d'attendre le ticker de 30 secondes.
+            val player = (_uiState.value.screen as? StreamiaScreen.Player)?.entry
+            if (player?.type == MediaType.Live && _uiState.value.epg.isEmpty) {
+                loadEpg(player)
+            }
+
             // Le warm-up au démarrage se limite volontairement à une seule journée pour ne pas
             // concurrencer le chargement du catalogue. Les jours voisins seront préchargés dès que
             // l'utilisateur ouvre réellement le Guide TV.
