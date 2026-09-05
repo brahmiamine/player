@@ -107,18 +107,29 @@ class MatchRowEngine(
             }
             .toList()
 
-        val items = deduplicate(events)
-            .mapNotNull { event ->
+        val items = sortedItems(
+            deduplicate(events).mapNotNull { event ->
                 matchTemporalState(event.startEpochSeconds, event.endEpochSeconds, nowEpochSeconds)
                     ?.let { state -> MatchRowItem(event, state) }
-            }
-            .sortedWith(
-                compareBy<MatchRowItem> { it.temporalState != MatchTemporalState.Live }
-                    .thenBy { it.event.startEpochSeconds }
-                    .thenBy { it.event.fingerprint },
-            )
-            .take(limit)
+            },
+        ).take(limit)
 
+        if (items.isEmpty()) return null
+        return MatchRow(title = rowTitle(items), items = items)
+    }
+
+    /**
+     * Fusionne plusieurs jours lus séquentiellement depuis SQLite sans conserver toutes les grilles
+     * EPG en mémoire. Les programmes qui chevauchent minuit peuvent exister dans deux lectures de
+     * journée : l'empreinte du match les déduplique ici.
+     */
+    fun mergeRows(rows: List<MatchRow>, limit: Int = ROW_LIMIT): MatchRow? {
+        val seen = linkedMapOf<String, MatchRowItem>()
+        rows.asSequence()
+            .flatMap { it.items.asSequence() }
+            .forEach { item -> seen.putIfAbsent(item.event.fingerprint, item) }
+
+        val items = sortedItems(seen.values.toList()).take(limit)
         if (items.isEmpty()) return null
         return MatchRow(title = rowTitle(items), items = items)
     }
@@ -159,6 +170,13 @@ class MatchRowEngine(
             .forEach { event -> seen.putIfAbsent(event.fingerprint, event) }
         return seen.values.toList()
     }
+
+    private fun sortedItems(items: List<MatchRowItem>): List<MatchRowItem> =
+        items.sortedWith(
+            compareBy<MatchRowItem> { it.temporalState != MatchTemporalState.Live }
+                .thenBy { it.event.startEpochSeconds }
+                .thenBy { it.event.fingerprint },
+        )
 
     private fun rowTitle(items: List<MatchRowItem>): String {
         val states = items.mapTo(mutableSetOf(), MatchRowItem::temporalState)
