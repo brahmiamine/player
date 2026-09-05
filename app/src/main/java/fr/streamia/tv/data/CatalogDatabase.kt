@@ -420,6 +420,9 @@ internal class CatalogDatabase(context: Context) :
         return result.values.toList()
     }
 
+    fun loadRecommendationCandidates(profileId: String, type: MediaType, limit: Int): List<MediaEntry> =
+        loadRecent(profileId, type, limit)
+
     private fun loadRecent(profileId: String, type: MediaType, limit: Int): List<MediaEntry> {
         if (limit <= 0) return emptyList()
         return readableDatabase.rawQuery(
