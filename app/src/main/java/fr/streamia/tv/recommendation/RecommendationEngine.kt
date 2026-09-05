@@ -227,6 +227,7 @@ class RecommendationEngine(
         hiddenEntries: Set<String> = emptySet(),
         hiddenCategoryIds: Set<String> = emptySet(),
         limit: Int = 12,
+        minimumScore: Double = MIN_SIMILARITY,
     ): List<RecommendedMedia> = candidates
         .asSequence()
         .filter { it.type == source.entry.type }
@@ -236,11 +237,14 @@ class RecommendationEngine(
                 it.categoryId in hiddenCategoryIds
         }
         .distinctBy(MediaEntry::key)
-        .map { entry ->
-            val result = similarityEngine.compare(source, featuresFor(entry, detailsByKey))
+        .mapNotNull { entry ->
+            val candidateFeatures = featuresFor(entry, detailsByKey)
+            if (likelySameContent(source, candidateFeatures)) return@mapNotNull null
+            val result = similarityEngine.compare(source, candidateFeatures)
+            if (!result.substantive) return@mapNotNull null
             RecommendedMedia(entry = entry, score = result.score, reason = result.reason)
         }
-        .filter { it.score >= MIN_SIMILARITY }
+        .filter { it.score >= minimumScore.coerceIn(0.0, 1.0) }
         .sortedWith(compareByDescending<RecommendedMedia> { it.score }.thenBy { it.entry.key })
         .take(limit.coerceAtLeast(0))
         .toList()
