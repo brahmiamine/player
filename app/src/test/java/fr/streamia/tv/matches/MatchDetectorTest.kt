@@ -199,6 +199,64 @@ class MatchDetectorTest {
         assertEquals(MatchSport.Combat, result.sport)
     }
 
+
+    @Test
+    fun `slash fixture on generic sports channel is accepted from real XMLTV shape`() {
+        val result = detector.detect(
+            title = "Fenerbahçe / Beşiktaş",
+            description = "beIN SPORTS, le plus grand des spectacles",
+            category = null,
+            channelName = "VIP: BEIN SPORTS MAX 7 HD",
+        )
+
+        assertTrue(result.isMatch)
+        assertEquals(MatchSport.Other, result.sport)
+        assertEquals("Fenerbahçe", result.participantA)
+        assertEquals("Beşiktaş", result.participantB)
+        assertTrue("GENERIC_SPORT_CHANNEL" in result.signals)
+    }
+
+    @Test
+    fun `multi word slash fixture is accepted on sports channel`() {
+        val result = detector.detect(
+            title = "Preston North End / Blackburn Rovers",
+            description = null,
+            category = null,
+            channelName = "beIN Sports MAX 10",
+        )
+
+        assertTrue(result.isMatch)
+        assertEquals("Preston North End", result.participantA)
+        assertEquals("Blackburn Rovers", result.participantB)
+    }
+
+    @Test
+    fun `slash title on non sports channel is still rejected`() {
+        val result = detector.detect(
+            title = "Alice / Bob",
+            description = "Portrait croisé de deux artistes.",
+            category = "Culture",
+            channelName = "Culture TV",
+        )
+
+        assertFalse(result.isMatch)
+        assertNull(result.sport)
+    }
+
+    @Test
+    fun `youth team tokens with digits are accepted`() {
+        val result = detector.detect(
+            title = "PSG U19 / Dortmund U19",
+            description = "UEFA Youth League football",
+            category = "Football",
+            channelName = "Canal+ Foot",
+        )
+
+        assertTrue(result.isMatch)
+        assertEquals("PSG U19", result.participantA)
+        assertEquals("Dortmund U19", result.participantB)
+    }
+
     @Test
     fun `versus pattern without any sport signal is not enough on its own`() {
         val result = detector.detect(
