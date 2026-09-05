@@ -80,6 +80,7 @@ fun HomeScreen(
     onOpenFavorite: (MediaEntry) -> Unit,
     onOpenMatch: (MediaEntry) -> Unit,
     onOpenRecommendation: (MediaEntry) -> Unit,
+    onOpenLiveMatches: () -> Unit,
 ) {
     val firstFocus = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { firstFocus.requestFocus() } }
@@ -240,6 +241,7 @@ fun HomeScreen(
                 onSettings = onSettings,
                 onRefresh = onRefresh,
                 onChangePlaylist = onChangePlaylist,
+                onOpenLiveMatches = onOpenLiveMatches,
                 modifier = Modifier.fillMaxWidth().height(MainGridHeight),
             )
         }
@@ -258,6 +260,7 @@ private fun MainActionGrid(
     onEpg: () -> Unit,
     onRefresh: () -> Unit,
     onChangePlaylist: () -> Unit,
+    onOpenLiveMatches: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Row(
@@ -331,6 +334,7 @@ private fun MainActionGrid(
                 Modifier.weight(1f).then(if (firstFocus != null && !liveTileEnabled) Modifier.focusRequester(firstFocus) else Modifier),
             )
             HomeAction(StreamiaIconGlyph.Refresh, if (busy || catalogLoading) "Chargement…" else "Actualiser", onRefresh, Modifier.weight(1f), enabled = !busy && !catalogLoading)
+            HomeAction(StreamiaIconGlyph.Guide, "Matchs du jour", onOpenLiveMatches, Modifier.weight(1f))
             HomeAction(StreamiaIconGlyph.Swap, "Changer de liste", onChangePlaylist, Modifier.weight(1f))
         }
     }

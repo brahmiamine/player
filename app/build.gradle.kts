@@ -141,6 +141,10 @@ dependencies {
     implementation(platform("com.google.firebase:firebase-bom:34.18.0"))
     implementation("com.google.firebase:firebase-crashlytics")
 
+    // Parseur HTML tolérant pour le scrape de liveonsat.com (balisage ancien, tables imbriquées,
+    // balises non refermées) : voir fr.streamia.tv.liveonsat.LiveOnSatParser.
+    implementation("org.jsoup:jsoup:1.18.3")
+
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 

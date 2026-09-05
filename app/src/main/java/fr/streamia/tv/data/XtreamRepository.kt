@@ -40,6 +40,7 @@ class XtreamRepository(context: Context) {
     private val libraryStore = UserLibraryStore(context)
     private val appSettingsStore = AppSettingsStore(context)
     private val recommendationStore = RecommendationStore(context)
+    private val liveOnSatRepository = LiveOnSatRepository(context)
     private val xmlTvRepository = XmlTvRepository()
     private val m3uParser = M3uParser()
     private val updateChecker = UpdateChecker()
@@ -113,6 +114,13 @@ class XtreamRepository(context: Context) {
     /** Enrichit le moteur de recommandation dès qu'une fiche film/série est réellement consultée. */
     suspend fun cacheRecommendationDetails(profileId: String, details: MediaDetails) =
         withContext(Dispatchers.IO) { recommendationStore.saveDetails(profileId, details) }
+
+    /**
+     * Matchs du jour scrapés depuis liveonsat.com, sans lien avec un profil Xtream/M3U particulier
+     * (seule leur mise en correspondance avec les chaînes, faite par l'appelant, en dépend).
+     */
+    suspend fun loadLiveOnSatMatches(forceRefresh: Boolean = false): LiveOnSatFetchResult =
+        liveOnSatRepository.loadMatches(forceRefresh, maxAgeMillis = LIVE_ONSAT_CACHE_MAX_AGE_MS)
 
     /**
      * Recherche indexée en base plutôt que dans le sous-ensemble matérialisé en mémoire : sous
@@ -588,6 +596,12 @@ class XtreamRepository(context: Context) {
 
     companion object {
         const val DEFAULT_CATEGORY_PAGE_SIZE = 500
+
+        // Rescrapé à chaque ouverture de l'app (voir StreamiaViewModel.loadLiveOnSatMatches). Cette
+        // fenêtre évite seulement qu'une réouverture rapprochée (retour de veille, changement
+        // d'appli) ne relance un scrape à quelques secondes d'intervalle — liveonsat.com n'a pas
+        // d'API et ne doit pas être sollicité plus souvent que nécessaire.
+        private const val LIVE_ONSAT_CACHE_MAX_AGE_MS = 15 * 60_000L
 
         // Partagé par toutes les instances de XtreamRepository du process : le worker EPG en
         // arrière-plan (EpgSyncWorker) et le ViewModel créent chacun leur propre instance, mais
