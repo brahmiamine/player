@@ -30,7 +30,7 @@ internal class LiveOnSatCache(context: Context) {
     fun save(matches: List<LiveOnSatMatch>, fetchedAtEpochMillis: Long = System.currentTimeMillis()) {
         val root = JSONObject().apply {
             put("fetchedAtEpochMillis", fetchedAtEpochMillis)
-            put("matches", JSONArray(matches.map(LiveOnSatMatch::toJson)))
+            put("matches", JSONArray(matches.map { it.toJson() }))
         }
         file.writeText(root.toString())
     }
