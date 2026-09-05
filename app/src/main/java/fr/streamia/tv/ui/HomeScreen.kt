@@ -85,7 +85,10 @@ fun HomeScreen(
     onOpenLiveMatches: () -> Unit,
 ) {
     val firstFocus = remember { FocusRequester() }
-    LaunchedEffect(Unit) { runCatching { firstFocus.requestFocus() } }
+    val restoringHome = restoreContext?.origin == ContentReturnOrigin.Home
+    LaunchedEffect(restoringHome) {
+        if (!restoringHome) runCatching { firstFocus.requestFocus() }
+    }
 
     // Comme pour le guide TV, une catégorie verrouillée et pas encore déverrouillée cette session
     // est traitée comme masquée ici : l'accueil ouvre le contenu directement (reprise, favori),
