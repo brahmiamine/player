@@ -422,6 +422,30 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     }
 
     fun openEntry(entry: MediaEntry) {
+        // Le Browser reste le retour par défaut. Depuis un détail (contenu similaire / retry),
+        // conserver le contexte qui a amené l'utilisateur jusque-là au lieu de l'écraser.
+        if (_uiState.value.screen is StreamiaScreen.Browser || _uiState.value.screen is StreamiaScreen.Epg) {
+            _uiState.update { it.copy(contentReturnContext = ContentReturnContext.browser(entry.key)) }
+        }
+        openEntryInternal(entry)
+    }
+
+    fun openHomeEntry(entry: MediaEntry, rowKey: String) {
+        _uiState.update { it.copy(contentReturnContext = ContentReturnContext.home(rowKey, entry.key)) }
+        openEntryInternal(entry)
+    }
+
+    fun openSearchEntry(entry: MediaEntry) {
+        _uiState.update { it.copy(contentReturnContext = ContentReturnContext.search(entry.key)) }
+        openEntryInternal(entry)
+    }
+
+    fun openLiveMatchChannel(entry: MediaEntry, matchKey: String) {
+        _uiState.update { it.copy(contentReturnContext = ContentReturnContext.liveMatches(matchKey, entry.key)) }
+        openEntryInternal(entry)
+    }
+
+    private fun openEntryInternal(entry: MediaEntry) {
         when {
             entry.type == MediaType.Live -> openPlayer(entry, returnToSeries = false)
             entry.type == MediaType.Movie -> loadMovie(entry)
@@ -435,6 +459,11 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
      * par l'écran de détails que [openEntry] ouvrirait pour un film. Les épisodes de série sont déjà
      * lisibles directement via [openEntry] ; seul le cas Film nécessite ce raccourci.
      */
+    fun resumeHomePlayback(entry: MediaEntry) {
+        _uiState.update { it.copy(contentReturnContext = ContentReturnContext.home(HomeRowKey.Resume, entry.key)) }
+        if (entry.type == MediaType.Movie) openPlayer(entry, returnToSeries = false) else openEntryInternal(entry)
+    }
+
     fun resumePlayback(entry: MediaEntry) {
         if (entry.type == MediaType.Movie) openPlayer(entry, returnToSeries = false) else openEntry(entry)
     }
@@ -505,6 +534,14 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     suspend fun epgCacheSizeBytes(): Long = repository.epgCacheSizeBytes()
     fun showParentalControl() { _uiState.update { it.copy(screen = StreamiaScreen.ParentalControl, message = null) } }
     fun showSearch() { _uiState.update { it.copy(screen = StreamiaScreen.Search, message = null) } }
+
+    fun updateSearchQuery(query: String) {
+        _uiState.update { it.copy(searchQuery = query) }
+    }
+
+    fun updateSearchType(type: MediaType?) {
+        _uiState.update { it.copy(searchType = type) }
+    }
 
     fun showLiveMatches() {
         _uiState.update { it.copy(screen = StreamiaScreen.LiveMatches, message = null) }
@@ -1002,15 +1039,16 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         }
     }
 
-    fun closePlayer() {
+    fun closePlayer(forceBrowser: Boolean = false) {
         val profileId = _uiState.value.activeProfileId
         val player = _uiState.value.screen as? StreamiaScreen.Player
         _uiState.update {
             it.copy(
                 screen = when {
                     it.catalogHydrating -> StreamiaScreen.Home
+                    forceBrowser -> StreamiaScreen.Browser
                     player?.returnToSeries == true && it.seriesDetails != null -> StreamiaScreen.Series(it.seriesDetails.series)
-                    else -> StreamiaScreen.Browser
+                    else -> it.contentReturnContext?.destinationScreen() ?: StreamiaScreen.Browser
                 },
                 epg = EpgNowContext(),
                 resumePositionMs = 0,
@@ -1022,10 +1060,24 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     }
 
     fun closeDetails() {
-        _uiState.update { it.copy(screen = StreamiaScreen.Browser, mediaDetails = null, similarMedia = emptyList(), message = null) }
+        _uiState.update {
+            it.copy(
+                screen = it.contentReturnContext?.destinationScreen() ?: StreamiaScreen.Browser,
+                mediaDetails = null,
+                similarMedia = emptyList(),
+                message = null,
+            )
+        }
     }
     fun closeSeries() {
-        _uiState.update { it.copy(screen = StreamiaScreen.Browser, seriesDetails = null, similarMedia = emptyList(), message = null) }
+        _uiState.update {
+            it.copy(
+                screen = it.contentReturnContext?.destinationScreen() ?: StreamiaScreen.Browser,
+                seriesDetails = null,
+                similarMedia = emptyList(),
+                message = null,
+            )
+        }
     }
 
     fun zap(delta: Int) {
