@@ -90,18 +90,18 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     parentalControlEnabled = state.appSettings.parentalControlEnabled,
                     parentalUnlocked = state.parentalUnlocked,
                     catalogLoading = state.catalogHydrating,
-                    matchRow = state.homeMatchRow,
+                    liveMatchRow = state.homeLiveMatchRow,
+                    upcomingMatchRow = state.homeUpcomingMatchRow,
                     recommendationRows = state.homeRecommendationRows,
+                    restoreContext = state.contentReturnContext,
                     onOpenSection = viewModel::openSection,
                     onSettings = viewModel::showSettings,
                     onSearch = viewModel::showSearch,
                     onEpg = viewModel::showEpg,
                     onRefresh = viewModel::refresh,
                     onChangePlaylist = viewModel::logout,
-                    onResumePlayback = viewModel::resumePlayback,
-                    onOpenFavorite = viewModel::openEntry,
-                    onOpenMatch = viewModel::openEntry,
-                    onOpenRecommendation = viewModel::openEntry,
+                    onResumePlayback = viewModel::resumeHomePlayback,
+                    onOpenHomeEntry = viewModel::openHomeEntry,
                     onOpenLiveMatches = viewModel::showLiveMatches,
                 )
 
@@ -203,8 +203,15 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
 
                 state.screen is StreamiaScreen.Search && state.catalog != null -> SearchScreen(
                     favoriteEntries = state.library.favoriteEntries,
+                    query = state.searchQuery,
+                    type = state.searchType,
+                    restoreEntryKey = state.contentReturnContext
+                        ?.takeIf { it.origin == ContentReturnOrigin.Search }
+                        ?.itemKey,
                     search = viewModel::searchCatalog,
-                    onOpenEntry = viewModel::openEntry,
+                    onQueryChange = viewModel::updateSearchQuery,
+                    onTypeChange = viewModel::updateSearchType,
+                    onOpenEntry = viewModel::openSearchEntry,
                     onToggleEntryFavorite = viewModel::toggleEntryFavorite,
                     onBack = viewModel::showHome,
                 )
@@ -214,7 +221,13 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     loading = state.liveOnSatLoading,
                     error = state.liveOnSatError,
                     fetchedAtEpochMillis = state.liveOnSatFetchedAtEpochMillis,
-                    onOpenChannel = viewModel::openEntry,
+                    restoreMatchKey = state.contentReturnContext
+                        ?.takeIf { it.origin == ContentReturnOrigin.LiveMatches }
+                        ?.liveMatchKey,
+                    restoreChannelKey = state.contentReturnContext
+                        ?.takeIf { it.origin == ContentReturnOrigin.LiveMatches }
+                        ?.itemKey,
+                    onOpenChannel = viewModel::openLiveMatchChannel,
                     onRefresh = viewModel::refreshLiveOnSatMatches,
                     onBack = viewModel::showHome,
                 )
@@ -308,7 +321,10 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                         livePlaybackSession = livePlaybackSession,
                         liveVideoSurface = liveVideoSurface,
                         onBack = {
-                            LiveBrowserReturnState.remember(playerScreen.entry)
+                            val origin = state.contentReturnContext?.origin
+                            if (origin == null || origin == ContentReturnOrigin.Browser) {
+                                LiveBrowserReturnState.remember(playerScreen.entry)
+                            }
                             viewModel.closePlayer()
                         },
                         onZap = viewModel::zap,
