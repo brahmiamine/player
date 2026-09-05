@@ -175,6 +175,25 @@ fun HomeScreen(
 
     val homeListState = rememberLazyListState()
     val restoreTarget = restoreContext?.takeIf { it.origin == ContentReturnOrigin.Home }
+    val effectiveRestoreRowKey = remember(
+        restoreTarget,
+        displayedLiveMatchRow,
+        displayedUpcomingMatchRow,
+    ) {
+        when (restoreTarget?.homeRowKey) {
+            HomeRowKey.LiveMatches, HomeRowKey.UpcomingMatches -> {
+                val matchKey = restoreTarget.itemKey
+                when {
+                    displayedLiveMatchRow?.items?.any { it.event.fingerprint == matchKey } == true ->
+                        HomeRowKey.LiveMatches
+                    displayedUpcomingMatchRow?.items?.any { it.event.fingerprint == matchKey } == true ->
+                        HomeRowKey.UpcomingMatches
+                    else -> restoreTarget.homeRowKey
+                }
+            }
+            else -> restoreTarget?.homeRowKey
+        }
+    }
     val visibleRowKeys = remember(
         resumeCards,
         favoriteCards,
@@ -190,8 +209,8 @@ fun HomeScreen(
             recommendationRows.forEach { row -> add(HomeRowKey.recommendation(row.kind)) }
         }
     }
-    LaunchedEffect(restoreTarget?.homeRowKey, visibleRowKeys) {
-        val targetRow = restoreTarget?.homeRowKey ?: return@LaunchedEffect
+    LaunchedEffect(effectiveRestoreRowKey, visibleRowKeys) {
+        val targetRow = effectiveRestoreRowKey ?: return@LaunchedEffect
         val rowIndex = visibleRowKeys.indexOf(targetRow)
         if (rowIndex >= 0) homeListState.scrollToItem(rowIndex + 1)
     }
@@ -271,7 +290,7 @@ fun HomeScreen(
                         row = displayedLiveMatchRow,
                         firstFocusRequester = if (focusOnLiveMatches) firstFocus else null,
                         restoreItemKey = restoreTarget
-                            ?.takeIf { it.homeRowKey == HomeRowKey.LiveMatches }
+                            ?.takeIf { effectiveRestoreRowKey == HomeRowKey.LiveMatches }
                             ?.itemKey,
                         onOpenMatch = { item ->
                             onOpenHomeEntry(item.event.channel, HomeRowKey.LiveMatches, item.event.fingerprint)
@@ -289,7 +308,7 @@ fun HomeScreen(
                         row = displayedUpcomingMatchRow,
                         firstFocusRequester = if (focusOnUpcomingMatches) firstFocus else null,
                         restoreItemKey = restoreTarget
-                            ?.takeIf { it.homeRowKey == HomeRowKey.UpcomingMatches }
+                            ?.takeIf { effectiveRestoreRowKey == HomeRowKey.UpcomingMatches }
                             ?.itemKey,
                         onOpenMatch = { item ->
                             onOpenHomeEntry(item.event.channel, HomeRowKey.UpcomingMatches, item.event.fingerprint)
