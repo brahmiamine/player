@@ -218,7 +218,7 @@ private fun String.epgLookupAliases(): List<String> {
 }
 
 private val EPG_DECORATION_TOKENS = setOf(
-    "fr", "france", "vip", "raw", "uhd", "hd", "fhd", "hevc", "h265", "h264",
+    "fr", "vip", "raw", "uhd", "hd", "fhd", "hevc", "h265", "h264",
 )
 
 private val EPG_QUALITY_TOKEN = Regex("^(?:4k|8k|2160p|1080p|720p|\\d{2,3}fps)$")
