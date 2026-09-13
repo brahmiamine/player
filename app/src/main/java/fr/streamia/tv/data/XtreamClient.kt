@@ -236,7 +236,7 @@ class XtreamClient {
 
     /**
      * [sink] reçoit les entrées par lots de [WRITE_CHUNK_SIZE] au fil du parsing : en cas d'échec
-     * réseau après un premier lot déjà écrit, la nouvelle tentative (URL alternative http/https)
+     * réseau après un premier lot déjà écrit, la nouvelle tentative (HTTP → HTTPS uniquement)
      * reparse la réponse depuis le début et réécrit tout — `INSERT OR REPLACE` côté
      * [CatalogDatabase.ReplaceSession] rend ces réécritures sans effet de bord.
      */

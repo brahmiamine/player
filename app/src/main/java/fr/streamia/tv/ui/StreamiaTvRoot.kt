@@ -16,11 +16,13 @@ import fr.streamia.tv.data.PlaybackSessionStore
 import fr.streamia.tv.data.resolveStartupProfileId
 import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.player.LivePlaybackSession
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 
 /**
  * Point d'entrée conservé pour PlayerScreen. L'ancien sélecteur Live superposé a été supprimé :
@@ -64,7 +66,11 @@ fun StreamiaTvRoot(viewModel: StreamiaViewModel) {
     DisposableEffect(livePlaybackSession, lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_START -> livePlaybackSession.resume()
+                Lifecycle.Event.ON_START -> {
+                    if (shouldKeepLivePlayback(viewModel.uiState.value.screen)) {
+                        livePlaybackSession.resume()
+                    }
+                }
                 Lifecycle.Event.ON_STOP -> livePlaybackSession.stop(clearSession = false)
                 else -> Unit
             }
@@ -73,6 +79,12 @@ fun StreamiaTvRoot(viewModel: StreamiaViewModel) {
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
             livePlaybackSession.release()
+        }
+    }
+
+    LaunchedEffect(state.screen, livePlaybackSession) {
+        if (!shouldKeepLivePlayback(state.screen)) {
+            livePlaybackSession.stop(clearSession = true)
         }
     }
 
@@ -118,28 +130,48 @@ fun StreamiaTvRoot(viewModel: StreamiaViewModel) {
 
     LaunchedEffect(Unit) {
         var previouslyActiveProfileId: String? = null
+        var lastPlaybackFingerprint: String? = null
         viewModel.uiState.collect { current ->
             val activeProfileId = current.activeProfileId
-            if (activeProfileId != null) {
-                val savedPlayback = sessionStore.load()
-                if (savedPlayback != null && savedPlayback.profileId != activeProfileId) {
-                    sessionStore.clearPlayback()
+            if (activeProfileId != null && activeProfileId != previouslyActiveProfileId) {
+                withContext(Dispatchers.IO) {
+                    val savedPlayback = sessionStore.load()
+                    if (savedPlayback != null && savedPlayback.profileId != activeProfileId) {
+                        sessionStore.clearPlayback()
+                    }
+                    sessionStore.saveActiveProfile(activeProfileId)
                 }
-                sessionStore.saveActiveProfile(activeProfileId)
                 previouslyActiveProfileId = activeProfileId
+                lastPlaybackFingerprint = null
             }
 
             val playerScreen = current.screen as? StreamiaScreen.Player
-            if (playerScreen != null && activeProfileId != null) {
-                sessionStore.save(activeProfileId, playerScreen.entry, playerScreen.returnToSeries)
-            } else if (current.lastViewedEntry != null && activeProfileId != null) {
-                val entry = current.lastViewedEntry ?: return@collect
-                sessionStore.save(activeProfileId, entry, entry.type == MediaType.Series)
+            val playbackFingerprint = when {
+                playerScreen != null && activeProfileId != null ->
+                    "$activeProfileId:${playerScreen.entry.key}:${playerScreen.returnToSeries}"
+                current.lastViewedEntry != null && activeProfileId != null -> {
+                    val entry = current.lastViewedEntry
+                    "$activeProfileId:${entry.key}:${entry.type == MediaType.Series}"
+                }
+                else -> null
+            }
+            if (playbackFingerprint != null && playbackFingerprint != lastPlaybackFingerprint) {
+                lastPlaybackFingerprint = playbackFingerprint
+                withContext(Dispatchers.IO) {
+                    val player = current.screen as? StreamiaScreen.Player
+                    if (player != null && activeProfileId != null) {
+                        sessionStore.save(activeProfileId, player.entry, player.returnToSeries)
+                    } else {
+                        val entry = current.lastViewedEntry ?: return@withContext
+                        sessionStore.save(activeProfileId ?: return@withContext, entry, entry.type == MediaType.Series)
+                    }
+                }
             }
 
             if (current.screen is StreamiaScreen.Login && activeProfileId == null && previouslyActiveProfileId != null) {
-                sessionStore.disableAutoOpen()
+                withContext(Dispatchers.IO) { sessionStore.disableAutoOpen() }
                 previouslyActiveProfileId = null
+                lastPlaybackFingerprint = null
             }
         }
     }

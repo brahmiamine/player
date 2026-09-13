@@ -4,6 +4,8 @@ import android.content.Context
 import org.json.JSONObject
 import java.security.MessageDigest
 import java.security.SecureRandom
+import javax.crypto.SecretKeyFactory
+import javax.crypto.spec.PBEKeySpec
 
 enum class VideoAspectSetting { Fit, Fill, Zoom }
 enum class BufferMode { LowLatency, Auto, Stable }
@@ -180,7 +182,13 @@ class AppSettingsStore(context: Context) {
     fun verifyParentalPin(pin: String): Boolean {
         val salt = preferences.getString(KEY_PARENTAL_PIN_SALT, null) ?: return false
         val storedHash = preferences.getString(KEY_PARENTAL_PIN_HASH, null) ?: return false
-        return hashPin(pin, salt) == storedHash
+        if (!pinMatches(pin, salt, storedHash)) return false
+        if (!storedHash.startsWith(PIN_HASH_PREFIX)) {
+            preferences.edit()
+                .putString(KEY_PARENTAL_PIN_HASH, hashPin(pin, salt))
+                .apply()
+        }
+        return true
     }
 
     private companion object {
@@ -206,9 +214,28 @@ class AppSettingsStore(context: Context) {
 /**
  * Hachage salé d'un code parental, extrait en fonction pure (plutôt que méthode privée de
  * [AppSettingsStore]) pour rester testable sans `Context` Android — ce module n'a pas Robolectric.
+ *
+ * Le préfixe `pbkdf2:` distingue le dérivé étiré du SHA-256 historique, toujours accepté à la
+ * vérification pour ne pas verrouiller les codes déjà enregistrés.
  */
+internal const val PIN_HASH_PREFIX = "pbkdf2:"
+private const val PIN_PBKDF2_ITERATIONS = 120_000
+
 internal fun hashPin(pin: String, salt: String): String =
+    PIN_HASH_PREFIX + pbkdf2Pin(pin, salt)
+
+internal fun hashPinSha256(pin: String, salt: String): String =
     MessageDigest.getInstance("SHA-256").digest((salt + pin).toByteArray(Charsets.UTF_8)).toHex()
+
+internal fun pinMatches(pin: String, salt: String, storedHash: String): Boolean {
+    val expected = if (storedHash.startsWith(PIN_HASH_PREFIX)) hashPin(pin, salt) else hashPinSha256(pin, salt)
+    return MessageDigest.isEqual(expected.toByteArray(Charsets.UTF_8), storedHash.toByteArray(Charsets.UTF_8))
+}
+
+private fun pbkdf2Pin(pin: String, salt: String): String {
+    val spec = PBEKeySpec(pin.toCharArray(), salt.toByteArray(Charsets.UTF_8), PIN_PBKDF2_ITERATIONS, 256)
+    return SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded.toHex()
+}
 
 private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it) }
 

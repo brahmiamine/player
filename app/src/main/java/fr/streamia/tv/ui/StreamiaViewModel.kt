@@ -27,6 +27,9 @@ import fr.streamia.tv.domain.SeriesEpisode
 import fr.streamia.tv.domain.ServerCredentials
 import fr.streamia.tv.domain.adjacentTo
 import fr.streamia.tv.domain.epgNowContextAt
+import fr.streamia.tv.domain.isParentalBlocked
+import fr.streamia.tv.domain.parentalExcludedCategoryIds
+import fr.streamia.tv.domain.parentalLockedCategoryIds
 import fr.streamia.tv.domain.withTimeOffset
 import fr.streamia.tv.liveonsat.ChannelMatcher
 import fr.streamia.tv.liveonsat.ResolvedLiveOnSatMatch
@@ -120,6 +123,20 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             return
         }
         val library = repository.library(profileId)
+        val appSettings = repository.appSettings()
+        // Après un kill, parentalUnlocked revient à false : ne pas relancer une chaîne/VOD
+        // d'une catégorie verrouillée sans redemander le code.
+        if (
+            isParentalBlocked(
+                entry = entry,
+                lockedCategoryKeys = library.lockedCategories,
+                parentalControlEnabled = appSettings.parentalControlEnabled,
+                parentalUnlocked = false,
+            )
+        ) {
+            openProfile(profileId)
+            return
+        }
         val startupCatalog = Catalog(emptyList(), listOf(entry))
         _uiState.value = StreamiaUiState(
             booting = false,
@@ -132,7 +149,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             activeProfileId = profileId,
             profiles = repository.profiles(),
             library = library,
-            appSettings = repository.appSettings(),
+            appSettings = appSettings,
             resumePositionMs = library.history.firstOrNull { it.entry.key == entry.key }?.positionMs ?: 0L,
         )
         // Après une fermeture complète Android recrée le ViewModel, donc le petit cache RAM EPG
@@ -448,6 +465,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     }
 
     private fun openEntryInternal(entry: MediaEntry) {
+        if (_uiState.value.blocksParental(entry)) return
         when {
             entry.type == MediaType.Live -> openPlayer(entry, returnToSeries = false)
             entry.type == MediaType.Movie -> loadMovie(entry)
@@ -1106,17 +1124,16 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         // Le repli sur allLive peut faire sauter le zapping dans une autre catégorie que celle en
         // cours : si elle est verrouillée et pas encore déverrouillée cette session, elle doit être
         // exclue comme si elle était masquée — il n'y a pas d'écran de code pendant le zapping.
-        val lockedCategoryIds = if (state.appSettings.parentalControlEnabled && !state.parentalUnlocked) {
-            state.catalog?.categoriesFor(MediaType.Live)
-                .orEmpty()
-                .filter { it.key in state.library.lockedCategories }
-                .mapTo(mutableSetOf(), MediaCategory::id)
-        } else {
-            emptySet()
-        }
+        val lockedCategoryIds = parentalLockedCategoryIds(
+            categories = state.catalog?.categoriesFor(MediaType.Live).orEmpty(),
+            lockedCategoryKeys = state.library.lockedCategories,
+            parentalControlEnabled = state.appSettings.parentalControlEnabled,
+            parentalUnlocked = state.parentalUnlocked,
+            type = MediaType.Live,
+        )
         val sameCategory = state.catalog?.entriesIn(MediaType.Live, current.categoryId)
             .orEmpty()
-            .filterNot { it.key in state.library.hiddenEntries }
+            .filterNot { it.key in state.library.hiddenEntries || it.categoryId in lockedCategoryIds }
         val allLive = state.catalog?.entriesFor(MediaType.Live)
             .orEmpty()
             .filterNot { it.key in state.library.hiddenEntries || it.categoryId in lockedCategoryIds }
@@ -1135,6 +1152,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     }
 
     private fun openPlayer(entry: MediaEntry, returnToSeries: Boolean) {
+        if (_uiState.value.blocksParental(entry)) return
         val profileId = _uiState.value.activeProfileId
         val resume = if (profileId != null && entry.type != MediaType.Live) repository.resumePosition(profileId, entry.key) else 0L
         _uiState.update {
@@ -1899,6 +1917,14 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 val state = _uiState.value
                 val profileId = state.activeProfileId
                 val catalog = state.catalog
+                val excludedLiveCategoryIds = parentalExcludedCategoryIds(
+                    categories = catalog?.categories.orEmpty(),
+                    lockedCategoryKeys = state.library.lockedCategories,
+                    hiddenCategoryKeys = state.library.hiddenCategories,
+                    parentalControlEnabled = state.appSettings.parentalControlEnabled,
+                    parentalUnlocked = state.parentalUnlocked,
+                    type = MediaType.Live,
+                )
                 val liveChannels = when {
                     profileId == null -> emptyList()
                     catalog != null && catalog.isCategoryLoaded(MediaType.Live, Catalog.ALL_CATEGORY_ID) ->
@@ -1906,6 +1932,8 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                     else -> withContext(Dispatchers.IO) {
                         runCatching { repository.loadSection(profileId, MediaType.Live) }.getOrDefault(emptyList())
                     }
+                }.filterNot {
+                    it.key in state.library.hiddenEntries || it.categoryId in excludedLiveCategoryIds
                 }
 
                 val todayGuide = if (profileId != null && liveChannels.isNotEmpty()) {
@@ -2185,7 +2213,14 @@ data class StreamiaUiState(
     val searchType: MediaType? = null,
     val contentReturnContext: ContentReturnContext? = null,
     val lastViewedEntry: MediaEntry? = null,
-)
+) {
+    fun blocksParental(entry: MediaEntry): Boolean = isParentalBlocked(
+        entry = entry,
+        lockedCategoryKeys = library.lockedCategories,
+        parentalControlEnabled = appSettings.parentalControlEnabled,
+        parentalUnlocked = parentalUnlocked,
+    )
+}
 
 sealed interface StreamiaScreen {
     data object Login : StreamiaScreen

@@ -21,8 +21,8 @@ class M3uParserTest {
 
         val result = M3uParser().parse(StringReader(playlist))
 
-        // Les URL sans schéma commencent en HTTP ; le client/lecteur sait essayer HTTPS si nécessaire.
-        assertEquals("http://provider.test:443", result.credentials.serverUrl)
+        // Les URL sans schéma commencent en HTTPS, comme la saisie Xtream sans schéma.
+        assertEquals("https://provider.test:443", result.credentials.serverUrl)
         assertEquals("my user", result.credentials.username)
         assertEquals("p@ss", result.credentials.password)
         assertEquals(3, result.parsedEntries)

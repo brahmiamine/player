@@ -37,4 +37,28 @@ class PlaybackUrlStrategyTest {
             candidates,
         )
     }
+
+    @Test
+    fun `https streams never fall back to cleartext http`() {
+        val live = PlaybackUrlStrategy.candidates(
+            initialUrl = "https://provider.test/live/user/pass/42.ts",
+            type = MediaType.Live,
+            preference = PlaybackTransportPreference(scheme = "http", liveExtension = "m3u8"),
+        )
+        assertTrue(live.all { it.startsWith("https://") })
+        assertEquals(
+            listOf(
+                "https://provider.test/live/user/pass/42.m3u8",
+                "https://provider.test/live/user/pass/42.ts",
+            ),
+            live,
+        )
+
+        val vod = PlaybackUrlStrategy.candidates(
+            initialUrl = "https://provider.test/movie/user/pass/9.mkv",
+            type = MediaType.Movie,
+            preference = PlaybackTransportPreference(scheme = "http"),
+        )
+        assertEquals(listOf("https://provider.test/movie/user/pass/9.mkv"), vod)
+    }
 }

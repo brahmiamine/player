@@ -70,6 +70,7 @@ import fr.streamia.tv.domain.EpgProgram
 import fr.streamia.tv.domain.MediaCategory
 import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.MediaType
+import fr.streamia.tv.domain.parentalLockedCategoryIds
 import fr.streamia.tv.domain.SeriesEpisode
 import fr.streamia.tv.domain.ServerCredentials
 import fr.streamia.tv.domain.XtreamUrlBuilder
@@ -509,7 +510,10 @@ fun PlayerScreen(
         seekFeedback = null
     }
 
-    LaunchedEffect(Unit) { rootFocus.requestFocus() }
+    LaunchedEffect(Unit) {
+        yield()
+        runCatching { rootFocus.requestFocus() }
+    }
     LaunchedEffect(settingsOpen) {
         if (settingsOpen) {
             yield()
@@ -721,6 +725,10 @@ fun PlayerScreen(
             PlayerGuide(
                 catalog = catalog,
                 currentEntry = entry,
+                hiddenEntries = hiddenEntries,
+                lockedCategories = lockedCategories,
+                parentalControlEnabled = parentalControlEnabled,
+                parentalUnlocked = parentalUnlocked,
                 onEntrySelected = {
                     onEntrySelected(it)
                     guideOpen = false
@@ -1055,12 +1063,39 @@ private fun PlaybackTimeline(positionMs: Long, durationMs: Long) {
 private fun PlayerGuide(
     catalog: Catalog,
     currentEntry: MediaEntry,
+    hiddenEntries: Set<String>,
+    lockedCategories: Set<String>,
+    parentalControlEnabled: Boolean,
+    parentalUnlocked: Boolean,
     onEntrySelected: (MediaEntry) -> Unit,
     onClose: () -> Unit,
 ) {
-    val categories = remember(catalog) { listOf(Catalog.allCategory(MediaType.Live)) + catalog.categoriesFor(MediaType.Live) }
-    var selectedCategoryId by remember(currentEntry.categoryId) { mutableStateOf(currentEntry.categoryId) }
-    val channels = remember(catalog, selectedCategoryId) { catalog.entriesIn(MediaType.Live, selectedCategoryId) }
+    val providerCategories = remember(catalog, lockedCategories, parentalControlEnabled, parentalUnlocked) {
+        catalog.categoriesFor(MediaType.Live).filterNot { category ->
+            category.key in lockedCategories && parentalControlEnabled && !parentalUnlocked
+        }
+    }
+    val categories = remember(providerCategories) {
+        listOf(Catalog.allCategory(MediaType.Live)) + providerCategories
+    }
+    val excludedCategoryIds = remember(catalog, lockedCategories, parentalControlEnabled, parentalUnlocked) {
+        parentalLockedCategoryIds(
+            categories = catalog.categoriesFor(MediaType.Live),
+            lockedCategoryKeys = lockedCategories,
+            parentalControlEnabled = parentalControlEnabled,
+            parentalUnlocked = parentalUnlocked,
+            type = MediaType.Live,
+        )
+    }
+    val initialCategoryId = remember(currentEntry.categoryId, categories) {
+        if (categories.any { it.id == currentEntry.categoryId }) currentEntry.categoryId else Catalog.ALL_CATEGORY_ID
+    }
+    var selectedCategoryId by remember(initialCategoryId) { mutableStateOf(initialCategoryId) }
+    val channels = remember(catalog, selectedCategoryId, hiddenEntries, excludedCategoryIds) {
+        catalog.entriesIn(MediaType.Live, selectedCategoryId).filterNot {
+            it.key in hiddenEntries || it.categoryId in excludedCategoryIds
+        }
+    }
     val firstFocus = remember(selectedCategoryId) { FocusRequester() }
 
     LaunchedEffect(selectedCategoryId, channels.size) {

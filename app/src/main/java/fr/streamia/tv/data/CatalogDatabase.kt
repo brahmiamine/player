@@ -376,8 +376,9 @@ internal class CatalogDatabase(context: Context) :
     ).use(::readEntries)
 
     fun search(profileId: String, query: String, type: MediaType? = null, limit: Int = 500): List<MediaEntry> {
-        val needle = "%${query.trim()}%"
-        if (query.isBlank()) return emptyList()
+        val trimmed = query.trim()
+        if (trimmed.isBlank()) return emptyList()
+        val needle = "%${escapeSqlLike(trimmed)}%"
         val typeClause = if (type == null) "" else " AND media_type = ?"
         val args = buildList {
             add(profileId)
@@ -391,7 +392,11 @@ internal class CatalogDatabase(context: Context) :
             """
             SELECT ${ENTRY_COLUMNS.joinToString()} FROM catalog_entries
             WHERE profile_id = ? AND navigable = 1$typeClause
-              AND (name LIKE ? COLLATE NOCASE OR display_name LIKE ? COLLATE NOCASE OR tvg_id LIKE ? COLLATE NOCASE)
+              AND (
+                name LIKE ? ESCAPE '\' COLLATE NOCASE OR
+                display_name LIKE ? ESCAPE '\' COLLATE NOCASE OR
+                tvg_id LIKE ? ESCAPE '\' COLLATE NOCASE
+              )
             ORDER BY number, media_id
             LIMIT ?
             """.trimIndent(),
@@ -566,5 +571,13 @@ internal class CatalogDatabase(context: Context) :
             "playable",
             "added_at",
         )
+    }
+}
+
+/** Échappe `%`, `_` et `\` pour un motif `LIKE ... ESCAPE '\'`. */
+internal fun escapeSqlLike(value: String): String = buildString(value.length) {
+    value.forEach { char ->
+        if (char == '%' || char == '_' || char == '\\') append('\\')
+        append(char)
     }
 }

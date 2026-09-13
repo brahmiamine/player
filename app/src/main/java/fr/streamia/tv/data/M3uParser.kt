@@ -209,7 +209,7 @@ class M3uParser {
 
     companion object {
         private const val BUFFER_SIZE = 64 * 1024
-        private const val DEFAULT_SCHEME = "http"
+        private const val DEFAULT_SCHEME = "https"
         private val SCHEME_PREFIX = Regex("^[A-Za-z][A-Za-z0-9+.-]*://")
         private val ATTRIBUTE = Regex("([A-Za-z0-9_-]+)\\s*=\\s*\"([^\"]*)\"")
     }

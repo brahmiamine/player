@@ -18,8 +18,12 @@ object PlaybackUrlStrategy {
         val schemes = buildList {
             preference.scheme?.lowercase()?.takeIf { it == "http" || it == "https" }?.let(::add)
             add(currentScheme)
-            add(if (currentScheme == "http") "https" else "http")
-        }.distinct()
+            if (currentScheme == "http") add("https")
+        }.distinct().filter { scheme ->
+            // Un flux annoncé en HTTPS ne doit jamais retomber en HTTP : username/password
+            // sont dans le chemin. On n'autorise le clair que si l'URL de départ l'était déjà.
+            currentScheme == "http" || scheme == "https"
+        }
 
         if (type != MediaType.Live) {
             return schemes.map { scheme -> replaceScheme(initialUrl, scheme) }.distinct()

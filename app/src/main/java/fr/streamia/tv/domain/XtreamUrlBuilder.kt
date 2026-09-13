@@ -60,17 +60,13 @@ class XtreamUrlBuilder(private val credentials: ServerCredentials) {
             return if (withScheme.endsWith("://")) withScheme else withScheme.trimEnd('/')
         }
 
-        /** Retourne la même URL avec l'autre transport HTTP/HTTPS. */
+        /** Passe une URL HTTP en HTTPS. Ne rétrograde jamais HTTPS vers HTTP : les identifiants
+         *  Xtream voyagent dans l'URL, un échec TLS ne doit pas les renvoyer en clair. */
         fun alternateTransportUrl(url: String): String? {
             val uri = runCatching { URI(url) }.getOrNull() ?: return null
-            val targetScheme = when (uri.scheme?.lowercase()) {
-                "http" -> "https"
-                "https" -> "http"
-                else -> return null
-            }
+            if (uri.scheme?.lowercase() != "http") return null
             return buildString {
-                append(targetScheme)
-                append("://")
+                append("https://")
                 append(uri.rawAuthority ?: return null)
                 append(uri.rawPath.orEmpty())
                 if (!uri.rawQuery.isNullOrBlank()) append("?${uri.rawQuery}")

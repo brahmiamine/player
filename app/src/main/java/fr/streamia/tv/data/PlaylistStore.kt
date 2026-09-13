@@ -12,65 +12,40 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
+class PlaylistStoreException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
+
 /**
  * Persiste les profils de playlists dans un payload chiffré avec AndroidKeyStore.
  * Les identifiants Xtream et les URL privées restent donc chiffrés au repos.
  */
 class PlaylistStore(context: Context) {
     private val preferences = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+    private val lock = Any()
 
-    fun loadAll(): List<PlaylistProfile> = runCatching {
-        val encryptedPayload = preferences.getString(KEY_PAYLOAD, null) ?: return emptyList()
-        val encodedIv = preferences.getString(KEY_IV, null) ?: return emptyList()
-        val iv = Base64.decode(encodedIv, Base64.NO_WRAP)
-        val encrypted = Base64.decode(encryptedPayload, Base64.NO_WRAP)
-        val cipher = Cipher.getInstance(TRANSFORMATION).apply {
-            init(Cipher.DECRYPT_MODE, getOrCreateKey(), GCMParameterSpec(128, iv))
-        }
-        val array = JSONArray(String(cipher.doFinal(encrypted), Charsets.UTF_8))
-        buildList {
-            for (index in 0 until array.length()) {
-                val json = array.optJSONObject(index) ?: continue
-                val id = json.optString("id").takeIf(String::isNotBlank) ?: continue
-                val name = json.optString("name").takeIf(String::isNotBlank) ?: continue
-                val kind = runCatching { PlaylistKind.valueOf(json.optString("kind")) }.getOrNull() ?: continue
-                add(
-                    PlaylistProfile(
-                        id = id,
-                        name = name,
-                        kind = kind,
-                        serverUrl = json.optNullableString("server"),
-                        username = json.optNullableString("username"),
-                        password = json.optNullableString("password"),
-                        m3uUri = json.optNullableString("m3u_uri"),
-                        m3uUrl = json.optNullableString("m3u_url"),
-                        xmlTvUrl = json.optNullableString("xmltv_url"),
-                        autoRefreshHours = json.optInt("auto_refresh_hours", 6).coerceIn(1, 168),
-                        lastRefreshAt = json.optLong("last_refresh_at", 0L),
-                        updatedAt = json.optLong("updated_at", 0L),
-                    ),
-                )
-            }
-        }.sortedByDescending(PlaylistProfile::updatedAt)
-    }.getOrElse { emptyList() }
+    @Volatile
+    private var unreadablePayload = false
+
+    fun loadAll(): List<PlaylistProfile> = synchronized(lock) { loadAllLocked() }
 
     fun find(id: String): PlaylistProfile? = loadAll().firstOrNull { it.id == id }
 
     fun upsert(profile: PlaylistProfile) {
-        val profiles = loadAll().filterNot { it.id == profile.id }.toMutableList()
-        profiles += profile.copy(updatedAt = System.currentTimeMillis())
-        saveAll(profiles)
+        mutate { profiles ->
+            profiles.filterNot { it.id == profile.id } + profile.copy(updatedAt = System.currentTimeMillis())
+        }
     }
 
     fun rename(id: String, name: String): PlaylistProfile? {
         val cleaned = name.trim()
         if (cleaned.isBlank()) return null
-        val profiles = loadAll().toMutableList()
-        val index = profiles.indexOfFirst { it.id == id }
-        if (index < 0) return null
-        val updated = profiles[index].copy(name = cleaned, updatedAt = System.currentTimeMillis())
-        profiles[index] = updated
-        saveAll(profiles)
+        var updated: PlaylistProfile? = null
+        mutate { profiles ->
+            val index = profiles.indexOfFirst { it.id == id }
+            if (index < 0) return@mutate profiles
+            val next = profiles[index].copy(name = cleaned, updatedAt = System.currentTimeMillis())
+            updated = next
+            profiles.toMutableList().also { it[index] = next }
+        }
         return updated
     }
 
@@ -81,37 +56,100 @@ class PlaylistStore(context: Context) {
         autoRefreshHours: Int,
         lastRefreshAt: Long? = null,
     ): PlaylistProfile? {
-        val profiles = loadAll().toMutableList()
-        val index = profiles.indexOfFirst { it.id == id }
-        if (index < 0) return null
-        val current = profiles[index]
-        val updated = current.copy(
-            m3uUrl = m3uUrl?.trim()?.takeIf(String::isNotBlank),
-            xmlTvUrl = xmlTvUrl?.trim()?.takeIf(String::isNotBlank),
-            autoRefreshHours = autoRefreshHours.coerceIn(1, 168),
-            lastRefreshAt = lastRefreshAt ?: current.lastRefreshAt,
-            updatedAt = System.currentTimeMillis(),
-        )
-        profiles[index] = updated
-        saveAll(profiles)
+        var updated: PlaylistProfile? = null
+        mutate { profiles ->
+            val index = profiles.indexOfFirst { it.id == id }
+            if (index < 0) return@mutate profiles
+            val current = profiles[index]
+            val next = current.copy(
+                m3uUrl = m3uUrl?.trim()?.takeIf(String::isNotBlank),
+                xmlTvUrl = xmlTvUrl?.trim()?.takeIf(String::isNotBlank),
+                autoRefreshHours = autoRefreshHours.coerceIn(1, 168),
+                lastRefreshAt = lastRefreshAt ?: current.lastRefreshAt,
+                updatedAt = System.currentTimeMillis(),
+            )
+            updated = next
+            profiles.toMutableList().also { it[index] = next }
+        }
         return updated
     }
 
     fun markRefreshed(id: String, at: Long = System.currentTimeMillis()) {
-        val profiles = loadAll().toMutableList()
-        val index = profiles.indexOfFirst { it.id == id }
-        if (index < 0) return
-        profiles[index] = profiles[index].copy(lastRefreshAt = at, updatedAt = System.currentTimeMillis())
-        saveAll(profiles)
+        mutate { profiles ->
+            val index = profiles.indexOfFirst { it.id == id }
+            if (index < 0) return@mutate profiles
+            val next = profiles.toMutableList()
+            next[index] = next[index].copy(lastRefreshAt = at, updatedAt = System.currentTimeMillis())
+            next
+        }
     }
 
     fun delete(id: String) {
-        saveAll(loadAll().filterNot { it.id == id })
+        mutate { profiles -> profiles.filterNot { it.id == id } }
     }
 
-    private fun saveAll(profiles: List<PlaylistProfile>) {
+    private fun mutate(transform: (List<PlaylistProfile>) -> List<PlaylistProfile>) {
+        synchronized(lock) {
+            saveAllLocked(transform(loadAllLocked()))
+        }
+    }
+
+    private fun loadAllLocked(): List<PlaylistProfile> {
+        val encryptedPayload = preferences.getString(KEY_PAYLOAD, null)
+        val encodedIv = preferences.getString(KEY_IV, null)
+        if (encryptedPayload.isNullOrBlank() || encodedIv.isNullOrBlank()) {
+            unreadablePayload = false
+            return emptyList()
+        }
+        return try {
+            val iv = Base64.decode(encodedIv, Base64.NO_WRAP)
+            val encrypted = Base64.decode(encryptedPayload, Base64.NO_WRAP)
+            val cipher = Cipher.getInstance(TRANSFORMATION).apply {
+                init(Cipher.DECRYPT_MODE, getOrCreateKey(), GCMParameterSpec(128, iv))
+            }
+            val array = JSONArray(String(cipher.doFinal(encrypted), Charsets.UTF_8))
+            buildList {
+                for (index in 0 until array.length()) {
+                    val json = array.optJSONObject(index) ?: continue
+                    val id = json.optString("id").takeIf(String::isNotBlank) ?: continue
+                    val name = json.optString("name").takeIf(String::isNotBlank) ?: continue
+                    val kind = runCatching { PlaylistKind.valueOf(json.optString("kind")) }.getOrNull() ?: continue
+                    add(
+                        PlaylistProfile(
+                            id = id,
+                            name = name,
+                            kind = kind,
+                            serverUrl = json.optNullableString("server"),
+                            username = json.optNullableString("username"),
+                            password = json.optNullableString("password"),
+                            m3uUri = json.optNullableString("m3u_uri"),
+                            m3uUrl = json.optNullableString("m3u_url"),
+                            xmlTvUrl = json.optNullableString("xmltv_url"),
+                            autoRefreshHours = json.optInt("auto_refresh_hours", 6).coerceIn(1, 168),
+                            lastRefreshAt = json.optLong("last_refresh_at", 0L),
+                            updatedAt = json.optLong("updated_at", 0L),
+                        ),
+                    )
+                }
+            }.sortedByDescending(PlaylistProfile::updatedAt).also {
+                unreadablePayload = false
+            }
+        } catch (error: Exception) {
+            unreadablePayload = true
+            emptyList()
+        }
+    }
+
+    private fun saveAllLocked(profiles: List<PlaylistProfile>) {
+        if (unreadablePayload) {
+            throw PlaylistStoreException(
+                "Impossible d'enregistrer les listes : les identifiants existants n'ont pas pu être lus.",
+            )
+        }
         if (profiles.isEmpty()) {
-            preferences.edit().clear().apply()
+            if (!preferences.edit().clear().commit()) {
+                throw PlaylistStoreException("Impossible d'enregistrer les listes.")
+            }
             return
         }
         val array = JSONArray()
@@ -137,10 +175,13 @@ class PlaylistStore(context: Context) {
             init(Cipher.ENCRYPT_MODE, getOrCreateKey())
         }
         val encrypted = cipher.doFinal(array.toString().toByteArray(Charsets.UTF_8))
-        preferences.edit()
+        val written = preferences.edit()
             .putString(KEY_IV, Base64.encodeToString(cipher.iv, Base64.NO_WRAP))
             .putString(KEY_PAYLOAD, Base64.encodeToString(encrypted, Base64.NO_WRAP))
-            .apply()
+            .commit()
+        if (!written) {
+            throw PlaylistStoreException("Impossible d'enregistrer les listes.")
+        }
     }
 
     private fun getOrCreateKey(): SecretKey {
