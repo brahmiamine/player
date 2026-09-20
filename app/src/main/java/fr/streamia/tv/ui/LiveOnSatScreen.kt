@@ -84,9 +84,17 @@ fun LiveOnSatScreen(
         }
     }
     val visibleMatches = remember(matches, nowEpochSeconds) {
-        matches
-            .filter { it.isVisibleAt(nowEpochSeconds) }
-            .sortedBy { it.match.startEpochSeconds }
+        // Tous les matchs du jour sont affichés, sans filtrage : on les ordonne seulement pour que
+        // l'EN DIRECT et l'À VENIR remontent en tête, les TERMINÉS restant visibles en bas.
+        matches.sortedWith(
+            compareBy<ResolvedLiveOnSatMatch> { resolved ->
+                when {
+                    resolved.isLiveAt(nowEpochSeconds) -> 0
+                    resolved.isVisibleAt(nowEpochSeconds) -> 1
+                    else -> 2
+                }
+            }.thenBy { it.match.startEpochSeconds },
+        )
     }
     val matchListState = rememberLazyListState()
     val restoreChannelFocus = remember { FocusRequester() }
@@ -179,6 +187,7 @@ private fun LiveOnSatMatchCard(
 ) {
     val match = resolved.match
     val isLive = resolved.isLiveAt(nowEpochSeconds)
+    val isEnded = !resolved.isVisibleAt(nowEpochSeconds)
     Column(
         Modifier
             .fillMaxWidth()
@@ -187,10 +196,10 @@ private fun LiveOnSatMatchCard(
             .padding(16.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            if (isLive) {
-                Text("● EN DIRECT", color = Danger, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-            } else {
-                Text(formatMatchTime(match.startEpochSeconds), color = FocusBlueBright, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            when {
+                isLive -> Text("● EN DIRECT", color = Danger, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                isEnded -> Text("Terminé", color = MutedInk, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                else -> Text(formatMatchTime(match.startEpochSeconds), color = FocusBlueBright, fontSize = 12.sp, fontWeight = FontWeight.Bold)
             }
             Spacer(Modifier.width(10.dp))
             Text(
@@ -207,7 +216,7 @@ private fun LiveOnSatMatchCard(
             Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            ChannelLogo(match.participantALogoUrl, match.participantA, Modifier.width(38.dp).height(38.dp))
+            ChannelLogo(match.participantALogoUrl, match.participantA, Modifier.width(48.dp).height(48.dp))
             Spacer(Modifier.width(10.dp))
             Text(
                 "${match.participantA} – ${match.participantB}",
@@ -219,7 +228,7 @@ private fun LiveOnSatMatchCard(
                 modifier = Modifier.weight(1f),
             )
             Spacer(Modifier.width(10.dp))
-            ChannelLogo(match.participantBLogoUrl, match.participantB, Modifier.width(38.dp).height(38.dp))
+            ChannelLogo(match.participantBLogoUrl, match.participantB, Modifier.width(48.dp).height(48.dp))
         }
         if (match.channels.isNotEmpty()) {
             Spacer(Modifier.height(10.dp))
@@ -256,8 +265,8 @@ private fun ChannelChip(
                 Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                ChannelLogo(entry.iconUrl, entry.displayName, Modifier.width(24.dp).height(24.dp))
-                Spacer(Modifier.width(7.dp))
+                ChannelLogo(entry.iconUrl, entry.displayName, Modifier.width(32.dp).height(32.dp))
+                Spacer(Modifier.width(9.dp))
                 Text(
                     name,
                     color = Ink,

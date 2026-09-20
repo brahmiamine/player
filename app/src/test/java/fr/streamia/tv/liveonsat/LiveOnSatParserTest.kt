@@ -59,6 +59,16 @@ class LiveOnSatParserTest {
         assertEquals("League Two", matches[1].competition)
     }
 
+    @Test
+    fun `channel names are cleaned from annotations, emojis and symbols`() {
+        val matches = LiveOnSatParser.parse(HTML_WITH_DECORATED_CHANNELS)
+
+        assertEquals(
+            listOf("Apple TV", "MLS Season Pass", "viju+ Sport HD", "DAZN 1"),
+            matches.single().channels.map { it.name },
+        )
+    }
+
     private companion object {
         val HTML_ONE_MATCH = """
             <html><body>
@@ -150,6 +160,24 @@ class LiveOnSatParserTest {
               <div class = fLeft><div>
                 <div class="fLeft_time_live dynamic-time" data-timestamp="1700003600">ST: 20:30</div>
                 <div class = fLeft_live></div>
+              </div></div>
+            </div>
+            </body></html>
+        """.trimIndent()
+
+        val HTML_WITH_DECORATED_CHANNELS = """
+            <html><body>
+            <div><span class=comp_head>Test League</span></div>
+            <div class=blockfix>
+              <div class=fix><div class=fix_text><div class = fLeft>Team A v Team B</div></div></div>
+              <div class = fLeft><div>
+                <div class="fLeft_time_live dynamic-time" data-timestamp="1700000000">ST: 19:30</div>
+                <div class = fLeft_live>
+                  <table><tr><td class=chan_col><a href="#" class = chan_live_free>Apple TV ($/geo/R) 📺</a></td></tr></table>
+                  <table><tr><td class=chan_col><a href="#" class = chan_live_not_free>MLS Season Pass [$]</a></td></tr></table>
+                  <table><tr><td class=chan_col><a href="#" class = chan_live_iptvcable>viju+ Sport HD</a></td></tr></table>
+                  <table><tr><td class=chan_col><a href="#" class = chan_live_iptvcable>DAZN 1 (geo/R) [app]</a></td></tr></table>
+                </div>
               </div></div>
             </div>
             </body></html>

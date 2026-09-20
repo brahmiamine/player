@@ -104,6 +104,7 @@ fun BrowserScreen(
     liveVideoSurface: @Composable (LiveVideoSurfacePlacement) -> Unit,
     library: UserLibrarySnapshot,
     appSettings: AppSettings,
+    loadingCategoryKeys: Set<String> = emptySet(),
     parentalUnlocked: Boolean,
     offline: Boolean,
     busy: Boolean,
@@ -131,7 +132,7 @@ fun BrowserScreen(
     BackHandler(onBack = ::leaveBrowserForHome)
     val context = LocalContext.current.applicationContext
     val navigationStore = remember(credentials) { BrowserNavigationStore(context, credentials) }
-    val restoredLiveSelection = remember(catalog, credentials) {
+    val restoredLiveSelection = remember(credentials) {
         val stored = navigationStore.liveSelection()
         val returnedEntryKey = LiveBrowserReturnState.consume()
         val entryKey = returnedEntryKey ?: stored?.entryKey
@@ -147,11 +148,15 @@ fun BrowserScreen(
         ?.takeIf { catalog.count(it) > 0 }
         ?: MediaType.entries.firstOrNull { catalog.count(it) > 0 }
         ?: MediaType.Live
-    // initialType/initialCategoryId ne servent qu'à l'entrée dans l'écran. Les inclure dans
-    // les clés recréait l'état après onLocationChanged et annulait le clic suivant.
-    var selectedType by remember(catalog, credentials) { mutableStateOf(defaultType) }
-    var lastLiveEntryKey by remember(catalog, credentials) { mutableStateOf(restoredLiveSelection.second) }
-    var selectedCategoryId by remember(catalog, credentials) {
+    // initialType/initialCategoryId ne servent qu'à l'entrée dans l'écran. Ils ne doivent PAS faire
+    // partie des clés de mémorisation : `catalog` change d'instance à chaque page chargée, et le
+    // claver dessus réinitialisait `selectedType`/`selectedCategoryId` à chaque chargement de
+    // catégorie — la sélection revenait à la catégorie par défaut/enregistrée et annulait le clic.
+    // `credentials` est stable pour toute la durée de visite de l'écran (il ne change qu'au
+    // changement de profil, qui détruit l'écran de toute façon).
+    var selectedType by remember(credentials) { mutableStateOf(defaultType) }
+    var lastLiveEntryKey by remember(credentials) { mutableStateOf(restoredLiveSelection.second) }
+    var selectedCategoryId by remember(credentials) {
         mutableStateOf(
             if (defaultType == MediaType.Live) {
                 restoredLiveSelection.first ?: initialCategoryId ?: defaultCategoryId(catalog, MediaType.Live)
@@ -333,6 +338,7 @@ fun BrowserScreen(
                     categories = categories,
                     selectedCategoryId = selectedCategoryId,
                     entries = entries,
+                    loading = Catalog.categoryKey(selectedType, selectedCategoryId) in loadingCategoryKeys,
                     favoriteCategories = library.favoriteCategories,
                     favoriteEntries = library.favoriteEntries,
                     lockedCategories = library.lockedCategories,
@@ -921,6 +927,7 @@ private fun VodCatalogLayout(
     categories: List<MediaCategory>,
     selectedCategoryId: String,
     entries: List<MediaEntry>,
+    loading: Boolean,
     favoriteCategories: Set<String>,
     favoriteEntries: Set<String>,
     lockedCategories: Set<String>,
@@ -965,6 +972,7 @@ private fun VodCatalogLayout(
             entries = entries,
             favoriteEntries = favoriteEntries,
             historyByKey = historyByKey,
+            loading = loading,
             onEntrySelected = onEntrySelected,
             onEntryFocused = onEntryFocused,
             onToggleFavorite = onToggleEntryFavorite,
@@ -1076,6 +1084,7 @@ private fun PosterGrid(
     categoryName: String,
     totalCount: Int,
     entries: List<MediaEntry>,
+    loading: Boolean,
     favoriteEntries: Set<String>,
     historyByKey: Map<String, PlaybackHistoryItem>,
     onEntrySelected: (MediaEntry) -> Unit,
@@ -1102,7 +1111,13 @@ private fun PosterGrid(
 
         if (entries.isEmpty()) {
             Box(Modifier.fillMaxSize().background(DeepSurface), contentAlignment = Alignment.Center) {
-                Text("Aucun contenu dans cette catégorie", color = MutedInk, fontSize = TypeBody)
+                Text(
+                    // Distinguer « la page arrive » de « la catégorie est vide » : une lecture SQLite
+                    // sur une catégorie jamais ouverte n'est pas un catalogue vide.
+                    if (loading) "Chargement…" else "Aucun contenu dans cette catégorie",
+                    color = MutedInk,
+                    fontSize = TypeBody,
+                )
             }
         } else {
             LazyVerticalGrid(

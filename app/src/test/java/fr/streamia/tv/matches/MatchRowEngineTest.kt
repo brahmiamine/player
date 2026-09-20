@@ -263,6 +263,39 @@ class MatchRowEngineTest {
         assertTrue(row == null || row.items.isEmpty())
     }
 
+    @Test
+    fun `same fixture announced minutes apart across a slot boundary is one card`() {
+        // Deux annonces séparées de 2 minutes, situées de part et d'autre d'une frontière de quart
+        // d'heure : l'ancien découpage en créneaux fixes en faisait deux cartes.
+        val boundary = ((now / 900) + 2) * 900
+        val channelA = channel(1, "beIN Sports FR")
+        val channelB = channel(2, "beIN Sports EN")
+        val programs = mapOf(
+            channelA to listOf(footballProgram("PSG - Marseille", boundary - 60, boundary + 3_540)),
+            channelB to listOf(footballProgram("PSG vs Marseille", boundary + 60, boundary + 3_660)),
+        )
+
+        val row = engine.buildRow(programs, now)
+
+        assertEquals(1, row?.items?.size)
+    }
+
+    @Test
+    fun `two broadcasts of the same fixture hours apart stay separate`() {
+        val channelA = channel(1, "beIN Sports FR")
+        val channelB = channel(2, "beIN Sports EN")
+        val laterStart = now + 1_800 + 4 * 3_600
+        val programs = mapOf(
+            channelA to listOf(footballProgram("PSG - Marseille", now + 1_800, now + 5_400)),
+            channelB to listOf(footballProgram("PSG vs Marseille", laterStart, laterStart + 3_600)),
+        )
+
+        val row = engine.buildRow(programs, now)
+
+        assertEquals(2, row?.items?.size)
+        assertEquals(2, row?.items?.map { it.event.fingerprint }?.toSet()?.size)
+    }
+
     private fun channel(id: Int, name: String, categoryId: String = "sport") = MediaEntry(
         id = id,
         name = name,

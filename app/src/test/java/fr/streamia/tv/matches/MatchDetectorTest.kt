@@ -268,4 +268,86 @@ class MatchDetectorTest {
         assertFalse(result.isMatch)
         assertNull(result.sport)
     }
+
+    @Test
+    fun `programme vocabulary alone never becomes a match on a sports channel`() {
+        // Cas réellement produits : le seul motif d'affrontement (0.42) plus le contexte générique du
+        // nom de chaîne (0.16) atteignaient le seuil de confiance sans aucune preuve sportive.
+        val titles = listOf(
+            "Film - Action",
+            "Documentaire - Histoire",
+            "Serie - Saison 3",
+            "Musique - Concert",
+            "Multiplex - Ligue 1",
+            "Documentaire. - Histoire",
+            "Cinéma - Action",
+            "Série - Saison 2",
+            "Météo - Trophée",
+        )
+
+        titles.forEach { title ->
+            val result = detector.detect(
+                title = title,
+                description = null,
+                category = null,
+                channelName = "beIN SPORTS 1",
+            )
+
+            assertFalse("« $title » ne doit pas être détecté comme un match", result.isMatch)
+        }
+    }
+
+    @Test
+    fun `a real competition prefix is not mistaken for programme vocabulary`() {
+        // « Serie » appartient au vocabulaire de programme, mais « Serie A » est une compétition : un
+        // côté n'est rejeté que s'il ne contient aucun mot porteur de sens.
+        val result = detector.detect(
+            title = "Serie A - Juventus vs Milan",
+            description = "Calcio, partita in diretta.",
+            category = null,
+            channelName = "beIN SPORTS 1",
+        )
+
+        assertTrue(result.isMatch)
+    }
+
+    @Test
+    fun `club names alone detect a fixture on a channel with no sport keyword`() {
+        // Cas réel de la grille du fournisseur : titre en « Club / Club », aucune catégorie EPG
+        // exploitable, et une chaîne dont le nom ne dit rien de sport. Le nom de club est la seule
+        // preuve disponible — sans lui, ce match en direct était invisible sur l'accueil.
+        val result = detector.detect(
+            title = "Fulham / Manchester United",
+            description = null,
+            category = null,
+            channelName = "FR: CANAL+ Family 4K",
+        )
+
+        assertTrue(result.isMatch)
+        assertEquals("Fulham", result.participantA)
+        assertEquals("Manchester United", result.participantB)
+        assertTrue("CLUB_NAME_MARKER" in result.signals)
+    }
+
+    @Test
+    fun `ambiguous club initials need a second word to count`() {
+        val result = detector.detect(
+            title = "AC / DC",
+            description = null,
+            category = null,
+            channelName = "FR: CANAL+ Family 4K",
+        )
+
+        assertFalse(result.isMatch)
+    }
+
+    @Test
+    fun `mightBeMatch short circuits titles with no separator`() {
+        assertFalse(detector.mightBeMatch("Journal de 20h"))
+        assertFalse(detector.mightBeMatch("Un si grand soleil"))
+        assertTrue(detector.mightBeMatch("PSG - Marseille"))
+        assertTrue(detector.mightBeMatch("Arsenal vs Chelsea"))
+        assertTrue(detector.mightBeMatch("Fenerbahçe / Beşiktaş"))
+        assertTrue(detector.mightBeMatch("Bayern gegen Dortmund"))
+    }
 }

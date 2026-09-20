@@ -29,6 +29,7 @@ import fr.streamia.tv.domain.adjacentTo
 import fr.streamia.tv.domain.epgNowContextAt
 import fr.streamia.tv.domain.withTimeOffset
 import fr.streamia.tv.liveonsat.ChannelMatcher
+import fr.streamia.tv.liveonsat.LiveOnSatMatch
 import fr.streamia.tv.liveonsat.ResolvedLiveOnSatMatch
 import fr.streamia.tv.liveonsat.withEpgTiming
 import fr.streamia.tv.matches.MatchRow
@@ -679,6 +680,25 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         val catalog = _uiState.value.catalog ?: return
         if (catalog.isCategoryLoaded(type, categoryId)) return
         loadCategoryPage(profileId, type, categoryId, offset = 0)
+        prefetchNeighborCategories(profileId, type, categoryId)
+    }
+
+    /**
+     * Charge en arrière-plan les catégories adjacentes à [categoryId] dans le rail (précédente et
+     * suivante), tant qu'elles ne sont pas déjà matérialisées. La navigation à la télécommande est
+     * linéaire (haut/bas dans le rail) : l'utilisateur ouvre presque toujours la catégorie voisine,
+     * et une page SQLite indexée coûte beaucoup moins que la latence d'un clic non préchargé.
+     */
+    private fun prefetchNeighborCategories(profileId: String, type: MediaType, categoryId: String) {
+        val catalog = _uiState.value.catalog ?: return
+        val ordered = catalog.categoriesFor(type)
+        val index = ordered.indexOfFirst { it.id == categoryId }
+        if (index < 0) return
+        listOfNotNull(ordered.getOrNull(index - 1), ordered.getOrNull(index + 1)).forEach { neighbor ->
+            if (!catalog.isCategoryLoaded(type, neighbor.id)) {
+                loadCategoryPage(profileId, type, neighbor.id, offset = 0)
+            }
+        }
     }
 
     /**
@@ -697,20 +717,57 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     private fun loadCategoryPage(profileId: String, type: MediaType, categoryId: String, offset: Int) {
         val loadKey = "$profileId:${Catalog.categoryKey(type, categoryId)}:$offset"
         if (!categoryLoadsInFlight.add(loadKey)) return
+        setCategoryLoading(type, categoryId, loading = true)
         viewModelScope.launch {
             try {
                 val page = runCatching { repository.loadCategoryPage(profileId, type, categoryId, offset) }.getOrNull() ?: return@launch
                 if (page.entries.isEmpty() && offset > 0) return@launch
-                _uiState.update { state ->
-                    if (state.activeProfileId != profileId) return@update state
-                    val rawBase = state.rawCatalog ?: state.catalog ?: return@update state
-                    val mergedRaw = rawBase.withMaterializedEntries(page.entries, type, categoryId)
-                    val mergedCatalog = repository.customizedCatalog(profileId, mergedRaw)
-                    state.copy(rawCatalog = mergedRaw, catalog = mergedCatalog)
+                mergeIntoCatalog(profileId) { base ->
+                    base.withMaterializedEntries(page.entries, type, categoryId)
                 }
             } finally {
                 categoryLoadsInFlight.remove(loadKey)
+                setCategoryLoading(type, categoryId, loading = false)
             }
+        }
+    }
+
+    /**
+     * Fusionne une évolution du catalogue brut **hors du thread principal**.
+     *
+     * Reconstruire un [Catalog] réindexe toutes les entrées matérialisées — dont les dizaines de
+     * milliers de chaînes Direct chargées au démarrage — et [XtreamRepository.customizedCatalog]
+     * relit en plus les préférences du profil. Fait jusqu'ici directement dans `_uiState.update`,
+     * donc sur le thread principal : chaque sélection de catégorie Films/Séries figeait l'écran, qui
+     * continuait d'afficher la catégorie précédente le temps du calcul.
+     *
+     * [catalogLayoutMutation] sérialise les fusions et la base est relue sous ce verrou : deux
+     * chargements concurrents (navigation rapide entre catégories) ne peuvent plus s'écraser l'un
+     * l'autre en repartant d'une même version périmée.
+     */
+    private suspend fun mergeIntoCatalog(profileId: String, merge: (Catalog) -> Catalog) {
+        catalogLayoutMutation.withLock {
+            if (_uiState.value.activeProfileId != profileId) return
+            val base = _uiState.value.rawCatalog ?: _uiState.value.catalog ?: return
+            val raw = withContext(Dispatchers.Default) { merge(base) }
+            val customized = withContext(Dispatchers.Default) { repository.customizedCatalog(profileId, raw) }
+            _uiState.update { state ->
+                if (state.activeProfileId != profileId) state
+                else state.copy(rawCatalog = raw, catalog = customized)
+            }
+        }
+    }
+
+    /**
+     * Marque une catégorie comme en cours de lecture. Sans cette information, l'interface ne peut pas
+     * distinguer « la page arrive » de « la catégorie est vide » et affichait « Aucun contenu dans
+     * cette catégorie » pendant tout le chargement.
+     */
+    private fun setCategoryLoading(type: MediaType, categoryId: String, loading: Boolean) {
+        val key = Catalog.categoryKey(type, categoryId)
+        _uiState.update { state ->
+            val next = if (loading) state.loadingCategoryKeys + key else state.loadingCategoryKeys - key
+            if (next == state.loadingCategoryKeys) state else state.copy(loadingCategoryKeys = next)
         }
     }
 
@@ -740,13 +797,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         viewModelScope.launch {
             try {
                 val section = runCatching { repository.loadSection(profileId, type) }.getOrNull() ?: return@launch
-                _uiState.update { state ->
-                    if (state.activeProfileId != profileId) return@update state
-                    val rawBase = state.rawCatalog ?: state.catalog ?: return@update state
-                    val mergedRaw = rawBase.withFullSectionMaterialized(section, type)
-                    val mergedCatalog = repository.customizedCatalog(profileId, mergedRaw)
-                    state.copy(rawCatalog = mergedRaw, catalog = mergedCatalog)
-                }
+                mergeIntoCatalog(profileId) { base -> base.withFullSectionMaterialized(section, type) }
                 if (type == MediaType.Live) {
                     startEpgBackgroundSync()
                     refreshHomeMatchRow()
@@ -1647,13 +1698,12 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             epgGuideMemoryCache.put(profileId, today, offsetHours, guide)
 
             val programsByChannel = linkedMapOf<MediaEntry, List<fr.streamia.tv.domain.EpgProgram>>()
-            eligibleLiveEntries
-                .asSequence()
-                .filter { guide.channelForEntry(it) != null }
-                .forEach { channel ->
-                    val programs = guide.forEntry(channel)
-                    if (programs.isNotEmpty()) programsByChannel[channel] = programs
-                }
+            // Une seule résolution chaîne→EPG par entrée : `guide.forEntry` la re-faisait en interne,
+            // ce qui doublait le coût (normalisation + alias) sur des dizaines de milliers de chaînes.
+            eligibleLiveEntries.forEach { channel ->
+                val programs = guide.channelForEntry(channel)?.programs.orEmpty()
+                if (programs.isNotEmpty()) programsByChannel[channel] = programs
+            }
 
             val rows = matchRowEngine.buildHomeRows(
                 programsByChannel = programsByChannel,
@@ -1896,46 +1946,12 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             if (sequence != liveOnSatLoadSequence) return@launch
 
             result.onSuccess { fetch ->
-                val state = _uiState.value
-                val profileId = state.activeProfileId
-                val catalog = state.catalog
-                val liveChannels = when {
-                    profileId == null -> emptyList()
-                    catalog != null && catalog.isCategoryLoaded(MediaType.Live, Catalog.ALL_CATEGORY_ID) ->
-                        catalog.entriesFor(MediaType.Live)
-                    else -> withContext(Dispatchers.IO) {
-                        runCatching { repository.loadSection(profileId, MediaType.Live) }.getOrDefault(emptyList())
-                    }
-                }
-
-                val todayGuide = if (profileId != null && liveChannels.isNotEmpty()) {
-                    val today = LocalDate.now(ZoneId.systemDefault())
-                    val offsetHours = state.appSettings.epgTimeOffsetHours
-                    epgGuideMemoryCache.get(profileId, today, offsetHours) ?: runCatching {
-                        val (dayStart, dayEnd) = epgDayBounds(today)
-                        repository.cachedEpgGuide(
-                            profileId = profileId,
-                            displayStartEpochSeconds = dayStart,
-                            displayEndEpochSeconds = dayEnd,
-                            offsetHours = offsetHours,
-                        )
-                    }.getOrNull()?.also { guide ->
-                        epgGuideMemoryCache.put(profileId, today, offsetHours, guide)
-                    }
-                } else {
-                    null
-                }
-
-                val resolved = withContext(Dispatchers.Default) {
-                    liveOnSatChannelMatcher
-                        .resolve(fetch.matches, liveChannels)
-                        .map { it.withEpgTiming(todayGuide) }
-                }
-                if (sequence != liveOnSatLoadSequence) return@launch
+                // Phase 1 : afficher immédiatement tous les matchs du jour, sans attendre la
+                // résolution des chaînes ni l'enrichissement EPG (les deux étapes coûteuses).
                 _uiState.update {
                     it.copy(
                         liveOnSatLoading = false,
-                        liveOnSatMatches = resolved,
+                        liveOnSatMatches = fetch.matches.map { match -> ResolvedLiveOnSatMatch(match, emptyMap()) },
                         liveOnSatFetchedAtEpochMillis = fetch.fetchedAtEpochMillis,
                         liveOnSatError = if (forceRefresh && fetch.fromCache) {
                             "Actualisation impossible, affichage des données précédentes."
@@ -1944,10 +1960,73 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                         },
                     )
                 }
+                // Phase 2 : résoudre les chaînes + EPG en arrière-plan, par lots progressifs.
+                resolveLiveOnSatChannels(sequence, fetch.matches)
             }.onFailure { error ->
                 if (sequence != liveOnSatLoadSequence) return@launch
                 _uiState.update { it.copy(liveOnSatLoading = false, liveOnSatError = error.safeMessage()) }
             }
+        }
+    }
+
+    /**
+     * Deuxième phase de [loadLiveOnSatMatches] : associe chaque diffuseur à une chaîne du profil et
+     * enrichit les horaires via l'EPG. L'index des chaînes Direct n'est construit qu'une fois, puis
+     * les matchs sont résolus par paquets de [LIVE_ONSAT_RESOLVE_BATCH], avec une mise à jour d'état
+     * après chaque paquet : les matchs s'affichent donc d'abord, puis leurs chaînes reconnues
+     * apparaissent progressivement, sans jamais bloquer l'affichage initial.
+     */
+    private suspend fun resolveLiveOnSatChannels(sequence: Long, matches: List<LiveOnSatMatch>) {
+        if (matches.isEmpty()) return
+        val state = _uiState.value
+        val profileId = state.activeProfileId ?: return
+        val catalog = state.catalog
+
+        val liveChannels = if (catalog?.isCategoryLoaded(MediaType.Live, Catalog.ALL_CATEGORY_ID) == true) {
+            catalog.entriesFor(MediaType.Live)
+        } else {
+            withContext(Dispatchers.IO) {
+                runCatching { repository.loadSection(profileId, MediaType.Live) }.getOrDefault(emptyList())
+            }
+        }
+        if (liveChannels.isEmpty()) return
+
+        val todayGuide = run {
+            val today = LocalDate.now(ZoneId.systemDefault())
+            val offsetHours = state.appSettings.epgTimeOffsetHours
+            epgGuideMemoryCache.get(profileId, today, offsetHours) ?: runCatching {
+                val (dayStart, dayEnd) = epgDayBounds(today)
+                repository.cachedEpgGuide(
+                    profileId = profileId,
+                    displayStartEpochSeconds = dayStart,
+                    displayEndEpochSeconds = dayEnd,
+                    offsetHours = offsetHours,
+                )
+            }.getOrNull()?.also { guide -> epgGuideMemoryCache.put(profileId, today, offsetHours, guide) }
+        }
+
+        val index = withContext(Dispatchers.Default) { liveOnSatChannelMatcher.buildIndex(liveChannels) }
+        val resolved = matches.map { ResolvedLiveOnSatMatch(it, emptyMap()) }.toMutableList()
+
+        var offset = 0
+        while (offset < matches.size) {
+            if (sequence != liveOnSatLoadSequence) return
+            val end = minOf(offset + LIVE_ONSAT_RESOLVE_BATCH, matches.size)
+            val chunk = withContext(Dispatchers.Default) {
+                (offset until end).map { i ->
+                    val match = matches[i]
+                    val matched = match.channels.mapNotNull { channel ->
+                        liveOnSatChannelMatcher.match(index, channel.name)?.let { entry -> channel.name to entry }
+                    }.toMap()
+                    ResolvedLiveOnSatMatch(match, matched).withEpgTiming(todayGuide)
+                }
+            }
+            for (i in offset until end) resolved[i] = chunk[i - offset]
+            _uiState.update { current ->
+                if (sequence != liveOnSatLoadSequence) current
+                else current.copy(liveOnSatMatches = resolved.toList())
+            }
+            offset = end
         }
     }
 
@@ -2181,6 +2260,12 @@ data class StreamiaUiState(
     val resumePositionMs: Long = 0,
     val browserType: MediaType? = null,
     val browserCategoryId: String? = null,
+    /**
+     * Catégories dont une page est en cours de lecture SQLite, clés [Catalog.categoryKey]. Permet à
+     * l'interface d'afficher « Chargement… » plutôt que « Aucun contenu » pendant l'ouverture d'une
+     * catégorie Films/Séries encore jamais parcourue.
+     */
+    val loadingCategoryKeys: Set<String> = emptySet(),
     val searchQuery: String = "",
     val searchType: MediaType? = null,
     val contentReturnContext: ContentReturnContext? = null,
@@ -2210,6 +2295,7 @@ private const val HOME_MATCH_ROW_LIMIT = 12
 private const val HOME_MATCH_REBUILD_INTERVAL_SECONDS = 5 * 60L
 private const val HOME_RECOMMENDATION_CANDIDATE_LIMIT = 400
 private const val HOME_RECOMMENDATION_REBUILD_INTERVAL_MS = 5 * 60_000L
+private const val LIVE_ONSAT_RESOLVE_BATCH = 20
 private const val SIMILAR_CANDIDATE_LIMIT = 400
 private const val SIMILAR_RESULT_LIMIT = 12
 private const val SIMILAR_TARGET_COUNT = 8

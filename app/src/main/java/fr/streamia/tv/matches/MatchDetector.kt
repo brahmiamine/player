@@ -36,6 +36,16 @@ data class MatchDetection(
  */
 class StructuredMatchDetector {
 
+    /**
+     * Prédicat bon marché pour écrémer la grille EPG avant d'appeler [detect]. Sans séparateur
+     * d'affrontement dans le titre, [detect] ne peut pas conclure à un match (`extractParticipants`
+     * en a besoin) : on évite alors de normaliser titre/description/catégorie/chaîne pour la grande
+     * majorité des programmes (journaux, films, magazines…), ce qui domine le coût du balayage
+     * complet de l'EPG au moment de construire les rangées « en direct »/« suivants ».
+     */
+    fun mightBeMatch(title: String): Boolean =
+        VERSUS_SEPARATORS.any { title.contains(it, ignoreCase = true) }
+
     fun detect(
         title: String,
         description: String?,
@@ -65,6 +75,12 @@ class StructuredMatchDetector {
             score += WEIGHT_VERSUS_PATTERN
         }
 
+        // Un nom de club est une preuve sportive à part entière, indépendante du nom de la chaîne :
+        // le format dominant du fournisseur est « Fulham / Manchester United », souvent sur une
+        // chaîne dont le nom ne dit rien de sport (CANAL+ Family) et sans catégorie EPG exploitable.
+        val clubMarkerContext = versus != null &&
+            (containsClubMarker(versus.first) || containsClubMarker(versus.second))
+
         // Le titre/description/catégorie EPG restent prioritaires pour déterminer le sport exact.
         // Le nom de chaîne n'est utilisé qu'en repli : une chaîne "beIN SPORTS MAX" confirme qu'un
         // titre "A / B" est bien un événement sportif, sans inventer qu'il s'agit forcément de foot.
@@ -89,7 +105,7 @@ class StructuredMatchDetector {
         val sport = keywordSport
             ?: competitionEntry?.value
             ?: channelSport
-            ?: MatchSport.Other.takeIf { versus != null && genericSportsContext }
+            ?: MatchSport.Other.takeIf { versus != null && (genericSportsContext || clubMarkerContext) }
 
         when {
             keywordSport != null && containsAny(normalizedCategory, SPORT_KEYWORDS.getValue(keywordSport)) -> {
@@ -109,7 +125,7 @@ class StructuredMatchDetector {
                 score += WEIGHT_SPORT_CONTEXT
             }
             sport == MatchSport.Other -> {
-                signals += "GENERIC_SPORT_CHANNEL"
+                signals += if (clubMarkerContext) "CLUB_NAME_MARKER" else "GENERIC_SPORT_CHANNEL"
                 score += WEIGHT_SPORT_CONTEXT
             }
         }
@@ -155,6 +171,22 @@ class StructuredMatchDetector {
         )
     }
 
+    /**
+     * Vrai quand un côté ressemble à un nom de club. Deux familles :
+     * — les formes longues (« United », « Rovers », « Olympique ») suffisent seules ;
+     * — les sigles et les suffixes ambigus (« FC », « City », « Villa ») n'exigent qu'un côté de
+     *   plus d'un mot, sans quoi « AC / DC » deviendrait une affiche.
+     */
+    private fun containsClubMarker(side: String): Boolean {
+        val words = normalize(side)
+            .split(' ')
+            .map { it.trim { char -> char in GENERIC_WORD_TRIM_CHARS } }
+            .filter(String::isNotBlank)
+        if (words.isEmpty()) return false
+        if (words.any { it in CLUB_MARKER_WORDS }) return true
+        return words.size >= 2 && words.any { it in AMBIGUOUS_CLUB_MARKER_WORDS }
+    }
+
     private fun detectSportKeyword(haystack: String): MatchSport? =
         SPORT_KEYWORDS.entries.firstOrNull { (_, keywords) -> containsAny(haystack, keywords) }?.key
 
@@ -187,7 +219,34 @@ class StructuredMatchDetector {
     private fun looksLikeParticipant(text: String): Boolean {
         val words = text.split(WHITESPACE).filter(String::isNotBlank)
         if (words.isEmpty() || words.size > MAX_PARTICIPANT_WORDS) return false
+        // Un côté qui n'est que du vocabulaire de programme (« Film », « Saison 3 ») n'est pas une
+        // équipe. Sans ce filtre, « Documentaire - Histoire » sur une chaîne dont le nom contient
+        // « sport » satisfaisait le motif d'affrontement (0.42) ET le contexte de chaîne générique
+        // (0.16), soit 0.58 >= MIN_CONFIDENCE : un faux match en tête de la rangée « en direct ».
+        if (isGenericContentSide(words)) return false
         return words.all { PARTICIPANT_WORD.matches(it) || it == "&" }
+    }
+
+    /**
+     * Vrai quand le côté n'est fait que de vocabulaire de programme : au moins un mot descriptif, et
+     * rien d'autre que des nombres (« Saison 3 »). Un seul mot porteur de sens suffit à en faire un
+     * participant plausible — c'est ce qui préserve « Serie A », « Top 14 » ou « PSG U19 ».
+     *
+     * Sortie anticipée au premier mot significatif : le coût par programme EPG reste négligeable.
+     */
+    private fun isGenericContentSide(words: List<String>): Boolean {
+        var hasGenericWord = false
+        words.forEach { raw ->
+            // Le titre arrive non normalisé : on réutilise [normalize] pour replier la casse et les
+            // accents, sinon « Cinéma » n'était pas reconnu comme le mot stocké « cinema ».
+            val word = normalize(raw).trim { it in GENERIC_WORD_TRIM_CHARS }
+            when {
+                word in GENERIC_CONTENT_WORDS -> hasGenericWord = true
+                word.isNotEmpty() && word.all(Char::isDigit) -> Unit
+                else -> return false
+            }
+        }
+        return hasGenericWord
     }
 
     private companion object {
@@ -277,6 +336,43 @@ class StructuredMatchDetector {
 
         val REPLAY_KEYWORDS = listOf(
             "replay", "rediffusion", "diffusion en differe", "rerun", "اعادة", "إعادة",
+        )
+
+        /**
+         * Vocabulaire de programme : un côté de titre composé uniquement de ces mots ne désigne pas
+         * une équipe. Volontairement restreint aux termes sans ambiguïté — « ligue », « top »,
+         * « world » et « cup » en sont exclus car ils ouvrent de vrais noms de compétition.
+         */
+        val GENERIC_CONTENT_WORDS = setOf(
+            "film", "films", "cinema", "documentaire", "documentaires", "reportage", "emission",
+            "magazine", "journal", "meteo", "teleachat", "horoscope",
+            "serie", "series", "saison", "episode", "episodes", "telefilm", "animation",
+            "musique", "musical", "concert", "concerts", "festival", "spectacle", "theatre",
+            "opera", "ballet", "danse", "divertissement",
+            "multiplex", "championnat", "championnats", "coupe", "tournoi", "tournois", "trophee",
+        )
+
+        /** Ponctuation retirée avant comparaison : [PARTICIPANT_WORD] tolère « . », « ' », « + », « _ ». */
+        const val GENERIC_WORD_TRIM_CHARS = ".,;:!?\"'«»()[]-–—"
+
+        /**
+         * Formes longues de noms de club : suffisantes à elles seules. Choix volontairement
+         * conservateur — « Real », « Union », « Town », « Club » ou « Forest » sont exclus car trop
+         * fréquents dans des titres non sportifs.
+         */
+        val CLUB_MARKER_WORDS = setOf(
+            "united", "rovers", "wanderers", "albion", "athletic", "sporting", "olympique",
+            "olympiacos", "olympiakos", "deportivo", "atletico", "borussia", "dynamo", "lokomotiv",
+            "spartak", "hotspur",
+        )
+
+        /**
+         * Sigles et suffixes de club ambigus : ne comptent que dans un côté de plusieurs mots, pour
+         * ne pas transformer « AC / DC » en affiche.
+         */
+        val AMBIGUOUS_CLUB_MARKER_WORDS = setOf(
+            "fc", "cf", "sc", "ac", "afc", "cd", "sv", "fk", "sk", "bk", "vfl", "vfb", "tsg", "bsc",
+            "city", "villa", "county",
         )
 
         const val WEIGHT_VERSUS_PATTERN = 0.42

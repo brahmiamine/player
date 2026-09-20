@@ -188,7 +188,9 @@ fun HomeScreen(
                         HomeRowKey.LiveMatches
                     displayedUpcomingMatchRow?.items?.any { it.event.fingerprint == matchKey } == true ->
                         HomeRowKey.UpcomingMatches
-                    else -> restoreTarget.homeRowKey
+                    // Le match a disparu des deux rangées (il s'est terminé pendant la lecture) :
+                    // renvoyer null évite de viser une rangée sans carte à refocaliser.
+                    else -> null
                 }
             }
             else -> restoreTarget?.homeRowKey
@@ -210,9 +212,15 @@ fun HomeScreen(
         }
     }
     LaunchedEffect(effectiveRestoreRowKey, visibleRowKeys) {
-        val targetRow = effectiveRestoreRowKey ?: return@LaunchedEffect
-        val rowIndex = visibleRowKeys.indexOf(targetRow)
-        if (rowIndex >= 0) homeListState.scrollToItem(rowIndex + 1)
+        val rowIndex = effectiveRestoreRowKey?.let(visibleRowKeys::indexOf) ?: -1
+        if (rowIndex >= 0) {
+            homeListState.scrollToItem(rowIndex + 1)
+        } else if (restoringHome) {
+            // La rangée ou la carte visée a disparu entre-temps (match terminé, catégorie masquée,
+            // rangée recalculée) : sans ce repli, l'accueil resterait sans focus et la télécommande
+            // ne répondrait plus.
+            runCatching { firstFocus.requestFocus() }
+        }
     }
 
     LazyColumn(
@@ -569,13 +577,13 @@ private fun HomeMatchCard(
                     ChannelLogo(
                         event.channel.iconUrl,
                         event.channel.displayName,
-                        Modifier.width(24.dp).height(24.dp),
+                        Modifier.width(40.dp).height(40.dp),
                     )
-                    Spacer(Modifier.width(7.dp))
+                    Spacer(Modifier.width(9.dp))
                     Text(
                         event.channel.displayName,
                         color = MutedInk,
-                        fontSize = 11.sp,
+                        fontSize = 12.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )

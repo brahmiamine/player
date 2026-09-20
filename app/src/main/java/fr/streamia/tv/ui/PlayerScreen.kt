@@ -132,6 +132,7 @@ fun PlayerScreen(
     nextEpisode: SeriesEpisode?,
     livePlaybackSession: LivePlaybackSession,
     liveVideoSurface: @Composable (LiveVideoSurfacePlacement) -> Unit,
+    liveReturnsToSource: Boolean,
     onBack: () -> Unit,
     onZap: (Int) -> Unit,
     onEntrySelected: (MediaEntry) -> Unit,
@@ -550,7 +551,10 @@ fun PlayerScreen(
             // pendant que le catalogue restauré au démarrage (resumeStartup) est encore en cours de
             // relecture atterrit sur l'accueil au lieu du navigateur Live, car closePlayer() retombe
             // sur l'accueil tant que catalogHydrating est vrai.
-            sharedLivePlayer -> { returningToBrowser = true; PlayerOverlayController.openLivePicker() }
+            // Exception : une chaîne lancée depuis un écran qui sait se restaurer (accueil, matchs
+            // du jour) y revient, sur la carte d'origine (liveReturnsToSource) — onBack() laisse
+            // alors closePlayer() honorer le ContentReturnContext.
+            sharedLivePlayer && !liveReturnsToSource -> { returningToBrowser = true; PlayerOverlayController.openLivePicker() }
             else -> onBack()
         }
     }

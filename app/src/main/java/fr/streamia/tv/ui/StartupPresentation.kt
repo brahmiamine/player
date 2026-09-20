@@ -18,3 +18,18 @@ internal fun shouldDeferLiveBrowserReturn(state: StreamiaUiState): Boolean {
     val player = state.screen as? StreamiaScreen.Player ?: return false
     return state.catalogHydrating && player.entry.type == fr.streamia.tv.domain.MediaType.Live
 }
+
+/**
+ * Une chaîne ouverte depuis un écran qui sait se restaurer y revient, sur la carte d'origine :
+ * `ContentReturnContext` porte la rangée + l'empreinte du match côté accueil, et la clé match +
+ * chaîne côté « Matchs du jour ». Les autres provenances gardent le navigateur Direct — c'est le
+ * seul écran qui partage le lecteur Live avec son aperçu, et la Recherche ne mémorise pas ses
+ * résultats.
+ *
+ * `when` exhaustif plutôt qu'une comparaison : un nouvel écran d'origine fera échouer la compilation
+ * au lieu de retomber silencieusement sur le navigateur.
+ */
+internal fun livePlayerReturnsToSource(origin: ContentReturnOrigin?): Boolean = when (origin) {
+    ContentReturnOrigin.Home, ContentReturnOrigin.LiveMatches -> true
+    ContentReturnOrigin.Browser, ContentReturnOrigin.Search, null -> false
+}

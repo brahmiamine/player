@@ -360,8 +360,17 @@ private data class IndexedEntry(val entry: MediaEntry, val text: String)
 private val VISUAL_SEPARATOR_NAME = Regex("^\\s*#{2,}.*#{2,}\\s*$")
 
 /** Les fournisseurs utilisent parfois de fausses chaînes ### ... ### comme séparateurs visuels. */
-fun MediaEntry.isVisualSeparator(): Boolean = VISUAL_SEPARATOR_NAME.matches(displayName) ||
-    VISUAL_SEPARATOR_NAME.matches(name)
+fun MediaEntry.isVisualSeparator(): Boolean =
+    looksLikeVisualSeparator(displayName) || looksLikeVisualSeparator(name)
+
+/**
+ * Test bon marché avant l'expression régulière : un séparateur contient forcément un `#`. Ce
+ * contrôle est appelé deux fois par entrée à **chaque** construction de [Catalog] — donc sur les
+ * dizaines de milliers de chaînes Direct matérialisées — et le motif ne peut pas correspondre sans
+ * `#`. Le résultat est strictement identique, le coût devient négligeable.
+ */
+private fun looksLikeVisualSeparator(value: String): Boolean =
+    value.contains('#') && VISUAL_SEPARATOR_NAME.matches(value)
 
 fun List<MediaEntry>.adjacentTo(currentKey: String, delta: Int): MediaEntry? {
     if (isEmpty()) return null

@@ -72,6 +72,27 @@ class StartupPresentationTest {
         )
     }
 
+    @Test
+    fun `live channel opened from home returns to home`() {
+        assertTrue(livePlayerReturnsToSource(ContentReturnOrigin.Home))
+    }
+
+    @Test
+    fun `live channel opened from the matches screen returns to the matches screen`() {
+        assertTrue(livePlayerReturnsToSource(ContentReturnOrigin.LiveMatches))
+    }
+
+    @Test
+    fun `live channel opened from the browser or search keeps the live browser return`() {
+        assertFalse(livePlayerReturnsToSource(ContentReturnOrigin.Browser))
+        assertFalse(livePlayerReturnsToSource(ContentReturnOrigin.Search))
+    }
+
+    @Test
+    fun `live player without return context keeps the live browser return`() {
+        assertFalse(livePlayerReturnsToSource(null))
+    }
+
     private fun liveEntry() = MediaEntry(
         id = 1,
         name = "Live",

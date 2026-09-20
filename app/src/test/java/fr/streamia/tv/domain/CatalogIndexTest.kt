@@ -60,6 +60,16 @@ class CatalogIndexTest {
         assertEquals(false, entry(2, "AR: MAZZIKA LQ", MediaType.Live).isVisualSeparator())
     }
 
+    @Test
+    fun visualSeparatorShortcutKeepsTheRegexSemantics() {
+        // Le test bon marché `contains('#')` court-circuite l'expression régulière : ces cas
+        // verrouillent l'équivalence, y compris les espaces de début et le `#` isolé.
+        assertEquals(true, entry(1, "   ### SPORTS ###   ", MediaType.Live).isVisualSeparator())
+        assertEquals(false, entry(2, "FR: TF1 #1", MediaType.Live).isVisualSeparator())
+        assertEquals(false, entry(3, "# Live", MediaType.Live).isVisualSeparator())
+        assertEquals(false, entry(4, "AB##CD", MediaType.Live).isVisualSeparator())
+    }
+
     private fun entry(id: Int, name: String, type: MediaType) = MediaEntry(
         id = id,
         name = name,

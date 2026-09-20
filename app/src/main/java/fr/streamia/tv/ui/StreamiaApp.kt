@@ -112,6 +112,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     liveVideoSurface = liveVideoSurface,
                     library = state.library,
                     appSettings = state.appSettings,
+                    loadingCategoryKeys = state.loadingCategoryKeys,
                     parentalUnlocked = state.parentalUnlocked,
                     offline = state.offline,
                     busy = state.busy,
@@ -320,10 +321,17 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                         nextEpisode = state.seriesDetails?.nextEpisode(playerScreen.entry.id),
                         livePlaybackSession = livePlaybackSession,
                         liveVideoSurface = liveVideoSurface,
+                        liveReturnsToSource = livePlayerReturnsToSource(state.contentReturnContext?.origin),
                         onBack = {
                             val origin = state.contentReturnContext?.origin
                             if (origin == null || origin == ContentReturnOrigin.Browser) {
                                 LiveBrowserReturnState.remember(playerScreen.entry)
+                            } else if (playerScreen.entry.type == MediaType.Live) {
+                                // Retour vers un écran sans aperçu (accueil, matchs du jour) : le
+                                // lecteur Live est partagé avec l'aperçu du navigateur, mais ces écrans
+                                // n'affichent aucune vidéo — sans cette coupure, le flux continuerait
+                                // en fond, audio compris.
+                                livePlaybackSession.stop(clearSession = true)
                             }
                             viewModel.closePlayer()
                         },

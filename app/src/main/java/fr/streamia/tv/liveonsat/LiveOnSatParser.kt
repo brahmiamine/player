@@ -51,7 +51,7 @@ object LiveOnSatParser {
         val channels = block
             .select("a.chan_live_free, a.chan_live_not_free, a.chan_live_iptvcable")
             .mapNotNull { anchor ->
-                val name = anchor.text().trim()
+                val name = cleanChannelName(anchor.text())
                 if (name.isEmpty()) null else LiveOnSatChannel(name = name, free = anchor.hasClass("chan_live_free"))
             }
 
@@ -91,8 +91,23 @@ object LiveOnSatParser {
         }
     }
 
+    /**
+     * Nettoie le nom brut d'un diffuseur : retire les annotations entre parenthèses/crochets
+     * (« (geo/R) », « [$] », « [app] », « [online] »), les emojis et symboles parasites (📺, €…),
+     * puis replie les espaces. « HD »/« 4K »/« FHD » restent : ils font partie du nom de la chaîne
+     * et aident l'utilisateur à la reconnaître.
+     */
+    private fun cleanChannelName(raw: String): String =
+        raw.replace(BRACKETED_ANNOTATION, " ")
+            .replace(CHANNEL_SYMBOL_RUN, " ")
+            .replace(WHITESPACE_RUN, " ")
+            .trim()
+
     private const val LIVE_ONSAT_ORIGIN = "https://liveonsat.com"
     private const val TEAM_LOGO_MIN_TOKEN_LENGTH = 4
     private val TEAM_LOGO_NON_ALNUM = Regex("[^\\p{L}\\p{N}]+")
     private val TEAM_SEPARATOR = Regex("\\sv\\s")
+    private val BRACKETED_ANNOTATION = Regex("[\\(\\[][^)\\]]*[)\\]]")
+    private val CHANNEL_SYMBOL_RUN = Regex("[^\\p{L}\\p{N}+&'.-]+")
+    private val WHITESPACE_RUN = Regex("\\s+")
 }

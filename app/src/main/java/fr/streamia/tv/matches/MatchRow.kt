@@ -25,9 +25,11 @@ data class MatchEvent(
     val sourceTitle: String,
 ) {
     /** Fusionne un même match diffusé sur plusieurs chaînes/langues : sport + adversaires (ordre
-     * indifférent) + créneau arrondi au quart d'heure. Volontairement conservateur : un léger
-     * décalage d'orthographe entre fournisseurs peut laisser deux cartes plutôt que de fusionner
-     * deux événements en réalité différents. */
+     * indifférent). Volontairement **sans** l'horaire : l'heure sert au regroupement des diffusions
+     * proches dans [MatchRowEngine], pas à l'identité du match. */
+    val identityKey: String = matchIdentityKey(sport, participantA, participantB)
+
+    /** Identité + créneau d'annonce : clé stable de la carte affichée. */
     val fingerprint: String = matchFingerprint(sport, participantA, participantB, startEpochSeconds)
 }
 
@@ -80,16 +82,17 @@ fun HomeMatchRows.reclassifiedAt(nowEpochSeconds: Long): HomeMatchRows {
     )
 }
 
+internal fun matchIdentityKey(sport: MatchSport, participantA: String, participantB: String): String {
+    val names = listOf(normalizeParticipant(participantA), normalizeParticipant(participantB)).sorted()
+    return "${sport.name}|${names[0]}|${names[1]}"
+}
+
 internal fun matchFingerprint(
     sport: MatchSport,
     participantA: String,
     participantB: String,
     startEpochSeconds: Long,
-): String {
-    val names = listOf(normalizeParticipant(participantA), normalizeParticipant(participantB)).sorted()
-    val bucket = startEpochSeconds / FINGERPRINT_TIME_BUCKET_SECONDS
-    return "${sport.name}|${names[0]}|${names[1]}|$bucket"
-}
+): String = "${matchIdentityKey(sport, participantA, participantB)}|${startEpochSeconds / FINGERPRINT_TIME_BUCKET_SECONDS}"
 
 private fun normalizeParticipant(value: String): String =
     Normalizer.normalize(value, Normalizer.Form.NFD)
@@ -230,6 +233,9 @@ class MatchRowEngine(
         val start = program.startEpochSeconds ?: return null
         val end = program.endEpochSeconds ?: return null
         if (end <= start || end <= nowEpochSeconds) return null
+        // Écrémer sans normalisation : un titre sans séparateur ne peut pas être un match, on saute
+        // donc le détecteur complet (coûteux) pour la quasi-totalité des programmes de la grille.
+        if (!detector.mightBeMatch(program.title)) return null
         val detection = detector.detect(
             title = program.title,
             description = program.description,
@@ -253,14 +259,37 @@ class MatchRowEngine(
         )
     }
 
-    /** Le premier événement rencontré pour une empreinte donnée gagne, par ordre stable des chaînes
-     * (v1 : pas encore de source préférée basée sur le profil de recommandations). */
+    /**
+     * Fusionne les diffusions d'un même match. L'identité (`identityKey`) ignore volontairement
+     * l'heure de départ : deux fournisseurs qui annoncent le même match à quelques minutes d'écart
+     * produisent une seule carte, alors qu'un découpage en créneaux fixes en créait deux dès que les
+     * horaires tombaient de part et d'autre d'une frontière (20:59 et 21:01 donnaient deux empreintes).
+     *
+     * Les diffusions d'un même match sont regroupées par proximité d'horaire, en comparant chaque
+     * annonce au **début du groupe** et non à l'annonce précédente : sans cela, une chaîne de matchs
+     * espacés de moins de [MATCH_START_TOLERANCE_SECONDS] finirait par n'en former qu'un.
+     *
+     * Le gagnant reste choisi par ordre stable des chaînes puis de l'heure — déterministe, identique
+     * d'un rafraîchissement à l'autre (v1 : pas encore de source préférée basée sur les habitudes).
+     */
     private fun deduplicate(events: List<MatchEvent>): List<MatchEvent> {
-        val seen = linkedMapOf<String, MatchEvent>()
-        events
-            .sortedWith(compareBy({ it.channel.key }, { it.startEpochSeconds }))
-            .forEach { event -> seen.putIfAbsent(event.fingerprint, event) }
-        return seen.values.toList()
+        val winners = ArrayList<MatchEvent>(events.size)
+        events.groupBy { it.identityKey }.values.forEach { sameMatch ->
+            val byStart = sameMatch.sortedWith(compareBy({ it.startEpochSeconds }, { it.channel.key }))
+            var clusterStart = byStart.first().startEpochSeconds
+            var winner = byStart.first()
+            byStart.drop(1).forEach { event ->
+                if (event.startEpochSeconds - clusterStart > MATCH_START_TOLERANCE_SECONDS) {
+                    winners += winner
+                    clusterStart = event.startEpochSeconds
+                    winner = event
+                } else if (STREAM_ORDER.compare(event, winner) < 0) {
+                    winner = event
+                }
+            }
+            winners += winner
+        }
+        return winners
     }
 
     private fun sortedItems(items: List<MatchRowItem>): List<MatchRowItem> =
@@ -282,5 +311,16 @@ class MatchRowEngine(
 
     private companion object {
         const val ROW_LIMIT = 12
+
+        /**
+         * Écart maximal entre deux annonces du même match. Couvre la dérive d'horaire habituelle
+         * entre fournisseurs EPG (début du pré-show chez l'un, coup d'envoi chez l'autre) tout en
+         * restant très en dessous du délai qui séparerait deux diffusions distinctes d'une même
+         * affiche.
+         */
+        const val MATCH_START_TOLERANCE_SECONDS = 45 * 60L
+
+        /** Ordre stable et déterministe de choix de la chaîne diffusant un match. */
+        val STREAM_ORDER = compareBy<MatchEvent>({ it.channel.key }, { it.startEpochSeconds })
     }
 }
