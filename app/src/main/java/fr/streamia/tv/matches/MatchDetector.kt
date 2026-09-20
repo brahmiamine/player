@@ -81,6 +81,13 @@ class StructuredMatchDetector {
         val clubMarkerContext = versus != null &&
             (containsClubMarker(versus.first) || containsClubMarker(versus.second))
 
+        // Le séparateur « x » (ou « × ») et la barre « / » sont des marqueurs d'affrontement forts :
+        // « Flamengo x Palmeiras » ou « Fulham / Manchester United ». Deux noms plausibles de part et
+        // d'autre suffisent alors, même sans indice sportif dans le titre ou le nom de la chaîne.
+        // La garde « nom substantiel » écarte les paires d'abréviations de 2 lettres (« AC / DC »).
+        val strongSeparator = versus != null && STRONG_SEPARATOR.containsMatchIn(title) &&
+            (isSubstantialName(versus.first) || isSubstantialName(versus.second))
+
         // Le titre/description/catégorie EPG restent prioritaires pour déterminer le sport exact.
         // Le nom de chaîne n'est utilisé qu'en repli : une chaîne "beIN SPORTS MAX" confirme qu'un
         // titre "A / B" est bien un événement sportif, sans inventer qu'il s'agit forcément de foot.
@@ -105,7 +112,7 @@ class StructuredMatchDetector {
         val sport = keywordSport
             ?: competitionEntry?.value
             ?: channelSport
-            ?: MatchSport.Other.takeIf { versus != null && (genericSportsContext || clubMarkerContext) }
+            ?: MatchSport.Other.takeIf { versus != null && (genericSportsContext || clubMarkerContext || strongSeparator) }
 
         when {
             keywordSport != null && containsAny(normalizedCategory, SPORT_KEYWORDS.getValue(keywordSport)) -> {
@@ -125,7 +132,11 @@ class StructuredMatchDetector {
                 score += WEIGHT_SPORT_CONTEXT
             }
             sport == MatchSport.Other -> {
-                signals += if (clubMarkerContext) "CLUB_NAME_MARKER" else "GENERIC_SPORT_CHANNEL"
+                signals += when {
+                    clubMarkerContext -> "CLUB_NAME_MARKER"
+                    strongSeparator -> "STRONG_SEPARATOR"
+                    else -> "GENERIC_SPORT_CHANNEL"
+                }
                 score += WEIGHT_SPORT_CONTEXT
             }
         }
@@ -189,6 +200,11 @@ class StructuredMatchDetector {
 
     private fun detectSportKeyword(haystack: String): MatchSport? =
         SPORT_KEYWORDS.entries.firstOrNull { (_, keywords) -> containsAny(haystack, keywords) }?.key
+
+    /** Un nom assez substantiel pour être une équipe : plus de 2 caractères ou plusieurs mots.
+     * Écarte « AC / DC » (abréviations de 2 lettres) tout en acceptant « PSG / OM ». */
+    private fun isSubstantialName(side: String): Boolean =
+        side.length > 2 || side.any(Char::isWhitespace)
 
     private fun containsAny(haystack: String, needles: List<String>): Boolean =
         needles.any { haystack.contains(it) }
@@ -259,8 +275,11 @@ class StructuredMatchDetector {
         // Du plus spécifique au plus ambigu : slash/tiret sont gardés vers la fin.
         val VERSUS_SEPARATORS = listOf(
             " vs. ", " vs ", " v. ", " v ", " contre ", " gegen ", " against ", " ضد ", " @ ",
-            " x ", " / ", " - ", " – ", " — ",
+            " x ", " × ", " / ", " - ", " – ", " — ",
         )
+
+        /** Séparateurs d'affrontement forts : « x », « × » et « / ». */
+        val STRONG_SEPARATOR = Regex("\\s[x×/]\\s", RegexOption.IGNORE_CASE)
 
         val SPORT_KEYWORDS: Map<MatchSport, List<String>> = mapOf(
             MatchSport.Football to listOf(

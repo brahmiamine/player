@@ -213,7 +213,7 @@ class MatchDetectorTest {
         assertEquals(MatchSport.Other, result.sport)
         assertEquals("Fenerbahçe", result.participantA)
         assertEquals("Beşiktaş", result.participantB)
-        assertTrue("GENERIC_SPORT_CHANNEL" in result.signals)
+        assertTrue("STRONG_SEPARATOR" in result.signals)
     }
 
     @Test
@@ -231,16 +231,34 @@ class MatchDetectorTest {
     }
 
     @Test
-    fun `slash title on non sports channel is still rejected`() {
+    fun `slash separator detects a fixture even without sport context`() {
+        // Le « / » est un marqueur fort au même titre que « x » : deux noms plausibles suffisent,
+        // même sur une chaîne sans indice sportif (CANAL+ Family) et sans catégorie EPG exploitable.
         val result = detector.detect(
-            title = "Alice / Bob",
-            description = "Portrait croisé de deux artistes.",
-            category = "Culture",
-            channelName = "Culture TV",
+            title = "Flamengo / Palmeiras",
+            description = null,
+            category = null,
+            channelName = "FR: CANAL+ Family 4K",
+        )
+
+        assertTrue(result.isMatch)
+        assertEquals(MatchSport.Other, result.sport)
+        assertEquals("Flamengo", result.participantA)
+        assertEquals("Palmeiras", result.participantB)
+        assertTrue("STRONG_SEPARATOR" in result.signals)
+    }
+
+    @Test
+    fun `programme vocabulary is still rejected with the slash separator`() {
+        // Le « / » est fort, mais il ne transforme pas un descriptif de programme en match.
+        val result = detector.detect(
+            title = "Documentaire / Histoire",
+            description = null,
+            category = null,
+            channelName = "FR: CANAL+ Family 4K",
         )
 
         assertFalse(result.isMatch)
-        assertNull(result.sport)
     }
 
     @Test
@@ -349,5 +367,51 @@ class MatchDetectorTest {
         assertTrue(detector.mightBeMatch("Arsenal vs Chelsea"))
         assertTrue(detector.mightBeMatch("Fenerbahçe / Beşiktaş"))
         assertTrue(detector.mightBeMatch("Bayern gegen Dortmund"))
+        assertTrue(detector.mightBeMatch("Flamengo x Palmeiras"))
+    }
+
+    @Test
+    fun `x separator alone is enough to detect a fixture`() {
+        // Format courant des EPG sud-américains : « Club x Club », sans indice sportif ni nom de
+        // chaîne exploitable. Le « x » est une preuve suffisante d'affrontement.
+        val result = detector.detect(
+            title = "Flamengo x Palmeiras",
+            description = null,
+            category = null,
+            channelName = "FR: CANAL+ Family 4K",
+        )
+
+        assertTrue(result.isMatch)
+        assertEquals(MatchSport.Other, result.sport)
+        assertEquals("Flamengo", result.participantA)
+        assertEquals("Palmeiras", result.participantB)
+        assertTrue("STRONG_SEPARATOR" in result.signals)
+    }
+
+    @Test
+    fun `multiplication sign separator is treated like x`() {
+        val result = detector.detect(
+            title = "Boca Juniors × River Plate",
+            description = null,
+            category = null,
+            channelName = "FR: CANAL+ Family 4K",
+        )
+
+        assertTrue(result.isMatch)
+        assertEquals("Boca Juniors", result.participantA)
+        assertEquals("River Plate", result.participantB)
+    }
+
+    @Test
+    fun `programme vocabulary is still rejected even with the x separator`() {
+        // Le « x » est fort, mais il ne transforme pas un descriptif de programme en match.
+        val result = detector.detect(
+            title = "Documentaire x Histoire",
+            description = null,
+            category = null,
+            channelName = "FR: CANAL+ Family 4K",
+        )
+
+        assertFalse(result.isMatch)
     }
 }
