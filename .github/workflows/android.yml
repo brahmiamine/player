@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 concurrency:
   group: android-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -50,11 +51,36 @@ jobs:
           gradle-version: "8.13"
 
       - name: Unit tests and lint
+        id: unit_tests_lint
+        continue-on-error: true
         run: |
-          if ! gradle --no-daemon testDebugUnitTest lintDebug; then
-            test -f app/build/reports/lint-results-debug.txt && cat app/build/reports/lint-results-debug.txt
-            exit 1
-          fi
+          gradle --no-daemon testDebugUnitTest lintDebug --stacktrace > gradle-output.log 2>&1
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          test -f app/build/reports/lint-results-debug.txt && cat app/build/reports/lint-results-debug.txt >> gradle-output.log
+          cat gradle-output.log
+
+      # TEMPORARY diagnostic: this sandbox has no way to read GitHub Actions job logs (they're
+      # served from Azure blob storage, blocked by this environment's egress policy), so post the
+      # failure tail as a PR comment instead — a plain api.github.com call, which is reachable.
+      # Remove this step once CI is green again.
+      - name: Post failure log as PR comment (diagnostic)
+        if: steps.unit_tests_lint.outputs.exit_code != '0' && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tail -c 60000 gradle-output.log > tail.log
+          python3 -c "
+          import json
+          body = '### Unit tests/lint failure (diagnostic)\n\n<details><summary>gradle-output.log tail</summary>\n\n\`\`\`\n' + open('tail.log').read() + '\n\`\`\`\n\n</details>'
+          print(json.dumps({'body': body}))
+          " > comment.json
+          curl -sS -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
+            -d @comment.json
+
+      - name: Fail job if unit tests/lint failed
+        if: steps.unit_tests_lint.outputs.exit_code != '0'
+        run: exit 1
 
       - name: Build debug APK
         run: gradle --no-daemon assembleDebug
