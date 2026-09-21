@@ -50,7 +50,7 @@ data class GlassBlob(val center: Offset, val radiusFraction: Float, val color: C
 val LocalGlassHaze = compositionLocalOf<HazeState?> { null }
 
 /** Fond plein écran d'un écran du thème iOS Glass : base quasi noire + dégradés diffus propres à
- * l'écran (voir les jeux de blobs par écran dans chaque fichier ui/*Screen.kt). */
+ * l'écran (voir les jeux de blobs par écran dans chaque fichier écran de ce package). */
 @Composable
 fun GlassBackdrop(blobs: List<GlassBlob>, modifier: Modifier = Modifier) {
     val hazeState = LocalGlassHaze.current
@@ -74,7 +74,7 @@ fun GlassBackdrop(blobs: List<GlassBlob>, modifier: Modifier = Modifier) {
                     )
                 }
             },
-    )
+    ) {}
 }
 
 /**
