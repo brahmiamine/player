@@ -83,7 +83,32 @@ jobs:
         run: exit 1
 
       - name: Build debug APK
-        run: gradle --no-daemon assembleDebug
+        id: build_debug
+        continue-on-error: true
+        run: |
+          gradle --no-daemon assembleDebug --stacktrace > gradle-assemble-output.log 2>&1
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          cat gradle-assemble-output.log
+
+      # TEMPORARY diagnostic — see the "Unit tests and lint" step above for why. Remove once green.
+      - name: Post assembleDebug failure log as PR comment (diagnostic)
+        if: steps.build_debug.outputs.exit_code != '0' && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tail -c 60000 gradle-assemble-output.log > tail.log
+          python3 -c "
+          import json
+          body = '### assembleDebug failure (diagnostic)\n\n<details><summary>gradle-assemble-output.log tail</summary>\n\n\`\`\`\n' + open('tail.log').read() + '\n\`\`\`\n\n</details>'
+          print(json.dumps({'body': body}))
+          " > comment2.json
+          curl -sS -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
+            -d @comment2.json
+
+      - name: Fail job if assembleDebug failed
+        if: steps.build_debug.outputs.exit_code != '0'
+        run: exit 1
 
       - name: Decode release keystore
         if: github.event_name != 'pull_request'
