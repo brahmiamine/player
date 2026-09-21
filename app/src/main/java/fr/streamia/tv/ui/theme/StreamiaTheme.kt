@@ -3,25 +3,43 @@ package fr.streamia.tv.ui.theme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.darkColorScheme
 
-// Palette "Nocturne" : fond bleu-gris quasi neutre, accent blurple unique utilisé en trait plutôt
-// qu'en aplat. Les rôles ci-dessous reprennent ceux de l'ancienne palette (mêmes noms, donc aucun
-// écran n'a besoin d'être retouché pour en bénéficier) mais avec les valeurs du nouveau système :
-// bg/surface/texte/accent viennent tels quels de ses tokens ; les autres rôles (remplissage
-// focus, bordure de repos, alerte) sont choisis sur ses rampes tonales pour rester cohérents avec
-// elles.
-val Night = Color(0xFF161826) // --color-bg
-val DeepSurface = Color(0xFF232532) // --color-surface
-val RaisedSurface = Color(0xFF3F424D) // --color-neutral-800
-val FocusBlue = Color(0xFF2B2741) // --color-accent-900 : remplissage d'un élément focalisé
-val FocusBlueBright = Color(0xFF9184D9) // --color-accent : icônes, accents, contour de focus
-val WarmSignal = Color(0xFFC9A06B) // signal d'alerte (hors-ligne, suppression) à faible chroma
-val Ink = Color(0xFFE9E9ED) // --color-text
-val MutedInk = Color(0xFF9397AB) // --color-neutral-500
-val Danger = Color(0xFFE2938C) // erreur, désaturée pour rester dans l'esprit du système
+// Palette "iOS Glass" : verre dépoli très marqué (visionOS) sur fond noir portant de larges
+// dégradés colorés diffus, accent rose unique (#FF375F) utilisé en aplat sur les actions
+// principales. Les rôles ci-dessous reprennent les noms de l'ancienne palette Nocturne (aucun
+// écran n'a donc besoin d'être retouché pour les hériter) mais avec les valeurs du nouveau
+// système ; les rôles propres au verre (remplissages translucides, bordures, rayons) sont
+// nouveaux et vivent à côté.
+val Night = Color(0xFF050506) // --color-bg : quasi noir, support des dégradés diffus derrière le verre
+val DeepSurface = Color(0x1FFFFFFF) // blanc 12% : remplissage verre au repos
+val RaisedSurface = Color(0x29FFFFFF) // blanc 16% : remplissage verre sélectionné (non focalisé)
+val AccentPink = Color(0xFFFF375F)
+val AccentPinkLight = Color(0xFFFF5C7C)
+val AccentPinkText = Color(0xFFFF7A93) // texte sur fond sombre portant l'accent (méta, "EN DIRECT"…)
+val FocusBlue = Color(0x3DFF375F) // accent rose 24% : remplissage d'un élément focalisé
+val FocusBlueBright = AccentPink // contour de focus, icônes, accents
+val WarmSignal = Color(0xFFFF9F0A) // signal d'alerte (hors-ligne, verrouillage)
+val Ink = Color(0xFFFFFFFF) // --color-text
+val MutedInk = Color(0x9EFFFFFF) // blanc 62%
+val Danger = Color(0xFFFF6B6B)
+
+// Rôles propres au verre : bordures et remplissages translucides des cartes/pilules, dérivés du
+// blanc à alpha croissante (mêmes valeurs que le prototype HTML : 0.06 / 0.08 / 0.10 / 0.16).
+val GlassBorder = Color(0x29FFFFFF)
+val GlassFillFaint = Color(0x0FFFFFFF)
+val GlassFillSoft = Color(0x14FFFFFF)
+val GlassFillMedium = Color(0x1AFFFFFF)
+val GlassScrim = Color(0xCC0B0710) // aplat de repli (sans flou) pour les appareils < Android 13
+
+// Rayons "très arrondis" (iOS 18 / visionOS) — un seul jeu de tailles pour tout l'habillage verre.
+val RadiusCard = 28.dp
+val RadiusPanel = 24.dp
+val RadiusTile = 20.dp
+val RadiusPill = 999.dp
 
 /**
  * Échelle typographique partagée : le même rôle (titre de contenu, titre d'écran, titre de
@@ -37,16 +55,17 @@ val TypeBody = 16.sp // Paragraphe (synopsis) et titres de carte/ligne de conten
 val TypeBodyLineHeight = 23.sp
 val TypeLabel = 14.sp // Boutons, méta-ligne, texte secondaire
 
-// Nocturne tient sa hiérarchie par la taille et l'espace, pas par la graisse : les titres n'y
-// dépassent jamais 500 (Medium). N'affecte que les titres/hero ; les libellés de bouton et les
+// Le verre iOS porte sa hiérarchie par la graisse autant que par la taille : les titres vont du
+// Bold au Black selon le prototype. N'affecte que les titres/hero ; les libellés de bouton et les
 // onglets gardent leur graisse forte pour rester lisibles à distance du canapé.
-val HeadingWeight = FontWeight.Medium
+val HeadingWeight = FontWeight.Bold
+val HeroWeight = FontWeight.ExtraBold
 // Espacement des étiquettes de section capitalisées ("CATÉGORIES", "REPRENDRE LA LECTURE"…).
 val KickerLetterSpacing = 1.1.sp
 
 private val StreamiaColors = darkColorScheme(
     primary = FocusBlueBright,
-    onPrimary = Night,
+    onPrimary = Ink,
     secondary = WarmSignal,
     onSecondary = Night,
     background = Night,
@@ -56,7 +75,7 @@ private val StreamiaColors = darkColorScheme(
     surfaceVariant = RaisedSurface,
     onSurfaceVariant = MutedInk,
     error = Danger,
-    onError = Night,
+    onError = Ink,
 )
 
 @Composable

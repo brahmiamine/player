@@ -32,7 +32,6 @@ import fr.streamia.tv.ui.theme.FocusBlueBright
 import fr.streamia.tv.ui.theme.HeadingWeight
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
-import fr.streamia.tv.ui.theme.Night
 import fr.streamia.tv.ui.theme.TypeLabel
 import fr.streamia.tv.ui.theme.TypeSectionTitle
 
@@ -54,8 +53,9 @@ fun ParentalPinDialog(
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
     Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.78f)), contentAlignment = Alignment.Center) {
+        GlassSurface(modifier = Modifier.width(420.dp)) {
         Column(
-            Modifier.width(420.dp).background(Night, RoundedCornerShape(16.dp)).padding(28.dp),
+            Modifier.padding(28.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             StreamiaIcon(StreamiaIconGlyph.Lock, tint = FocusBlueBright, size = 30.dp)
@@ -99,6 +99,7 @@ fun ParentalPinDialog(
                 onClear = { pin = ""; errorMessage = null },
                 onCancel = onCancel,
             )
+        }
         }
     }
 }

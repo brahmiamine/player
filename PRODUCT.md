@@ -18,11 +18,11 @@ Streamia TV provides a fast, TV-first media browser for Xtream-compatible accoun
 
 ## Brand Personality
 
-Calm, premium, and dependable. The interface should recede behind the programme while remaining immediately legible when opened.
+Premium and immersive: iOS/visionOS-inspired frosted glass over a dark, softly coloured backdrop, with a single vivid accent (#FF375F) reserved for primary actions and live/selected state. Very rounded corners throughout. The glass recedes behind the programme during playback while remaining unmistakably legible — and its focus target unmistakably located — from across the room.
 
 ## Anti-references
 
-Do not imitate Netflix or another streaming brand. Avoid neon IPTV dashboards, crowded technical tables, glassmorphism, decorative gradients, tiny text, and focus states that are visible only through subtle colour changes.
+Do not imitate Netflix or another streaming brand. Avoid neon IPTV dashboards, crowded technical tables, decorative gradients used as noise rather than structure, tiny text, and — regardless of visual style — focus states that would be missed if the viewer could not perceive colour: focus must always also read through scale, a distinct glow/shadow, and a wide border, never colour alone.
 
 ## Design Principles
 

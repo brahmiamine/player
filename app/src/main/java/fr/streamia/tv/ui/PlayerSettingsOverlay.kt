@@ -1,6 +1,8 @@
 package fr.streamia.tv.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
@@ -15,6 +17,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -24,6 +27,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.font.FontWeight
@@ -33,10 +37,12 @@ import androidx.compose.ui.unit.sp
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import fr.streamia.tv.ui.theme.FocusBlueBright
+import fr.streamia.tv.ui.theme.GlassBorder
 import fr.streamia.tv.ui.theme.HeadingWeight
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
 import fr.streamia.tv.ui.theme.Night
+import fr.streamia.tv.ui.theme.RadiusCard
 
 @Composable
 internal fun BoxScope.PlayerSettings(
@@ -53,7 +59,10 @@ internal fun BoxScope.PlayerSettings(
 ) {
     Column(
         Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(430.dp)
-            .background(Night.copy(alpha = 0.98f))
+            .padding(vertical = 40.dp, horizontal = 24.dp)
+            .clip(RoundedCornerShape(RadiusCard))
+            .background(Night.copy(alpha = 0.82f))
+            .border(BorderStroke(1.dp, GlassBorder), RoundedCornerShape(RadiusCard))
             .verticalScroll(rememberScrollState())
             .padding(26.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -119,7 +128,7 @@ private fun ExternalSubtitleSection(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        FocusableSurface(onClick = onPickFile, modifier = Modifier.fillMaxWidth().height(58.dp)) {
+        FocusableSurface(onClick = onPickFile, accent = true, modifier = Modifier.fillMaxWidth().height(58.dp)) {
             Text("Charger un fichier .srt / .vtt", color = Ink, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 16.dp))
         }
         FocusableSurface(onClick = { urlFieldOpen = !urlFieldOpen }, modifier = Modifier.fillMaxWidth().height(58.dp)) {
@@ -181,7 +190,14 @@ private fun TrackDropdown(
             }
         }
         if (expanded) {
-            LazyColumn(Modifier.fillMaxWidth().heightIn(max = 210.dp).background(Night)) {
+            LazyColumn(
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 210.dp)
+                    .clip(RoundedCornerShape(RadiusCard))
+                    .background(Night.copy(alpha = 0.9f))
+                    .border(BorderStroke(1.dp, GlassBorder), RoundedCornerShape(RadiusCard)),
+            ) {
                 itemsIndexed(choices) { index, choice ->
                     FocusableSurface(
                         onClick = { onSelected(index); expanded = false },

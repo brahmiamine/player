@@ -51,6 +51,7 @@ import fr.streamia.tv.ui.theme.HeadingWeight
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
 import fr.streamia.tv.ui.theme.Night
+import fr.streamia.tv.ui.theme.RadiusPill
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.time.Instant
@@ -227,28 +228,32 @@ fun HomeScreen(
         state = homeListState,
         modifier = Modifier
             .fillMaxSize()
-            .background(Night)
             .padding(horizontal = 46.dp, vertical = 30.dp),
     ) {
         item {
             Column(Modifier.fillMaxWidth()) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    StreamiaLogo()
-                    Spacer(Modifier.weight(1f))
-                    Column(horizontalAlignment = Alignment.End) {
-                        profileName?.takeIf(String::isNotBlank)?.let {
-                            Text(it, color = Ink, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                GlassSurface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(RadiusPill)) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 26.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        StreamiaLogo()
+                        Spacer(Modifier.weight(1f))
+                        Column(horizontalAlignment = Alignment.End) {
+                            profileName?.takeIf(String::isNotBlank)?.let {
+                                Text(it, color = Ink, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                            val expiry = catalog.account?.expiresAtEpochSeconds?.let(::formatExpiry)
+                            Text(
+                                buildString {
+                                    append(if (offline) "Mode cache" else "Liste connectée")
+                                    if (catalogLoading) append(" · chargement du catalogue…")
+                                    if (expiry != null) append(" · expire le $expiry")
+                                },
+                                color = if (offline) FocusBlueBright else MutedInk,
+                                fontSize = 13.sp,
+                            )
                         }
-                        val expiry = catalog.account?.expiresAtEpochSeconds?.let(::formatExpiry)
-                        Text(
-                            buildString {
-                                append(if (offline) "Mode cache" else "Liste connectée")
-                                if (catalogLoading) append(" · chargement du catalogue…")
-                                if (expiry != null) append(" · expire le $expiry")
-                            },
-                            color = if (offline) FocusBlueBright else MutedInk,
-                            fontSize = 13.sp,
-                        )
                     }
                 }
                 Spacer(Modifier.height(28.dp))
@@ -770,17 +775,17 @@ private fun HomeTile(
     enabled: Boolean = true,
     prominent: Boolean = false,
 ) {
-    FocusableSurface(onClick = onClick, enabled = enabled, modifier = modifier) {
+    FocusableSurface(onClick = onClick, enabled = enabled, accent = prominent, modifier = modifier) {
         Column(
             Modifier.fillMaxSize().padding(if (prominent) 34.dp else 22.dp),
             verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally,
+            horizontalAlignment = Alignment.Start,
         ) {
-            StreamiaIcon(glyph, size = if (prominent) 64.dp else 42.dp)
+            StreamiaIcon(glyph, size = if (prominent) 64.dp else 42.dp, tint = if (prominent) Ink else FocusBlueBright)
             Spacer(Modifier.height(if (prominent) 24.dp else 12.dp))
             Text(title, color = Ink, fontSize = if (prominent) 29.sp else 20.sp, fontWeight = HeadingWeight)
             Spacer(Modifier.height(5.dp))
-            Text(subtitle, color = MutedInk, fontSize = if (prominent) 15.sp else 12.sp)
+            Text(subtitle, color = if (prominent) Ink.copy(alpha = 0.75f) else MutedInk, fontSize = if (prominent) 15.sp else 12.sp)
         }
     }
 }

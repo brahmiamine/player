@@ -32,11 +32,12 @@ import fr.streamia.tv.domain.Catalog
 import fr.streamia.tv.domain.MediaCategory
 import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.MediaType
+import androidx.compose.foundation.shape.RoundedCornerShape
 import fr.streamia.tv.ui.theme.FocusBlueBright
 import fr.streamia.tv.ui.theme.HeadingWeight
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
-import fr.streamia.tv.ui.theme.Night
+import fr.streamia.tv.ui.theme.RadiusPill
 import fr.streamia.tv.ui.theme.TypeLabel
 import fr.streamia.tv.ui.theme.TypeSectionTitle
 import fr.streamia.tv.ui.theme.TypeScreenTitle
@@ -85,29 +86,35 @@ fun OrganizerScreen(
             .filterNot { it.key in locallyMovedEntryKeys }
     }
 
-    Column(Modifier.fillMaxSize().background(Night).padding(24.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            FocusableSurface(onClick = onBack, modifier = Modifier.width(120.dp).height(50.dp)) {
-                Text("← Retour", color = Ink, fontSize = TypeLabel, modifier = Modifier.padding(horizontal = 14.dp))
-            }
-            Spacer(Modifier.width(16.dp))
-            Text("Organiser le catalogue", color = Ink, fontSize = TypeScreenTitle, fontWeight = HeadingWeight)
-            Spacer(Modifier.weight(1f))
-            MediaType.entries.forEach { mediaType ->
-                FocusableSurface(
-                    onClick = {
-                        type = mediaType
-                        sourceCategoryId = catalog.categoriesFor(mediaType).firstOrNull()?.id
-                        destinationCategoryId = catalog.categoriesFor(mediaType).drop(1).firstOrNull()?.id
-                        selectedCategoryKeys = emptySet()
-                        selectedEntryKeys = emptySet()
-                    },
-                    selected = type == mediaType,
-                    modifier = Modifier.width(115.dp).height(48.dp),
-                ) {
-                    Text(mediaType.displayName, color = Ink, fontSize = TypeLabel, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 12.dp))
+    Column(Modifier.fillMaxSize().padding(24.dp)) {
+        GlassSurface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(RadiusPill)) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                FocusableSurface(onClick = onBack, modifier = Modifier.width(120.dp).height(50.dp)) {
+                    Text("← Retour", color = Ink, fontSize = TypeLabel, modifier = Modifier.padding(horizontal = 14.dp))
                 }
-                Spacer(Modifier.width(7.dp))
+                Spacer(Modifier.width(16.dp))
+                Text("Organiser le catalogue", color = Ink, fontSize = TypeScreenTitle, fontWeight = HeadingWeight)
+                Spacer(Modifier.weight(1f))
+                MediaType.entries.forEach { mediaType ->
+                    FocusableSurface(
+                        onClick = {
+                            type = mediaType
+                            sourceCategoryId = catalog.categoriesFor(mediaType).firstOrNull()?.id
+                            destinationCategoryId = catalog.categoriesFor(mediaType).drop(1).firstOrNull()?.id
+                            selectedCategoryKeys = emptySet()
+                            selectedEntryKeys = emptySet()
+                        },
+                        selected = type == mediaType,
+                        accent = type == mediaType,
+                        modifier = Modifier.width(115.dp).height(48.dp),
+                    ) {
+                        Text(mediaType.displayName, color = Ink, fontSize = TypeLabel, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 12.dp))
+                    }
+                    Spacer(Modifier.width(7.dp))
+                }
             }
         }
         Spacer(Modifier.height(14.dp))
@@ -119,7 +126,8 @@ fun OrganizerScreen(
         Spacer(Modifier.height(14.dp))
 
         Row(Modifier.fillMaxSize()) {
-            Column(Modifier.width(420.dp).fillMaxHeight()) {
+            GlassSurface(modifier = Modifier.width(420.dp).fillMaxHeight()) {
+              Column(Modifier.fillMaxSize().padding(18.dp)) {
                 SectionLabel(
                     if (categoryQuery.isBlank()) "Catégories (${categories.size})" else "Catégories (${visibleCategories.size}/${categories.size})",
                 )
@@ -275,6 +283,7 @@ fun OrganizerScreen(
                                     }
                                 },
                                 selected = category.key in selectedCategoryKeys,
+                                accent = category.key in selectedCategoryKeys,
                                 modifier = Modifier.width(52.dp).height(50.dp),
                                 contentDescription = if (category.key in selectedCategoryKeys) {
                                     "Désélectionner ${category.name}"
@@ -292,10 +301,12 @@ fun OrganizerScreen(
                         }
                     }
                 }
+              }
             }
 
             Spacer(Modifier.width(18.dp))
-            Column(Modifier.weight(1f).fillMaxHeight()) {
+            GlassSurface(modifier = Modifier.weight(1f).fillMaxHeight()) {
+              Column(Modifier.fillMaxSize().padding(18.dp)) {
                 val sourceName = categories.firstOrNull { it.id == sourceCategoryId }?.name ?: "Catégorie"
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text(sourceName, color = Ink, fontSize = TypeSectionTitle, fontWeight = HeadingWeight, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -312,6 +323,7 @@ fun OrganizerScreen(
                                     }
                                 },
                                 selected = entry.key in selectedEntryKeys,
+                                accent = entry.key in selectedEntryKeys,
                                 modifier = Modifier.weight(1f).height(50.dp),
                             ) {
                                 Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -381,6 +393,7 @@ fun OrganizerScreen(
                             selectedEntryKeys = emptySet()
                         },
                         enabled = selectedEntryKeys.isNotEmpty() && destinationCategoryId != null,
+                        accent = selectedEntryKeys.isNotEmpty() && destinationCategoryId != null,
                         modifier = Modifier.width(190.dp).height(52.dp),
                     ) {
                         Text("Déplacer la sélection", color = Ink, fontSize = TypeLabel, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 14.dp))
@@ -393,6 +406,7 @@ fun OrganizerScreen(
                         Text("Réinitialiser", color = Ink, fontSize = TypeLabel, modifier = Modifier.padding(horizontal = 14.dp))
                     }
                 }
+              }
             }
         }
     }

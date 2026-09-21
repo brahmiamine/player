@@ -28,10 +28,11 @@ import fr.streamia.tv.data.LiveChannelSortOrder
 import fr.streamia.tv.data.LiveStreamFormat
 import fr.streamia.tv.data.VideoAspectSetting
 import fr.streamia.tv.data.VodSortOrder
+import androidx.compose.foundation.shape.RoundedCornerShape
 import fr.streamia.tv.ui.theme.HeadingWeight
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
-import fr.streamia.tv.ui.theme.Night
+import fr.streamia.tv.ui.theme.RadiusPill
 
 @Composable
 fun SettingsScreen(
@@ -56,11 +57,16 @@ fun SettingsScreen(
     val firstFocus = androidx.compose.runtime.remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { firstFocus.requestFocus() } }
 
-    Column(Modifier.fillMaxSize().background(Night).padding(horizontal = 48.dp, vertical = 32.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            StreamiaLogo(compact = true)
-            Spacer(Modifier.weight(1f))
-            Text("Paramètres", color = Ink, fontSize = 27.sp, fontWeight = HeadingWeight)
+    Column(Modifier.fillMaxSize().padding(horizontal = 48.dp, vertical = 32.dp)) {
+        GlassSurface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(RadiusPill)) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                StreamiaLogo(compact = true)
+                Spacer(Modifier.weight(1f))
+                Text("Paramètres", color = Ink, fontSize = 27.sp, fontWeight = HeadingWeight)
+            }
         }
         Spacer(Modifier.height(20.dp))
         Text(
@@ -245,6 +251,7 @@ internal fun SettingsTile(
         onClick = onClick,
         enabled = enabled,
         selected = selected,
+        accent = selected,
         modifier = modifier.fillMaxSize(),
     ) {
         // maxLines + padding réduit : la tuile a une hauteur fixe (voir grilles Paramètres/Outils),

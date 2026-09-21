@@ -45,7 +45,6 @@ import fr.streamia.tv.ui.theme.FocusBlueBright
 import fr.streamia.tv.ui.theme.HeadingWeight
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
-import fr.streamia.tv.ui.theme.Night
 import fr.streamia.tv.ui.theme.TypeBody
 import fr.streamia.tv.ui.theme.TypeBodyLineHeight
 import fr.streamia.tv.ui.theme.TypeHero
@@ -82,7 +81,7 @@ fun SeriesScreen(
         }
     }
 
-    Row(Modifier.fillMaxSize().background(Night).padding(30.dp)) {
+    Row(Modifier.fillMaxSize().padding(30.dp)) {
         Column(Modifier.width(365.dp).fillMaxHeight().verticalScroll(rememberScrollState())) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 FocusableSurface(onClick = onBack, modifier = Modifier.weight(1f).height(48.dp)) {
@@ -170,6 +169,7 @@ fun SeriesScreen(
                             FocusableSurface(
                                 onClick = { selectedSeason = season },
                                 selected = selectedSeason == season,
+                                accent = selectedSeason == season,
                                 modifier = Modifier.fillMaxWidth().height(54.dp),
                             ) {
                                 Text("Saison $season", color = Ink, fontSize = TypeLabel, modifier = Modifier.padding(horizontal = 15.dp))

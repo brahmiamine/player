@@ -1,7 +1,9 @@
 package fr.streamia.tv.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,6 +22,8 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -70,10 +74,13 @@ import fr.streamia.tv.player.PlaybackTransportStore
 import fr.streamia.tv.player.PlaybackUrlStrategy
 import fr.streamia.tv.ui.theme.DeepSurface
 import fr.streamia.tv.ui.theme.FocusBlueBright
+import fr.streamia.tv.ui.theme.GlassBorder
 import fr.streamia.tv.ui.theme.HeadingWeight
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
 import fr.streamia.tv.ui.theme.Night
+import fr.streamia.tv.ui.theme.RadiusCard
+import fr.streamia.tv.ui.theme.RadiusPill
 import fr.streamia.tv.ui.theme.TypeBody
 import fr.streamia.tv.ui.theme.TypeSectionTitle
 import fr.streamia.tv.ui.theme.WarmSignal
@@ -263,7 +270,7 @@ fun BrowserScreen(
     // est donc posé en premier (plein écran) dans ce Box, et le bandeau + le message flottent
     // ensuite par-dessus, translucides, plutôt que de réserver leur propre bande opaque en haut
     // comme le fait la disposition Column classique utilisée par les autres écrans (VOD compris).
-    Box(Modifier.fillMaxSize().background(Night)) {
+    Box(Modifier.fillMaxSize()) {
         if (isLive) {
             LiveCatalogLayout(
                 catalog = catalog,
@@ -391,53 +398,66 @@ private fun BrowserHeader(
     onSettings: () -> Unit,
 ) {
     val idleBackground = if (translucent) Color.Transparent else DeepSurface
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(BROWSER_HEADER_HEIGHT)
-            .then(if (translucent) Modifier.background(Night.copy(alpha = 0.72f)) else Modifier)
-            .padding(horizontal = 20.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        StreamiaLogo(compact = true)
-        Spacer(Modifier.width(16.dp))
-        HeaderAction("Accueil", 90.dp, onHome, idleBackground = idleBackground)
-        Spacer(Modifier.width(6.dp))
-
-        for (type in MediaType.entries) {
-            FocusableSurface(
-                onClick = { onTypeSelected(type) },
-                selected = selectedType == type,
-                enabled = catalog.count(type) > 0,
-                idleBackground = idleBackground,
-                modifier = Modifier.width(104.dp).height(44.dp),
-            ) {
-                Column(Modifier.padding(horizontal = 10.dp)) {
-                    Text(type.displayName, color = Ink, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    Text(catalog.count(type).toString(), color = MutedInk, fontSize = 11.sp)
-                }
-            }
+    val row: @Composable () -> Unit = {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(BROWSER_HEADER_HEIGHT)
+                .padding(horizontal = 20.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            StreamiaLogo(compact = true)
+            Spacer(Modifier.width(16.dp))
+            HeaderAction("Accueil", 90.dp, onHome, idleBackground = idleBackground)
             Spacer(Modifier.width(6.dp))
-        }
 
-        Spacer(Modifier.weight(1f))
-        HeaderAction("Recherche", 52.dp, onSearch, glyph = StreamiaIconGlyph.Search, idleBackground = idleBackground)
-        Spacer(Modifier.width(6.dp))
-        HeaderAction("EPG", 68.dp, onEpg, catalog.count(MediaType.Live) > 0, idleBackground = idleBackground)
-        Spacer(Modifier.width(6.dp))
-        HeaderAction("Paramètres", 52.dp, onSettings, glyph = StreamiaIconGlyph.Settings, idleBackground = idleBackground)
-        Spacer(Modifier.width(10.dp))
-        Box(Modifier.size(6.dp).background(if (offline) WarmSignal else Color(0xFF8FBFA0)))
-        Spacer(Modifier.width(5.dp))
-        Text(
-            when {
-                busy -> "Chargement…"
-                offline -> "Cache"
-                else -> "Local / en ligne"
-            },
-            color = if (offline) WarmSignal else MutedInk,
-            fontSize = 12.sp,
-        )
+            for (type in MediaType.entries) {
+                FocusableSurface(
+                    onClick = { onTypeSelected(type) },
+                    selected = selectedType == type,
+                    enabled = catalog.count(type) > 0,
+                    accent = selectedType == type,
+                    idleBackground = idleBackground,
+                    modifier = Modifier.width(104.dp).height(44.dp),
+                ) {
+                    Column(Modifier.padding(horizontal = 10.dp)) {
+                        Text(type.displayName, color = Ink, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text(catalog.count(type).toString(), color = MutedInk, fontSize = 11.sp)
+                    }
+                }
+                Spacer(Modifier.width(6.dp))
+            }
+
+            Spacer(Modifier.weight(1f))
+            HeaderAction("Recherche", 52.dp, onSearch, glyph = StreamiaIconGlyph.Search, idleBackground = idleBackground)
+            Spacer(Modifier.width(6.dp))
+            HeaderAction("EPG", 68.dp, onEpg, catalog.count(MediaType.Live) > 0, idleBackground = idleBackground)
+            Spacer(Modifier.width(6.dp))
+            HeaderAction("Paramètres", 52.dp, onSettings, glyph = StreamiaIconGlyph.Settings, idleBackground = idleBackground)
+            Spacer(Modifier.width(10.dp))
+            Box(Modifier.size(6.dp).background(if (offline) WarmSignal else Color(0xFF8FBFA0)))
+            Spacer(Modifier.width(5.dp))
+            Text(
+                when {
+                    busy -> "Chargement…"
+                    offline -> "Cache"
+                    else -> "Local / en ligne"
+                },
+                color = if (offline) WarmSignal else MutedInk,
+                fontSize = 12.sp,
+            )
+        }
+    }
+    if (translucent) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(RadiusPill))
+                .background(Night.copy(alpha = 0.72f))
+                .border(BorderStroke(1.dp, GlassBorder), RoundedCornerShape(RadiusPill)),
+        ) { row() }
+    } else {
+        GlassSurface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(RadiusPill)) { row() }
     }
 }
 
@@ -697,7 +717,13 @@ private fun LiveChannelList(
         }
     }
 
-    Column(modifier.background(Night.copy(alpha = 0.72f))) {
+    Column(
+        modifier
+            .clip(RoundedCornerShape(RadiusCard))
+            .background(Night.copy(alpha = 0.72f))
+            .border(BorderStroke(1.dp, GlassBorder), RoundedCornerShape(RadiusCard))
+            .padding(14.dp),
+    ) {
         Row(Modifier.fillMaxWidth().padding(start = 3.dp, bottom = 7.dp), verticalAlignment = Alignment.CenterVertically) {
             SectionLabel("Chaînes")
             Spacer(Modifier.weight(1f))
@@ -1020,7 +1046,8 @@ private fun CategoryRail(
         }
     }
 
-    Column(modifier.then(if (translucent) Modifier.background(Night.copy(alpha = 0.72f)) else Modifier)) {
+    val railContent: @Composable () -> Unit = {
+      Column(Modifier.fillMaxSize().padding(14.dp)) {
         Row(Modifier.fillMaxWidth().padding(start = 3.dp, bottom = 7.dp), verticalAlignment = Alignment.CenterVertically) {
             SectionLabel("Catégories")
             Spacer(Modifier.weight(1f))
@@ -1075,6 +1102,17 @@ private fun CategoryRail(
                 }
             }
         }
+      }
+    }
+    if (translucent) {
+        Box(
+            modifier
+                .clip(RoundedCornerShape(RadiusCard))
+                .background(Night.copy(alpha = 0.72f))
+                .border(BorderStroke(1.dp, GlassBorder), RoundedCornerShape(RadiusCard)),
+        ) { railContent() }
+    } else {
+        GlassSurface(modifier = modifier) { railContent() }
     }
 }
 
@@ -1110,7 +1148,10 @@ private fun PosterGrid(
         }
 
         if (entries.isEmpty()) {
-            Box(Modifier.fillMaxSize().background(DeepSurface), contentAlignment = Alignment.Center) {
+            Box(
+                Modifier.fillMaxSize().clip(RoundedCornerShape(RadiusCard)).background(DeepSurface),
+                contentAlignment = Alignment.Center,
+            ) {
                 Text(
                     // Distinguer « la page arrive » de « la catégorie est vide » : une lecture SQLite
                     // sur une catégorie jamais ouverte n'est pas un catalogue vide.

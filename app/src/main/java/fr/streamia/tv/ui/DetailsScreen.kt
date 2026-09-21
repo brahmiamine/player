@@ -31,7 +31,6 @@ import fr.streamia.tv.ui.theme.FocusBlueBright
 import fr.streamia.tv.ui.theme.HeadingWeight
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
-import fr.streamia.tv.ui.theme.Night
 import fr.streamia.tv.ui.theme.TypeBody
 import fr.streamia.tv.ui.theme.TypeBodyLineHeight
 import fr.streamia.tv.ui.theme.TypeHero
@@ -55,7 +54,7 @@ fun MovieDetailsScreen(
     onBack: () -> Unit,
 ) {
     BackHandler(onBack = onBack)
-    Row(Modifier.fillMaxSize().background(Night).padding(34.dp)) {
+    Row(Modifier.fillMaxSize().padding(34.dp)) {
         Column(Modifier.width(330.dp).fillMaxHeight()) {
             FocusableSurface(onClick = onBack, modifier = Modifier.width(130.dp).height(50.dp)) {
                 Text("← Retour", color = Ink, fontSize = TypeLabel, modifier = Modifier.padding(horizontal = 15.dp))
@@ -64,7 +63,7 @@ fun MovieDetailsScreen(
             ChannelLogo(details?.posterUrl ?: movie.iconUrl, movie.displayName, Modifier.size(300.dp))
             Spacer(Modifier.height(16.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                FocusableSurface(onClick = onPlay, enabled = !busy, modifier = Modifier.weight(1f).height(58.dp)) {
+                FocusableSurface(onClick = onPlay, enabled = !busy, accent = true, modifier = Modifier.weight(1f).height(58.dp)) {
                     Row(
                         Modifier.padding(horizontal = 16.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -121,11 +120,19 @@ fun MovieDetailsScreen(
             if (!details?.plot.isNullOrBlank() || !movie.plot.isNullOrBlank()) {
                 Text(details?.plot ?: movie.plot.orEmpty(), color = Ink, fontSize = TypeBody, lineHeight = TypeBodyLineHeight)
             }
-            DetailLine("Réalisateur", details?.director)
-            DetailLine("Distribution", details?.cast)
-            DetailLine("Pays", details?.country)
-            DetailLine("TMDB", details?.tmdbId)
-            DetailLine("Bande-annonce", details?.youtubeTrailer)
+            val hasDetailLines = listOf(details?.director, details?.cast, details?.country, details?.tmdbId, details?.youtubeTrailer)
+                .any { !it.isNullOrBlank() }
+            if (hasDetailLines) {
+                GlassSurface(modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        DetailLine("Réalisateur", details?.director)
+                        DetailLine("Distribution", details?.cast)
+                        DetailLine("Pays", details?.country)
+                        DetailLine("TMDB", details?.tmdbId)
+                        DetailLine("Bande-annonce", details?.youtubeTrailer)
+                    }
+                }
+            }
             if (resumePositionMs > 0) {
                 Text("Une position de lecture sauvegardée est disponible. La lecture reprendra automatiquement.", color = MutedInk, fontSize = TypeLabel)
             }
