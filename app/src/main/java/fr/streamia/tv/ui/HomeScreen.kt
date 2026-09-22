@@ -35,6 +35,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
+import fr.streamia.tv.beinsports.ResolvedBeinProgrammeItem
 import fr.streamia.tv.data.UserLibrarySnapshot
 import fr.streamia.tv.data.isResumable
 import fr.streamia.tv.domain.Catalog
@@ -71,6 +72,7 @@ import java.util.Locale
 private val MainGridHeight = 560.dp
 private val CardRowSpacing = 22.dp
 private val TV_PROGRAMME_ZONE: ZoneId = ZoneId.of("Europe/Paris")
+private val BEIN_MENA_ZONE: ZoneId = ZoneId.of("Asia/Qatar")
 private const val TV_PROGRAMME_PROGRESS_REFRESH_MS = 30_000L
 private const val TV_PROGRAMME_DATA_REFRESH_MS = 2 * 60_000L
 
@@ -89,6 +91,8 @@ fun HomeScreen(
     recommendationRows: List<RecommendationRow> = emptyList(),
     tvProgrammeNow: List<ResolvedTvProgrammeNowItem> = emptyList(),
     tvProgrammeTonight: List<ResolvedTvProgrammeItem> = emptyList(),
+    beinSportsNow: List<ResolvedBeinProgrammeItem> = emptyList(),
+    beinSportsNext: List<ResolvedBeinProgrammeItem> = emptyList(),
     restoreContext: ContentReturnContext? = null,
     onOpenSection: (MediaType) -> Unit,
     onSettings: () -> Unit,
@@ -100,6 +104,7 @@ fun HomeScreen(
     onOpenHomeEntry: (MediaEntry, String, String) -> Unit,
     onOpenLiveMatches: () -> Unit,
     onRefreshTvProgrammeNow: () -> Unit,
+    onRefreshBeinSportsGuide: () -> Unit,
 ) {
     val firstFocus = remember { FocusRequester() }
     val restoringHome = restoreContext?.origin == ContentReturnOrigin.Home
@@ -180,10 +185,19 @@ fun HomeScreen(
             delay(TV_PROGRAMME_PROGRESS_REFRESH_MS)
         }
     }
+    var beinNowTime by remember { mutableStateOf(LocalTime.now(BEIN_MENA_ZONE)) }
+    LaunchedEffect(beinSportsNow) {
+        if (beinSportsNow.isEmpty()) return@LaunchedEffect
+        while (true) {
+            beinNowTime = LocalTime.now(BEIN_MENA_ZONE)
+            delay(TV_PROGRAMME_PROGRESS_REFRESH_MS)
+        }
+    }
     LaunchedEffect(Unit) {
         while (true) {
             delay(TV_PROGRAMME_DATA_REFRESH_MS)
             onRefreshTvProgrammeNow()
+            onRefreshBeinSportsGuide()
         }
     }
 
@@ -203,10 +217,19 @@ fun HomeScreen(
         !focusOnResume && !focusOnFavorites && !focusOnMatches && !focusOnTvProgrammeNow &&
             tvProgrammeTonight.isNotEmpty()
     val focusOnTvProgramme = focusOnTvProgrammeNow || focusOnTvProgrammeTonight
+    val focusOnBeinSportsNow =
+        !focusOnResume && !focusOnFavorites && !focusOnMatches && !focusOnTvProgramme &&
+            beinSportsNow.isNotEmpty()
+    val focusOnBeinSportsNext =
+        !focusOnResume && !focusOnFavorites && !focusOnMatches && !focusOnTvProgramme &&
+            !focusOnBeinSportsNow && beinSportsNext.isNotEmpty()
+    val focusOnBeinSports = focusOnBeinSportsNow || focusOnBeinSportsNext
     val focusOnRecommendations =
-        !focusOnResume && !focusOnFavorites && !focusOnMatches && !focusOnTvProgramme && recommendationRows.isNotEmpty()
+        !focusOnResume && !focusOnFavorites && !focusOnMatches && !focusOnTvProgramme &&
+            !focusOnBeinSports && recommendationRows.isNotEmpty()
     val focusOnGrid =
-        !focusOnResume && !focusOnFavorites && !focusOnMatches && !focusOnTvProgramme && !focusOnRecommendations
+        !focusOnResume && !focusOnFavorites && !focusOnMatches && !focusOnTvProgramme &&
+            !focusOnBeinSports && !focusOnRecommendations
 
     val homeListState = rememberLazyListState()
     val restoreTarget = restoreContext?.takeIf { it.origin == ContentReturnOrigin.Home }
@@ -238,6 +261,8 @@ fun HomeScreen(
         displayedUpcomingMatchRow,
         tvProgrammeNow,
         tvProgrammeTonight,
+        beinSportsNow,
+        beinSportsNext,
         recommendationRows,
     ) {
         buildList {
@@ -247,6 +272,8 @@ fun HomeScreen(
             if (displayedUpcomingMatchRow?.items?.isNotEmpty() == true) add(HomeRowKey.UpcomingMatches)
             if (tvProgrammeNow.isNotEmpty()) add(HomeRowKey.TvProgrammeNow)
             if (tvProgrammeTonight.isNotEmpty()) add(HomeRowKey.TvProgrammeTonight)
+            if (beinSportsNow.isNotEmpty()) add(HomeRowKey.BeinSportsNow)
+            if (beinSportsNext.isNotEmpty()) add(HomeRowKey.BeinSportsNext)
             recommendationRows.forEach { row -> add(HomeRowKey.recommendation(row.kind)) }
         }
     }
@@ -406,6 +433,56 @@ fun HomeScreen(
                             onOpenHomeEntry(
                                 item.channel,
                                 HomeRowKey.TvProgrammeTonight,
+                                item.fingerprint,
+                            )
+                        },
+                    )
+                    Spacer(Modifier.height(CardRowSpacing))
+                }
+            }
+        }
+
+        if (beinSportsNow.isNotEmpty()) {
+            item {
+                Column(Modifier.fillMaxWidth()) {
+                    BeinSportsProgrammeRow(
+                        title = "beIN Sports en direct",
+                        items = beinSportsNow,
+                        now = beinNowTime,
+                        showLive = true,
+                        firstFocusRequester = if (focusOnBeinSportsNow) firstFocus else null,
+                        restoreItemKey = restoreTarget
+                            ?.takeIf { it.homeRowKey == HomeRowKey.BeinSportsNow }
+                            ?.itemKey,
+                        onOpenProgramme = { item ->
+                            onOpenHomeEntry(
+                                item.channel,
+                                HomeRowKey.BeinSportsNow,
+                                item.fingerprint,
+                            )
+                        },
+                    )
+                    Spacer(Modifier.height(CardRowSpacing))
+                }
+            }
+        }
+
+        if (beinSportsNext.isNotEmpty()) {
+            item {
+                Column(Modifier.fillMaxWidth()) {
+                    BeinSportsProgrammeRow(
+                        title = "beIN Sports suivant",
+                        items = beinSportsNext,
+                        now = beinNowTime,
+                        showLive = false,
+                        firstFocusRequester = if (focusOnBeinSportsNext) firstFocus else null,
+                        restoreItemKey = restoreTarget
+                            ?.takeIf { it.homeRowKey == HomeRowKey.BeinSportsNext }
+                            ?.itemKey,
+                        onOpenProgramme = { item ->
+                            onOpenHomeEntry(
+                                item.channel,
+                                HomeRowKey.BeinSportsNext,
                                 item.fingerprint,
                             )
                         },
@@ -906,6 +983,174 @@ private fun TvProgrammeTonightCard(
                     channel.iconUrl,
                     channel.displayName,
                     Modifier.width(48.dp).height(48.dp),
+                )
+                Spacer(Modifier.width(7.dp))
+                Text(
+                    channel.displayName,
+                    color = MutedInk,
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun BeinSportsProgrammeRow(
+    title: String,
+    items: List<ResolvedBeinProgrammeItem>,
+    now: LocalTime,
+    showLive: Boolean,
+    firstFocusRequester: FocusRequester?,
+    restoreItemKey: String?,
+    onOpenProgramme: (ResolvedBeinProgrammeItem) -> Unit,
+) {
+    val rowState = rememberLazyListState()
+    val restoreFocus = remember { FocusRequester() }
+    LaunchedEffect(restoreItemKey, items) {
+        val targetIndex = items.indexOfFirst { it.fingerprint == restoreItemKey }
+        if (targetIndex >= 0) {
+            rowState.scrollToItem(targetIndex)
+            delay(RESTORE_FOCUS_DELAY_MS)
+            runCatching { restoreFocus.requestFocus() }
+        }
+    }
+
+    Column(Modifier.fillMaxWidth()) {
+        SectionLabel(title, fontSize = 16.sp)
+        Spacer(Modifier.height(10.dp))
+        LazyRow(state = rowState, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            itemsIndexed(items, key = { _, item -> item.fingerprint }) { index, item ->
+                val cardModifier = when {
+                    item.fingerprint == restoreItemKey -> Modifier.focusRequester(restoreFocus)
+                    index == 0 && firstFocusRequester != null -> Modifier.focusRequester(firstFocusRequester)
+                    else -> Modifier
+                }
+                BeinSportsProgrammeCard(
+                    item = item,
+                    now = now,
+                    showLive = showLive,
+                    onClick = { onOpenProgramme(item) },
+                    modifier = cardModifier,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun BeinSportsProgrammeCard(
+    item: ResolvedBeinProgrammeItem,
+    now: LocalTime,
+    showLive: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val programme = item.programme
+    val channel = item.channel
+    val progress = if (showLive) programme.progressAt(now) else null
+
+    FocusableSurface(
+        onClick = onClick,
+        modifier = modifier.width(280.dp).height(250.dp),
+    ) {
+        Column(Modifier.fillMaxSize().padding(9.dp)) {
+            Box(Modifier.fillMaxWidth().height(112.dp)) {
+                if (!programme.imageUrl.isNullOrBlank()) {
+                    MediaArtwork(
+                        programme.imageUrl,
+                        programme.title,
+                        Modifier.fillMaxSize(),
+                    )
+                } else {
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(MutedInk.copy(alpha = 0.10f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        ChannelLogo(
+                            channel.iconUrl,
+                            channel.displayName,
+                            Modifier.width(76.dp).height(76.dp),
+                        )
+                    }
+                }
+                Text(
+                    programme.timeRangeLabel,
+                    color = Ink,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(7.dp)
+                        .clip(RoundedCornerShape(5.dp))
+                        .background(Night.copy(alpha = 0.9f))
+                        .padding(horizontal = 7.dp, vertical = 4.dp),
+                )
+                if (showLive) {
+                    LiveBadge(Modifier.align(Alignment.TopEnd).padding(7.dp))
+                } else {
+                    Text(
+                        "À SUIVRE",
+                        color = Night,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(7.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(FocusBlueBright)
+                            .padding(horizontal = 7.dp, vertical = 3.dp),
+                    )
+                }
+            }
+            Spacer(Modifier.height(7.dp))
+            Text(
+                programme.title,
+                color = Ink,
+                fontSize = 14.sp,
+                lineHeight = 17.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            programme.category?.takeIf(String::isNotBlank)?.let { category ->
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    category,
+                    color = MutedInk,
+                    fontSize = 10.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (progress != null) {
+                Spacer(Modifier.height(7.dp))
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(5.dp)
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(MutedInk.copy(alpha = 0.24f)),
+                ) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth(progress)
+                            .height(5.dp)
+                            .background(FocusBlueBright),
+                    )
+                }
+            }
+            Spacer(Modifier.weight(1f))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                ChannelLogo(
+                    channel.iconUrl,
+                    channel.displayName,
+                    Modifier.width(44.dp).height(44.dp),
                 )
                 Spacer(Modifier.width(7.dp))
                 Text(
