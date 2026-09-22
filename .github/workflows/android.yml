@@ -69,11 +69,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           tail -c 60000 gradle-output.log > tail.log
-          python3 -c "
+          cat > build_comment.py << 'PYEOF'
           import json
-          body = '### Unit tests/lint failure (diagnostic)\n\n<details><summary>gradle-output.log tail</summary>\n\n\`\`\`\n' + open('tail.log').read() + '\n\`\`\`\n\n</details>'
-          print(json.dumps({'body': body}))
-          " > comment.json
+          with open('tail.log') as f:
+              text = f.read()
+          body = "### Unit tests/lint failure (diagnostic)\n\n<details><summary>gradle-output.log tail</summary>\n\n```\n" + text + "\n```\n\n</details>"
+          with open('comment.json', 'w') as out:
+              json.dump({'body': body}, out)
+          PYEOF
+          python3 build_comment.py
           curl -sS -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
             "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
             -d @comment.json
@@ -97,11 +101,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           tail -c 60000 gradle-assemble-output.log > tail.log
-          python3 -c "
+          cat > build_comment.py << 'PYEOF'
           import json
-          body = '### assembleDebug failure (diagnostic)\n\n<details><summary>gradle-assemble-output.log tail</summary>\n\n\`\`\`\n' + open('tail.log').read() + '\n\`\`\`\n\n</details>'
-          print(json.dumps({'body': body}))
-          " > comment2.json
+          with open('tail.log') as f:
+              text = f.read()
+          body = "### assembleDebug failure (diagnostic)\n\n<details><summary>gradle-assemble-output.log tail</summary>\n\n```\n" + text + "\n```\n\n</details>"
+          with open('comment2.json', 'w') as out:
+              json.dump({'body': body}, out)
+          PYEOF
+          python3 build_comment.py
           curl -sS -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
             "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
             -d @comment2.json
@@ -150,11 +158,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           tail -c 60000 report-size-output.log > tail.log
-          python3 -c "
+          cat > build_comment.py << 'PYEOF'
           import json
-          body = '### Report APK sizes failure (diagnostic)\n\n<details><summary>report-size-output.log tail</summary>\n\n\`\`\`\n' + open('tail.log').read() + '\n\`\`\`\n\n</details>'
-          print(json.dumps({'body': body}))
-          " > comment3.json
+          with open('tail.log') as f:
+              text = f.read()
+          body = "### Report APK sizes failure (diagnostic)\n\n<details><summary>report-size-output.log tail</summary>\n\n```\n" + text + "\n```\n\n</details>"
+          with open('comment3.json', 'w') as out:
+              json.dump({'body': body}, out)
+          PYEOF
+          python3 build_comment.py
           curl -sS -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
             "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
             -d @comment3.json
@@ -186,11 +198,15 @@ jobs:
             df -h . 2>&1
           } > snapshot.log 2>&1
           tail -c 60000 snapshot.log > tail.log
-          python3 -c "
+          cat > build_comment.py << 'PYEOF'
           import json
-          body = '### Pre-upload directory snapshot (diagnostic)\n\n<details><summary>snapshot.log</summary>\n\n\`\`\`\n' + open('tail.log').read() + '\n\`\`\`\n\n</details>'
-          print(json.dumps({'body': body}))
-          " > comment4.json
+          with open('tail.log') as f:
+              text = f.read()
+          body = "### Pre-upload directory snapshot (diagnostic)\n\n<details><summary>snapshot.log</summary>\n\n```\n" + text + "\n```\n\n</details>"
+          with open('comment4.json', 'w') as out:
+              json.dump({'body': body}, out)
+          PYEOF
+          python3 build_comment.py
           curl -sS -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
             "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
             -d @comment4.json
