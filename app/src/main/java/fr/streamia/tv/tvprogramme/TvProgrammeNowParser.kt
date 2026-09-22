@@ -238,7 +238,7 @@ object TvProgrammeNowParser {
     private const val MAX_REASONABLE_PROGRAMME_MINUTES = 8 * 60
     private val CHANNEL_NUMBER = Regex("""\bN\s*[°ºo]?\s*\d+\b""", RegexOption.IGNORE_CASE)
     private val CHANNEL_LOGO_ALT = Regex("""^logo\s+(?:de\s+la\s+cha[iî]ne\s+)?(.+?)(?:\s+programme)?$""", RegexOption.IGNORE_CASE)
-    private val TIME = Regex("""\b(\d{1,2})h(\d{2})\b""")
+    private val TIME = Regex("""(?<!\d)(\d{1,2})h(\d{2})(?!\d)""")
     private val TRAILING_DIRECT = Regex("""\s+Direct\s*$""", RegexOption.IGNORE_CASE)
     private val TRAILING_ELLIPSIS = Regex("""\s*(?:…|\.\.\.)\s*$""")
     private val IMAGE_ATTRIBUTES = listOf("data-src", "data-lazy-src", "data-original", "src", "srcset")
