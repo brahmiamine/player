@@ -29,6 +29,57 @@ class TvProgrammeChannelMatcher {
     ): List<ResolvedTvProgrammeItem> =
         resolve(programmes, frenchLiveChannels(catalog), limit)
 
+    fun resolveNow(
+        programmes: List<TvProgrammeNowItem>,
+        catalog: Catalog,
+        limit: Int = DEFAULT_LIMIT,
+    ): List<ResolvedTvProgrammeNowItem> =
+        resolveNow(programmes, frenchLiveChannels(catalog), limit)
+
+    fun resolveNow(
+        programmes: List<TvProgrammeNowItem>,
+        channels: List<MediaEntry>,
+        limit: Int = DEFAULT_LIMIT,
+    ): List<ResolvedTvProgrammeNowItem> {
+        if (programmes.isEmpty() || channels.isEmpty()) return emptyList()
+
+        val indexed = channels.map { channel ->
+            IndexedChannel(
+                channel = channel,
+                display = normalized(channel.displayName),
+                raw = normalized(channel.name),
+                quality = maxOf(qualityRank(channel.displayName), qualityRank(channel.name)),
+            )
+        }
+
+        val seenChannels = mutableSetOf<String>()
+        return programmes.asSequence()
+            .mapNotNull { programme ->
+                val source = normalized(programme.channelName)
+                val best = indexed.asSequence()
+                    .map { candidate ->
+                        RankedChannel(
+                            channel = candidate.channel,
+                            score = maxOf(similarity(source, candidate.display), similarity(source, candidate.raw)),
+                            quality = candidate.quality,
+                        )
+                    }
+                    .filter { it.score >= MIN_MATCH_SCORE }
+                    .sortedWith(
+                        compareByDescending<RankedChannel> { it.score }
+                            .thenByDescending { it.quality }
+                            .thenBy { it.channel.number },
+                    )
+                    .firstOrNull()
+                    ?: return@mapNotNull null
+
+                if (!seenChannels.add(best.channel.key)) return@mapNotNull null
+                ResolvedTvProgrammeNowItem(programme = programme, channel = best.channel)
+            }
+            .take(limit)
+            .toList()
+    }
+
     fun resolve(
         programmes: List<TvProgrammeItem>,
         channels: List<MediaEntry>,
