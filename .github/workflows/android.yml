@@ -167,6 +167,34 @@ jobs:
         if: github.event_name != 'pull_request'
         run: du -h app/build/outputs/apk/optimized/app-optimized.apk
 
+      # TEMPORARY diagnostic — always posts, to see ground truth right before the upload step that
+      # keeps reporting "no files found" despite the immediately preceding `du` succeeding. Remove
+      # once green.
+      - name: Post pre-upload directory snapshot as PR comment (diagnostic)
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo "--- pwd ---"
+            pwd
+            echo "--- ls -la app/build/outputs/apk/debug/ ---"
+            ls -la app/build/outputs/apk/debug/ 2>&1
+            echo "--- find app/build/outputs (full stat) ---"
+            find app/build/outputs -exec ls -la {} \; 2>&1
+            echo "--- df -h . ---"
+            df -h . 2>&1
+          } > snapshot.log 2>&1
+          tail -c 60000 snapshot.log > tail.log
+          python3 -c "
+          import json
+          body = '### Pre-upload directory snapshot (diagnostic)\n\n<details><summary>snapshot.log</summary>\n\n\`\`\`\n' + open('tail.log').read() + '\n\`\`\`\n\n</details>'
+          print(json.dumps({'body': body}))
+          " > comment4.json
+          curl -sS -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
+            -d @comment4.json
+
       - name: Upload APK artifact
         uses: actions/upload-artifact@v7
         with:
