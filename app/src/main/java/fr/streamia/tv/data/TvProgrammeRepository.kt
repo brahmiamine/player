@@ -7,6 +7,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.IOException
 import java.time.LocalDate
+import java.time.ZoneId
 
 data class TvProgrammeFetchResult(
     val programmes: List<TvProgrammeItem>,
@@ -20,7 +21,7 @@ internal class TvProgrammeRepository(context: Context) {
 
     suspend fun loadTonight(forceRefresh: Boolean, maxAgeMillis: Long): TvProgrammeFetchResult =
         withContext(Dispatchers.IO) {
-            val today = LocalDate.now().toString()
+            val today = LocalDate.now(ZoneId.of("Europe/Paris")).toString()
             val cached = cache.load()?.takeIf { it.localDate == today }
             val fresh = cached != null && System.currentTimeMillis() - cached.fetchedAtEpochMillis < maxAgeMillis
 
