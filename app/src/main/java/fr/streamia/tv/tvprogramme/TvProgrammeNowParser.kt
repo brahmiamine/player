@@ -152,11 +152,11 @@ object TvProgrammeNowParser {
     }
 
     private fun channelName(anchor: Element, container: Element): String? {
-        val semanticAlt = sequenceOf(anchor.selectFirst("img[alt]"), container.selectFirst("img[alt]"))
-            .filterNotNull()
+        val semanticAlt = container.select("img[alt]")
+            .asSequence()
             .map { it.attr("alt").trim() }
-            .firstOrNull { CHANNEL_LOGO_ALT.containsMatchIn(it) }
-            ?.let { CHANNEL_LOGO_ALT.find(it)?.groupValues?.getOrNull(1)?.trim() }
+            .mapNotNull { CHANNEL_LOGO_ALT.matchEntire(it)?.groupValues?.getOrNull(1)?.trim() }
+            .firstOrNull()
             ?.removeSuffix(" programme")
             ?.trim()
         if (!semanticAlt.isNullOrBlank()) return semanticAlt
