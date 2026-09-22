@@ -54,6 +54,7 @@ jobs:
         id: unit_tests_lint
         continue-on-error: true
         run: |
+          set +e
           gradle --no-daemon testDebugUnitTest lintDebug --stacktrace > gradle-output.log 2>&1
           echo "exit_code=$?" >> "$GITHUB_OUTPUT"
           test -f app/build/reports/lint-results-debug.txt && cat app/build/reports/lint-results-debug.txt >> gradle-output.log
@@ -90,6 +91,7 @@ jobs:
         id: build_debug
         continue-on-error: true
         run: |
+          set +e
           gradle --no-daemon assembleDebug --stacktrace > gradle-assemble-output.log 2>&1
           echo "exit_code=$?" >> "$GITHUB_OUTPUT"
           cat gradle-assemble-output.log
@@ -142,6 +144,7 @@ jobs:
         id: report_size
         continue-on-error: true
         run: |
+          set +e
           {
             echo "--- find app/build/outputs ---"
             find app/build/outputs -type f 2>&1
@@ -184,9 +187,11 @@ jobs:
       # once green.
       - name: Post pre-upload directory snapshot as PR comment (diagnostic)
         if: github.event_name == 'pull_request'
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set +e
           {
             echo "--- pwd ---"
             pwd
