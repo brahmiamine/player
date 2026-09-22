@@ -47,6 +47,19 @@ class TvProgrammeChannelMatcherTest {
     }
 
     @Test
+    fun acceptsFrPrefixWithoutSeparator() {
+        val result = matcher.resolve(
+            programmes = listOf(TvProgrammeItem("France 2", "21:05", "Journal")),
+            channels = listOf(
+                channel(1, "FR France 2 HD", "fr"),
+                channel(2, "FR France 2 4K", "fr"),
+            ),
+        )
+
+        assertEquals(2, result.single().channel.id)
+    }
+
+    @Test
     fun matchesCommonNamingVariantsButDoesNotConfuseTf1WithTf1SeriesFilms() {
         val channels = listOf(
             channel(1, "FR | Canal Plus UHD", "fr"),
