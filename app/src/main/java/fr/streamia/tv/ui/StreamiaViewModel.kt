@@ -32,6 +32,9 @@ import fr.streamia.tv.liveonsat.ChannelMatcher
 import fr.streamia.tv.liveonsat.LiveOnSatMatch
 import fr.streamia.tv.liveonsat.ResolvedLiveOnSatMatch
 import fr.streamia.tv.liveonsat.withEpgTiming
+import fr.streamia.tv.tvprogramme.ResolvedTvProgrammeItem
+import fr.streamia.tv.tvprogramme.TvProgrammeChannelMatcher
+import fr.streamia.tv.tvprogramme.TvProgrammeItem
 import fr.streamia.tv.matches.MatchRow
 import fr.streamia.tv.matches.MatchRowEngine
 import fr.streamia.tv.recommendation.ContentFeatures
@@ -85,6 +88,11 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     private val liveOnSatChannelMatcher = ChannelMatcher()
     private var liveOnSatLoadSequence = 0L
     private var liveOnSatLoadJob: Job? = null
+    private val tvProgrammeChannelMatcher = TvProgrammeChannelMatcher()
+    private var tvProgrammeLoadSequence = 0L
+    private var tvProgrammeResolveSequence = 0L
+    private var tvProgrammeLoadJob: Job? = null
+    private var tvProgrammeRawItems: List<TvProgrammeItem> = emptyList()
     private var epgSyncJob: Job? = null
     private var epgSyncProfileId: String? = null
     private var epgPrefetchJob: Job? = null
@@ -142,6 +150,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         // directement le dernier flux Live et contourne openProfile()/showCatalog().
         warmEpgGuideCache(profileId)
         loadLiveOnSatMatches(forceRefresh = false)
+        loadTvProgrammeTonight(forceRefresh = false)
         viewModelScope.launch {
             // Catalogue déjà résolu (favoris/ordre déjà appliqués) persisté lors d'une précédente
             // réconciliation réussie pour ce profil : s'il est encore valide pour l'organisation
@@ -267,6 +276,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 refreshHomeMatchRow()
                 refreshHomeRecommendations()
                 loadLiveOnSatMatches(forceRefresh = false)
+                loadTvProgrammeTonight(forceRefresh = false)
                 try {
                     mergeCatalog(repository.openProfile(profileId, knownCache = cachedCatalog))
                 } catch (error: Throwable) {
@@ -528,6 +538,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         _uiState.update { it.copy(screen = StreamiaScreen.Home, message = null, epgLoading = false) }
         refreshHomeMatchRow()
         refreshHomeRecommendations()
+        resolveTvProgrammeTonight()
     }
     fun showSettings() { _uiState.update { it.copy(screen = StreamiaScreen.Settings, message = null) } }
     fun showTools() { _uiState.update { it.copy(screen = StreamiaScreen.Tools, message = null) } }
@@ -789,6 +800,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             if (type == MediaType.Live) {
                 startEpgBackgroundSync()
                 refreshHomeMatchRow()
+                resolveTvProgrammeTonight()
             }
             return
         }
@@ -801,6 +813,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 if (type == MediaType.Live) {
                     startEpgBackgroundSync()
                     refreshHomeMatchRow()
+                    resolveTvProgrammeTonight()
                 }
             } finally {
                 categoryLoadsInFlight.remove(loadKey)
@@ -1945,6 +1958,75 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     }
 
     /**
+     * Charge le programme TV français du soir depuis tv-programme.com. Le scrape est indépendant
+     * de la playlist ; le rapprochement avec les chaînes n'est publié qu'après disponibilité du
+     * catalogue Live du profil courant.
+     */
+    private fun loadTvProgrammeTonight(forceRefresh: Boolean) {
+        val profileId = _uiState.value.activeProfileId ?: return
+        if (!forceRefresh && tvProgrammeLoadJob?.isActive == true) return
+        if (forceRefresh) tvProgrammeLoadJob?.cancel()
+
+        val sequence = ++tvProgrammeLoadSequence
+        tvProgrammeLoadJob = viewModelScope.launch {
+            runCatching { repository.loadTvProgrammeTonight(forceRefresh) }
+                .onSuccess { fetch ->
+                    if (sequence != tvProgrammeLoadSequence || _uiState.value.activeProfileId != profileId) {
+                        return@onSuccess
+                    }
+                    tvProgrammeRawItems = fetch.programmes
+                    resolveTvProgrammeTonight()
+                }
+        }
+    }
+
+    /**
+     * Associe le programme aux seules catégories Live commençant par FR/fr. Le matcher choisit,
+     * pour un même nom de chaîne, la variante 4K > UHD > FHD > HD > SD. Le calcul est hors thread
+     * UI car certains fournisseurs exposent plusieurs milliers de chaînes françaises/variantes.
+     */
+    private fun resolveTvProgrammeTonight() {
+        val state = _uiState.value
+        val profileId = state.activeProfileId ?: return
+        val catalog = state.catalog ?: return
+        val programmes = tvProgrammeRawItems
+        if (programmes.isEmpty()) return
+
+        val excludedCategoryKeys = if (
+            state.appSettings.parentalControlEnabled && !state.parentalUnlocked
+        ) {
+            state.library.hiddenCategories + state.library.lockedCategories
+        } else {
+            state.library.hiddenCategories
+        }
+        val excludedCategoryIds = catalog.categories.asSequence()
+            .filter { it.type == MediaType.Live && it.key in excludedCategoryKeys }
+            .mapTo(mutableSetOf()) { it.id }
+        val hiddenEntries = state.library.hiddenEntries
+        val sequence = ++tvProgrammeResolveSequence
+
+        viewModelScope.launch(Dispatchers.Default) {
+            val resolved = tvProgrammeChannelMatcher.resolve(programmes, catalog)
+                .filterNot { item ->
+                    item.channel.key in hiddenEntries || item.channel.categoryId in excludedCategoryIds
+                }
+
+            if (
+                sequence != tvProgrammeResolveSequence ||
+                _uiState.value.activeProfileId != profileId
+            ) return@launch
+
+            _uiState.update { current ->
+                if (current.activeProfileId == profileId) {
+                    current.copy(homeTvProgrammeTonight = resolved)
+                } else {
+                    current
+                }
+            }
+        }
+    }
+
+    /**
      * Charge (ou réutilise le cache si assez récent) les matchs du jour scrapés depuis
      * liveonsat.com, puis résout leurs diffuseurs contre les chaînes Direct de ce profil. Le scrape
      * lui-même ne dépend d'aucun profil ; seule cette résolution en dépend.
@@ -2187,6 +2269,11 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         homeRecommendationBuildSequence += 1
         homeRecommendationLastBuiltProfileId = null
         homeRecommendationLastBuiltAtMillis = 0L
+        tvProgrammeLoadJob?.cancel()
+        tvProgrammeLoadJob = null
+        tvProgrammeLoadSequence += 1
+        tvProgrammeResolveSequence += 1
+        tvProgrammeRawItems = emptyList()
         epgPrefetchJob?.cancel()
         epgPrefetchJob = null
         epgSyncJob?.cancel()
@@ -2222,6 +2309,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         ensureSectionLoaded(MediaType.Live)
         refreshHomeRecommendations()
         loadLiveOnSatMatches(forceRefresh = false)
+        loadTvProgrammeTonight(forceRefresh = false)
     }
 
     private fun showError(error: Throwable) {
@@ -2269,6 +2357,7 @@ data class StreamiaUiState(
     val homeLiveMatchRow: MatchRow? = null,
     val homeUpcomingMatchRow: MatchRow? = null,
     val homeRecommendationRows: List<RecommendationRow> = emptyList(),
+    val homeTvProgrammeTonight: List<ResolvedTvProgrammeItem> = emptyList(),
     val similarMedia: List<RecommendedMedia> = emptyList(),
     val liveOnSatMatches: List<ResolvedLiveOnSatMatch> = emptyList(),
     val liveOnSatLoading: Boolean = false,

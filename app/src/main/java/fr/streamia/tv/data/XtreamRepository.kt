@@ -41,6 +41,7 @@ class XtreamRepository(context: Context) {
     private val appSettingsStore = AppSettingsStore(context)
     private val recommendationStore = RecommendationStore(context)
     private val liveOnSatRepository = LiveOnSatRepository(context)
+    private val tvProgrammeRepository = TvProgrammeRepository(context)
     private val xmlTvRepository = XmlTvRepository()
     private val m3uParser = M3uParser()
     private val updateChecker = UpdateChecker()
@@ -129,6 +130,10 @@ class XtreamRepository(context: Context) {
      */
     suspend fun loadLiveOnSatMatches(forceRefresh: Boolean = false): LiveOnSatFetchResult =
         liveOnSatRepository.loadMatches(forceRefresh, maxAgeMillis = LIVE_ONSAT_CACHE_MAX_AGE_MS)
+
+    /** Programmes TV français du soir scrapés depuis tv-programme.com avec cache local. */
+    suspend fun loadTvProgrammeTonight(forceRefresh: Boolean = false): TvProgrammeFetchResult =
+        tvProgrammeRepository.loadTonight(forceRefresh, maxAgeMillis = TV_PROGRAMME_CACHE_MAX_AGE_MS)
 
     /**
      * Recherche indexée en base plutôt que dans le sous-ensemble matérialisé en mémoire : sous
@@ -624,6 +629,10 @@ class XtreamRepository(context: Context) {
         // d'appli) ne relance un scrape à quelques secondes d'intervalle — liveonsat.com n'a pas
         // d'API et ne doit pas être sollicité plus souvent que nécessaire.
         private const val LIVE_ONSAT_CACHE_MAX_AGE_MS = 15 * 60_000L
+
+        // Le programme du soir change beaucoup moins souvent que les matchs live. Deux heures
+        // limitent les requêtes vers tv-programme.com tout en renouvelant les données dans la soirée.
+        private const val TV_PROGRAMME_CACHE_MAX_AGE_MS = 2 * 60 * 60_000L
 
         // Partagé par toutes les instances de XtreamRepository du process : le worker EPG en
         // arrière-plan (EpgSyncWorker) et le ViewModel créent chacun leur propre instance, mais
