@@ -693,7 +693,7 @@ private fun TvProgrammeTonightCard(
     val channel = item.channel
     FocusableSurface(
         onClick = onClick,
-        modifier = modifier.width(280.dp).height(218.dp),
+        modifier = modifier.width(280.dp).height(232.dp),
     ) {
         Column(Modifier.fillMaxSize().padding(9.dp)) {
             Box(Modifier.fillMaxWidth().height(125.dp)) {
@@ -730,7 +730,7 @@ private fun TvProgrammeTonightCard(
                 ChannelLogo(
                     channel.iconUrl,
                     channel.displayName,
-                    Modifier.width(34.dp).height(34.dp),
+                    Modifier.width(48.dp).height(48.dp),
                 )
                 Spacer(Modifier.width(7.dp))
                 Text(
