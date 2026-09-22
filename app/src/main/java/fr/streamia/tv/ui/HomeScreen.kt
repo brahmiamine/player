@@ -21,6 +21,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -47,6 +48,7 @@ import fr.streamia.tv.matches.reclassifiedAt
 import fr.streamia.tv.recommendation.RecommendationRow
 import fr.streamia.tv.recommendation.RecommendedMedia
 import fr.streamia.tv.tvprogramme.ResolvedTvProgrammeItem
+import fr.streamia.tv.tvprogramme.ResolvedTvProgrammeNowItem
 import fr.streamia.tv.ui.theme.Danger
 import fr.streamia.tv.ui.theme.FocusBlueBright
 import fr.streamia.tv.ui.theme.HeadingWeight
@@ -57,6 +59,7 @@ import fr.streamia.tv.ui.theme.RadiusPill
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.time.Instant
+import java.time.LocalTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Date
@@ -67,6 +70,8 @@ import java.util.Locale
  * l'accueil garde le même confort quand aucune rangée « Reprendre »/« Favoris » n'est affichée. */
 private val MainGridHeight = 560.dp
 private val CardRowSpacing = 22.dp
+private val TV_PROGRAMME_ZONE: ZoneId = ZoneId.of("Europe/Paris")
+private const val TV_PROGRAMME_PROGRESS_REFRESH_MS = 30_000L
 
 @Composable
 fun HomeScreen(
@@ -81,6 +86,7 @@ fun HomeScreen(
     liveMatchRow: MatchRow? = null,
     upcomingMatchRow: MatchRow? = null,
     recommendationRows: List<RecommendationRow> = emptyList(),
+    tvProgrammeNow: List<ResolvedTvProgrammeNowItem> = emptyList(),
     tvProgrammeTonight: List<ResolvedTvProgrammeItem> = emptyList(),
     restoreContext: ContentReturnContext? = null,
     onOpenSection: (MediaType) -> Unit,
@@ -164,6 +170,15 @@ fun HomeScreen(
     val displayedLiveMatchRow = timedMatchRows.live
     val displayedUpcomingMatchRow = timedMatchRows.upcomingToday
 
+    var tvProgrammeNowTime by remember { mutableStateOf(LocalTime.now(TV_PROGRAMME_ZONE)) }
+    LaunchedEffect(tvProgrammeNow) {
+        if (tvProgrammeNow.isEmpty()) return@LaunchedEffect
+        while (true) {
+            tvProgrammeNowTime = LocalTime.now(TV_PROGRAMME_ZONE)
+            delay(TV_PROGRAMME_PROGRESS_REFRESH_MS)
+        }
+    }
+
     // Le focus initial va toujours à la rangée la plus haute réellement affichée, pour ne jamais
     // demander le focus d'un composant pas encore composé (grille hors écran si les deux rangées
     // sont présentes). Sans historique ni favori (cas courant après import), le comportement est
@@ -174,8 +189,12 @@ fun HomeScreen(
     val focusOnUpcomingMatches =
         !focusOnResume && !focusOnFavorites && !focusOnLiveMatches && displayedUpcomingMatchRow?.items?.isNotEmpty() == true
     val focusOnMatches = focusOnLiveMatches || focusOnUpcomingMatches
-    val focusOnTvProgramme =
-        !focusOnResume && !focusOnFavorites && !focusOnMatches && tvProgrammeTonight.isNotEmpty()
+    val focusOnTvProgrammeNow =
+        !focusOnResume && !focusOnFavorites && !focusOnMatches && tvProgrammeNow.isNotEmpty()
+    val focusOnTvProgrammeTonight =
+        !focusOnResume && !focusOnFavorites && !focusOnMatches && !focusOnTvProgrammeNow &&
+            tvProgrammeTonight.isNotEmpty()
+    val focusOnTvProgramme = focusOnTvProgrammeNow || focusOnTvProgrammeTonight
     val focusOnRecommendations =
         !focusOnResume && !focusOnFavorites && !focusOnMatches && !focusOnTvProgramme && recommendationRows.isNotEmpty()
     val focusOnGrid =
@@ -209,6 +228,7 @@ fun HomeScreen(
         favoriteCards,
         displayedLiveMatchRow,
         displayedUpcomingMatchRow,
+        tvProgrammeNow,
         tvProgrammeTonight,
         recommendationRows,
     ) {
@@ -217,6 +237,7 @@ fun HomeScreen(
             if (favoriteCards.isNotEmpty()) add(HomeRowKey.Favorites)
             if (displayedLiveMatchRow?.items?.isNotEmpty() == true) add(HomeRowKey.LiveMatches)
             if (displayedUpcomingMatchRow?.items?.isNotEmpty() == true) add(HomeRowKey.UpcomingMatches)
+            if (tvProgrammeNow.isNotEmpty()) add(HomeRowKey.TvProgrammeNow)
             if (tvProgrammeTonight.isNotEmpty()) add(HomeRowKey.TvProgrammeTonight)
             recommendationRows.forEach { row -> add(HomeRowKey.recommendation(row.kind)) }
         }
@@ -341,12 +362,35 @@ fun HomeScreen(
             }
         }
 
+        if (tvProgrammeNow.isNotEmpty()) {
+            item {
+                Column(Modifier.fillMaxWidth()) {
+                    TvProgrammeNowRow(
+                        items = tvProgrammeNow,
+                        now = tvProgrammeNowTime,
+                        firstFocusRequester = if (focusOnTvProgrammeNow) firstFocus else null,
+                        restoreItemKey = restoreTarget
+                            ?.takeIf { it.homeRowKey == HomeRowKey.TvProgrammeNow }
+                            ?.itemKey,
+                        onOpenProgramme = { item ->
+                            onOpenHomeEntry(
+                                item.channel,
+                                HomeRowKey.TvProgrammeNow,
+                                item.fingerprint,
+                            )
+                        },
+                    )
+                    Spacer(Modifier.height(CardRowSpacing))
+                }
+            }
+        }
+
         if (tvProgrammeTonight.isNotEmpty()) {
             item {
                 Column(Modifier.fillMaxWidth()) {
                     TvProgrammeTonightRow(
                         items = tvProgrammeTonight,
-                        firstFocusRequester = if (focusOnTvProgramme) firstFocus else null,
+                        firstFocusRequester = if (focusOnTvProgrammeTonight) firstFocus else null,
                         restoreItemKey = restoreTarget
                             ?.takeIf { it.homeRowKey == HomeRowKey.TvProgrammeTonight }
                             ?.itemKey,
@@ -642,6 +686,129 @@ private fun LiveBadge(modifier: Modifier = Modifier) {
             .padding(horizontal = 7.dp, vertical = 3.dp),
     ) {
         Text("LIVE", color = Night, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+private fun TvProgrammeNowRow(
+    items: List<ResolvedTvProgrammeNowItem>,
+    now: LocalTime,
+    firstFocusRequester: FocusRequester?,
+    restoreItemKey: String?,
+    onOpenProgramme: (ResolvedTvProgrammeNowItem) -> Unit,
+) {
+    val rowState = rememberLazyListState()
+    val restoreFocus = remember { FocusRequester() }
+    LaunchedEffect(restoreItemKey, items) {
+        val targetIndex = items.indexOfFirst { it.fingerprint == restoreItemKey }
+        if (targetIndex >= 0) {
+            rowState.scrollToItem(targetIndex)
+            delay(RESTORE_FOCUS_DELAY_MS)
+            runCatching { restoreFocus.requestFocus() }
+        }
+    }
+
+    Column(Modifier.fillMaxWidth()) {
+        SectionLabel("Programme TV FR en direct", fontSize = 16.sp)
+        Spacer(Modifier.height(10.dp))
+        LazyRow(state = rowState, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            itemsIndexed(items, key = { _, item -> item.fingerprint }) { index, item ->
+                val cardModifier = when {
+                    item.fingerprint == restoreItemKey -> Modifier.focusRequester(restoreFocus)
+                    index == 0 && firstFocusRequester != null -> Modifier.focusRequester(firstFocusRequester)
+                    else -> Modifier
+                }
+                TvProgrammeNowCard(
+                    item = item,
+                    now = now,
+                    onClick = { onOpenProgramme(item) },
+                    modifier = cardModifier,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TvProgrammeNowCard(
+    item: ResolvedTvProgrammeNowItem,
+    now: LocalTime,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val programme = item.programme
+    val channel = item.channel
+    val progress = programme.progressAt(now)
+
+    FocusableSurface(
+        onClick = onClick,
+        modifier = modifier.width(280.dp).height(250.dp),
+    ) {
+        Column(Modifier.fillMaxSize().padding(9.dp)) {
+            Box(Modifier.fillMaxWidth().height(125.dp)) {
+                MediaArtwork(
+                    programme.imageUrl,
+                    programme.title,
+                    Modifier.fillMaxSize(),
+                )
+                Text(
+                    programme.timeRangeLabel,
+                    color = Ink,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(7.dp)
+                        .clip(RoundedCornerShape(5.dp))
+                        .background(Night.copy(alpha = 0.9f))
+                        .padding(horizontal = 7.dp, vertical = 4.dp),
+                )
+                LiveBadge(Modifier.align(Alignment.TopEnd).padding(7.dp))
+            }
+            Spacer(Modifier.height(7.dp))
+            Text(
+                programme.title,
+                color = Ink,
+                fontSize = 14.sp,
+                lineHeight = 17.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(7.dp))
+            if (progress != null) {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(5.dp)
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(MutedInk.copy(alpha = 0.24f)),
+                ) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth(progress)
+                            .height(5.dp)
+                            .background(FocusBlueBright),
+                    )
+                }
+            }
+            Spacer(Modifier.weight(1f))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                ChannelLogo(
+                    channel.iconUrl,
+                    channel.displayName,
+                    Modifier.width(48.dp).height(48.dp),
+                )
+                Spacer(Modifier.width(7.dp))
+                Text(
+                    channel.displayName,
+                    color = MutedInk,
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
     }
 }
 
