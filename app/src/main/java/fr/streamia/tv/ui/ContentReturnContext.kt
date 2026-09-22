@@ -52,6 +52,7 @@ internal object HomeRowKey {
     const val Favorites = "favorites"
     const val LiveMatches = "matches-live"
     const val UpcomingMatches = "matches-next"
+    const val TvProgrammeNow = "tv-programme-fr-live"
     const val TvProgrammeTonight = "tv-programme-fr-tonight"
 
     fun recommendation(kind: RecommendationRowKind): String = "recommendation:$kind"
