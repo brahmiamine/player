@@ -1,183 +1,150 @@
 package fr.streamia.tv.beinsports
 
-import org.jsoup.Jsoup
-import org.jsoup.nodes.Element
+import org.json.JSONArray
+import org.json.JSONObject
+import java.time.Instant
 import java.util.Locale
 
+/** Chaîne exposée par l'EPG beIN SPORTS (`/api/opta/tv-channel`). */
+data class BeinGuideChannel(
+    val id: String,
+    val name: String,
+)
+
 /**
- * Parse la grille TV MENA de beIN SPORTS sans dépendre de classes CSS précises.
+ * Parse la grille TV MENA de beIN SPORTS.
  *
- * La page expose une section par chaîne (beIN SPORTS 1, XTRA, EN, FR, MAX, 4K...) et chaque
- * programme contient une plage horaire HH:mm HH:mm. Le parseur cherche ces éléments sémantiques,
- * puis remonte vers le plus petit bloc contenant aussi le titre du programme.
+ * La page https://www.beinsports.com/en-mena/tv-guide ne contient pas la grille dans son HTML :
+ * elle est chargée côté client depuis deux endpoints JSON du site :
+ * - `/api/opta/tv-channel?region=en-mena` : liste des chaînes (id + nom) ;
+ * - `/api/opta/tv-event?channelIds=…&endAfter=…&startBefore=…` : programmes, avec des bornes
+ *   `startDate`/`endDate` en UTC (ISO-8601), le titre, la catégorie et l'indicateur `live`.
  */
 object BeinSportsTvGuideParser {
-    fun parse(html: String): List<BeinChannelSchedule> {
-        val document = Jsoup.parse(html, GUIDE_URL)
-        val seenChannels = mutableSetOf<String>()
-
-        return document.getAllElements()
-            .asSequence()
-            .mapNotNull { element ->
-                val name = element.ownText().trim().takeIf(CHANNEL_NAME::matches) ?: return@mapNotNull null
-                val key = canonicalChannelKey(name)
-                if (!seenChannels.add(key)) return@mapNotNull null
-
-                val container = findChannelContainer(element) ?: return@mapNotNull null
-                val programmes = extractProgrammes(container, name)
-                if (programmes.isEmpty()) return@mapNotNull null
-                BeinChannelSchedule(channelName = name, programmes = programmes)
+    /** Chaînes beIN de la grille MENA, sans les déclinaisons AFC/NBA/HDR hors bouquet principal. */
+    fun parseChannels(json: String): List<BeinGuideChannel> {
+        val seenNames = mutableSetOf<String>()
+        return rows(json)
+            .mapNotNull { row ->
+                val id = row.optString("id").trim().takeIf(String::isNotEmpty) ?: return@mapNotNull null
+                val name = row.optString("name").replace(MULTI_SPACE, " ").trim()
+                if (!CHANNEL_NAME.matches(name)) return@mapNotNull null
+                if (!seenNames.add(name.lowercase(Locale.ROOT))) return@mapNotNull null
+                BeinGuideChannel(id = id, name = name)
             }
+            .sortedWith(CHANNEL_ORDER)
             .toList()
     }
 
-    private fun findChannelContainer(channelElement: Element): Element? {
-        var node: Element? = channelElement.parent()
-        repeat(MAX_CHANNEL_ANCESTORS) {
-            val current = node ?: return null
-            val channelNames = current.getAllElements()
-                .count { CHANNEL_NAME.matches(it.ownText().trim()) }
-            val timePairs = TIME_PAIR.findAll(current.text()).count()
-            if (channelNames == 1 && timePairs >= 1) return current
-            if (current.tagName().equals("body", ignoreCase = true)) return null
-            node = current.parent()
-        }
-        return null
-    }
-
-    private fun extractProgrammes(
-        container: Element,
-        channelName: String,
-    ): List<BeinProgrammeItem> {
+    /** Regroupe les programmes par chaîne, dans l'ordre de [channels], triés par heure de début. */
+    fun parseEvents(
+        json: String,
+        channels: List<BeinGuideChannel>,
+    ): List<BeinChannelSchedule> {
+        val channelsById = channels.associateBy { it.id.uppercase(Locale.ROOT) }
+        val programmesByChannel = linkedMapOf<String, MutableList<BeinProgrammeItem>>()
         val seen = mutableSetOf<String>()
 
-        return container.getAllElements()
-            .asSequence()
-            .filter { element ->
-                TIME_PAIR.containsMatchIn(element.text()) &&
-                    element.children().none { child -> TIME_PAIR.containsMatchIn(child.text()) }
-            }
-            .mapNotNull { timeLeaf ->
-                val block = findProgrammeBlock(timeLeaf, container, channelName) ?: return@mapNotNull null
-                val time = TIME_PAIR.find(block.text()) ?: return@mapNotNull null
-                val start = normalizeTime(time.groupValues[1], time.groupValues[2])
-                val end = normalizeTime(time.groupValues[3], time.groupValues[4])
-                val descriptor = descriptor(block, channelName, time.value)
-                if (descriptor.title.isBlank()) return@mapNotNull null
+        rows(json).forEach { row ->
+            val channelId = row.optString("channelId").ifBlank {
+                row.optJSONObject("channel")?.optString("id").orEmpty()
+            }.uppercase(Locale.ROOT)
+            val channel = channelsById[channelId] ?: return@forEach
 
-                val dedupeKey = "$start|$end|${descriptor.title.lowercase(Locale.ROOT)}"
-                if (!seen.add(dedupeKey)) return@mapNotNull null
+            val start = parseInstant(row.optString("startDate")) ?: return@forEach
+            val end = parseInstant(row.optString("endDate")) ?: return@forEach
+            if (end <= start) return@forEach
 
-                BeinProgrammeItem(
-                    channelName = channelName,
-                    category = descriptor.category,
-                    title = descriptor.title,
-                    startTime = start,
-                    endTime = end,
-                    isLive = LIVE_WORD.containsMatchIn(block.text()),
-                    imageUrl = programmeImageUrl(block),
-                )
-            }
-            .toList()
-    }
-
-    private fun findProgrammeBlock(
-        timeLeaf: Element,
-        channelContainer: Element,
-        channelName: String,
-    ): Element? {
-        var node: Element? = timeLeaf
-        repeat(MAX_PROGRAMME_ANCESTORS) {
-            val current = node ?: return null
-            if (current == channelContainer) return null
-
-            val text = current.text().trim()
-            val pairCount = TIME_PAIR.findAll(text).count()
-            val meaningful = text
-                .replace(TIME_PAIR, " ")
-                .replace(LIVE_WORD, " ")
-                .replace(channelName, " ", ignoreCase = true)
+            val title = row.optString("title").ifBlank { row.localized("Title") }
                 .replace(MULTI_SPACE, " ")
                 .trim()
+            if (title.isEmpty() || isChannelFiller(title)) return@forEach
 
-            if (pairCount == 1 && meaningful.any(Char::isLetter)) return current
-            node = current.parent()
-        }
-        return null
-    }
+            val dedupeKey = "$channelId|$start|${title.lowercase(Locale.ROOT)}"
+            if (!seen.add(dedupeKey)) return@forEach
 
-    private fun descriptor(
-        block: Element,
-        channelName: String,
-        timeText: String,
-    ): ProgrammeDescriptor {
-        val lines = block.wholeText()
-            .lines()
-            .map { line ->
-                line.replace(timeText, " ")
-                    .replace(LIVE_WORD, " ")
-                    .replace(channelName, " ", ignoreCase = true)
-                    .replace(MULTI_SPACE, " ")
-                    .trim()
-            }
-            .filter { it.isNotBlank() }
-            .filterNot { CHANNEL_NAME.matches(it) }
-            .distinct()
+            val category = row.optString("category").ifBlank { row.localized("Category") }
+                .replace(MULTI_SPACE, " ")
+                .trim()
+                .takeIf(String::isNotEmpty)
 
-        if (lines.isNotEmpty()) {
-            val title = lines.maxByOrNull(String::length).orEmpty()
-            val category = lines.firstOrNull { it != title }
-            return ProgrammeDescriptor(title = title, category = category)
+            programmesByChannel.getOrPut(channel.id) { mutableListOf() } += BeinProgrammeItem(
+                channelName = channel.name,
+                category = category,
+                title = title,
+                startEpochMillis = start,
+                endEpochMillis = end,
+                isLive = row.optBoolean("live", false) ||
+                    row.optJSONObject("data")?.optString("Live").equals("true", ignoreCase = true),
+                imageUrl = row.optJSONObject("data")?.optString("ImageURL")?.let(::absoluteUrl),
+            )
         }
 
-        val fallback = block.text()
-            .replace(timeText, " ")
-            .replace(LIVE_WORD, " ")
-            .replace(channelName, " ", ignoreCase = true)
-            .replace(MULTI_SPACE, " ")
-            .trim()
-        return ProgrammeDescriptor(title = fallback, category = null)
+        return channels.mapNotNull { channel ->
+            val programmes = programmesByChannel[channel.id]?.sortedBy { it.startEpochMillis }
+            if (programmes.isNullOrEmpty()) null else BeinChannelSchedule(channel.name, programmes)
+        }
     }
 
-    private fun programmeImageUrl(block: Element): String? =
-        block.select("img[data-src], img[data-lazy-src], img[src]")
-            .asSequence()
-            .mapNotNull { image ->
-                listOf("data-src", "data-lazy-src", "src")
-                    .asSequence()
-                    .map { attribute -> image.attr(attribute).trim() }
-                    .firstOrNull { raw -> raw.isNotBlank() && !raw.startsWith("data:", ignoreCase = true) }
-                    ?.let(::absoluteUrl)
-            }
-            .firstOrNull()
-
-    private fun absoluteUrl(raw: String): String = when {
-        raw.startsWith("https://", ignoreCase = true) || raw.startsWith("http://", ignoreCase = true) -> raw
-        raw.startsWith("//") -> "https:$raw"
-        raw.startsWith("/") -> "$ORIGIN$raw"
-        else -> "$ORIGIN/$raw"
+    private fun rows(json: String): Sequence<JSONObject> {
+        val trimmed = json.trim()
+        val array = if (trimmed.startsWith("[")) {
+            JSONArray(trimmed)
+        } else {
+            JSONObject(trimmed).optJSONArray("rows") ?: JSONArray()
+        }
+        return (0 until array.length()).asSequence().mapNotNull(array::optJSONObject)
     }
 
-    private fun normalizeTime(hour: String, minute: String): String =
-        "${hour.padStart(2, '0')}:${minute.padStart(2, '0')}"
+    private fun JSONObject.localized(key: String): String =
+        optJSONObject("data")?.optJSONObject(key)?.optString("English").orEmpty()
 
-    private fun canonicalChannelKey(raw: String): String =
-        raw.lowercase(Locale.ROOT).replace(MULTI_SPACE, " ").trim()
+    private fun parseInstant(raw: String): Long? =
+        raw.trim().takeIf(String::isNotEmpty)?.let { runCatching { Instant.parse(it).toEpochMilli() }.getOrNull() }
 
-    private data class ProgrammeDescriptor(
-        val title: String,
-        val category: String?,
-    )
+    /**
+     * Créneaux de remplissage : titre réduit au nom de la chaîne (« beIN Sports MAX ») ou bandeau
+     * promotionnel (« beIN SPORTS XTRA For Live And Exclusive Coverage… »).
+     */
+    private fun isChannelFiller(title: String): Boolean =
+        CHANNEL_NAME.matches(title) || CHANNEL_PROMO.containsMatchIn(title)
+
+    private fun absoluteUrl(raw: String): String? {
+        val value = raw.trim()
+        return when {
+            value.isEmpty() -> null
+            value.startsWith("https://", ignoreCase = true) || value.startsWith("http://", ignoreCase = true) -> value
+            value.startsWith("//") -> "https:$value"
+            value.startsWith("/") -> "$ORIGIN$value"
+            else -> null
+        }
+    }
+
+    private fun familyRank(name: String): Int {
+        val upper = name.uppercase(Locale.ROOT)
+        return when {
+            " EN " in "$upper " -> 1
+            " FR " in "$upper " -> 2
+            "XTRA" in upper -> 3
+            "MAX" in upper -> 4
+            "4K" in upper -> 5
+            "NEWS" in upper -> 6
+            DIGITS.containsMatchIn(upper) -> 0
+            else -> 7
+        }
+    }
+
+    private val CHANNEL_ORDER: Comparator<BeinGuideChannel> =
+        compareBy<BeinGuideChannel> { familyRank(it.name) }
+            .thenBy { DIGITS.find(it.name)?.value?.toIntOrNull() ?: 0 }
+            .thenBy { it.name }
 
     private const val ORIGIN = "https://www.beinsports.com"
-    private const val GUIDE_URL = "$ORIGIN/en-mena/tv-guide"
-    private const val MAX_CHANNEL_ANCESTORS = 10
-    private const val MAX_PROGRAMME_ANCESTORS = 7
 
     private val CHANNEL_NAME = Regex(
         """(?i)^beIN(?:\s+SPORTS)?(?:\s+(?:NEWS|XTRA|EN|FR|MAX))?(?:\s+\d+)?(?:\s+4K)?$""",
     )
-    private val TIME_PAIR = Regex("""\b(\d{1,2}):(\d{2})\s+(\d{1,2}):(\d{2})\b""")
-    private val LIVE_WORD = Regex("""(?i)\bLive\b""")
+    private val CHANNEL_PROMO = Regex("""(?i)^beIN(?:\s+SPORTS)?(?:\s+(?:XTRA|MAX))?\s+for\s+live\b""")
+    private val DIGITS = Regex("""\d+""")
     private val MULTI_SPACE = Regex("""\s+""")
 }

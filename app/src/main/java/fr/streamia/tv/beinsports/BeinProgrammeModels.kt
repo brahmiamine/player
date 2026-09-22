@@ -1,38 +1,40 @@
 package fr.streamia.tv.beinsports
 
 import fr.streamia.tv.domain.MediaEntry
-import java.time.LocalTime
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
+/**
+ * Programme de la grille beIN SPORTS. Les bornes sont des instants absolus (UTC) fournis par
+ * l'EPG : la détection « en cours / suivant » ne dépend donc ni du fuseau MENA ni du passage de
+ * minuit, et l'affichage se fait dans le fuseau de l'appareil.
+ */
 data class BeinProgrammeItem(
     val channelName: String,
     val category: String?,
     val title: String,
-    val startTime: String,
-    val endTime: String,
+    val startEpochMillis: Long,
+    val endEpochMillis: Long,
     val isLive: Boolean = false,
     val imageUrl: String? = null,
 ) {
+    val startTime: String
+        get() = formatClock(startEpochMillis)
+
+    val endTime: String
+        get() = formatClock(endEpochMillis)
+
     val timeRangeLabel: String
         get() = "$startTime - $endTime"
 
-    fun isOnAirAt(now: LocalTime): Boolean {
-        val start = startTime.toLocalTimeOrNull() ?: return false
-        val end = endTime.toLocalTimeOrNull() ?: return false
-        if (start == end) return false
-        return if (start < end) {
-            now >= start && now < end
-        } else {
-            now >= start || now < end
-        }
-    }
+    fun isOnAirAt(nowEpochMillis: Long): Boolean =
+        endEpochMillis > startEpochMillis && nowEpochMillis >= startEpochMillis && nowEpochMillis < endEpochMillis
 
-    fun progressAt(now: LocalTime): Float? {
-        if (!isOnAirAt(now)) return null
-        val start = startTime.toLocalTimeOrNull() ?: return null
-        val end = endTime.toLocalTimeOrNull() ?: return null
-        val total = minutesForward(start, end)
-        if (total <= 0) return null
-        val elapsed = minutesForward(start, now)
+    fun progressAt(nowEpochMillis: Long): Float? {
+        if (!isOnAirAt(nowEpochMillis)) return null
+        val total = endEpochMillis - startEpochMillis
+        val elapsed = nowEpochMillis - startEpochMillis
         return (elapsed.toFloat() / total.toFloat()).coerceIn(0f, 1f)
     }
 }
@@ -52,31 +54,33 @@ data class ResolvedBeinProgrammeItem(
     val channel: MediaEntry,
 ) {
     val fingerprint: String =
-        channel.key + ":" + programme.startTime + ":" + programme.title.lowercase().hashCode()
+        channel.key + ":" + programme.startEpochMillis + ":" + programme.title.lowercase().hashCode()
 }
 
 object BeinGuideSelector {
+    /**
+     * Par chaîne : le programme dont la plage [début, fin[ contient [nowEpochMillis], puis le
+     * programme qui démarre ensuite (le plus proche début strictement postérieur à maintenant).
+     */
     fun select(
         schedules: List<BeinChannelSchedule>,
-        now: LocalTime,
+        nowEpochMillis: Long,
     ): BeinGuideRows {
         val current = mutableListOf<BeinProgrammeItem>()
         val next = mutableListOf<BeinProgrammeItem>()
 
         schedules.forEach { schedule ->
-            val onAir = schedule.programmes.firstOrNull { it.isOnAirAt(now) }
+            val onAir = schedule.programmes
+                .filter { it.isOnAirAt(nowEpochMillis) }
+                .maxByOrNull { it.startEpochMillis }
             if (onAir != null) current += onAir
 
             val upcoming = schedule.programmes
                 .asSequence()
-                .filterNot { it === onAir }
-                .mapNotNull { programme ->
-                    val start = programme.startTime.toLocalTimeOrNull() ?: return@mapNotNull null
-                    val delta = minutesForward(now, start)
-                    if (delta in 1..MAX_NEXT_LOOKAHEAD_MINUTES) programme to delta else null
-                }
-                .minByOrNull { (_, delta) -> delta }
-                ?.first
+                .filter { it !== onAir && it.endEpochMillis > it.startEpochMillis }
+                .filter { it.startEpochMillis > nowEpochMillis }
+                .filter { it.startEpochMillis - nowEpochMillis <= MAX_NEXT_LOOKAHEAD_MILLIS }
+                .minByOrNull { it.startEpochMillis }
 
             if (upcoming != null) next += upcoming
         }
@@ -84,16 +88,10 @@ object BeinGuideSelector {
         return BeinGuideRows(current = current, next = next)
     }
 
-    private const val MAX_NEXT_LOOKAHEAD_MINUTES = 12 * 60
+    private const val MAX_NEXT_LOOKAHEAD_MILLIS = 12 * 60 * 60 * 1000L
 }
 
-private fun String.toLocalTimeOrNull(): LocalTime? =
-    runCatching { LocalTime.parse(this) }.getOrNull()
+private val CLOCK_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 
-private fun minutesForward(start: LocalTime, end: LocalTime): Int {
-    val startMinutes = start.hour * 60 + start.minute
-    val endMinutes = end.hour * 60 + end.minute
-    return (endMinutes - startMinutes + MINUTES_PER_DAY) % MINUTES_PER_DAY
-}
-
-private const val MINUTES_PER_DAY = 24 * 60
+private fun formatClock(epochMillis: Long): String =
+    CLOCK_FORMAT.format(Instant.ofEpochMilli(epochMillis).atZone(ZoneId.systemDefault()))

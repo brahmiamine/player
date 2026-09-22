@@ -9,7 +9,6 @@ import java.io.File
 
 internal data class CachedBeinGuideData(
     val fetchedAtEpochMillis: Long,
-    val localDate: String,
     val schedules: List<BeinChannelSchedule>,
 )
 
@@ -21,7 +20,6 @@ internal class BeinSportsGuideCache(context: Context) {
         val channels = root.getJSONArray("channels")
         CachedBeinGuideData(
             fetchedAtEpochMillis = root.getLong("fetchedAtEpochMillis"),
-            localDate = root.getString("localDate"),
             schedules = (0 until channels.length()).map { index ->
                 channels.getJSONObject(index).toSchedule()
             },
@@ -30,12 +28,10 @@ internal class BeinSportsGuideCache(context: Context) {
 
     fun save(
         schedules: List<BeinChannelSchedule>,
-        localDate: String,
         fetchedAtEpochMillis: Long = System.currentTimeMillis(),
     ) {
         val root = JSONObject().apply {
             put("fetchedAtEpochMillis", fetchedAtEpochMillis)
-            put("localDate", localDate)
             put("channels", JSONArray(schedules.map { it.toJson() }))
         }
         file.writeText(root.toString())
@@ -50,8 +46,8 @@ internal class BeinSportsGuideCache(context: Context) {
         put("channelName", channelName)
         category?.let { put("category", it) }
         put("title", title)
-        put("startTime", startTime)
-        put("endTime", endTime)
+        put("startEpochMillis", startEpochMillis)
+        put("endEpochMillis", endEpochMillis)
         put("isLive", isLive)
         imageUrl?.let { put("imageUrl", it) }
     }
@@ -70,13 +66,13 @@ internal class BeinSportsGuideCache(context: Context) {
         channelName = getString("channelName"),
         category = optString("category").takeIf(String::isNotBlank),
         title = getString("title"),
-        startTime = getString("startTime"),
-        endTime = getString("endTime"),
+        startEpochMillis = getLong("startEpochMillis"),
+        endEpochMillis = getLong("endEpochMillis"),
         isLive = optBoolean("isLive", false),
         imageUrl = optString("imageUrl").takeIf(String::isNotBlank),
     )
 
     private companion object {
-        const val FILE_NAME = "bein-sports-tv-guide-cache-v1.json"
+        const val FILE_NAME = "bein-sports-tv-guide-cache-v2.json"
     }
 }

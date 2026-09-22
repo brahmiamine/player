@@ -59,8 +59,8 @@ class BeinSportsChannelMatcherTest {
         channelName = channelName,
         category = "Football",
         title = "Programme",
-        startTime = "20:00",
-        endTime = "22:00",
+        startEpochMillis = 1_790_000_000_000L,
+        endEpochMillis = 1_790_007_200_000L,
     )
 
     private fun channel(id: Int, name: String, categoryId: String) = MediaEntry(

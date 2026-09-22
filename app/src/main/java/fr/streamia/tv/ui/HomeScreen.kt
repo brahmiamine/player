@@ -72,7 +72,6 @@ import java.util.Locale
 private val MainGridHeight = 560.dp
 private val CardRowSpacing = 22.dp
 private val TV_PROGRAMME_ZONE: ZoneId = ZoneId.of("Europe/Paris")
-private val BEIN_MENA_ZONE: ZoneId = ZoneId.of("Asia/Qatar")
 private const val TV_PROGRAMME_PROGRESS_REFRESH_MS = 30_000L
 private const val TV_PROGRAMME_DATA_REFRESH_MS = 2 * 60_000L
 
@@ -185,11 +184,11 @@ fun HomeScreen(
             delay(TV_PROGRAMME_PROGRESS_REFRESH_MS)
         }
     }
-    var beinNowTime by remember { mutableStateOf(LocalTime.now(BEIN_MENA_ZONE)) }
+    var beinNowEpochMillis by remember { mutableStateOf(System.currentTimeMillis()) }
     LaunchedEffect(beinSportsNow) {
         if (beinSportsNow.isEmpty()) return@LaunchedEffect
         while (true) {
-            beinNowTime = LocalTime.now(BEIN_MENA_ZONE)
+            beinNowEpochMillis = System.currentTimeMillis()
             delay(TV_PROGRAMME_PROGRESS_REFRESH_MS)
         }
     }
@@ -448,7 +447,7 @@ fun HomeScreen(
                     BeinSportsProgrammeRow(
                         title = "beIN Sports en direct",
                         items = beinSportsNow,
-                        now = beinNowTime,
+                        nowEpochMillis = beinNowEpochMillis,
                         showLive = true,
                         firstFocusRequester = if (focusOnBeinSportsNow) firstFocus else null,
                         restoreItemKey = restoreTarget
@@ -473,7 +472,7 @@ fun HomeScreen(
                     BeinSportsProgrammeRow(
                         title = "beIN Sports suivant",
                         items = beinSportsNext,
-                        now = beinNowTime,
+                        nowEpochMillis = beinNowEpochMillis,
                         showLive = false,
                         firstFocusRequester = if (focusOnBeinSportsNext) firstFocus else null,
                         restoreItemKey = restoreTarget
@@ -1001,7 +1000,7 @@ private fun TvProgrammeTonightCard(
 private fun BeinSportsProgrammeRow(
     title: String,
     items: List<ResolvedBeinProgrammeItem>,
-    now: LocalTime,
+    nowEpochMillis: Long,
     showLive: Boolean,
     firstFocusRequester: FocusRequester?,
     restoreItemKey: String?,
@@ -1030,7 +1029,7 @@ private fun BeinSportsProgrammeRow(
                 }
                 BeinSportsProgrammeCard(
                     item = item,
-                    now = now,
+                    nowEpochMillis = nowEpochMillis,
                     showLive = showLive,
                     onClick = { onOpenProgramme(item) },
                     modifier = cardModifier,
@@ -1043,14 +1042,14 @@ private fun BeinSportsProgrammeRow(
 @Composable
 private fun BeinSportsProgrammeCard(
     item: ResolvedBeinProgrammeItem,
-    now: LocalTime,
+    nowEpochMillis: Long,
     showLive: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val programme = item.programme
     val channel = item.channel
-    val progress = if (showLive) programme.progressAt(now) else null
+    val progress = if (showLive) programme.progressAt(nowEpochMillis) else null
 
     FocusableSurface(
         onClick = onClick,
