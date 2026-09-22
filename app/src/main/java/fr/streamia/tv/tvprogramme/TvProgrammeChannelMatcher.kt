@@ -129,7 +129,7 @@ class TvProgrammeChannelMatcher {
     private companion object {
         const val MIN_MATCH_SCORE = 0.6
         const val DEFAULT_LIMIT = 40
-        val FRENCH_PREFIX = Regex("""^\s*fr\s*(?:\||:|-|•|»)+\s*""", RegexOption.IGNORE_CASE)
+        val FRENCH_PREFIX = Regex("""^\s*fr\b\s*(?:(?:\||:|-|•|»)+\s*)?""", RegexOption.IGNORE_CASE)
         val COMBINING_MARKS = Regex("\\p{M}+")
         val NON_ALNUM = Regex("[^\\p{L}\\p{N}]+")
         val WHITESPACE = Regex("\\s+")
