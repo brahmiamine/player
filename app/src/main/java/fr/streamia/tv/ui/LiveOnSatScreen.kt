@@ -215,7 +215,7 @@ private fun LiveOnSatMatchCard(
             Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            ChannelLogo(match.participantALogoUrl, match.participantA, Modifier.width(48.dp).height(48.dp))
+            ChannelLogo(match.participantALogoUrl, match.participantA, Modifier.width(64.dp).height(64.dp))
             Spacer(Modifier.width(10.dp))
             Text(
                 "${match.participantA} – ${match.participantB}",
@@ -227,7 +227,7 @@ private fun LiveOnSatMatchCard(
                 modifier = Modifier.weight(1f),
             )
             Spacer(Modifier.width(10.dp))
-            ChannelLogo(match.participantBLogoUrl, match.participantB, Modifier.width(48.dp).height(48.dp))
+            ChannelLogo(match.participantBLogoUrl, match.participantB, Modifier.width(64.dp).height(64.dp))
         }
         if (match.channels.isNotEmpty()) {
             Spacer(Modifier.height(10.dp))
@@ -265,7 +265,7 @@ private fun ChannelChip(
                 Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                ChannelLogo(entry.iconUrl, entry.displayName, Modifier.width(32.dp).height(32.dp))
+                ChannelLogo(entry.iconUrl, entry.displayName, Modifier.width(40.dp).height(40.dp))
                 Spacer(Modifier.width(9.dp))
                 Text(
                     name,
