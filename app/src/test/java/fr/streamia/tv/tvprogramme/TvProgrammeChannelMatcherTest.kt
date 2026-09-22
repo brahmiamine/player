@@ -47,6 +47,26 @@ class TvProgrammeChannelMatcherTest {
     }
 
     @Test
+    fun currentProgrammeAlsoUsesHighestQualityVariant() {
+        val channels = listOf(
+            channel(1, "FR | TF1 SD", "fr"),
+            channel(2, "FR | TF1 HD", "fr"),
+            channel(3, "FR | TF1 FHD", "fr"),
+            channel(4, "FR | TF1 UHD", "fr"),
+            channel(5, "FR | TF1 4K", "fr"),
+        )
+
+        val result = matcher.resolveNow(
+            programmes = listOf(
+                TvProgrammeNowItem("TF1", "20:00", "21:00", "JT 20h"),
+            ),
+            channels = channels,
+        )
+
+        assertEquals(5, result.single().channel.id)
+    }
+
+    @Test
     fun acceptsFrPrefixWithoutSeparator() {
         val result = matcher.resolve(
             programmes = listOf(TvProgrammeItem("France 2", "21:05", "Journal")),
