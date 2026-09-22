@@ -112,6 +112,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onResumePlayback = viewModel::resumeHomePlayback,
                     onOpenHomeEntry = viewModel::openHomeEntry,
                     onOpenLiveMatches = viewModel::showLiveMatches,
+                    onRefreshTvProgrammeNow = viewModel::refreshTvProgrammeNow,
                 )
 
                 state.screen is StreamiaScreen.Browser && state.catalog != null && state.credentials != null -> BrowserScreen(
