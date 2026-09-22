@@ -102,6 +102,8 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     recommendationRows = state.homeRecommendationRows,
                     tvProgrammeNow = state.homeTvProgrammeNow,
                     tvProgrammeTonight = state.homeTvProgrammeTonight,
+                    beinSportsNow = state.homeBeinSportsNow,
+                    beinSportsNext = state.homeBeinSportsNext,
                     restoreContext = state.contentReturnContext,
                     onOpenSection = viewModel::openSection,
                     onSettings = viewModel::showSettings,
@@ -113,6 +115,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onOpenHomeEntry = viewModel::openHomeEntry,
                     onOpenLiveMatches = viewModel::showLiveMatches,
                     onRefreshTvProgrammeNow = viewModel::refreshTvProgrammeNow,
+                    onRefreshBeinSportsGuide = viewModel::refreshBeinSportsGuide,
                 )
 
                 state.screen is StreamiaScreen.Browser && state.catalog != null && state.credentials != null -> BrowserScreen(
