@@ -46,6 +46,7 @@ import fr.streamia.tv.matches.MatchTemporalState
 import fr.streamia.tv.matches.reclassifiedAt
 import fr.streamia.tv.recommendation.RecommendationRow
 import fr.streamia.tv.recommendation.RecommendedMedia
+import fr.streamia.tv.tvprogramme.ResolvedTvProgrammeItem
 import fr.streamia.tv.ui.theme.Danger
 import fr.streamia.tv.ui.theme.FocusBlueBright
 import fr.streamia.tv.ui.theme.HeadingWeight
@@ -80,6 +81,7 @@ fun HomeScreen(
     liveMatchRow: MatchRow? = null,
     upcomingMatchRow: MatchRow? = null,
     recommendationRows: List<RecommendationRow> = emptyList(),
+    tvProgrammeTonight: List<ResolvedTvProgrammeItem> = emptyList(),
     restoreContext: ContentReturnContext? = null,
     onOpenSection: (MediaType) -> Unit,
     onSettings: () -> Unit,
@@ -172,8 +174,12 @@ fun HomeScreen(
     val focusOnUpcomingMatches =
         !focusOnResume && !focusOnFavorites && !focusOnLiveMatches && displayedUpcomingMatchRow?.items?.isNotEmpty() == true
     val focusOnMatches = focusOnLiveMatches || focusOnUpcomingMatches
-    val focusOnRecommendations = !focusOnResume && !focusOnFavorites && !focusOnMatches && recommendationRows.isNotEmpty()
-    val focusOnGrid = !focusOnResume && !focusOnFavorites && !focusOnMatches && !focusOnRecommendations
+    val focusOnTvProgramme =
+        !focusOnResume && !focusOnFavorites && !focusOnMatches && tvProgrammeTonight.isNotEmpty()
+    val focusOnRecommendations =
+        !focusOnResume && !focusOnFavorites && !focusOnMatches && !focusOnTvProgramme && recommendationRows.isNotEmpty()
+    val focusOnGrid =
+        !focusOnResume && !focusOnFavorites && !focusOnMatches && !focusOnTvProgramme && !focusOnRecommendations
 
     val homeListState = rememberLazyListState()
     val restoreTarget = restoreContext?.takeIf { it.origin == ContentReturnOrigin.Home }
@@ -203,6 +209,7 @@ fun HomeScreen(
         favoriteCards,
         displayedLiveMatchRow,
         displayedUpcomingMatchRow,
+        tvProgrammeTonight,
         recommendationRows,
     ) {
         buildList {
@@ -210,6 +217,7 @@ fun HomeScreen(
             if (favoriteCards.isNotEmpty()) add(HomeRowKey.Favorites)
             if (displayedLiveMatchRow?.items?.isNotEmpty() == true) add(HomeRowKey.LiveMatches)
             if (displayedUpcomingMatchRow?.items?.isNotEmpty() == true) add(HomeRowKey.UpcomingMatches)
+            if (tvProgrammeTonight.isNotEmpty()) add(HomeRowKey.TvProgrammeTonight)
             recommendationRows.forEach { row -> add(HomeRowKey.recommendation(row.kind)) }
         }
     }
@@ -326,6 +334,28 @@ fun HomeScreen(
                             ?.itemKey,
                         onOpenMatch = { item ->
                             onOpenHomeEntry(item.event.channel, HomeRowKey.UpcomingMatches, item.event.fingerprint)
+                        },
+                    )
+                    Spacer(Modifier.height(CardRowSpacing))
+                }
+            }
+        }
+
+        if (tvProgrammeTonight.isNotEmpty()) {
+            item {
+                Column(Modifier.fillMaxWidth()) {
+                    TvProgrammeTonightRow(
+                        items = tvProgrammeTonight,
+                        firstFocusRequester = if (focusOnTvProgramme) firstFocus else null,
+                        restoreItemKey = restoreTarget
+                            ?.takeIf { it.homeRowKey == HomeRowKey.TvProgrammeTonight }
+                            ?.itemKey,
+                        onOpenProgramme = { item ->
+                            onOpenHomeEntry(
+                                item.channel,
+                                HomeRowKey.TvProgrammeTonight,
+                                item.fingerprint,
+                            )
                         },
                     )
                     Spacer(Modifier.height(CardRowSpacing))
@@ -612,6 +642,106 @@ private fun LiveBadge(modifier: Modifier = Modifier) {
             .padding(horizontal = 7.dp, vertical = 3.dp),
     ) {
         Text("LIVE", color = Night, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+private fun TvProgrammeTonightRow(
+    items: List<ResolvedTvProgrammeItem>,
+    firstFocusRequester: FocusRequester?,
+    restoreItemKey: String?,
+    onOpenProgramme: (ResolvedTvProgrammeItem) -> Unit,
+) {
+    val rowState = rememberLazyListState()
+    val restoreFocus = remember { FocusRequester() }
+    LaunchedEffect(restoreItemKey, items) {
+        val targetIndex = items.indexOfFirst { it.fingerprint == restoreItemKey }
+        if (targetIndex >= 0) {
+            rowState.scrollToItem(targetIndex)
+            delay(RESTORE_FOCUS_DELAY_MS)
+            runCatching { restoreFocus.requestFocus() }
+        }
+    }
+
+    Column(Modifier.fillMaxWidth()) {
+        SectionLabel("Programme TV FR ce soir", fontSize = 16.sp)
+        Spacer(Modifier.height(10.dp))
+        LazyRow(state = rowState, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            itemsIndexed(items, key = { _, item -> item.fingerprint }) { index, item ->
+                val cardModifier = when {
+                    item.fingerprint == restoreItemKey -> Modifier.focusRequester(restoreFocus)
+                    index == 0 && firstFocusRequester != null -> Modifier.focusRequester(firstFocusRequester)
+                    else -> Modifier
+                }
+                TvProgrammeTonightCard(
+                    item = item,
+                    onClick = { onOpenProgramme(item) },
+                    modifier = cardModifier,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TvProgrammeTonightCard(
+    item: ResolvedTvProgrammeItem,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val programme = item.programme
+    val channel = item.channel
+    FocusableSurface(
+        onClick = onClick,
+        modifier = modifier.width(280.dp).height(218.dp),
+    ) {
+        Column(Modifier.fillMaxSize().padding(9.dp)) {
+            Box(Modifier.fillMaxWidth().height(125.dp)) {
+                MediaArtwork(
+                    programme.imageUrl,
+                    programme.title,
+                    Modifier.fillMaxSize(),
+                )
+                Text(
+                    programme.time,
+                    color = Ink,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(7.dp)
+                        .clip(RoundedCornerShape(5.dp))
+                        .background(Night.copy(alpha = 0.9f))
+                        .padding(horizontal = 7.dp, vertical = 4.dp),
+                )
+            }
+            Spacer(Modifier.height(7.dp))
+            Text(
+                programme.title,
+                color = Ink,
+                fontSize = 14.sp,
+                lineHeight = 17.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.weight(1f))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                ChannelLogo(
+                    channel.iconUrl,
+                    channel.displayName,
+                    Modifier.width(34.dp).height(34.dp),
+                )
+                Spacer(Modifier.width(7.dp))
+                Text(
+                    channel.displayName,
+                    color = MutedInk,
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
     }
 }
 
