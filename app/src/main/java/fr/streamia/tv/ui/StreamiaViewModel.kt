@@ -586,6 +586,8 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
 
     fun refreshLiveOnSatMatches() = loadLiveOnSatMatches(forceRefresh = true)
 
+    fun refreshTvProgrammeNow() = loadTvProgrammeNow(forceRefresh = false)
+
     fun toggleLivePreview() {
         updateAppSettings { it.copy(livePreviewEnabled = !it.livePreviewEnabled) }
     }
