@@ -72,6 +72,7 @@ private val MainGridHeight = 560.dp
 private val CardRowSpacing = 22.dp
 private val TV_PROGRAMME_ZONE: ZoneId = ZoneId.of("Europe/Paris")
 private const val TV_PROGRAMME_PROGRESS_REFRESH_MS = 30_000L
+private const val TV_PROGRAMME_DATA_REFRESH_MS = 2 * 60_000L
 
 @Composable
 fun HomeScreen(
@@ -98,6 +99,7 @@ fun HomeScreen(
     onResumePlayback: (MediaEntry) -> Unit,
     onOpenHomeEntry: (MediaEntry, String, String) -> Unit,
     onOpenLiveMatches: () -> Unit,
+    onRefreshTvProgrammeNow: () -> Unit,
 ) {
     val firstFocus = remember { FocusRequester() }
     val restoringHome = restoreContext?.origin == ContentReturnOrigin.Home
@@ -176,6 +178,12 @@ fun HomeScreen(
         while (true) {
             tvProgrammeNowTime = LocalTime.now(TV_PROGRAMME_ZONE)
             delay(TV_PROGRAMME_PROGRESS_REFRESH_MS)
+        }
+    }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(TV_PROGRAMME_DATA_REFRESH_MS)
+            onRefreshTvProgrammeNow()
         }
     }
 
