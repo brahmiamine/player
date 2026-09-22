@@ -726,8 +726,6 @@ private fun LiveChannelList(
     ) {
         Row(Modifier.fillMaxWidth().padding(start = 3.dp, bottom = 7.dp), verticalAlignment = Alignment.CenterVertically) {
             SectionLabel("Chaînes")
-            Spacer(Modifier.weight(1f))
-            Text("OK aperçu · OK encore plein écran", color = MutedInk, fontSize = 12.sp)
         }
         if (entries.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -747,7 +745,7 @@ private fun LiveChannelList(
                         idleBackground = Color.Transparent,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(48.dp)
+                            .height(60.dp)
                             .onPreviewKeyEvent { event ->
                                 if (
                                     event.type == KeyEventType.KeyDown &&
@@ -764,7 +762,7 @@ private fun LiveChannelList(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(entry.number.toString(), color = MutedInk, fontSize = 11.sp, modifier = Modifier.width(38.dp))
-                            ChannelLogo(entry.iconUrl, entry.displayName, Modifier.size(31.dp))
+                            ChannelLogo(entry.iconUrl, entry.displayName, Modifier.size(42.dp))
                             Spacer(Modifier.width(8.dp))
                             Text(
                                 entry.displayName,
@@ -916,7 +914,7 @@ private fun LivePreview(
                     Text(entry.displayName, color = Ink, fontSize = TypeBody, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Spacer(Modifier.height(3.dp))
                     Text(
-                        "CH ${entry.number}${if (favorite) " · ★ Favori" else ""} · OK encore = plein écran · OK long = favori",
+                        "CH ${entry.number}${if (favorite) " · ★ Favori" else ""}",
                         color = FocusBlueBright,
                         fontSize = 12.sp,
                         maxLines = 1,
@@ -1050,8 +1048,10 @@ private fun CategoryRail(
       Column(Modifier.fillMaxSize().padding(14.dp)) {
         Row(Modifier.fillMaxWidth().padding(start = 3.dp, bottom = 7.dp), verticalAlignment = Alignment.CenterVertically) {
             SectionLabel("Catégories")
-            Spacer(Modifier.weight(1f))
-            Text("OK choisir · OK long favori", color = MutedInk, fontSize = 12.sp)
+            if (type != MediaType.Live) {
+                Spacer(Modifier.weight(1f))
+                Text("OK choisir · OK long favori", color = MutedInk, fontSize = 12.sp)
+            }
         }
         LazyColumn(
             state = listState,
@@ -1139,7 +1139,10 @@ private fun PosterGrid(
     }
 
     Column(modifier) {
-        Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Text(categoryName.ifBlank { type.displayName }, color = Ink, fontSize = TypeSectionTitle, fontWeight = HeadingWeight, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Spacer(Modifier.width(10.dp))
             Text("$totalCount ${type.pluralName}", color = MutedInk, fontSize = 12.sp)

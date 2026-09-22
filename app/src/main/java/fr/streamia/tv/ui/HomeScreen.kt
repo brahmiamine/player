@@ -29,6 +29,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -582,7 +583,7 @@ private fun HomeMatchCard(
                     ChannelLogo(
                         event.channel.iconUrl,
                         event.channel.displayName,
-                        Modifier.width(40.dp).height(40.dp),
+                        Modifier.width(50.dp).height(50.dp),
                     )
                     Spacer(Modifier.width(9.dp))
                     Text(
@@ -779,13 +780,32 @@ private fun HomeTile(
         Column(
             Modifier.fillMaxSize().padding(if (prominent) 34.dp else 22.dp),
             verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.Start,
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            StreamiaIcon(glyph, size = if (prominent) 64.dp else 42.dp, tint = if (prominent) Ink else FocusBlueBright)
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                StreamiaIcon(
+                    glyph,
+                    size = if (prominent) 64.dp else 42.dp,
+                    tint = if (prominent) Ink else FocusBlueBright,
+                )
+            }
             Spacer(Modifier.height(if (prominent) 24.dp else 12.dp))
-            Text(title, color = Ink, fontSize = if (prominent) 29.sp else 20.sp, fontWeight = HeadingWeight)
+            Text(
+                title,
+                color = Ink,
+                fontSize = if (prominent) 29.sp else 20.sp,
+                fontWeight = HeadingWeight,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
+            )
             Spacer(Modifier.height(5.dp))
-            Text(subtitle, color = if (prominent) Ink.copy(alpha = 0.75f) else MutedInk, fontSize = if (prominent) 15.sp else 12.sp)
+            Text(
+                subtitle,
+                color = if (prominent) Ink.copy(alpha = 0.75f) else MutedInk,
+                fontSize = if (prominent) 15.sp else 12.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
     }
 }
