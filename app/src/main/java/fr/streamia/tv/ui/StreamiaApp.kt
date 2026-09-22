@@ -152,6 +152,13 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
 
                 state.screen is StreamiaScreen.Settings -> SettingsScreen(
                     settings = state.appSettings,
+                    busy = state.busy,
+                    liveHistoryCount = state.library.history.count { it.entry.type == MediaType.Live },
+                    movieHistoryCount = state.library.history.count { it.entry.type == MediaType.Movie },
+                    seriesHistoryCount = state.library.history.count { it.entry.type == MediaType.Series },
+                    currentVersion = BuildConfig.VERSION_NAME,
+                    updateChecking = state.updateChecking,
+                    updateCheck = state.updateCheck,
                     onToggleLivePreview = viewModel::toggleLivePreview,
                     onCycleLivePreviewDelay = viewModel::cycleLivePreviewDelay,
                     onCycleVodSeekStep = viewModel::cycleVodSeekStep,
@@ -164,7 +171,20 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onToggleAutoPlayNextEpisode = viewModel::toggleAutoPlayNextEpisode,
                     onCycleSubtitleSizeScale = viewModel::cycleSubtitleSizeScale,
                     onToggleSubtitleBackground = viewModel::toggleSubtitleBackground,
-                    onTools = viewModel::showTools,
+                    onSearch = viewModel::showSearch,
+                    onEpg = viewModel::showEpg,
+                    onOrganizer = viewModel::showOrganizer,
+                    onRefresh = viewModel::refresh,
+                    onClearLiveHistory = { viewModel.clearHistory(MediaType.Live) },
+                    onClearMovieHistory = { viewModel.clearHistory(MediaType.Movie) },
+                    onClearSeriesHistory = { viewModel.clearHistory(MediaType.Series) },
+                    onClearAllHistory = { viewModel.clearHistory() },
+                    onChangePlaylist = viewModel::logout,
+                    onCheckForUpdate = viewModel::checkForUpdate,
+                    onDismissUpdateCheck = viewModel::dismissUpdateCheck,
+                    onExportBackup = viewModel::exportBackup,
+                    onImportBackup = viewModel::importBackup,
+                    onAbout = viewModel::showAbout,
                     onParentalControl = viewModel::showParentalControl,
                     onBack = viewModel::showHome,
                 )
@@ -206,7 +226,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     versionName = BuildConfig.VERSION_NAME,
                     onLoadCacheSize = viewModel::cacheSizeBytes,
                     onLoadEpgCacheSize = viewModel::epgCacheSizeBytes,
-                    onBack = viewModel::showTools,
+                    onBack = viewModel::showSettings,
                 )
 
                 state.screen is StreamiaScreen.Search && state.catalog != null -> SearchScreen(
