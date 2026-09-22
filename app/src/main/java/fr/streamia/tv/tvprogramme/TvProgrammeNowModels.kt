@@ -1,28 +1,40 @@
 package fr.streamia.tv.tvprogramme
 
 import fr.streamia.tv.domain.MediaEntry
-import java.time.LocalTime
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
-/** Programme actuellement diffusé sur une chaîne selon tv-programme.com. */
+/**
+ * Programme actuellement diffusé sur une chaîne selon tv-programme.com. Les bornes sont des
+ * instants absolus (le site expose désormais `data-starttime`/`data-endtime` en secondes UTC) :
+ * la détection « en cours » ne dépend donc plus d'une comparaison d'heures locales ni d'une
+ * hypothèse sur le passage de minuit.
+ */
 data class TvProgrammeNowItem(
     val channelName: String,
-    val startTime: String,
-    val endTime: String?,
+    val startEpochMillis: Long,
+    val endEpochMillis: Long,
     val title: String,
     val imageUrl: String? = null,
 ) {
+    val startTime: String
+        get() = formatClock(startEpochMillis)
+
+    val endTime: String
+        get() = formatClock(endEpochMillis)
+
     val timeRangeLabel: String
-        get() = endTime?.let { "$startTime - $it" } ?: startTime
+        get() = "$startTime - $endTime"
 
-    fun progressAt(now: LocalTime): Float? {
-        val start = startTime.toLocalTimeOrNull() ?: return null
-        val end = endTime?.toLocalTimeOrNull() ?: return null
-        val totalMinutes = minutesForward(start, end)
-        if (totalMinutes <= 0) return null
+    fun isOnAirAt(nowEpochMillis: Long): Boolean =
+        endEpochMillis > startEpochMillis && nowEpochMillis >= startEpochMillis && nowEpochMillis < endEpochMillis
 
-        val elapsedMinutes = minutesForward(start, now)
-        if (elapsedMinutes > totalMinutes) return null
-        return (elapsedMinutes.toFloat() / totalMinutes.toFloat()).coerceIn(0f, 1f)
+    fun progressAt(nowEpochMillis: Long): Float? {
+        if (!isOnAirAt(nowEpochMillis)) return null
+        val total = endEpochMillis - startEpochMillis
+        val elapsed = nowEpochMillis - startEpochMillis
+        return (elapsed.toFloat() / total.toFloat()).coerceIn(0f, 1f)
     }
 }
 
@@ -31,16 +43,11 @@ data class ResolvedTvProgrammeNowItem(
     val channel: MediaEntry,
 ) {
     val fingerprint: String =
-        channel.key + ":" + programme.startTime + ":" + programme.title.lowercase().hashCode()
+        channel.key + ":" + programme.startEpochMillis + ":" + programme.title.lowercase().hashCode()
 }
 
-private fun String.toLocalTimeOrNull(): LocalTime? =
-    runCatching { LocalTime.parse(this) }.getOrNull()
+private val CLOCK_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
+private val PARIS_ZONE: ZoneId = ZoneId.of("Europe/Paris")
 
-private fun minutesForward(start: LocalTime, end: LocalTime): Int {
-    val startMinutes = start.hour * 60 + start.minute
-    val endMinutes = end.hour * 60 + end.minute
-    return (endMinutes - startMinutes + MINUTES_PER_DAY) % MINUTES_PER_DAY
-}
-
-private const val MINUTES_PER_DAY = 24 * 60
+private fun formatClock(epochMillis: Long): String =
+    CLOCK_FORMAT.format(Instant.ofEpochMilli(epochMillis).atZone(PARIS_ZONE))

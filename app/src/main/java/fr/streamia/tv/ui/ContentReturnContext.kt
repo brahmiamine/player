@@ -50,12 +50,12 @@ data class ContentReturnContext(
 internal object HomeRowKey {
     const val Resume = "resume"
     const val Favorites = "favorites"
-    const val LiveMatches = "matches-live"
-    const val UpcomingMatches = "matches-next"
     const val TvProgrammeNow = "tv-programme-fr-live"
     const val TvProgrammeTonight = "tv-programme-fr-tonight"
     const val BeinSportsNow = "bein-sports-live"
     const val BeinSportsNext = "bein-sports-next"
+    const val UkGuideNow = "uk-guide-live"
+    const val UkGuideNext = "uk-guide-next"
 
     fun recommendation(kind: RecommendationRowKind): String = "recommendation:$kind"
 }
