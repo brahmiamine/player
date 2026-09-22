@@ -6,8 +6,8 @@
         </shape>
     </item>
     <item
-        android:width="72dp"
-        android:height="72dp"
+        android:width="60dp"
+        android:height="60dp"
         android:gravity="center"
         android:drawable="@drawable/streamia_logo_mark" />
 </layer-list>
