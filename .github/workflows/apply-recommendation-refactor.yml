@@ -36,23 +36,39 @@ jobs:
         with:
           gradle-version: "8.13"
 
-      - name: Add failing recommendation tests
+      - name: Add tests and implement recommendation refactor
         run: |
           python3 <<'PY'
           from pathlib import Path
 
-          def insert_before(path: str, marker: str, addition: str) -> None:
+          def insert_before(path: str, marker: str, unique: str, addition: str) -> None:
               file = Path(path)
               text = file.read_text()
-              if addition.strip() in text:
+              if unique in text:
                   return
-              if marker not in text:
-                  raise SystemExit(f"Marker not found in {path}: {marker}")
-              file.write_text(text.replace(marker, addition + marker, 1))
+              position = text.index(marker)
+              file.write_text(text[:position] + addition + text[position:])
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              file = Path(path)
+              text = file.read_text()
+              if new in text:
+                  return
+              if old not in text:
+                  raise SystemExit(f"Expected text not found in {path}: {old[:100]!r}")
+              file.write_text(text.replace(old, new, 1))
+
+          def replace_between(path: str, start: str, end: str, replacement: str) -> None:
+              file = Path(path)
+              text = file.read_text()
+              start_index = text.index(start)
+              end_index = text.index(end, start_index)
+              file.write_text(text[:start_index] + replacement + text[end_index:])
 
           insert_before(
               "app/src/test/java/fr/streamia/tv/recommendation/ContentSimilarityTest.kt",
               "    private fun features(\n",
+              "same broad genre without related plot is rejected",
               '''    @Test
               fun `same broad genre without related plot is rejected`() {
                   val source = features(
@@ -80,6 +96,7 @@ jobs:
           insert_before(
               "app/src/test/java/fr/streamia/tv/recommendation/RecommendationEngineTest.kt",
               "    private fun movie(\n",
+              "detail similarity keeps candidates matching both genre and story",
               '''    @Test
               fun `detail similarity keeps candidates matching both genre and story`() {
                   val sourceEntry = movie(90, "Deep Orbit", 8.4, "science", "équipage spatial mission planète inconnue")
@@ -106,62 +123,12 @@ jobs:
 
           '''.replace("              ", ""),
           )
-          PY
 
-      - name: Verify new tests fail for the intended behavior
-        run: |
-          set +e
-          gradle --no-daemon testDebugUnitTest \
-            --tests 'fr.streamia.tv.recommendation.ContentSimilarityTest' \
-            --tests 'fr.streamia.tv.recommendation.RecommendationEngineTest' \
-            --stacktrace > red-test.log 2>&1
-          status=$?
-          cat red-test.log
-          if [ "$status" -eq 0 ]; then
-            echo "The new tests unexpectedly passed before the implementation."
-            exit 1
-          fi
-          grep -R "same broad genre without related plot is rejected\|detail similarity keeps candidates matching both genre and story" \
-            app/build/test-results/testDebugUnitTest >/dev/null
-
-      - name: Implement recommendation candidate and scoring changes
-        run: |
-          python3 <<'PY'
-          from pathlib import Path
-          import re
-
-          def replace_once(path: str, old: str, new: str) -> None:
-              file = Path(path)
-              text = file.read_text()
-              if new in text:
-                  return
-              if old not in text:
-                  raise SystemExit(f"Expected block not found in {path}: {old[:100]!r}")
-              file.write_text(text.replace(old, new, 1))
-
-          def regex_once(path: str, pattern: str, replacement: str) -> None:
-              file = Path(path)
-              text = file.read_text()
-              updated, count = re.subn(pattern, replacement, text, count=1, flags=re.S)
-              if count != 1:
-                  raise SystemExit(f"Pattern matched {count} times in {path}: {pattern[:100]!r}")
-              file.write_text(updated)
-
-          # Genre + synopsis become the dominant evidence. A broad genre alone is no longer enough.
-          replace_once(
-              "app/src/main/java/fr/streamia/tv/recommendation/ContentSimilarity.kt",
-              '''        // Les signaux descriptifs dominent. Catégorie/année/note servent uniquement de
-              // départage et ne peuvent pas créer un résultat similaire sans preuve sémantique.
-              add(0.10, titleSimilarity, sourceTitleTokens.isNotEmpty() && candidateTitleTokens.isNotEmpty())
-              add(0.34, plotSimilarity, sourcePlotTokens.isNotEmpty() && candidatePlotTokens.isNotEmpty())
-              add(0.28, genreSimilarity, sourceGenres.isNotEmpty() && candidateGenres.isNotEmpty())
-              add(0.08, castSimilarity, sourceCast.isNotEmpty() && candidateCast.isNotEmpty())
-              add(0.10, directorSimilarity, sourceDirector.isNotEmpty() && candidateDirector.isNotEmpty())
-              add(0.025, countrySimilarity, sourceCountries.isNotEmpty() && candidateCountries.isNotEmpty())
-              add(0.035, yearSimilarity, extractYear(source) != null && extractYear(candidate) != null)
-              add(0.02, ratingSimilarity, source.rating != null && candidate.rating != null)
-              add(0.01, if (categoryMatch) 1.0 else 0.0, true)
-              '''.replace("              ", ""),
+          similarity = "app/src/main/java/fr/streamia/tv/recommendation/ContentSimilarity.kt"
+          replace_between(
+              similarity,
+              "        // Les signaux descriptifs dominent.",
+              "        var metadataScore",
               '''        // Pour une fiche détail, l'histoire et le genre doivent dominer nettement.
               // Catégorie IPTV, année et note restent seulement des critères de départage.
               add(0.06, titleSimilarity, sourceTitleTokens.isNotEmpty() && candidateTitleTokens.isNotEmpty())
@@ -173,18 +140,13 @@ jobs:
               add(0.02, yearSimilarity, extractYear(source) != null && extractYear(candidate) != null)
               add(0.01, ratingSimilarity, source.rating != null && candidate.rating != null)
               add(0.01, if (categoryMatch) 1.0 else 0.0, true)
-              '''.replace("              ", ""),
-          )
 
-          replace_once(
-              "app/src/main/java/fr/streamia/tv/recommendation/ContentSimilarity.kt",
-              '''        val strongTitleRelation = titleSimilarity >= 0.34
-              val strongPlotRelation = plotSimilarity >= 0.10
-              val genreRelation = genreSimilarity >= 0.34
-              val peopleRelation = directorSimilarity >= 0.72 || castSimilarity >= 0.20
-              val semanticRelation = semantic != null && semantic >= 0.58
-              val substantive = strongTitleRelation || strongPlotRelation || genreRelation || peopleRelation || semanticRelation
-              '''.replace("              ", ""),
+          '''.replace("              ", ""),
+          )
+          replace_between(
+              similarity,
+              "        val strongTitleRelation = titleSimilarity >= 0.34",
+              "        // Deux genres explicitement incompatibles",
               '''        val strongTitleRelation = titleSimilarity >= 0.45
               val plotAndGenreRelation = plotSimilarity >= 0.08 && genreSimilarity >= 0.34
               val strongPlotRelation = plotSimilarity >= 0.18
@@ -194,22 +156,13 @@ jobs:
               val semanticRelation = semantic != null && semantic >= 0.62
               val substantive = strongTitleRelation || plotAndGenreRelation || strongPlotRelation ||
                   strongGenreUniverse || peopleRelation || semanticRelation
-              '''.replace("              ", ""),
-          )
 
-          replace_once(
-              "app/src/main/java/fr/streamia/tv/recommendation/ContentSimilarity.kt",
-              '''        val reason = when {
-              directorSimilarity >= 0.72 -> "Même réalisateur"
-              genreSimilarity >= 0.66 && plotSimilarity >= 0.10 -> "Genres, intrigue et univers proches"
-              semantic != null && semantic >= 0.72 -> "Intrigue et ambiance similaires"
-              genreSimilarity >= 0.50 -> "Genres et univers proches"
-              plotSimilarity >= 0.18 -> "Intrigue et thèmes similaires"
-              castSimilarity >= 0.25 -> "Distribution similaire"
-              titleSimilarity >= 0.45 -> "Même saga ou univers"
-              else -> null
-              }
-              '''.replace("              ", ""),
+          '''.replace("              ", ""),
+          )
+          replace_between(
+              similarity,
+              "        val reason = when {",
+              "\n\n        return SimilarityScore",
               '''        val reason = when {
               genreSimilarity >= 0.66 && plotSimilarity >= 0.10 -> "Genre, intrigue et univers très proches"
               plotAndGenreRelation -> "Genre et histoire similaires"
@@ -220,24 +173,20 @@ jobs:
               titleSimilarity >= 0.45 -> "Même saga ou univers"
               else -> null
               }
-              '''.replace("              ", ""),
+          '''.replace("              ", ""),
           )
 
-          # Separate fast indexed pools for home discovery and source-specific detail similarity.
-          replace_once(
+          replace_between(
               "app/src/main/java/fr/streamia/tv/data/CatalogDatabase.kt",
-              '''    fun loadRecommendationCandidates(profileId: String, type: MediaType, limit: Int): List<MediaEntry> =
-                  loadRecent(profileId, type, limit)
-
-              private fun loadRecent(profileId: String, type: MediaType, limit: Int): List<MediaEntry> {
-              '''.replace("              ", ""),
+              "    fun loadRecommendationCandidates(",
+              "    private fun loadRecent(",
               '''    fun loadHomeRecommendationCandidates(profileId: String, type: MediaType, limit: Int): List<MediaEntry> =
                   loadRecent(profileId, type, limit)
 
               /**
-               * Candidats de fiche détail : la majorité vient de la même catégorie fournisseur,
-               * autour de la position du média. Les deux requêtes utilisent idx_catalog_category,
-               * restent rapides même avec 200k films, puis les contenus récents servent de repli.
+               * Pool de fiche détail centré sur le média : la majorité des candidats provient de
+               * sa catégorie fournisseur et de sa position voisine dans la playlist. Les requêtes
+               * utilisent idx_catalog_category, donc elles restent rapides sur un très gros catalogue.
                */
               fun loadSimilarityCandidates(profileId: String, source: MediaEntry, limit: Int): List<MediaEntry> {
                   if (limit <= 0) return emptyList()
@@ -245,10 +194,11 @@ jobs:
                   val forward = loadCategoryNeighbors(profileId, source, forward = true, limit = categoryTarget)
                   val backward = loadCategoryNeighbors(profileId, source, forward = false, limit = categoryTarget)
                   val categoryCandidates = interleave(forward, backward, categoryTarget)
+                  val seen = categoryCandidates.mapTo(mutableSetOf()) { it.key }
                   return buildList {
                       addAll(categoryCandidates)
                       loadRecent(profileId, source.type, limit).forEach { candidate ->
-                          if (candidate.key != source.key && none { it.key == candidate.key }) add(candidate)
+                          if (candidate.key != source.key && seen.add(candidate.key)) add(candidate)
                       }
                   }.take(limit)
               }
@@ -297,25 +247,13 @@ jobs:
                   return result
               }
 
-              private fun loadRecent(profileId: String, type: MediaType, limit: Int): List<MediaEntry> {
-              '''.replace("              ", ""),
+          '''.replace("              ", ""),
           )
 
-          replace_once(
+          replace_between(
               "app/src/main/java/fr/streamia/tv/data/CatalogCache.kt",
-              '''    /**
-               * Pool borné pour l'IA : lit seulement les contenus VOD récents via l'index SQLite existant.
-               * On évite ainsi de matérialiser des dizaines de milliers de films/séries dans le ViewModel.
-               */
-              suspend fun loadRecommendationCandidates(
-                  profileId: String,
-                  type: MediaType,
-                  limit: Int,
-              ): List<MediaEntry> = withContext(Dispatchers.IO) {
-                  ensureMigrated(profileId)
-                  database.loadRecommendationCandidates(profileId, type, limit)
-              }
-              '''.replace("              ", ""),
+              "    /**\n     * Pool borné pour l'IA",
+              "    suspend fun search(",
               '''    /** Pool récent borné, utilisé pour « À découvrir » et « Nouveautés ». */
               suspend fun loadHomeRecommendationCandidates(
                   profileId: String,
@@ -335,32 +273,32 @@ jobs:
                   ensureMigrated(profileId)
                   database.loadSimilarityCandidates(profileId, source, limit)
               }
-              '''.replace("              ", ""),
+
+          '''.replace("              ", ""),
           )
 
-          replace_once(
+          replace_between(
               "app/src/main/java/fr/streamia/tv/data/XtreamRepository.kt",
-              '''    /** Pool borné de candidats VOD pour le moteur de recommandation (accueil et fiches détail). */
-              suspend fun recommendationCandidates(profileId: String, type: MediaType, limit: Int): List<MediaEntry> =
-                  cache.loadRecommendationCandidates(profileId, type, limit)
-              '''.replace("              ", ""),
+              "    /** Pool borné de candidats VOD",
+              "    /**\n     * Fusionne",
               '''    /** Contenus récents pour l'accueil ; les goûts complètent ce pool dans le ViewModel. */
               suspend fun homeRecommendationCandidates(profileId: String, type: MediaType, limit: Int): List<MediaEntry> =
                   cache.loadHomeRecommendationCandidates(profileId, type, limit)
 
-              /** Candidats rapides et centrés sur la catégorie du média affiché dans une fiche détail. */
+              /** Candidats rapides centrés sur la catégorie du média affiché dans une fiche détail. */
               suspend fun similarityCandidates(profileId: String, source: MediaEntry, limit: Int): List<MediaEntry> =
                   cache.loadSimilarityCandidates(profileId, source, limit)
 
               /** Retours explicites déjà persistés : « plus comme ça » / « moins comme ça ». */
               suspend fun recommendationFeedback(profileId: String) =
                   withContext(Dispatchers.IO) { recommendationStore.feedback(profileId) }
-              '''.replace("              ", ""),
+
+          '''.replace("              ", ""),
           )
 
-          # Home = recent + candidates around recent history/favorites; detail = source-specific pool.
+          view_model = "app/src/main/java/fr/streamia/tv/ui/StreamiaViewModel.kt"
           replace_once(
-              "app/src/main/java/fr/streamia/tv/ui/StreamiaViewModel.kt",
+              view_model,
               '''            val candidates = listOf(MediaType.Movie, MediaType.Series).flatMap { type ->
                   runCatching {
                       repository.recommendationCandidates(profileId, type, HOME_RECOMMENDATION_CANDIDATE_LIMIT)
@@ -388,9 +326,8 @@ jobs:
               }
               '''.replace("              ", ""),
           )
-
           replace_once(
-              "app/src/main/java/fr/streamia/tv/ui/StreamiaViewModel.kt",
+              view_model,
               '''            val detailsByKey = runCatching {
                   repository.recommendationContentFeatures(profileId, detailsSource)
               }.getOrDefault(emptyMap())
@@ -405,48 +342,25 @@ jobs:
               if (sequence != homeRecommendationBuildSequence || _uiState.value.activeProfileId != profileId) return@launch
               '''.replace("              ", ""),
           )
-
           replace_once(
-              "app/src/main/java/fr/streamia/tv/ui/StreamiaViewModel.kt",
-              '''                    knownEntriesByKey = knownEntriesByKey,
-                  hiddenEntries = library.hiddenEntries,
-              '''.replace("              ", ""),
-              '''                    knownEntriesByKey = knownEntriesByKey,
-                  feedback = feedback,
-                  hiddenEntries = library.hiddenEntries,
-              '''.replace("              ", ""),
+              view_model,
+              "                    knownEntriesByKey = knownEntriesByKey,\n                    hiddenEntries = library.hiddenEntries,",
+              "                    knownEntriesByKey = knownEntriesByKey,\n                    feedback = feedback,\n                    hiddenEntries = library.hiddenEntries,",
           )
-
           replace_once(
-              "app/src/main/java/fr/streamia/tv/ui/StreamiaViewModel.kt",
+              view_model,
               "repository.recommendationCandidates(profileId, entry.type, SIMILAR_CANDIDATE_LIMIT)",
               "repository.similarityCandidates(profileId, entry, SIMILAR_CANDIDATE_LIMIT)",
           )
-
-          vm = Path("app/src/main/java/fr/streamia/tv/ui/StreamiaViewModel.kt")
-          text = vm.read_text()
-          text = re.sub(
-              r"private const val HOME_RECOMMENDATION_CANDIDATE_LIMIT = 400",
-              "private const val HOME_RECOMMENDATION_CANDIDATE_LIMIT = 400\n"
-              "private const val HOME_RECOMMENDATION_RECENT_LIMIT = 240\n"
-              "private const val HOME_RECOMMENDATION_TASTE_SOURCE_LIMIT = 4\n"
-              "private const val HOME_RECOMMENDATION_PER_SOURCE_LIMIT = 80",
-              text,
-              count=1,
+          replace_once(
+              view_model,
+              "private const val HOME_RECOMMENDATION_CANDIDATE_LIMIT = 400",
+              "private const val HOME_RECOMMENDATION_CANDIDATE_LIMIT = 400\nprivate const val HOME_RECOMMENDATION_RECENT_LIMIT = 240\nprivate const val HOME_RECOMMENDATION_TASTE_SOURCE_LIMIT = 4\nprivate const val HOME_RECOMMENDATION_PER_SOURCE_LIMIT = 80",
           )
-          text = re.sub(r"private const val SIMILAR_CANDIDATE_LIMIT = 400", "private const val SIMILAR_CANDIDATE_LIMIT = 300", text, count=1)
-          text = re.sub(r"private const val SIMILAR_ENRICH_LIMIT = 15", "private const val SIMILAR_ENRICH_LIMIT = 12", text, count=1)
-          text = re.sub(r"private const val SIMILAR_ENRICH_CONCURRENCY = 3", "private const val SIMILAR_ENRICH_CONCURRENCY = 4", text, count=1)
-          text = re.sub(r"private const val SIMILAR_DETAIL_MIN_SCORE = 0\.18", "private const val SIMILAR_DETAIL_MIN_SCORE = 0.28", text, count=1)
-          for required in (
-              "HOME_RECOMMENDATION_RECENT_LIMIT",
-              "HOME_RECOMMENDATION_TASTE_SOURCE_LIMIT",
-              "HOME_RECOMMENDATION_PER_SOURCE_LIMIT",
-              "SIMILAR_DETAIL_MIN_SCORE = 0.28",
-          ):
-              if required not in text:
-                  raise SystemExit(f"ViewModel constant patch missing: {required}")
-          vm.write_text(text)
+          replace_once(view_model, "private const val SIMILAR_CANDIDATE_LIMIT = 400", "private const val SIMILAR_CANDIDATE_LIMIT = 300")
+          replace_once(view_model, "private const val SIMILAR_ENRICH_LIMIT = 15", "private const val SIMILAR_ENRICH_LIMIT = 12")
+          replace_once(view_model, "private const val SIMILAR_ENRICH_CONCURRENCY = 3", "private const val SIMILAR_ENRICH_CONCURRENCY = 4")
+          replace_once(view_model, "private const val SIMILAR_DETAIL_MIN_SCORE = 0.18", "private const val SIMILAR_DETAIL_MIN_SCORE = 0.28")
           PY
 
       - name: Run unit tests and lint
