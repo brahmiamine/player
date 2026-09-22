@@ -1761,11 +1761,26 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         // Comme pour les Matchs : le scoring (similarité texte, décroissance des signaux) est du
         // CPU pur sur potentiellement plusieurs centaines de candidats, donc jamais sur Main.
         homeRecommendationJob = viewModelScope.launch(Dispatchers.Default) {
+            val tasteSources = (
+                library.history.sortedByDescending { it.updatedAt }.map { it.entry } +
+                    library.favoriteEntries.mapNotNull(catalog::entry)
+            ).distinctBy(MediaEntry::key).take(HOME_RECOMMENDATION_TASTE_SOURCE_LIMIT)
             val candidates = listOf(MediaType.Movie, MediaType.Series).flatMap { type ->
-                runCatching {
-                    repository.recommendationCandidates(profileId, type, HOME_RECOMMENDATION_CANDIDATE_LIMIT)
+                val recent = runCatching {
+                    repository.homeRecommendationCandidates(profileId, type, HOME_RECOMMENDATION_RECENT_LIMIT)
                 }.getOrDefault(emptyList())
+                val tasteCandidates = mutableListOf<MediaEntry>()
+                for (source in tasteSources) {
+                    if (source.type != type) continue
+                    tasteCandidates += runCatching {
+                        repository.similarityCandidates(profileId, source, HOME_RECOMMENDATION_PER_SOURCE_LIMIT)
+                    }.getOrDefault(emptyList())
+                }
+                (recent + tasteCandidates)
+                    .distinctBy(MediaEntry::key)
+                    .take(HOME_RECOMMENDATION_CANDIDATE_LIMIT)
             }
+
             if (sequence != homeRecommendationBuildSequence || _uiState.value.activeProfileId != profileId) return@launch
             if (candidates.isEmpty()) {
                 _uiState.update { current ->
@@ -1781,6 +1796,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             val detailsByKey = runCatching {
                 repository.recommendationContentFeatures(profileId, detailsSource)
             }.getOrDefault(emptyMap())
+            val feedback = runCatching { repository.recommendationFeedback(profileId) }.getOrDefault(emptyMap())
 
             if (sequence != homeRecommendationBuildSequence || _uiState.value.activeProfileId != profileId) return@launch
 
@@ -1794,6 +1810,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                     favoriteEntries = library.favoriteEntries,
                     watchedEntries = library.watchedEntries,
                     knownEntriesByKey = knownEntriesByKey,
+                    feedback = feedback,
                     hiddenEntries = library.hiddenEntries,
                     hiddenCategoryIds = excludedCategoryIds,
                 ),
@@ -1837,7 +1854,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             .mapTo(mutableSetOf()) { it.id }
 
         val candidates = runCatching {
-            repository.recommendationCandidates(profileId, entry.type, SIMILAR_CANDIDATE_LIMIT)
+            repository.similarityCandidates(profileId, entry, SIMILAR_CANDIDATE_LIMIT)
         }.getOrDefault(emptyList())
         if (candidates.isEmpty()) return
 
@@ -2294,14 +2311,17 @@ private const val MAX_EPG_DAY_SPAN = 30L
 private const val HOME_MATCH_ROW_LIMIT = 12
 private const val HOME_MATCH_REBUILD_INTERVAL_SECONDS = 5 * 60L
 private const val HOME_RECOMMENDATION_CANDIDATE_LIMIT = 400
+private const val HOME_RECOMMENDATION_RECENT_LIMIT = 240
+private const val HOME_RECOMMENDATION_TASTE_SOURCE_LIMIT = 4
+private const val HOME_RECOMMENDATION_PER_SOURCE_LIMIT = 80
 private const val HOME_RECOMMENDATION_REBUILD_INTERVAL_MS = 5 * 60_000L
 private const val LIVE_ONSAT_RESOLVE_BATCH = 20
-private const val SIMILAR_CANDIDATE_LIMIT = 400
+private const val SIMILAR_CANDIDATE_LIMIT = 300
 private const val SIMILAR_RESULT_LIMIT = 12
 private const val SIMILAR_TARGET_COUNT = 8
-private const val SIMILAR_ENRICH_LIMIT = 15
-private const val SIMILAR_ENRICH_CONCURRENCY = 3
-private const val SIMILAR_DETAIL_MIN_SCORE = 0.18
+private const val SIMILAR_ENRICH_LIMIT = 12
+private const val SIMILAR_ENRICH_CONCURRENCY = 4
+private const val SIMILAR_DETAIL_MIN_SCORE = 0.28
 
 class StreamiaViewModelFactory(private val repository: XtreamRepository) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
