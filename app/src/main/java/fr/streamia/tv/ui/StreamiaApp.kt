@@ -100,6 +100,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     liveMatchRow = state.homeLiveMatchRow,
                     upcomingMatchRow = state.homeUpcomingMatchRow,
                     recommendationRows = state.homeRecommendationRows,
+                    tvProgrammeNow = state.homeTvProgrammeNow,
                     tvProgrammeTonight = state.homeTvProgrammeTonight,
                     restoreContext = state.contentReturnContext,
                     onOpenSection = viewModel::openSection,
