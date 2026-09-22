@@ -9,11 +9,19 @@ import java.time.Instant
 
 class BeinSportsTvGuideParserTest {
     @Test
-    fun parsesMenaChannelsAndSkipsRegionalVariants() {
+    fun parsesEveryMenaChannelIncludingAfcAndNbaVariants() {
         val channels = BeinSportsTvGuideParser.parseChannels(CHANNELS_JSON)
 
         assertEquals(
-            listOf("beIN SPORTS 1", "beIN SPORTS 2", "beIN SPORTS EN 1", "beIN SPORTS XTRA 1", "beIN SPORTS MAX 1"),
+            listOf(
+                "beIN SPORTS 1",
+                "beIN SPORTS 2",
+                "beIN SPORTS EN 1",
+                "beIN SPORTS XTRA 1",
+                "beIN SPORTS MAX 1",
+                "beIN SPORTS 1 AFC",
+                "beIN SPORTS NBA",
+            ),
             channels.map { it.name },
         )
     }
@@ -26,7 +34,11 @@ class BeinSportsTvGuideParserTest {
         val now = millis("2026-09-22T19:47:00Z")
         val rows = BeinGuideSelector.select(schedules, now)
 
-        assertEquals(listOf("beIN SPORTS 1", "beIN SPORTS 2", "beIN SPORTS EN 1"), schedules.map { it.channelName })
+        assertEquals(
+            listOf("beIN SPORTS 1", "beIN SPORTS 2", "beIN SPORTS EN 1", "beIN SPORTS 1 AFC"),
+            schedules.map { it.channelName },
+        )
+        assertEquals("Karate - Asian Games", rows.current.single { it.channelName == "beIN SPORTS 1 AFC" }.title)
         // Les créneaux de remplissage (MAX, bandeau XTRA) sont ignorés.
         assertTrue(schedules.none { it.channelName == "beIN SPORTS MAX 1" })
         assertTrue(schedules.none { it.channelName == "beIN SPORTS XTRA 1" })

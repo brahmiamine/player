@@ -1,37 +1,28 @@
 package fr.streamia.tv.ukguide
 
 import fr.streamia.tv.domain.Catalog
+import fr.streamia.tv.domain.LiveChannelPrefix
 import fr.streamia.tv.domain.MediaEntry
-import fr.streamia.tv.domain.MediaType
 import java.text.Normalizer
 import java.util.Locale
 
 /**
- * Associe les chaînes de tvguideuk.com uniquement aux catégories Direct dont le nom commence par
- * "UK" (insensible à la casse), puis choisit la meilleure variante qualité disponible, comme
+ * Associe les chaînes de tvguideuk.com uniquement aux chaînes Direct "UK" de la playlist
+ * (catégorie ou nom de chaîne commençant par "UK", voir [LiveChannelPrefix]), puis choisit la
+ * meilleure variante qualité disponible, comme
  * [fr.streamia.tv.tvprogramme.TvProgrammeChannelMatcher] le fait pour les chaînes françaises.
  */
 class UkGuideChannelMatcher {
-    fun ukLiveChannels(catalog: Catalog): List<MediaEntry> {
-        val ukCategoryIds = catalog.categories.asSequence()
-            .filter { it.type == MediaType.Live && it.name.trim().startsWith("uk", ignoreCase = true) }
-            .mapTo(mutableSetOf()) { it.id }
-        if (ukCategoryIds.isEmpty()) return emptyList()
-
-        return catalog.entriesFor(MediaType.Live)
-            .filter { it.categoryId in ukCategoryIds }
-    }
+    fun ukLiveChannels(catalog: Catalog): List<MediaEntry> = LiveChannelPrefix.UK.channels(catalog)
 
     fun resolve(
         programmes: List<UkProgrammeItem>,
         catalog: Catalog,
-        limit: Int = DEFAULT_LIMIT,
-    ): List<ResolvedUkProgrammeItem> = resolve(programmes, ukLiveChannels(catalog), limit)
+    ): List<ResolvedUkProgrammeItem> = resolve(programmes, ukLiveChannels(catalog))
 
     fun resolve(
         programmes: List<UkProgrammeItem>,
         channels: List<MediaEntry>,
-        limit: Int = DEFAULT_LIMIT,
     ): List<ResolvedUkProgrammeItem> {
         if (programmes.isEmpty() || channels.isEmpty()) return emptyList()
 
@@ -68,7 +59,6 @@ class UkGuideChannelMatcher {
                 if (!seenChannels.add(best.channel.key)) return@mapNotNull null
                 ResolvedUkProgrammeItem(programme = programme, channel = best.channel)
             }
-            .take(limit)
             .toList()
     }
 
@@ -83,7 +73,7 @@ class UkGuideChannelMatcher {
     }
 
     private fun normalized(raw: String): NormalizedName {
-        val withoutUkPrefix = raw.replace(UK_PREFIX, " ")
+        val withoutUkPrefix = LiveChannelPrefix.UK.strip(raw)
         val ascii = Normalizer.normalize(withoutUkPrefix, Normalizer.Form.NFD)
             .replace(COMBINING_MARKS, "")
             .replace("+", " plus ")
@@ -127,8 +117,6 @@ class UkGuideChannelMatcher {
 
     private companion object {
         const val MIN_MATCH_SCORE = 0.6
-        const val DEFAULT_LIMIT = 40
-        val UK_PREFIX = Regex("""^\s*uk\b\s*(?:(?:\||:|-|•|»)+\s*)?""", RegexOption.IGNORE_CASE)
         val COMBINING_MARKS = Regex("\\p{M}+")
         val NON_ALNUM = Regex("[^\\p{L}\\p{N}]+")
         val WHITESPACE = Regex("\\s+")

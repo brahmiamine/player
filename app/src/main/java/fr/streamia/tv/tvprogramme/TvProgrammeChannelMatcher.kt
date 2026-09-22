@@ -1,45 +1,32 @@
 package fr.streamia.tv.tvprogramme
 
 import fr.streamia.tv.domain.Catalog
+import fr.streamia.tv.domain.LiveChannelPrefix
 import fr.streamia.tv.domain.MediaEntry
-import fr.streamia.tv.domain.MediaType
 import java.text.Normalizer
 import java.util.Locale
 
 /**
- * Associe les chaînes de tv-programme.com uniquement aux catégories Direct dont le nom commence
- * par "FR" (insensible à la casse), puis choisit la meilleure variante qualité disponible :
- * 4K > UHD > FHD > HD > SD > non marquée.
+ * Associe les chaînes de tv-programme.com uniquement aux chaînes Direct "FR" de la playlist
+ * (catégorie ou nom de chaîne commençant par "FR", voir [LiveChannelPrefix]), puis choisit la
+ * meilleure variante qualité disponible : 4K > UHD > FHD > HD > SD > non marquée.
  */
 class TvProgrammeChannelMatcher {
-    fun frenchLiveChannels(catalog: Catalog): List<MediaEntry> {
-        val frenchCategoryIds = catalog.categories.asSequence()
-            .filter { it.type == MediaType.Live && it.name.trim().startsWith("fr", ignoreCase = true) }
-            .mapTo(mutableSetOf()) { it.id }
-        if (frenchCategoryIds.isEmpty()) return emptyList()
-
-        return catalog.entriesFor(MediaType.Live)
-            .filter { it.categoryId in frenchCategoryIds }
-    }
+    fun frenchLiveChannels(catalog: Catalog): List<MediaEntry> = LiveChannelPrefix.FR.channels(catalog)
 
     fun resolve(
         programmes: List<TvProgrammeItem>,
         catalog: Catalog,
-        limit: Int = DEFAULT_LIMIT,
-    ): List<ResolvedTvProgrammeItem> =
-        resolve(programmes, frenchLiveChannels(catalog), limit)
+    ): List<ResolvedTvProgrammeItem> = resolve(programmes, frenchLiveChannels(catalog))
 
     fun resolveNow(
         programmes: List<TvProgrammeNowItem>,
         catalog: Catalog,
-        limit: Int = DEFAULT_LIMIT,
-    ): List<ResolvedTvProgrammeNowItem> =
-        resolveNow(programmes, frenchLiveChannels(catalog), limit)
+    ): List<ResolvedTvProgrammeNowItem> = resolveNow(programmes, frenchLiveChannels(catalog))
 
     fun resolveNow(
         programmes: List<TvProgrammeNowItem>,
         channels: List<MediaEntry>,
-        limit: Int = DEFAULT_LIMIT,
     ): List<ResolvedTvProgrammeNowItem> {
         if (programmes.isEmpty() || channels.isEmpty()) return emptyList()
 
@@ -76,14 +63,12 @@ class TvProgrammeChannelMatcher {
                 if (!seenChannels.add(best.channel.key)) return@mapNotNull null
                 ResolvedTvProgrammeNowItem(programme = programme, channel = best.channel)
             }
-            .take(limit)
             .toList()
     }
 
     fun resolve(
         programmes: List<TvProgrammeItem>,
         channels: List<MediaEntry>,
-        limit: Int = DEFAULT_LIMIT,
     ): List<ResolvedTvProgrammeItem> {
         if (programmes.isEmpty() || channels.isEmpty()) return emptyList()
 
@@ -120,7 +105,6 @@ class TvProgrammeChannelMatcher {
                 if (!seenChannels.add(best.channel.key)) return@mapNotNull null
                 ResolvedTvProgrammeItem(programme = programme, channel = best.channel)
             }
-            .take(limit)
             .toList()
     }
 
@@ -135,7 +119,7 @@ class TvProgrammeChannelMatcher {
     }
 
     private fun normalized(raw: String): NormalizedName {
-        val withoutFrenchPrefix = raw.replace(FRENCH_PREFIX, " ")
+        val withoutFrenchPrefix = LiveChannelPrefix.FR.strip(raw)
         val ascii = Normalizer.normalize(withoutFrenchPrefix, Normalizer.Form.NFD)
             .replace(COMBINING_MARKS, "")
             .replace("+", " plus ")
@@ -179,8 +163,6 @@ class TvProgrammeChannelMatcher {
 
     private companion object {
         const val MIN_MATCH_SCORE = 0.6
-        const val DEFAULT_LIMIT = 40
-        val FRENCH_PREFIX = Regex("""^\s*fr\b\s*(?:(?:\||:|-|•|»)+\s*)?""", RegexOption.IGNORE_CASE)
         val COMBINING_MARKS = Regex("\\p{M}+")
         val NON_ALNUM = Regex("[^\\p{L}\\p{N}]+")
         val WHITESPACE = Regex("\\s+")
