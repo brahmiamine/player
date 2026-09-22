@@ -15,7 +15,7 @@ Le score privilégie fortement :
 - le genre ;
 - puis, comme signaux secondaires, le titre ou la saga, le réalisateur et la distribution.
 
-La catégorie IPTV, l’année et la note ne suffisent jamais à elles seules pour déclarer deux contenus similaires. Une proximité descriptive réelle est obligatoire.
+La catégorie IPTV, l’année et la note ne suffisent jamais à elles seules pour déclarer deux contenus similaires. Une proximité descriptive réelle est obligatoire. Une normalisation légère rapproche aussi plusieurs termes français et anglais fréquents dans les synopsis, sans ajouter de modèle lourd sur l’Android TV.
 
 ## Accueil
 
@@ -32,4 +32,5 @@ Quand les signaux du profil ne sont pas encore suffisants, l’accueil affiche �
 - Aucun parcours complet du catalogue n’est nécessaire à l’ouverture d’une fiche.
 - Les calculs de similarité sont déterministes et exécutés hors du thread principal.
 - Les enrichissements réseau sont strictement bornés et mis en cache.
+- Les règles sont couvertes par les tests unitaires du moteur et le lint Android.
 - Les identifiants présents dans les URLs de playlists ne font pas partie du modèle de recommandation et ne doivent jamais être journalisés, documentés ou exportés.
