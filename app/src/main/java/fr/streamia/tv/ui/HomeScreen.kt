@@ -582,7 +582,7 @@ private fun HomeMatchCard(
                     ChannelLogo(
                         event.channel.iconUrl,
                         event.channel.displayName,
-                        Modifier.width(40.dp).height(40.dp),
+                        Modifier.width(50.dp).height(50.dp),
                     )
                     Spacer(Modifier.width(9.dp))
                     Text(
@@ -781,7 +781,13 @@ private fun HomeTile(
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.Start,
         ) {
-            StreamiaIcon(glyph, size = if (prominent) 64.dp else 42.dp, tint = if (prominent) Ink else FocusBlueBright)
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                StreamiaIcon(
+                    glyph,
+                    size = if (prominent) 64.dp else 42.dp,
+                    tint = if (prominent) Ink else FocusBlueBright,
+                )
+            }
             Spacer(Modifier.height(if (prominent) 24.dp else 12.dp))
             Text(title, color = Ink, fontSize = if (prominent) 29.sp else 20.sp, fontWeight = HeadingWeight)
             Spacer(Modifier.height(5.dp))
