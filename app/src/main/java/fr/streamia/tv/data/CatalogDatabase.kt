@@ -420,8 +420,72 @@ internal class CatalogDatabase(context: Context) :
         return result.values.toList()
     }
 
-    fun loadRecommendationCandidates(profileId: String, type: MediaType, limit: Int): List<MediaEntry> =
+    fun loadHomeRecommendationCandidates(profileId: String, type: MediaType, limit: Int): List<MediaEntry> =
         loadRecent(profileId, type, limit)
+
+    /**
+     * Pool de fiche détail centré sur le média : la majorité des candidats provient de
+     * sa catégorie fournisseur et de sa position voisine dans la playlist. Les requêtes
+     * utilisent idx_catalog_category, donc elles restent rapides sur un très gros catalogue.
+     */
+    fun loadSimilarityCandidates(profileId: String, source: MediaEntry, limit: Int): List<MediaEntry> {
+        if (limit <= 0) return emptyList()
+        val categoryTarget = (limit * 3 / 4).coerceAtLeast(1)
+        val forward = loadCategoryNeighbors(profileId, source, forward = true, limit = categoryTarget)
+        val backward = loadCategoryNeighbors(profileId, source, forward = false, limit = categoryTarget)
+        val categoryCandidates = interleave(forward, backward, categoryTarget)
+        val seen = categoryCandidates.mapTo(mutableSetOf()) { it.key }
+        return buildList {
+            addAll(categoryCandidates)
+            loadRecent(profileId, source.type, limit).forEach { candidate ->
+                if (candidate.key != source.key && seen.add(candidate.key)) add(candidate)
+            }
+        }.take(limit)
+    }
+
+    private fun loadCategoryNeighbors(
+        profileId: String,
+        source: MediaEntry,
+        forward: Boolean,
+        limit: Int,
+    ): List<MediaEntry> {
+        if (limit <= 0) return emptyList()
+        val comparison = if (forward) ">" else "<"
+        val direction = if (forward) "ASC" else "DESC"
+        return readableDatabase.rawQuery(
+            """
+            SELECT ${ENTRY_COLUMNS.joinToString()} FROM catalog_entries
+            WHERE profile_id = ? AND media_type = ? AND category_id = ? AND navigable = 1
+              AND (number $comparison ? OR (number = ? AND media_id $comparison ?))
+            ORDER BY number $direction, media_id $direction
+            LIMIT ?
+            """.trimIndent(),
+            arrayOf(
+                profileId,
+                source.type.name,
+                source.categoryId,
+                source.number.toString(),
+                source.number.toString(),
+                source.id.toString(),
+                limit.toString(),
+            ),
+        ).use(::readEntries)
+    }
+
+    private fun interleave(
+        first: List<MediaEntry>,
+        second: List<MediaEntry>,
+        limit: Int,
+    ): List<MediaEntry> {
+        val result = ArrayList<MediaEntry>(limit)
+        var index = 0
+        while (result.size < limit && (index < first.size || index < second.size)) {
+            if (index < first.size) result += first[index]
+            if (result.size < limit && index < second.size) result += second[index]
+            index += 1
+        }
+        return result
+    }
 
     private fun loadRecent(profileId: String, type: MediaType, limit: Int): List<MediaEntry> {
         if (limit <= 0) return emptyList()

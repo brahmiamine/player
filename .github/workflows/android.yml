@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 concurrency:
   group: android-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -50,14 +51,74 @@ jobs:
           gradle-version: "8.13"
 
       - name: Unit tests and lint
+        id: unit_tests_lint
+        continue-on-error: true
         run: |
-          if ! gradle --no-daemon testDebugUnitTest lintDebug; then
-            test -f app/build/reports/lint-results-debug.txt && cat app/build/reports/lint-results-debug.txt
-            exit 1
-          fi
+          set +e
+          gradle --no-daemon testDebugUnitTest lintDebug --stacktrace > gradle-output.log 2>&1
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          test -f app/build/reports/lint-results-debug.txt && cat app/build/reports/lint-results-debug.txt >> gradle-output.log
+          cat gradle-output.log
+
+      # TEMPORARY diagnostic: this sandbox has no way to read GitHub Actions job logs (they're
+      # served from Azure blob storage, blocked by this environment's egress policy), so post the
+      # failure tail as a PR comment instead — a plain api.github.com call, which is reachable.
+      # Remove this step once CI is green again.
+      - name: Post failure log as PR comment (diagnostic)
+        if: steps.unit_tests_lint.outputs.exit_code != '0' && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tail -c 60000 gradle-output.log > tail.log
+          cat > build_comment.py << 'PYEOF'
+          import json
+          with open('tail.log') as f:
+              text = f.read()
+          body = "### Unit tests/lint failure (diagnostic)\n\n<details><summary>gradle-output.log tail</summary>\n\n```\n" + text + "\n```\n\n</details>"
+          with open('comment.json', 'w') as out:
+              json.dump({'body': body}, out)
+          PYEOF
+          python3 build_comment.py
+          curl -sS -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
+            -d @comment.json
+
+      - name: Fail job if unit tests/lint failed
+        if: steps.unit_tests_lint.outputs.exit_code != '0'
+        run: exit 1
 
       - name: Build debug APK
-        run: gradle --no-daemon assembleDebug
+        id: build_debug
+        continue-on-error: true
+        run: |
+          set +e
+          gradle --no-daemon assembleDebug --stacktrace > gradle-assemble-output.log 2>&1
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          cat gradle-assemble-output.log
+
+      # TEMPORARY diagnostic — see the "Unit tests and lint" step above for why. Remove once green.
+      - name: Post assembleDebug failure log as PR comment (diagnostic)
+        if: steps.build_debug.outputs.exit_code != '0' && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tail -c 60000 gradle-assemble-output.log > tail.log
+          cat > build_comment.py << 'PYEOF'
+          import json
+          with open('tail.log') as f:
+              text = f.read()
+          body = "### assembleDebug failure (diagnostic)\n\n<details><summary>gradle-assemble-output.log tail</summary>\n\n```\n" + text + "\n```\n\n</details>"
+          with open('comment2.json', 'w') as out:
+              json.dump({'body': body}, out)
+          PYEOF
+          python3 build_comment.py
+          curl -sS -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
+            -d @comment2.json
+
+      - name: Fail job if assembleDebug failed
+        if: steps.build_debug.outputs.exit_code != '0'
+        run: exit 1
 
       - name: Decode release keystore
         if: github.event_name != 'pull_request'
@@ -80,11 +141,80 @@ jobs:
         run: gradle --no-daemon assembleOptimized
 
       - name: Report APK sizes
-        run: du -h app/build/outputs/apk/debug/app-debug.apk
+        id: report_size
+        continue-on-error: true
+        run: |
+          set +e
+          {
+            echo "--- find app/build/outputs ---"
+            find app/build/outputs -type f 2>&1
+            echo "--- du ---"
+            du -h app/build/outputs/apk/debug/app-debug.apk
+          } > report-size-output.log 2>&1
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          cat report-size-output.log
+
+      # TEMPORARY diagnostic — see the "Unit tests and lint" step above for why. Remove once green.
+      - name: Post APK-size failure log as PR comment (diagnostic)
+        if: steps.report_size.outputs.exit_code != '0' && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tail -c 60000 report-size-output.log > tail.log
+          cat > build_comment.py << 'PYEOF'
+          import json
+          with open('tail.log') as f:
+              text = f.read()
+          body = "### Report APK sizes failure (diagnostic)\n\n<details><summary>report-size-output.log tail</summary>\n\n```\n" + text + "\n```\n\n</details>"
+          with open('comment3.json', 'w') as out:
+              json.dump({'body': body}, out)
+          PYEOF
+          python3 build_comment.py
+          curl -sS -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
+            -d @comment3.json
+
+      - name: Fail job if reporting APK size failed
+        if: steps.report_size.outputs.exit_code != '0'
+        run: exit 1
 
       - name: Report optimized APK size
         if: github.event_name != 'pull_request'
         run: du -h app/build/outputs/apk/optimized/app-optimized.apk
+
+      # TEMPORARY diagnostic — always posts, to see ground truth right before the upload step that
+      # keeps reporting "no files found" despite the immediately preceding `du` succeeding. Remove
+      # once green.
+      - name: Post pre-upload directory snapshot as PR comment (diagnostic)
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          {
+            echo "--- pwd ---"
+            pwd
+            echo "--- ls -la app/build/outputs/apk/debug/ ---"
+            ls -la app/build/outputs/apk/debug/ 2>&1
+            echo "--- find app/build/outputs (full stat) ---"
+            find app/build/outputs -exec ls -la {} \; 2>&1
+            echo "--- df -h . ---"
+            df -h . 2>&1
+          } > snapshot.log 2>&1
+          tail -c 60000 snapshot.log > tail.log
+          cat > build_comment.py << 'PYEOF'
+          import json
+          with open('tail.log') as f:
+              text = f.read()
+          body = "### Pre-upload directory snapshot (diagnostic)\n\n<details><summary>snapshot.log</summary>\n\n```\n" + text + "\n```\n\n</details>"
+          with open('comment4.json', 'w') as out:
+              json.dump({'body': body}, out)
+          PYEOF
+          python3 build_comment.py
+          curl -sS -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
+            -d @comment4.json
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v7

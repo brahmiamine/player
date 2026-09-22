@@ -94,9 +94,17 @@ class XtreamRepository(context: Context) {
      */
     suspend fun loadSection(profileId: String, type: MediaType): List<MediaEntry> = cache.loadType(profileId, type)
 
-    /** Pool borné de candidats VOD pour le moteur de recommandation (accueil et fiches détail). */
-    suspend fun recommendationCandidates(profileId: String, type: MediaType, limit: Int): List<MediaEntry> =
-        cache.loadRecommendationCandidates(profileId, type, limit)
+    /** Contenus récents pour l'accueil ; les goûts complètent ce pool dans le ViewModel. */
+    suspend fun homeRecommendationCandidates(profileId: String, type: MediaType, limit: Int): List<MediaEntry> =
+        cache.loadHomeRecommendationCandidates(profileId, type, limit)
+
+    /** Candidats rapides centrés sur la catégorie du média affiché dans une fiche détail. */
+    suspend fun similarityCandidates(profileId: String, source: MediaEntry, limit: Int): List<MediaEntry> =
+        cache.loadSimilarityCandidates(profileId, source, limit)
+
+    /** Retours explicites déjà persistés : « plus comme ça » / « moins comme ça ». */
+    suspend fun recommendationFeedback(profileId: String) =
+        withContext(Dispatchers.IO) { recommendationStore.feedback(profileId) }
 
     /**
      * Fusionne, pour les entrées demandées, les métadonnées enrichies (genre/casting/réalisateur…)

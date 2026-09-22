@@ -129,17 +129,24 @@ class CatalogCache(context: Context) {
         database.loadType(profileId, type)
     }
 
-    /**
-     * Pool borné pour l'IA : lit seulement les contenus VOD récents via l'index SQLite existant.
-     * On évite ainsi de matérialiser des dizaines de milliers de films/séries dans le ViewModel.
-     */
-    suspend fun loadRecommendationCandidates(
+    /** Pool récent borné, utilisé pour « À découvrir » et « Nouveautés ». */
+    suspend fun loadHomeRecommendationCandidates(
         profileId: String,
         type: MediaType,
         limit: Int,
     ): List<MediaEntry> = withContext(Dispatchers.IO) {
         ensureMigrated(profileId)
-        database.loadRecommendationCandidates(profileId, type, limit)
+        database.loadHomeRecommendationCandidates(profileId, type, limit)
+    }
+
+    /** Pool indexé centré sur le film ou la série actuellement ouvert. */
+    suspend fun loadSimilarityCandidates(
+        profileId: String,
+        source: MediaEntry,
+        limit: Int,
+    ): List<MediaEntry> = withContext(Dispatchers.IO) {
+        ensureMigrated(profileId)
+        database.loadSimilarityCandidates(profileId, source, limit)
     }
 
     suspend fun search(

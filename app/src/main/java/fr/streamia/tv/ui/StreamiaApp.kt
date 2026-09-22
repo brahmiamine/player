@@ -18,6 +18,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
 import fr.streamia.tv.ui.theme.FocusBlueBright
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -35,6 +36,7 @@ import fr.streamia.tv.player.LivePlaybackSession
 import fr.streamia.tv.domain.MediaType
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.ui.PlayerView
+import dev.chrisbanes.haze.HazeState
 
 @Composable
 fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackSession) {
@@ -59,9 +61,14 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
         }
     }
 
+    val glassHaze = remember { HazeState() }
+
     StreamiaTheme {
         ResponsiveTvViewport {
-            when {
+          CompositionLocalProvider(LocalGlassHaze provides glassHaze) {
+            Box(Modifier.fillMaxSize()) {
+              GlassBackdrop(glassBlobsFor(state.screen))
+              when {
                 shouldShowStartupGate(state) -> BootScreen()
 
                 state.screen is StreamiaScreen.Login -> LoginScreen(
@@ -145,6 +152,13 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
 
                 state.screen is StreamiaScreen.Settings -> SettingsScreen(
                     settings = state.appSettings,
+                    busy = state.busy,
+                    liveHistoryCount = state.library.history.count { it.entry.type == MediaType.Live },
+                    movieHistoryCount = state.library.history.count { it.entry.type == MediaType.Movie },
+                    seriesHistoryCount = state.library.history.count { it.entry.type == MediaType.Series },
+                    currentVersion = BuildConfig.VERSION_NAME,
+                    updateChecking = state.updateChecking,
+                    updateCheck = state.updateCheck,
                     onToggleLivePreview = viewModel::toggleLivePreview,
                     onCycleLivePreviewDelay = viewModel::cycleLivePreviewDelay,
                     onCycleVodSeekStep = viewModel::cycleVodSeekStep,
@@ -157,7 +171,20 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onToggleAutoPlayNextEpisode = viewModel::toggleAutoPlayNextEpisode,
                     onCycleSubtitleSizeScale = viewModel::cycleSubtitleSizeScale,
                     onToggleSubtitleBackground = viewModel::toggleSubtitleBackground,
-                    onTools = viewModel::showTools,
+                    onSearch = viewModel::showSearch,
+                    onEpg = viewModel::showEpg,
+                    onOrganizer = viewModel::showOrganizer,
+                    onRefresh = viewModel::refresh,
+                    onClearLiveHistory = { viewModel.clearHistory(MediaType.Live) },
+                    onClearMovieHistory = { viewModel.clearHistory(MediaType.Movie) },
+                    onClearSeriesHistory = { viewModel.clearHistory(MediaType.Series) },
+                    onClearAllHistory = { viewModel.clearHistory() },
+                    onChangePlaylist = viewModel::logout,
+                    onCheckForUpdate = viewModel::checkForUpdate,
+                    onDismissUpdateCheck = viewModel::dismissUpdateCheck,
+                    onExportBackup = viewModel::exportBackup,
+                    onImportBackup = viewModel::importBackup,
+                    onAbout = viewModel::showAbout,
                     onParentalControl = viewModel::showParentalControl,
                     onBack = viewModel::showHome,
                 )
@@ -199,7 +226,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     versionName = BuildConfig.VERSION_NAME,
                     onLoadCacheSize = viewModel::cacheSizeBytes,
                     onLoadEpgCacheSize = viewModel::epgCacheSizeBytes,
-                    onBack = viewModel::showTools,
+                    onBack = viewModel::showSettings,
                 )
 
                 state.screen is StreamiaScreen.Search && state.catalog != null -> SearchScreen(
@@ -344,7 +371,9 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                 }
 
                 else -> BootScreen()
+              }
             }
+          }
         }
     }
 }

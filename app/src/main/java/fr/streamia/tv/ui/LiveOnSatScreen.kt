@@ -38,12 +38,11 @@ import fr.streamia.tv.liveonsat.ResolvedLiveOnSatMatch
 import fr.streamia.tv.liveonsat.isLiveAt
 import fr.streamia.tv.liveonsat.isVisibleAt
 import fr.streamia.tv.ui.theme.Danger
-import fr.streamia.tv.ui.theme.DeepSurface
 import fr.streamia.tv.ui.theme.FocusBlueBright
 import fr.streamia.tv.ui.theme.HeadingWeight
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
-import fr.streamia.tv.ui.theme.Night
+import fr.streamia.tv.ui.theme.RadiusPill
 import fr.streamia.tv.ui.theme.RaisedSurface
 import fr.streamia.tv.ui.theme.TypeBody
 import fr.streamia.tv.ui.theme.TypeLabel
@@ -109,25 +108,30 @@ fun LiveOnSatScreen(
         }
     }
 
-    Column(Modifier.fillMaxSize().background(Night).padding(28.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            FocusableSurface(onClick = onBack, modifier = Modifier.width(120.dp).height(52.dp)) {
-                Text("← Retour", color = Ink, fontSize = TypeLabel, modifier = Modifier.padding(horizontal = 14.dp))
-            }
-            Spacer(Modifier.width(18.dp))
-            Text("Matchs du jour", color = Ink, fontSize = TypeScreenTitle, fontWeight = HeadingWeight)
-            Spacer(Modifier.weight(1f))
-            fetchedAtEpochMillis?.let {
-                Text("Mis à jour à ${formatClockTime(it)}", color = MutedInk, fontSize = TypeLabel)
-                Spacer(Modifier.width(14.dp))
-            }
-            FocusableSurface(onClick = onRefresh, enabled = !loading, modifier = Modifier.width(140.dp).height(52.dp)) {
-                Text(
-                    if (loading) "Actualisation…" else "Actualiser",
-                    color = Ink,
-                    fontSize = TypeLabel,
-                    modifier = Modifier.padding(horizontal = 14.dp),
-                )
+    Column(Modifier.fillMaxSize().padding(28.dp)) {
+        GlassSurface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(RadiusPill)) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                FocusableSurface(onClick = onBack, modifier = Modifier.width(120.dp).height(52.dp)) {
+                    Text("← Retour", color = Ink, fontSize = TypeLabel, modifier = Modifier.padding(horizontal = 14.dp))
+                }
+                Spacer(Modifier.width(18.dp))
+                Text("Matchs du jour", color = Ink, fontSize = TypeScreenTitle, fontWeight = HeadingWeight)
+                Spacer(Modifier.weight(1f))
+                fetchedAtEpochMillis?.let {
+                    Text("Mis à jour à ${formatClockTime(it)}", color = MutedInk, fontSize = TypeLabel)
+                    Spacer(Modifier.width(14.dp))
+                }
+                FocusableSurface(onClick = onRefresh, enabled = !loading, modifier = Modifier.width(140.dp).height(52.dp)) {
+                    Text(
+                        if (loading) "Actualisation…" else "Actualiser",
+                        color = Ink,
+                        fontSize = TypeLabel,
+                        modifier = Modifier.padding(horizontal = 14.dp),
+                    )
+                }
             }
         }
         Spacer(Modifier.height(18.dp))
@@ -188,13 +192,8 @@ private fun LiveOnSatMatchCard(
     val match = resolved.match
     val isLive = resolved.isLiveAt(nowEpochSeconds)
     val isEnded = !resolved.isVisibleAt(nowEpochSeconds)
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .background(DeepSurface)
-            .padding(16.dp),
-    ) {
+    GlassSurface(modifier = Modifier.fillMaxWidth()) {
+      Column(Modifier.fillMaxWidth().padding(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             when {
                 isLive -> Text("● EN DIRECT", color = Danger, fontSize = 12.sp, fontWeight = FontWeight.Bold)
@@ -244,6 +243,7 @@ private fun LiveOnSatMatchCard(
                 }
             }
         }
+      }
     }
 }
 

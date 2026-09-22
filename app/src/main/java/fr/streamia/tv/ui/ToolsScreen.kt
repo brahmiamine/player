@@ -29,11 +29,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
+import androidx.compose.foundation.shape.RoundedCornerShape
 import fr.streamia.tv.data.UpdateCheckResult
 import fr.streamia.tv.ui.theme.HeadingWeight
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
-import fr.streamia.tv.ui.theme.Night
+import fr.streamia.tv.ui.theme.RadiusPill
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -94,11 +95,16 @@ fun ToolsScreen(
         }
     }
 
-    Column(Modifier.fillMaxSize().background(Night).padding(horizontal = 42.dp, vertical = 28.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            StreamiaLogo(compact = true)
-            Spacer(Modifier.weight(1f))
-            Text("Outils et gestion", color = Ink, fontSize = 27.sp, fontWeight = HeadingWeight)
+    Column(Modifier.fillMaxSize().padding(horizontal = 42.dp, vertical = 28.dp)) {
+        GlassSurface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(RadiusPill)) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                StreamiaLogo(compact = true)
+                Spacer(Modifier.weight(1f))
+                Text("Outils et gestion", color = Ink, fontSize = 27.sp, fontWeight = HeadingWeight)
+            }
         }
         Spacer(Modifier.height(18.dp))
         Text("OK ouvre l'outil sélectionné. Retour revient aux paramètres.", color = MutedInk, fontSize = 14.sp)

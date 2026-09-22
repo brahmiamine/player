@@ -42,7 +42,7 @@ import fr.streamia.tv.ui.theme.FocusBlueBright
 import fr.streamia.tv.ui.theme.HeadingWeight
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
-import fr.streamia.tv.ui.theme.Night
+import fr.streamia.tv.ui.theme.RadiusTile
 import fr.streamia.tv.ui.theme.WarmSignal
 import kotlinx.coroutines.delay
 
@@ -114,27 +114,29 @@ fun LoginScreen(
 
     LaunchedEffect(mode, profiles.size) { runCatching { primaryFocus.requestFocus() } }
 
-    Row(Modifier.fillMaxSize().background(Night)) {
-        Column(
-            modifier = Modifier.fillMaxHeight().weight(0.32f).background(DeepSurface).padding(horizontal = 42.dp, vertical = 34.dp),
-            verticalArrangement = Arrangement.SpaceBetween,
-        ) {
-            StreamiaLogo()
-            Column {
-                Text("Vos chaînes,\nvos listes.", color = Ink, fontSize = 33.sp, lineHeight = 39.sp, fontWeight = HeadingWeight)
-                Spacer(Modifier.height(14.dp))
-                Text(
-                    "Xtream, fichier M3U ou URL M3U distante. XMLTV externe et actualisation automatique sont pris en charge.",
-                    color = MutedInk,
-                    fontSize = 16.sp,
-                    lineHeight = 23.sp,
-                )
+    Row(Modifier.fillMaxSize().padding(40.dp), horizontalArrangement = Arrangement.spacedBy(28.dp)) {
+        GlassSurface(modifier = Modifier.fillMaxHeight().weight(0.32f)) {
+            Column(
+                modifier = Modifier.fillMaxSize().padding(horizontal = 38.dp, vertical = 32.dp),
+                verticalArrangement = Arrangement.SpaceBetween,
+            ) {
+                StreamiaLogo()
+                Column {
+                    Text("Vos chaînes,\nvos listes.", color = Ink, fontSize = 33.sp, lineHeight = 39.sp, fontWeight = HeadingWeight)
+                    Spacer(Modifier.height(14.dp))
+                    Text(
+                        "Xtream, fichier M3U ou URL M3U distante. XMLTV externe et actualisation automatique sont pris en charge.",
+                        color = MutedInk,
+                        fontSize = 16.sp,
+                        lineHeight = 23.sp,
+                    )
+                }
+                Text("Données locales · Identifiants chiffrés · HTTP/HTTPS · Télécommande", color = MutedInk, fontSize = 12.sp, lineHeight = 18.sp)
             }
-            Text("Données locales · Identifiants chiffrés · HTTP/HTTPS · Télécommande", color = MutedInk, fontSize = 12.sp, lineHeight = 18.sp)
         }
 
         Box(
-            modifier = Modifier.fillMaxHeight().weight(0.68f).padding(horizontal = 42.dp, vertical = 26.dp),
+            modifier = Modifier.fillMaxHeight().weight(0.68f).padding(horizontal = 4.dp, vertical = 22.dp),
             contentAlignment = Alignment.TopStart,
         ) {
             when (mode) {
@@ -284,6 +286,7 @@ private fun PlaylistManager(
             FocusableSurface(
                 onClick = onAddXtream,
                 enabled = !busy,
+                accent = true,
                 modifier = Modifier.weight(1f).height(58.dp).focusRequester(primaryFocus),
             ) { Text("＋ Ajouter Xtream", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 18.dp)) }
             FocusableSurface(onClick = onAddM3u, enabled = !busy, modifier = Modifier.weight(1f).height(58.dp)) {
@@ -339,7 +342,7 @@ private fun XtreamForm(
                     Row(
                         Modifier
                             .fillMaxWidth()
-                            .background(DeepSurface, RoundedCornerShape(12.dp))
+                            .background(DeepSurface, RoundedCornerShape(RadiusTile))
                             .padding(horizontal = 18.dp, vertical = 14.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -356,7 +359,7 @@ private fun XtreamForm(
                     Row(
                         Modifier
                             .fillMaxWidth()
-                            .background(DeepSurface, RoundedCornerShape(12.dp))
+                            .background(DeepSurface, RoundedCornerShape(RadiusTile))
                             .padding(horizontal = 18.dp, vertical = 14.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -385,7 +388,7 @@ private fun XtreamForm(
                     modifier = Modifier.padding(horizontal = 12.dp),
                 )
             }
-            FocusableSurface(onClick = onSave, enabled = canSubmit, modifier = Modifier.weight(0.46f).height(60.dp)) {
+            FocusableSurface(onClick = onSave, enabled = canSubmit, accent = canSubmit, modifier = Modifier.weight(0.46f).height(60.dp)) {
                 Text(if (busy) "Connexion en cours…" else "Enregistrer et ouvrir", color = if (canSubmit || busy) Ink else MutedInk, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 18.dp))
             }
         }

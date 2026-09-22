@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -36,7 +37,7 @@ import fr.streamia.tv.ui.theme.FocusBlueBright
 import fr.streamia.tv.ui.theme.HeadingWeight
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
-import fr.streamia.tv.ui.theme.Night
+import fr.streamia.tv.ui.theme.RadiusPill
 import fr.streamia.tv.ui.theme.TypeBody
 import fr.streamia.tv.ui.theme.TypeLabel
 import fr.streamia.tv.ui.theme.TypeScreenTitle
@@ -77,15 +78,20 @@ fun SearchScreen(
         }
     }
 
-    Column(Modifier.fillMaxSize().background(Night).padding(28.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            FocusableSurface(onClick = onBack, modifier = Modifier.width(120.dp).height(52.dp)) {
-                Text("← Retour", color = Ink, fontSize = TypeLabel, modifier = Modifier.padding(horizontal = 14.dp))
+    Column(Modifier.fillMaxSize().padding(28.dp)) {
+        GlassSurface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(RadiusPill)) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                FocusableSurface(onClick = onBack, modifier = Modifier.width(120.dp).height(52.dp)) {
+                    Text("← Retour", color = Ink, fontSize = TypeLabel, modifier = Modifier.padding(horizontal = 14.dp))
+                }
+                Spacer(Modifier.width(18.dp))
+                Text("Recherche globale", color = Ink, fontSize = TypeScreenTitle, fontWeight = HeadingWeight)
+                Spacer(Modifier.weight(1f))
+                Text("${entries.size} résultats", color = MutedInk, fontSize = TypeLabel)
             }
-            Spacer(Modifier.width(18.dp))
-            Text("Recherche globale", color = Ink, fontSize = TypeScreenTitle, fontWeight = HeadingWeight)
-            Spacer(Modifier.weight(1f))
-            Text("${entries.size} résultats", color = MutedInk, fontSize = TypeLabel)
         }
         Spacer(Modifier.height(18.dp))
         TvTextField(
@@ -105,15 +111,34 @@ fun SearchScreen(
         Spacer(Modifier.height(18.dp))
 
         if (needle.isBlank()) {
-            Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("Tapez quelques lettres pour rechercher dans tout Streamia.", color = MutedInk, fontSize = TypeSectionTitle)
-                Spacer(Modifier.height(8.dp))
-                Text("Live · Films · Séries", color = FocusBlueBright, fontSize = TypeLabel)
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                GlassSurface {
+                    Column(
+                        Modifier.width(420.dp).padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Text(
+                            "Tapez quelques lettres pour rechercher dans tout Streamia.",
+                            color = Ink,
+                            fontSize = TypeSectionTitle,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Text("Live · Films · Séries", color = FocusBlueBright, fontSize = TypeLabel, fontWeight = FontWeight.Bold)
+                    }
+                }
             }
         } else {
             Column(Modifier.fillMaxSize()) {
                 SectionLabel("Contenus (${entries.size})")
                 Spacer(Modifier.height(10.dp))
+                if (entries.isEmpty()) {
+                    GlassSurface(modifier = Modifier.fillMaxWidth()) {
+                        Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+                            Text("Aucun résultat pour « $query ».", color = MutedInk, fontSize = TypeBody)
+                        }
+                    }
+                }
                 LazyColumn(state = resultListState, verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(entries, key = MediaEntry::key) { entry ->
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -167,7 +192,7 @@ fun SearchScreen(
 
 @Composable
 private fun SearchFilter(label: String, selected: Boolean, onClick: () -> Unit) {
-    FocusableSurface(onClick = onClick, selected = selected, modifier = Modifier.width(122.dp).height(46.dp)) {
+    FocusableSurface(onClick = onClick, selected = selected, accent = selected, modifier = Modifier.width(122.dp).height(46.dp)) {
         Text(label, color = Ink, fontSize = TypeLabel, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 14.dp))
     }
 }

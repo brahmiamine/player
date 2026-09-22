@@ -21,10 +21,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
+import androidx.compose.foundation.shape.RoundedCornerShape
 import fr.streamia.tv.ui.theme.HeadingWeight
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
-import fr.streamia.tv.ui.theme.Night
+import fr.streamia.tv.ui.theme.RadiusPill
 
 private sealed interface NewPinStep {
     /** Uniquement quand un code est déjà actif : il faut le code actuel avant d'en accepter un nouveau. */
@@ -45,13 +46,18 @@ fun ParentalControlScreen(
     var newPinStep by remember { mutableStateOf<NewPinStep?>(null) }
     var confirmDisable by remember { mutableStateOf(false) }
 
-    Column(Modifier.fillMaxSize().background(Night).padding(horizontal = 48.dp, vertical = 32.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            FocusableSurface(onClick = onBack, modifier = Modifier.width(120.dp).height(50.dp)) {
-                Text("← Retour", color = Ink, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 14.dp))
+    Column(Modifier.fillMaxSize().padding(horizontal = 48.dp, vertical = 32.dp)) {
+        GlassSurface(shape = RoundedCornerShape(RadiusPill)) {
+            Row(
+                Modifier.padding(horizontal = 22.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                FocusableSurface(onClick = onBack, modifier = Modifier.width(120.dp).height(50.dp)) {
+                    Text("← Retour", color = Ink, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 14.dp))
+                }
+                Spacer(Modifier.width(16.dp))
+                Text("Contrôle parental", color = Ink, fontSize = 27.sp, fontWeight = HeadingWeight)
             }
-            Spacer(Modifier.width(16.dp))
-            Text("Contrôle parental", color = Ink, fontSize = 27.sp, fontWeight = HeadingWeight)
         }
         Spacer(Modifier.height(20.dp))
         Text(

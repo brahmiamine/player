@@ -132,6 +132,10 @@ dependencies {
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.animation:animation")
     implementation("androidx.tv:tv-material:1.1.0")
+    // Flou temps réel derrière les panneaux de verre du thème iOS Glass : dégrade proprement en
+    // aplat teinté (sans flou) sous Android 13, plutôt qu'un RenderEffect maison fragile d'une
+    // version de Compose à l'autre. Voir fr.streamia.tv.ui.theme.GlassSurface.
+    implementation("dev.chrisbanes.haze:haze:1.7.2")
     implementation("androidx.media3:media3-exoplayer:$media3Version")
     implementation("androidx.media3:media3-exoplayer-hls:$media3Version")
     implementation("androidx.media3:media3-datasource-okhttp:$media3Version")

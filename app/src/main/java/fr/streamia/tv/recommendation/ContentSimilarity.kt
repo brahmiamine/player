@@ -69,8 +69,8 @@ class MetadataSimilarityEngine(
     override fun compare(source: ContentFeatures, candidate: ContentFeatures): SimilarityScore {
         val sourceTitleTokens = titleTokens(source.entry.displayName)
         val candidateTitleTokens = titleTokens(candidate.entry.displayName)
-        val sourcePlotTokens = tokens(source.plot)
-        val candidatePlotTokens = tokens(candidate.plot)
+        val sourcePlotTokens = plotTokens(source.plot)
+        val candidatePlotTokens = plotTokens(candidate.plot)
         val sourceGenres = genreTokens(source.genre)
         val candidateGenres = genreTokens(candidate.genre)
         val sourceCast = personTokens(source.cast)
@@ -98,16 +98,16 @@ class MetadataSimilarityEngine(
             available += weight
         }
 
-        // Les signaux descriptifs dominent. Catégorie/année/note servent uniquement de
-        // départage et ne peuvent pas créer un résultat similaire sans preuve sémantique.
-        add(0.10, titleSimilarity, sourceTitleTokens.isNotEmpty() && candidateTitleTokens.isNotEmpty())
-        add(0.34, plotSimilarity, sourcePlotTokens.isNotEmpty() && candidatePlotTokens.isNotEmpty())
-        add(0.28, genreSimilarity, sourceGenres.isNotEmpty() && candidateGenres.isNotEmpty())
-        add(0.08, castSimilarity, sourceCast.isNotEmpty() && candidateCast.isNotEmpty())
-        add(0.10, directorSimilarity, sourceDirector.isNotEmpty() && candidateDirector.isNotEmpty())
-        add(0.025, countrySimilarity, sourceCountries.isNotEmpty() && candidateCountries.isNotEmpty())
-        add(0.035, yearSimilarity, extractYear(source) != null && extractYear(candidate) != null)
-        add(0.02, ratingSimilarity, source.rating != null && candidate.rating != null)
+        // Pour une fiche détail, l'histoire et le genre doivent dominer nettement.
+        // Catégorie IPTV, année et note restent seulement des critères de départage.
+        add(0.06, titleSimilarity, sourceTitleTokens.isNotEmpty() && candidateTitleTokens.isNotEmpty())
+        add(0.46, plotSimilarity, sourcePlotTokens.isNotEmpty() && candidatePlotTokens.isNotEmpty())
+        add(0.34, genreSimilarity, sourceGenres.isNotEmpty() && candidateGenres.isNotEmpty())
+        add(0.04, castSimilarity, sourceCast.isNotEmpty() && candidateCast.isNotEmpty())
+        add(0.05, directorSimilarity, sourceDirector.isNotEmpty() && candidateDirector.isNotEmpty())
+        add(0.01, countrySimilarity, sourceCountries.isNotEmpty() && candidateCountries.isNotEmpty())
+        add(0.02, yearSimilarity, extractYear(source) != null && extractYear(candidate) != null)
+        add(0.01, ratingSimilarity, source.rating != null && candidate.rating != null)
         add(0.01, if (categoryMatch) 1.0 else 0.0, true)
 
         var metadataScore = if (available <= 0.0) 0.0 else (weighted / available).coerceIn(0.0, 1.0)
@@ -117,12 +117,15 @@ class MetadataSimilarityEngine(
             ?.takeIf(Double::isFinite)
             ?.coerceIn(0.0, 1.0)
 
-        val strongTitleRelation = titleSimilarity >= 0.34
-        val strongPlotRelation = plotSimilarity >= 0.10
-        val genreRelation = genreSimilarity >= 0.34
-        val peopleRelation = directorSimilarity >= 0.72 || castSimilarity >= 0.20
-        val semanticRelation = semantic != null && semantic >= 0.58
-        val substantive = strongTitleRelation || strongPlotRelation || genreRelation || peopleRelation || semanticRelation
+        val strongTitleRelation = titleSimilarity >= 0.45
+        val plotAndGenreRelation = plotSimilarity >= 0.08 && genreSimilarity >= 0.34
+        val strongPlotRelation = plotSimilarity >= 0.18
+        val strongGenreUniverse = genreSimilarity >= 0.66 &&
+            (titleSimilarity >= 0.34 || castSimilarity >= 0.20 || directorSimilarity >= 0.72)
+        val peopleRelation = directorSimilarity >= 0.72 || castSimilarity >= 0.30
+        val semanticRelation = semantic != null && semantic >= 0.62
+        val substantive = strongTitleRelation || plotAndGenreRelation || strongPlotRelation ||
+            strongGenreUniverse || peopleRelation || semanticRelation
 
         // Deux genres explicitement incompatibles doivent fortement pénaliser un rapprochement
         // faible basé sur quelques mots génériques du synopsis.
@@ -148,15 +151,16 @@ class MetadataSimilarityEngine(
         val finalScore = if (substantive) blended.coerceIn(0.0, 1.0) else 0.0
 
         val reason = when {
-            directorSimilarity >= 0.72 -> "Même réalisateur"
-            genreSimilarity >= 0.66 && plotSimilarity >= 0.10 -> "Genres, intrigue et univers proches"
+            genreSimilarity >= 0.66 && plotSimilarity >= 0.10 -> "Genre, intrigue et univers très proches"
+            plotAndGenreRelation -> "Genre et histoire similaires"
             semantic != null && semantic >= 0.72 -> "Intrigue et ambiance similaires"
-            genreSimilarity >= 0.50 -> "Genres et univers proches"
+            directorSimilarity >= 0.72 -> "Même réalisateur"
             plotSimilarity >= 0.18 -> "Intrigue et thèmes similaires"
-            castSimilarity >= 0.25 -> "Distribution similaire"
+            castSimilarity >= 0.30 -> "Distribution similaire"
             titleSimilarity >= 0.45 -> "Même saga ou univers"
             else -> null
         }
+
 
         return SimilarityScore(
             score = finalScore,
@@ -188,6 +192,14 @@ class MetadataSimilarityEngine(
 
     private fun personTokens(value: String?): Set<String> = rawTokens(value, minLength = 2)
         .filterNotTo(linkedSetOf()) { it in PERSON_NOISE_TOKENS }
+
+    /**
+     * Canonicalisation très légère des mots d'intrigue. Elle rapproche les variantes françaises
+     * et anglaises les plus fréquentes sans modèle lourd ni stemming agressif sur Android TV.
+     */
+    private fun plotTokens(value: String?): Set<String> = rawTokens(value, minLength = 3)
+        .filterNot { it in STOP_WORDS || it in TITLE_NOISE_TOKENS }
+        .mapTo(linkedSetOf()) { token -> PLOT_TOKEN_ALIASES[token] ?: token }
 
     private fun tokens(value: String?): Set<String> = rawTokens(value, minLength = 3)
         .filterNotTo(linkedSetOf()) { it in STOP_WORDS || it in TITLE_NOISE_TOKENS }
@@ -252,6 +264,30 @@ class MetadataSimilarityEngine(
         )
 
         val PERSON_NOISE_TOKENS = setOf("and", "avec", "with", "et")
+
+        val PLOT_TOKEN_ALIASES = mapOf(
+            "survivre" to "survival",
+            "survit" to "survival",
+            "survivent" to "survival",
+            "survivant" to "survival",
+            "survivants" to "survival",
+            "survive" to "survival",
+            "survives" to "survival",
+            "surviving" to "survival",
+            "ennemi" to "enemy",
+            "ennemis" to "enemy",
+            "ennemie" to "enemy",
+            "ennemies" to "enemy",
+            "enemies" to "enemy",
+            "soldat" to "military",
+            "soldats" to "military",
+            "militaire" to "military",
+            "militaires" to "military",
+            "soldier" to "military",
+            "soldiers" to "military",
+            "army" to "military",
+            "armee" to "military",
+        )
 
         val GENRE_ALIASES = mapOf(
             "science" to "science_fiction",

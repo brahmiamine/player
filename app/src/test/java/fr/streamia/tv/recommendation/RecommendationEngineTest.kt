@@ -154,6 +154,30 @@ class RecommendationEngineTest {
         assertTrue(result.any { it.entry.key == similarMovie.key })
     }
 
+    @Test
+    fun `detail similarity keeps candidates matching both genre and story`() {
+        val sourceEntry = movie(90, "Deep Orbit", 8.4, "science", "équipage spatial mission planète inconnue")
+        val source = ContentFeatures(
+            entry = sourceEntry,
+            plot = sourceEntry.plot,
+            genre = "Science-fiction, Thriller",
+        )
+        val close = movie(1, "Silent Planet", 8.0, "science", "astronautes en mission sur une planète inconnue")
+        val unrelated = movie(2, "Kitchen Rush", 8.8, "science", "restaurant familial cuisine amour vacances")
+        val details = mapOf(
+            close.key to ContentFeatures(close, plot = close.plot, genre = "Science-fiction, Thriller"),
+            unrelated.key to ContentFeatures(unrelated, plot = unrelated.plot, genre = "Science-fiction, Thriller"),
+        )
+
+        val result = engine.similarTo(
+            source = source,
+            candidates = listOf(unrelated, close),
+            detailsByKey = details,
+        )
+
+        assertEquals(listOf(close.key), result.map { it.entry.key })
+    }
+
     private fun movie(
         id: Int,
         name: String,

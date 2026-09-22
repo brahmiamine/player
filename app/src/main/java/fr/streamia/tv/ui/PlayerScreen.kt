@@ -7,7 +7,9 @@ import android.view.KeyEvent as AndroidKeyEvent
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -34,6 +36,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
@@ -93,10 +96,13 @@ import fr.streamia.tv.player.resolveSeekPosition
 import fr.streamia.tv.player.shouldPersistVodProgress
 import fr.streamia.tv.player.LivePlaybackSession
 import fr.streamia.tv.ui.theme.FocusBlueBright
+import fr.streamia.tv.ui.theme.GlassBorder
 import fr.streamia.tv.ui.theme.HeadingWeight
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
 import fr.streamia.tv.ui.theme.Night
+import fr.streamia.tv.ui.theme.RadiusCard
+import fr.streamia.tv.ui.theme.RadiusTile
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.yield
 import java.text.SimpleDateFormat
@@ -702,7 +708,9 @@ fun PlayerScreen(
                 Modifier
                     .align(Alignment.TopEnd)
                     .padding(34.dp)
-                    .background(Night.copy(alpha = 0.96f), androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(RadiusTile))
+                    .background(Night.copy(alpha = 0.82f))
+                    .border(BorderStroke(1.dp, GlassBorder), androidx.compose.foundation.shape.RoundedCornerShape(RadiusTile))
                     .padding(horizontal = 22.dp, vertical = 14.dp),
             ) {
                 Text(numberBuffer, color = FocusBlueBright, fontSize = 32.sp, fontWeight = FontWeight.Bold)
@@ -713,7 +721,9 @@ fun PlayerScreen(
             Box(
                 Modifier
                     .align(Alignment.Center)
-                    .background(Night.copy(alpha = 0.94f), androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(RadiusTile))
+                    .background(Night.copy(alpha = 0.8f))
+                    .border(BorderStroke(1.dp, GlassBorder), androidx.compose.foundation.shape.RoundedCornerShape(RadiusTile))
                     .padding(horizontal = 22.dp, vertical = 14.dp),
                 contentAlignment = Alignment.Center,
             ) {
@@ -808,7 +818,9 @@ private fun NextEpisodePrompt(
             Modifier
                 .padding(34.dp)
                 .width(420.dp)
-                .background(Night.copy(alpha = 0.97f), androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                .clip(androidx.compose.foundation.shape.RoundedCornerShape(RadiusCard))
+                .background(Night.copy(alpha = 0.85f))
+                .border(BorderStroke(1.dp, GlassBorder), androidx.compose.foundation.shape.RoundedCornerShape(RadiusCard))
                 .padding(22.dp),
         ) {
             Text("Épisode suivant dans ${secondsLeft}s", color = MutedInk, fontSize = 13.sp)
@@ -823,7 +835,7 @@ private fun NextEpisodePrompt(
             )
             Spacer(Modifier.height(16.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                FocusableSurface(onClick = onPlayNow, modifier = Modifier.weight(1f).height(48.dp).focusRequester(playNowFocus)) {
+                FocusableSurface(onClick = onPlayNow, accent = true, modifier = Modifier.weight(1f).height(48.dp).focusRequester(playNowFocus)) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text("Lire maintenant", color = Ink, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                     }
@@ -875,7 +887,9 @@ private fun PlayerInfoBand(
         modifier
             .fillMaxWidth()
             .padding(horizontal = 24.dp, vertical = 22.dp)
-            .background(Night.copy(alpha = 0.72f), androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
+            .clip(androidx.compose.foundation.shape.RoundedCornerShape(RadiusCard))
+            .background(Night.copy(alpha = 0.68f))
+            .border(BorderStroke(1.dp, GlassBorder), androidx.compose.foundation.shape.RoundedCornerShape(RadiusCard))
             .padding(horizontal = 22.dp, vertical = 16.dp),
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -1078,7 +1092,8 @@ private fun PlayerGuide(
         Modifier
             .fillMaxHeight()
             .width(820.dp)
-            .background(Night.copy(alpha = 0.98f))
+            .background(Night.copy(alpha = 0.85f))
+            .border(BorderStroke(1.dp, GlassBorder))
             .padding(24.dp),
     ) {
         Column(Modifier.width(290.dp).fillMaxHeight()) {

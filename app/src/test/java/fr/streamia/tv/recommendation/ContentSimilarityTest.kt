@@ -112,6 +112,27 @@ class ContentSimilarityTest {
         assertTrue(result.score >= 0.75)
     }
 
+    @Test
+    fun `same broad genre without related plot is rejected`() {
+        val source = features(
+            10,
+            "Front Line",
+            "Des soldats isolés derrière les lignes ennemies organisent une mission de sauvetage.",
+            genre = "Action, Thriller",
+        )
+        val unrelated = features(
+            11,
+            "Summer Kitchen",
+            "Une cheffe ouvre un restaurant familial et tombe amoureuse au bord de la mer.",
+            genre = "Action, Thriller",
+        )
+
+        val result = engine.compare(source, unrelated)
+
+        assertFalse(result.substantive)
+        assertEquals(0.0, result.score, 0.0001)
+    }
+
     private fun features(
         id: Int,
         name: String,

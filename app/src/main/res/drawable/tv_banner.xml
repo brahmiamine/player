@@ -3,12 +3,12 @@
     <item>
         <shape android:shape="rectangle">
             <size android:width="320dp" android:height="180dp" />
-            <solid android:color="#161826" />
+            <solid android:color="@color/streamia_night" />
         </shape>
     </item>
     <item
-        android:width="112dp"
-        android:height="112dp"
+        android:width="132dp"
+        android:height="132dp"
         android:gravity="center"
-        android:drawable="@drawable/ic_logo_mark" />
+        android:drawable="@drawable/streamia_logo_mark" />
 </layer-list>

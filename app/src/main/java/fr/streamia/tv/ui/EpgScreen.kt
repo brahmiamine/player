@@ -47,6 +47,7 @@ import fr.streamia.tv.ui.theme.HeadingWeight
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
 import fr.streamia.tv.ui.theme.Night
+import fr.streamia.tv.ui.theme.RadiusPill
 import fr.streamia.tv.ui.theme.TypeLabel
 import fr.streamia.tv.ui.theme.TypeSectionTitle
 import fr.streamia.tv.ui.theme.TypeScreenTitle
@@ -143,21 +144,26 @@ fun EpgScreen(
         if (selected != null) selected = null else onBack()
     }
 
-    Column(Modifier.fillMaxSize().background(Night).padding(24.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            FocusableSurface(
-                onClick = { if (selected != null) selected = null else onBack() },
-                modifier = Modifier.width(115.dp).height(50.dp),
+    Column(Modifier.fillMaxSize().padding(24.dp)) {
+        GlassSurface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(RadiusPill)) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("← Retour", color = Ink, fontSize = TypeLabel, modifier = Modifier.padding(horizontal = 14.dp))
-            }
-            Spacer(Modifier.width(16.dp))
-            Text("Guide TV · Grille horaire", color = Ink, fontSize = TypeScreenTitle, fontWeight = HeadingWeight)
-            Spacer(Modifier.weight(1f))
-            Text(if (guide == null) "XMLTV / fournisseur" else "${guide.channels.size} chaînes EPG", color = MutedInk, fontSize = TypeLabel)
-            Spacer(Modifier.width(12.dp))
-            FocusableSurface(onClick = onReload, enabled = !loading, modifier = Modifier.width(130.dp).height(50.dp)) {
-                Text(if (loading) "Chargement…" else "↻ Recharger", color = Ink, fontSize = TypeLabel, modifier = Modifier.padding(horizontal = 14.dp))
+                FocusableSurface(
+                    onClick = { if (selected != null) selected = null else onBack() },
+                    modifier = Modifier.width(115.dp).height(50.dp),
+                ) {
+                    Text("← Retour", color = Ink, fontSize = TypeLabel, modifier = Modifier.padding(horizontal = 14.dp))
+                }
+                Spacer(Modifier.width(16.dp))
+                Text("Guide TV · Grille horaire", color = Ink, fontSize = TypeScreenTitle, fontWeight = HeadingWeight)
+                Spacer(Modifier.weight(1f))
+                Text(if (guide == null) "XMLTV / fournisseur" else "${guide.channels.size} chaînes EPG", color = MutedInk, fontSize = TypeLabel)
+                Spacer(Modifier.width(12.dp))
+                FocusableSurface(onClick = onReload, enabled = !loading, modifier = Modifier.width(130.dp).height(50.dp)) {
+                    Text(if (loading) "Chargement…" else "↻ Recharger", color = Ink, fontSize = TypeLabel, modifier = Modifier.padding(horizontal = 14.dp))
+                }
             }
         }
         if (message != null) {
@@ -167,7 +173,8 @@ fun EpgScreen(
         Spacer(Modifier.height(14.dp))
 
         Row(Modifier.fillMaxSize()) {
-            Column(Modifier.width(250.dp).fillMaxHeight()) {
+            GlassSurface(modifier = Modifier.width(250.dp).fillMaxHeight()) {
+              Column(Modifier.fillMaxSize().padding(16.dp)) {
                 SectionLabel("Catégories")
                 Spacer(Modifier.height(9.dp))
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(7.dp)) {
@@ -175,12 +182,14 @@ fun EpgScreen(
                         FocusableSurface(
                             onClick = { categoryId = category.id },
                             selected = categoryId == category.id,
+                            accent = categoryId == category.id,
                             modifier = Modifier.fillMaxWidth().height(54.dp),
                         ) {
                             Text(category.name, color = Ink, fontSize = TypeLabel, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 13.dp))
                         }
                     }
                 }
+              }
             }
             Spacer(Modifier.width(16.dp))
             Column(Modifier.weight(1f).fillMaxHeight()) {
@@ -408,13 +417,8 @@ private fun ProgramDetailsPanel(
     onWatch: () -> Unit,
     onClose: () -> Unit,
 ) {
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(DeepSurface)
-            .padding(18.dp),
-    ) {
+    GlassSurface(modifier = Modifier.fillMaxWidth()) {
+      Column(Modifier.fillMaxWidth().padding(18.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(selected.program.title, color = Ink, fontSize = 20.sp, fontWeight = HeadingWeight, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -425,7 +429,7 @@ private fun ProgramDetailsPanel(
                 )
             }
             Spacer(Modifier.width(12.dp))
-            FocusableSurface(onClick = onWatch, modifier = Modifier.width(190.dp).height(50.dp)) {
+            FocusableSurface(onClick = onWatch, accent = true, modifier = Modifier.width(190.dp).height(50.dp)) {
                 Text("▶ Regarder la chaîne", color = Ink, fontSize = TypeLabel, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 14.dp))
             }
             Spacer(Modifier.width(10.dp))
@@ -441,6 +445,7 @@ private fun ProgramDetailsPanel(
             Spacer(Modifier.height(5.dp))
             Text(selected.program.category, color = FocusBlueBright, fontSize = 11.sp)
         }
+      }
     }
 }
 

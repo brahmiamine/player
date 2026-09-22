@@ -23,10 +23,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
+import androidx.compose.foundation.shape.RoundedCornerShape
 import fr.streamia.tv.ui.theme.HeadingWeight
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
-import fr.streamia.tv.ui.theme.Night
+import fr.streamia.tv.ui.theme.RadiusPill
 
 @Composable
 fun AboutScreen(
@@ -43,22 +44,31 @@ fun AboutScreen(
         epgCacheSizeBytes = runCatching { onLoadEpgCacheSize() }.getOrNull()
     }
 
-    Column(Modifier.fillMaxSize().background(Night).padding(horizontal = 48.dp, vertical = 32.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            FocusableSurface(onClick = onBack, modifier = Modifier.width(120.dp).height(50.dp)) {
-                Text("← Retour", color = Ink, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 14.dp))
+    Column(Modifier.fillMaxSize().padding(horizontal = 48.dp, vertical = 32.dp)) {
+        GlassSurface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(RadiusPill)) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                FocusableSurface(onClick = onBack, modifier = Modifier.width(120.dp).height(50.dp)) {
+                    Text("← Retour", color = Ink, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 14.dp))
+                }
+                Spacer(Modifier.width(16.dp))
+                Text("À propos", color = Ink, fontSize = 27.sp, fontWeight = HeadingWeight)
             }
-            Spacer(Modifier.width(16.dp))
-            Text("À propos", color = Ink, fontSize = 27.sp, fontWeight = HeadingWeight)
         }
         Spacer(Modifier.height(28.dp))
 
-        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            AboutLine("Streamia TV", versionName)
-            AboutLine("Appareil", "${Build.MANUFACTURER} ${Build.MODEL}".trim())
-            AboutLine("Android", "${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
-            AboutLine("Catalogue en cache", cacheSizeBytes?.let(::formatBytes) ?: "Calcul…")
-            AboutLine("EPG en cache", epgCacheSizeBytes?.let(::formatBytes) ?: "Calcul…")
+        GlassSurface(modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                StreamiaLogo(compact = true)
+                Spacer(Modifier.height(6.dp))
+                AboutLine("Version", versionName)
+                AboutLine("Appareil", "${Build.MANUFACTURER} ${Build.MODEL}".trim())
+                AboutLine("Android", "${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
+                AboutLine("Catalogue en cache", cacheSizeBytes?.let(::formatBytes) ?: "Calcul…")
+                AboutLine("EPG en cache", epgCacheSizeBytes?.let(::formatBytes) ?: "Calcul…")
+            }
         }
 
         Spacer(Modifier.height(28.dp))

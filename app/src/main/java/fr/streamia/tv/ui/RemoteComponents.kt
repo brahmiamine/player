@@ -29,23 +29,18 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.Role
@@ -58,14 +53,19 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
+import fr.streamia.tv.R
+import fr.streamia.tv.ui.theme.AccentPink
+import fr.streamia.tv.ui.theme.AccentPinkLight
 import fr.streamia.tv.ui.theme.DeepSurface
 import fr.streamia.tv.ui.theme.FocusBlue
 import fr.streamia.tv.ui.theme.FocusBlueBright
+import fr.streamia.tv.ui.theme.GlassBorder
 import fr.streamia.tv.ui.theme.HeadingWeight
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.KickerLetterSpacing
 import fr.streamia.tv.ui.theme.MutedInk
 import fr.streamia.tv.ui.theme.Night
+import fr.streamia.tv.ui.theme.RadiusTile
 import fr.streamia.tv.ui.theme.RaisedSurface
 import fr.streamia.tv.ui.theme.TypeSectionTitle
 import kotlinx.coroutines.CoroutineScope
@@ -93,17 +93,19 @@ fun FocusableSurface(
     // Direct) de rendre ses lignes au repos transparentes — seul le focus/la sélection reste plein
     // — sans changer l'aspect opaque par défaut des autres écrans (Accueil, VOD, Organiser…).
     idleBackground: Color = DeepSurface,
+    // Action principale (équivalent `.btn-accent` du prototype) : pilule dégradé accent avec
+    // lueur permanente, plutôt que le remplissage verre neutre des autres tuiles.
+    accent: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
     var longPressConsumed by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(if (focused) 1.035f else 1f, label = "focus-scale")
-    // Léger relief plutôt qu'un aplat pur : une élévation discrète au repos, plus marquée en focus,
-    // pour aider l'œil à séparer les rangées denses (Accueil, EPG) du fond sans réintroduire de
-    // glassmorphisme ni de bordures colorées supplémentaires — un seul réglage, partagé par tous
-    // les usages de FocusableSurface.
-    val elevation by animateDpAsState(if (focused) 10.dp else 2.dp, label = "focus-elevation")
-    val shape = RoundedCornerShape(12.dp)
+    // Le focus doit rester visible depuis l'autre bout du salon : un agrandissement net, une
+    // lueur accent (pas seulement un changement de teinte) et une bordure large — jamais un
+    // simple aplat de couleur — voir PRODUCT.md § Accessibilité & inclusion.
+    val scale by animateFloatAsState(if (focused) 1.06f else 1f, label = "focus-scale")
+    val elevation by animateDpAsState(if (focused) 26.dp else if (accent) 14.dp else 4.dp, label = "focus-elevation")
+    val shape = RoundedCornerShape(RadiusTile)
     val background = when {
         focused -> FocusBlue
         selected -> RaisedSurface
@@ -111,16 +113,28 @@ fun FocusableSurface(
     }
     val border = when {
         focused -> BorderStroke(3.dp, FocusBlueBright)
+        accent -> BorderStroke(1.dp, Color.White.copy(alpha = 0.25f))
         selected -> BorderStroke(2.dp, FocusBlue)
-        else -> BorderStroke(1.dp, Ink.copy(alpha = 0.08f))
+        else -> BorderStroke(1.dp, GlassBorder)
+    }
+    val glowColor = when {
+        focused -> AccentPink.copy(alpha = 0.55f)
+        accent -> AccentPink.copy(alpha = 0.45f)
+        else -> Color.Black.copy(alpha = 0.35f)
     }
 
     Box(
         modifier = modifier
             .scale(scale)
-            .shadow(elevation, shape, clip = false)
+            .shadow(elevation, shape, clip = false, ambientColor = glowColor, spotColor = glowColor)
             .clip(shape)
-            .background(background)
+            .then(
+                if (accent) {
+                    Modifier.background(Brush.verticalGradient(listOf(AccentPinkLight, AccentPink)), shape)
+                } else {
+                    Modifier.background(background, shape)
+                },
+            )
             .border(border, shape)
             .onFocusChanged {
                 focused = it.isFocused
@@ -182,8 +196,8 @@ fun TvTextField(
     enabled: Boolean = true,
 ) {
     var focused by remember { mutableStateOf(false) }
-    val shape = RoundedCornerShape(10.dp)
-    val fieldBackground = if (enabled) RaisedSurface else DeepSurface.copy(alpha = 0.72f)
+    val shape = RoundedCornerShape(18.dp)
+    val fieldBackground = if (enabled) RaisedSurface else DeepSurface.copy(alpha = 0.5f)
     val textColor = if (enabled) Ink else MutedInk.copy(alpha = 0.66f)
     val labelColor = when {
         !enabled -> MutedInk.copy(alpha = 0.55f)
@@ -203,7 +217,7 @@ fun TvTextField(
             .background(fieldBackground)
             .border(
                 if (focused && enabled) 3.dp else 1.dp,
-                if (focused && enabled) FocusBlueBright else Ink.copy(if (enabled) 0.12f else 0.05f),
+                if (focused && enabled) FocusBlueBright else GlassBorder,
                 shape,
             )
             .onFocusChanged { focused = enabled && it.isFocused }
@@ -225,27 +239,11 @@ fun TvTextField(
 @Composable
 fun StreamiaLogo(modifier: Modifier = Modifier, compact: Boolean = false) {
     Row(modifier, verticalAlignment = Alignment.CenterVertically) {
-        // Marque : un écran de télévision — le repère que le design Nocturne associe à « Streamia
-        // TV » (un pictogramme sobre, jamais un aplat décoratif) — plutôt que l'ancien logo
-        // bouton lecture/onde, sans lien avec ce vocabulaire visuel.
-        Box(
-            Modifier
-                .size(if (compact) 42.dp else 58.dp)
-                .drawBehind {
-                    drawCircle(FocusBlue, radius = size.minDimension / 2)
-                    val w = size.width
-                    val h = size.height
-                    val stroke = Stroke(width = w * 0.075f, cap = StrokeCap.Round, join = StrokeJoin.Round)
-                    drawRoundRect(
-                        FocusBlueBright,
-                        topLeft = Offset(w * 0.22f, h * 0.28f),
-                        size = Size(w * 0.56f, h * 0.34f),
-                        cornerRadius = CornerRadius(w * 0.06f),
-                        style = stroke,
-                    )
-                    drawLine(FocusBlueBright, Offset(w * 0.5f, h * 0.62f), Offset(w * 0.5f, h * 0.72f), stroke.width, cap = StrokeCap.Round)
-                    drawLine(FocusBlueBright, Offset(w * 0.36f, h * 0.74f), Offset(w * 0.64f, h * 0.74f), stroke.width, cap = StrokeCap.Round)
-                },
+        Image(
+            painter = painterResource(R.drawable.streamia_logo_mark),
+            contentDescription = "Logo Streamia TV",
+            modifier = Modifier.size(if (compact) 42.dp else 58.dp),
+            contentScale = ContentScale.Fit,
         )
         Spacer(Modifier.width(if (compact) 12.dp else 16.dp))
         Text(
