@@ -117,7 +117,7 @@ object TvProgrammeNowParser {
         // La paire début courant -> début suivant définit directement le créneau. Cette approche
         // gère explicitement le passage de minuit (ex. 23:50 -> 00:20) et évite d'interpréter une
         // heure du lendemain comme une émission déjà commencée.
-        val currentIndex = programmes.indices.dropLast(1).firstOrNull { index ->
+        val currentIndex = (0 until programmes.lastIndex).firstOrNull { index ->
             isInsideInterval(
                 now = now,
                 start = programmes[index].startTime.toLocalTime(),
@@ -155,6 +155,12 @@ object TvProgrammeNowParser {
     private fun String.toLocalTime(): LocalTime {
         val (hour, minute) = split(':').map(String::toInt)
         return LocalTime.of(hour, minute)
+    }
+
+    private fun forwardMinutes(start: LocalTime, end: LocalTime): Int {
+        val startMinutes = start.hour * 60 + start.minute
+        val endMinutes = end.hour * 60 + end.minute
+        return (endMinutes - startMinutes + DAY_MINUTES) % DAY_MINUTES
     }
 
     private fun forwardMinutes(startTime: String, endTime: String): Int =
