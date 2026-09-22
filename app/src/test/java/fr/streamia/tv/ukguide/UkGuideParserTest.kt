@@ -2,6 +2,7 @@ package fr.streamia.tv.ukguide
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.LocalTime
 
@@ -104,5 +105,49 @@ class UkGuideParserTest {
         assertEquals(0, rows.current.size)
         assertEquals(0, rows.next.size)
         assertFalse(schedules.single().programmes.single().isOnAirAt(LocalTime.of(10, 0)))
+    }
+
+    @Test
+    fun parsesGenreCategoriesFromTheNavigationPills() {
+        val html = """
+            <html><body>
+              <a class="cat-pill favourites-pill " data-category-key="__favourites" href="/login.php">Favourites</a>
+              <a class="cat-pill active" data-category-key="entertainment" href="/?date=2026-09-22&amp;hour=21&amp;channel_category=Entertainment">Entertainment</a>
+              <a class="cat-pill " data-category-key="sports" href="/?date=2026-09-22&amp;hour=21&amp;channel_category=Sports">Sports</a>
+              <a class="cat-pill " data-category-key="kids" href="/?date=2026-09-22&amp;hour=21&amp;channel_category=Kids">Kids</a>
+            </body></html>
+        """.trimIndent()
+
+        assertEquals(listOf("Entertainment", "Sports", "Kids"), UkGuideParser.parseCategories(html))
+    }
+
+    @Test
+    fun parsesFragmentJsonWithPaginationMetadata() {
+        val json = """
+            {
+              "ok": true,
+              "hasMore": true,
+              "nextOffset": 24,
+              "html": "<div class=\"tg12-row tg12-channel-row\"><div class=\"tg12-channel\"><div class=\"tg12-channel-text\"><div class=\"tg12-channel-name\">Sky Sports Main Event</div></div></div><div class=\"tg12-programmes\"><a class=\"tg12-programme\" style=\"--tg12-art:url('/media.php?h=1')\"><strong>Sky Sports News</strong><span>20:00&#8211;21:00</span></a></div></div>"
+            }
+        """.trimIndent()
+
+        val page = UkGuideParser.parseFragment(json)
+
+        assertTrue(page.hasMore)
+        assertEquals(24, page.nextOffset)
+        assertEquals(1, page.schedules.size)
+        assertEquals("Sky Sports Main Event", page.schedules.single().channelName)
+        assertEquals("Sky Sports News", page.schedules.single().programmes.single().title)
+    }
+
+    @Test
+    fun fragmentWithoutMorePagesReportsHasMoreFalse() {
+        val json = """{"ok":true,"hasMore":false,"nextOffset":-1,"html":""}"""
+
+        val page = UkGuideParser.parseFragment(json)
+
+        assertFalse(page.hasMore)
+        assertEquals(0, page.schedules.size)
     }
 }

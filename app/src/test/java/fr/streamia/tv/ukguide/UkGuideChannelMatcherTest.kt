@@ -28,6 +28,28 @@ class UkGuideChannelMatcherTest {
     }
 
     @Test
+    fun alsoAcceptsUkChannelsFiledUnderAnotherCategory() {
+        val uk = category("1", "UK | Entertainment")
+        val other = category("2", "Sports")
+        val catalog = Catalog(
+            categories = listOf(uk, other),
+            entries = listOf(
+                channel(1, "UK | BBC One HD", uk.id),
+                channel(2, "UK: Sky Sports Main Event", other.id),
+                channel(3, "Sky Sports Main Event", other.id),
+            ),
+        )
+
+        assertEquals(listOf(1, 2), matcher.ukLiveChannels(catalog).map { it.id })
+
+        val result = matcher.resolve(
+            programmes = listOf(programme("Sky Sports Main Event", "Live Football")),
+            catalog = catalog,
+        )
+        assertEquals(2, result.single().channel.id)
+    }
+
+    @Test
     fun picksHighestQualityVariantInRequestedOrder() {
         val channels = listOf(
             channel(1, "UK | BBC One SD", "uk"),

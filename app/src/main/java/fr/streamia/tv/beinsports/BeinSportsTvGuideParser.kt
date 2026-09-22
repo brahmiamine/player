@@ -21,14 +21,17 @@ data class BeinGuideChannel(
  *   `startDate`/`endDate` en UTC (ISO-8601), le titre, la catégorie et l'indicateur `live`.
  */
 object BeinSportsTvGuideParser {
-    /** Chaînes beIN de la grille MENA, sans les déclinaisons AFC/NBA/HDR hors bouquet principal. */
+    /**
+     * Toutes les chaînes beIN de la grille MENA, déclinaisons AFC/NBA/4K HDR comprises : leur
+     * identité reste distincte des chaînes principales côté [BeinSportsChannelMatcher].
+     */
     fun parseChannels(json: String): List<BeinGuideChannel> {
         val seenNames = mutableSetOf<String>()
         return rows(json)
             .mapNotNull { row ->
                 val id = row.optString("id").trim().takeIf(String::isNotEmpty) ?: return@mapNotNull null
                 val name = row.optString("name").replace(MULTI_SPACE, " ").trim()
-                if (!CHANNEL_NAME.matches(name)) return@mapNotNull null
+                if (!name.startsWith("bein", ignoreCase = true)) return@mapNotNull null
                 if (!seenNames.add(name.lowercase(Locale.ROOT))) return@mapNotNull null
                 BeinGuideChannel(id = id, name = name)
             }
@@ -127,10 +130,12 @@ object BeinSportsTvGuideParser {
             " FR " in "$upper " -> 2
             "XTRA" in upper -> 3
             "MAX" in upper -> 4
-            "4K" in upper -> 5
-            "NEWS" in upper -> 6
+            "AFC" in upper -> 5
+            "NBA" in upper -> 6
+            "4K" in upper -> 7
+            "NEWS" in upper -> 8
             DIGITS.containsMatchIn(upper) -> 0
-            else -> 7
+            else -> 9
         }
     }
 
@@ -142,7 +147,7 @@ object BeinSportsTvGuideParser {
     private const val ORIGIN = "https://www.beinsports.com"
 
     private val CHANNEL_NAME = Regex(
-        """(?i)^beIN(?:\s+SPORTS)?(?:\s+(?:NEWS|XTRA|EN|FR|MAX))?(?:\s+\d+)?(?:\s+4K)?$""",
+        """(?i)^beIN(?:\s+SPORTS)?(?:\s+(?:NEWS|XTRA|EN|FR|MAX|AFC|NBA))?(?:\s+\d+)?(?:\s+AFC)?(?:\s+4K(?:\s+HDR)?)?$""",
     )
     private val CHANNEL_PROMO = Regex("""(?i)^beIN(?:\s+SPORTS)?(?:\s+(?:XTRA|MAX))?\s+for\s+live\b""")
     private val DIGITS = Regex("""\d+""")

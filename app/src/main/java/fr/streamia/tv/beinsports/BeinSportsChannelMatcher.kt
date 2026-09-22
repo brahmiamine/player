@@ -1,16 +1,18 @@
 package fr.streamia.tv.beinsports
 
 import fr.streamia.tv.domain.Catalog
+import fr.streamia.tv.domain.LiveChannelPrefix
 import fr.streamia.tv.domain.MediaEntry
-import fr.streamia.tv.domain.MediaType
 import java.text.Normalizer
 import java.util.Locale
 
 /**
- * Résout les noms de chaînes de la grille MENA vers les chaînes Live de la playlist.
+ * Résout les noms de chaînes de la grille MENA vers les chaînes Live "AR" de la playlist
+ * (catégorie ou nom de chaîne commençant par "AR", voir [LiveChannelPrefix]).
  *
- * Le matching utilise une identité canonique (SPORTS 1, EN 1, FR 1, XTRA 1, MAX 1, NEWS, 4K...)
- * puis préfère la meilleure variante technique disponible : 4K > UHD > FHD > HD > SD.
+ * Le matching utilise une identité canonique (SPORTS 1, EN 1, FR 1, XTRA 1, MAX 1, 1 AFC, NBA,
+ * NEWS, 4K, 4K HDR...) puis préfère la meilleure variante technique disponible :
+ * 4K > UHD > FHD > HD > SD.
  */
 class BeinSportsChannelMatcher {
     fun resolve(
@@ -19,7 +21,7 @@ class BeinSportsChannelMatcher {
     ): List<ResolvedBeinProgrammeItem> {
         if (programmes.isEmpty()) return emptyList()
 
-        val candidates = catalog.entriesFor(MediaType.Live)
+        val candidates = LiveChannelPrefix.AR.channels(catalog)
             .asSequence()
             .mapNotNull { channel ->
                 val identity = identityOf(channel.displayName) ?: identityOf(channel.name) ?: return@mapNotNull null
@@ -57,11 +59,14 @@ class BeinSportsChannelMatcher {
         val number = normalized.tokens.firstOrNull { token -> token.all(Char::isDigit) }
         return when {
             "news" in normalized.tokens -> "news"
+            "nba" in normalized.tokens -> "nba"
+            "afc" in normalized.tokens -> number?.let { "afc:$it" } ?: "afc"
             "xtra" in normalized.tokens || "extra" in normalized.tokens -> number?.let { "xtra:$it" }
             "max" in normalized.tokens -> number?.let { "max:$it" }
             "en" in normalized.tokens || "english" in normalized.tokens -> number?.let { "en:$it" }
             "fr" in normalized.tokens || "french" in normalized.tokens -> number?.let { "fr:$it" }
             number != null -> "sports:$number"
+            "hdr" in normalized.tokens -> "4k-hdr"
             "4k" in normalized.tokens || "2160p" in normalized.tokens -> "4k"
             "sports" in normalized.tokens -> "sports"
             else -> null
@@ -69,7 +74,7 @@ class BeinSportsChannelMatcher {
     }
 
     private fun normalize(raw: String): NormalizedName {
-        val withoutProviderPrefix = raw.substringAfterLast('|', raw)
+        val withoutProviderPrefix = LiveChannelPrefix.AR.strip(raw).substringAfterLast('|')
         val ascii = Normalizer.normalize(withoutProviderPrefix, Normalizer.Form.NFD)
             .replace(COMBINING_MARKS, "")
             .lowercase(Locale.ROOT)

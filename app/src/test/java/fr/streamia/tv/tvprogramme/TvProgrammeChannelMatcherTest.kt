@@ -29,6 +29,23 @@ class TvProgrammeChannelMatcherTest {
     }
 
     @Test
+    fun alsoAcceptsFrChannelsFiledUnderAnotherCategory() {
+        val french = category("1", "FR | Généralistes")
+        val other = category("2", "Divers")
+        val catalog = Catalog(
+            categories = listOf(french, other),
+            entries = listOf(
+                channel(1, "FR | TF1 HD", french.id),
+                channel(2, "FR: M6 HD", other.id),
+                channel(3, "M6 HD", other.id),
+                channel(4, "|FR| Arte", other.id),
+            ),
+        )
+
+        assertEquals(listOf(1, 2, 4), matcher.frenchLiveChannels(catalog).map { it.id })
+    }
+
+    @Test
     fun picksHighestQualityVariantInRequestedOrder() {
         val channels = listOf(
             channel(1, "FR | TF1 SD", "fr"),
