@@ -113,17 +113,24 @@ object TvProgrammeNowParser {
         now: LocalTime,
     ): TvProgrammeNowItem? {
         if (programmes.isEmpty()) return null
-        val nowMinutes = now.hour * 60 + now.minute
 
-        val currentIndex = programmes.indices
-            .map { index -> index to signedMinuteDelta(programmes[index].startTime, nowMinutes) }
-            .filter { (_, delta) -> delta <= 0 }
-            .maxByOrNull { (_, delta) -> delta }
-            ?.first
-            ?: return null
+        // La paire début courant -> début suivant définit directement le créneau. Cette approche
+        // gère explicitement le passage de minuit (ex. 23:50 -> 00:20) et évite d'interpréter une
+        // heure du lendemain comme une émission déjà commencée.
+        val currentIndex = programmes.indices.dropLast(1).firstOrNull { index ->
+            isInsideInterval(
+                now = now,
+                start = programmes[index].startTime.toLocalTime(),
+                end = programmes[index + 1].startTime.toLocalTime(),
+            )
+        } ?: programmes.indices.lastOrNull()?.takeIf { lastIndex ->
+            val start = programmes[lastIndex].startTime.toLocalTime()
+            val elapsed = forwardMinutes(start, now)
+            elapsed in 0..MAX_REASONABLE_PROGRAMME_MINUTES
+        } ?: return null
 
         val current = programmes[currentIndex]
-        val next = programmes.drop(currentIndex + 1).firstOrNull()
+        val next = programmes.getOrNull(currentIndex + 1)
         val endTime = next?.startTime?.takeIf { candidateEnd ->
             val duration = forwardMinutes(current.startTime, candidateEnd)
             duration in 1..MAX_REASONABLE_PROGRAMME_MINUTES
@@ -138,9 +145,16 @@ object TvProgrammeNowParser {
         )
     }
 
-    private fun signedMinuteDelta(startTime: String, nowMinutes: Int): Int {
-        val start = startTime.toMinutes()
-        return ((start - nowMinutes + HALF_DAY_MINUTES + DAY_MINUTES) % DAY_MINUTES) - HALF_DAY_MINUTES
+    private fun isInsideInterval(now: LocalTime, start: LocalTime, end: LocalTime): Boolean =
+        if (start <= end) {
+            now >= start && now < end
+        } else {
+            now >= start || now < end
+        }
+
+    private fun String.toLocalTime(): LocalTime {
+        val (hour, minute) = split(':').map(String::toInt)
+        return LocalTime.of(hour, minute)
     }
 
     private fun forwardMinutes(startTime: String, endTime: String): Int =
@@ -215,10 +229,9 @@ object TvProgrammeNowParser {
     private const val MAX_PROGRAMME_ANCESTOR_DEPTH = 6
     private const val MAX_PROGRAMME_TEXT_LENGTH = 420
     private const val DAY_MINUTES = 24 * 60
-    private const val HALF_DAY_MINUTES = 12 * 60
     private const val MAX_REASONABLE_PROGRAMME_MINUTES = 8 * 60
     private val CHANNEL_NUMBER = Regex("""\bN\s*[°ºo]?\s*\d+\b""", RegexOption.IGNORE_CASE)
-    private val CHANNEL_LOGO_ALT = Regex("""(?:logo\s+(?:de\s+la\s+cha[iî]ne\s+)?)?(.+?)(?:\s+programme)?$""", RegexOption.IGNORE_CASE)
+    private val CHANNEL_LOGO_ALT = Regex("""^logo\s+(?:de\s+la\s+cha[iî]ne\s+)?(.+?)(?:\s+programme)?$""", RegexOption.IGNORE_CASE)
     private val TIME = Regex("""\b(\d{1,2})h(\d{2})\b""")
     private val TRAILING_DIRECT = Regex("""\s+Direct\s*$""", RegexOption.IGNORE_CASE)
     private val TRAILING_ELLIPSIS = Regex("""\s*(?:…|\.\.\.)\s*$""")
