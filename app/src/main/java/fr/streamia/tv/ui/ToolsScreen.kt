@@ -172,7 +172,6 @@ fun ToolsScreen(
                     "Version, appareil, taille du cache",
                     onAbout,
                     Modifier.weight(1f),
-                    selected = true,
                 )
             }
         }
