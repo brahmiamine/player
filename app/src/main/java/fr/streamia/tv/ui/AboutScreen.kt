@@ -61,7 +61,9 @@ fun AboutScreen(
 
         GlassSurface(modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                AboutLine("Streamia TV", versionName)
+                StreamiaLogo(compact = true)
+                Spacer(Modifier.height(6.dp))
+                AboutLine("Version", versionName)
                 AboutLine("Appareil", "${Build.MANUFACTURER} ${Build.MODEL}".trim())
                 AboutLine("Android", "${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
                 AboutLine("Catalogue en cache", cacheSizeBytes?.let(::formatBytes) ?: "Calcul…")

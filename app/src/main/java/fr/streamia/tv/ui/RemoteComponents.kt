@@ -29,24 +29,18 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.Role
@@ -59,6 +53,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
+import fr.streamia.tv.R
 import fr.streamia.tv.ui.theme.AccentPink
 import fr.streamia.tv.ui.theme.AccentPinkLight
 import fr.streamia.tv.ui.theme.DeepSurface
@@ -244,30 +239,11 @@ fun TvTextField(
 @Composable
 fun StreamiaLogo(modifier: Modifier = Modifier, compact: Boolean = false) {
     Row(modifier, verticalAlignment = Alignment.CenterVertically) {
-        // Marque : un écran de télévision — le repère que le design Nocturne associe à « Streamia
-        // TV » (un pictogramme sobre, jamais un aplat décoratif) — plutôt que l'ancien logo
-        // bouton lecture/onde, sans lien avec ce vocabulaire visuel.
-        Box(
-            Modifier
-                .size(if (compact) 42.dp else 58.dp)
-                .drawBehind {
-                    drawCircle(
-                        brush = Brush.linearGradient(listOf(AccentPinkLight, AccentPink)),
-                        radius = size.minDimension / 2,
-                    )
-                    val w = size.width
-                    val h = size.height
-                    val stroke = Stroke(width = w * 0.075f, cap = StrokeCap.Round, join = StrokeJoin.Round)
-                    drawRoundRect(
-                        Ink,
-                        topLeft = Offset(w * 0.22f, h * 0.28f),
-                        size = Size(w * 0.56f, h * 0.34f),
-                        cornerRadius = CornerRadius(w * 0.06f),
-                        style = stroke,
-                    )
-                    drawLine(Ink, Offset(w * 0.5f, h * 0.62f), Offset(w * 0.5f, h * 0.72f), stroke.width, cap = StrokeCap.Round)
-                    drawLine(Ink, Offset(w * 0.36f, h * 0.74f), Offset(w * 0.64f, h * 0.74f), stroke.width, cap = StrokeCap.Round)
-                },
+        Image(
+            painter = painterResource(R.drawable.streamia_logo_mark),
+            contentDescription = "Logo Streamia TV",
+            modifier = Modifier.size(if (compact) 42.dp else 58.dp),
+            contentScale = ContentScale.Fit,
         )
         Spacer(Modifier.width(if (compact) 12.dp else 16.dp))
         Text(
