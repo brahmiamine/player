@@ -827,7 +827,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                     startEpgBackgroundSync()
                     refreshHomeMatchRow()
                     resolveTvProgrammeTonight()
-                resolveTvProgrammeNow()
+                    resolveTvProgrammeNow()
                 }
             } finally {
                 categoryLoadsInFlight.remove(loadKey)
