@@ -166,12 +166,6 @@ fun SettingsScreen(
             }
         }
         Spacer(Modifier.height(14.dp))
-        Text(
-            "Tous les réglages, outils et actions de gestion sont regroupés ici. OK ouvre une fenêtre lorsqu'un choix est nécessaire.",
-            color = MutedInk,
-            fontSize = 14.sp,
-        )
-        Spacer(Modifier.height(14.dp))
 
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()),
