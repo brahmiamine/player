@@ -393,7 +393,19 @@ fun SettingsScreen(
                     Modifier.weight(1f),
                     enabled = !busy,
                 )
-                SettingsTile(StreamiaIconGlyph.Swap, "Changer de liste", "Gestionnaire de playlists", onChangePlaylist, Modifier.weight(1f))
+                SettingsTile(
+                    StreamiaIconGlyph.Swap,
+                    "Changer de liste",
+                    "Gestionnaire de playlists",
+                    {
+                        openChoices(
+                            "Changer de liste",
+                            "Vous allez quitter la liste actuelle et revenir au gestionnaire de playlists.",
+                            listOf("Annuler" to false, "Continuer" to false),
+                        ) { if (it == 1) onChangePlaylist() }
+                    },
+                    Modifier.weight(1f),
+                )
                 SettingsTile(
                     StreamiaIconGlyph.Lock,
                     "Contrôle parental",
@@ -414,7 +426,7 @@ fun SettingsScreen(
                         openChoices(
                             "Effacer l'historique Direct",
                             "Cette action retire uniquement l'historique des chaînes en direct.",
-                            listOf("Annuler" to true, "Effacer" to false),
+                            listOf("Annuler" to false, "Effacer" to false),
                         ) { if (it == 1) onClearLiveHistory() }
                     },
                     Modifier.weight(1f),
@@ -428,7 +440,7 @@ fun SettingsScreen(
                         openChoices(
                             "Effacer l'historique Films",
                             "Cette action retire uniquement l'historique des films.",
-                            listOf("Annuler" to true, "Effacer" to false),
+                            listOf("Annuler" to false, "Effacer" to false),
                         ) { if (it == 1) onClearMovieHistory() }
                     },
                     Modifier.weight(1f),
@@ -442,7 +454,7 @@ fun SettingsScreen(
                         openChoices(
                             "Effacer l'historique Séries",
                             "Cette action retire uniquement l'historique des séries.",
-                            listOf("Annuler" to true, "Effacer" to false),
+                            listOf("Annuler" to false, "Effacer" to false),
                         ) { if (it == 1) onClearSeriesHistory() }
                     },
                     Modifier.weight(1f),
@@ -460,7 +472,7 @@ fun SettingsScreen(
                         openChoices(
                             "Effacer tout l'historique",
                             "Tous les historiques Direct, Films et Séries seront supprimés.",
-                            listOf("Annuler" to true, "Tout effacer" to false),
+                            listOf("Annuler" to false, "Tout effacer" to false),
                         ) { if (it == 1) onClearAllHistory() }
                     },
                     Modifier.weight(1f),
