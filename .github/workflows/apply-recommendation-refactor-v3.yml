@@ -38,8 +38,9 @@ jobs:
 
       - name: Apply deterministic recommendation refactor
         run: |
-          python3 -m py_compile .github/scripts/apply_recommendation_refactor.py
+          python3 -m py_compile .github/scripts/apply_recommendation_refactor.py .github/scripts/refine_plot_tokens.py
           python3 .github/scripts/apply_recommendation_refactor.py
+          python3 .github/scripts/refine_plot_tokens.py
 
       - name: Run unit tests and lint
         run: gradle --no-daemon testDebugUnitTest lintDebug --stacktrace
@@ -51,6 +52,7 @@ jobs:
           git rm .github/workflows/apply-recommendation-refactor.yml
           git rm .github/workflows/apply-recommendation-refactor-v3.yml
           git rm .github/scripts/apply_recommendation_refactor.py
+          git rm .github/scripts/refine_plot_tokens.py
           git add app/src/main app/src/test
           git commit -m "feat: improve fast film and series recommendations"
           git push origin HEAD:claude/ios-glass-theme
