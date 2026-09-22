@@ -131,7 +131,37 @@ jobs:
         run: gradle --no-daemon assembleOptimized
 
       - name: Report APK sizes
-        run: du -h app/build/outputs/apk/debug/app-debug.apk
+        id: report_size
+        continue-on-error: true
+        run: |
+          {
+            echo "--- find app/build/outputs ---"
+            find app/build/outputs -type f 2>&1
+            echo "--- du ---"
+            du -h app/build/outputs/apk/debug/app-debug.apk
+          } > report-size-output.log 2>&1
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          cat report-size-output.log
+
+      # TEMPORARY diagnostic — see the "Unit tests and lint" step above for why. Remove once green.
+      - name: Post APK-size failure log as PR comment (diagnostic)
+        if: steps.report_size.outputs.exit_code != '0' && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tail -c 60000 report-size-output.log > tail.log
+          python3 -c "
+          import json
+          body = '### Report APK sizes failure (diagnostic)\n\n<details><summary>report-size-output.log tail</summary>\n\n\`\`\`\n' + open('tail.log').read() + '\n\`\`\`\n\n</details>'
+          print(json.dumps({'body': body}))
+          " > comment3.json
+          curl -sS -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
+            -d @comment3.json
+
+      - name: Fail job if reporting APK size failed
+        if: steps.report_size.outputs.exit_code != '0'
+        run: exit 1
 
       - name: Report optimized APK size
         if: github.event_name != 'pull_request'
