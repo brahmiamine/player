@@ -5,6 +5,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import fr.streamia.tv.BuildConfig
+import fr.streamia.tv.beinsports.BeinProgrammeItem
+import fr.streamia.tv.beinsports.BeinSportsChannelMatcher
+import fr.streamia.tv.beinsports.ResolvedBeinProgrammeItem
 import fr.streamia.tv.data.AppSettings
 import fr.streamia.tv.data.CatalogSource
 import fr.streamia.tv.data.EpgCacheMetadata
@@ -99,6 +102,12 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     private var tvProgrammeNowResolveSequence = 0L
     private var tvProgrammeNowLoadJob: Job? = null
     private var tvProgrammeNowRawItems: List<TvProgrammeNowItem> = emptyList()
+    private val beinSportsChannelMatcher = BeinSportsChannelMatcher()
+    private var beinGuideLoadSequence = 0L
+    private var beinGuideResolveSequence = 0L
+    private var beinGuideLoadJob: Job? = null
+    private var beinGuideCurrentRaw: List<BeinProgrammeItem> = emptyList()
+    private var beinGuideNextRaw: List<BeinProgrammeItem> = emptyList()
     private var epgSyncJob: Job? = null
     private var epgSyncProfileId: String? = null
     private var epgPrefetchJob: Job? = null
@@ -158,6 +167,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         loadLiveOnSatMatches(forceRefresh = false)
         loadTvProgrammeTonight(forceRefresh = false)
         loadTvProgrammeNow(forceRefresh = false)
+        loadBeinSportsGuide(forceRefresh = false)
         viewModelScope.launch {
             // Catalogue déjà résolu (favoris/ordre déjà appliqués) persisté lors d'une précédente
             // réconciliation réussie pour ce profil : s'il est encore valide pour l'organisation
@@ -285,6 +295,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 loadLiveOnSatMatches(forceRefresh = false)
                 loadTvProgrammeTonight(forceRefresh = false)
         loadTvProgrammeNow(forceRefresh = false)
+        loadBeinSportsGuide(forceRefresh = false)
                 try {
                     mergeCatalog(repository.openProfile(profileId, knownCache = cachedCatalog))
                 } catch (error: Throwable) {
@@ -548,7 +559,9 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         refreshHomeRecommendations()
         resolveTvProgrammeTonight()
         resolveTvProgrammeNow()
+        resolveBeinSportsGuide()
         loadTvProgrammeNow(forceRefresh = false)
+        loadBeinSportsGuide(forceRefresh = false)
     }
     fun showSettings() { _uiState.update { it.copy(screen = StreamiaScreen.Settings, message = null) } }
     fun showTools() { _uiState.update { it.copy(screen = StreamiaScreen.Tools, message = null) } }
@@ -587,6 +600,8 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     fun refreshLiveOnSatMatches() = loadLiveOnSatMatches(forceRefresh = true)
 
     fun refreshTvProgrammeNow() = loadTvProgrammeNow(forceRefresh = false)
+
+    fun refreshBeinSportsGuide() = loadBeinSportsGuide(forceRefresh = false)
 
     fun toggleLivePreview() {
         updateAppSettings { it.copy(livePreviewEnabled = !it.livePreviewEnabled) }
@@ -814,6 +829,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 refreshHomeMatchRow()
                 resolveTvProgrammeTonight()
                 resolveTvProgrammeNow()
+                resolveBeinSportsGuide()
             }
             return
         }
@@ -828,6 +844,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                     refreshHomeMatchRow()
                     resolveTvProgrammeTonight()
                     resolveTvProgrammeNow()
+                    resolveBeinSportsGuide()
                 }
             } finally {
                 categoryLoadsInFlight.remove(loadKey)
@@ -1972,6 +1989,82 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     }
 
     /**
+     * Charge la grille MENA beIN SPORTS et en extrait les émissions actuellement diffusées et
+     * suivantes. Le scrape ne dépend pas du profil ; seule la résolution vers la playlist dépend
+     * du catalogue Live courant.
+     */
+    private fun loadBeinSportsGuide(forceRefresh: Boolean) {
+        val profileId = _uiState.value.activeProfileId ?: return
+        if (!forceRefresh && beinGuideLoadJob?.isActive == true) return
+        if (forceRefresh) beinGuideLoadJob?.cancel()
+
+        val sequence = ++beinGuideLoadSequence
+        beinGuideLoadJob = viewModelScope.launch {
+            runCatching { repository.loadBeinSportsGuide(forceRefresh) }
+                .onSuccess { fetch ->
+                    if (
+                        sequence != beinGuideLoadSequence ||
+                        _uiState.value.activeProfileId != profileId
+                    ) {
+                        return@onSuccess
+                    }
+                    beinGuideCurrentRaw = fetch.rows.current
+                    beinGuideNextRaw = fetch.rows.next
+                    resolveBeinSportsGuide()
+                }
+        }
+    }
+
+    private fun resolveBeinSportsGuide() {
+        val state = _uiState.value
+        val profileId = state.activeProfileId ?: return
+        val catalog = state.catalog ?: return
+        if (beinGuideCurrentRaw.isEmpty() && beinGuideNextRaw.isEmpty()) return
+
+        val excludedCategoryKeys = if (
+            state.appSettings.parentalControlEnabled && !state.parentalUnlocked
+        ) {
+            state.library.hiddenCategories + state.library.lockedCategories
+        } else {
+            state.library.hiddenCategories
+        }
+        val excludedCategoryIds = catalog.categories.asSequence()
+            .filter { it.type == MediaType.Live && it.key in excludedCategoryKeys }
+            .mapTo(mutableSetOf()) { it.id }
+        val hiddenEntries = state.library.hiddenEntries
+        val sequence = ++beinGuideResolveSequence
+        val currentRaw = beinGuideCurrentRaw
+        val nextRaw = beinGuideNextRaw
+
+        viewModelScope.launch(Dispatchers.Default) {
+            fun visible(items: List<ResolvedBeinProgrammeItem>): List<ResolvedBeinProgrammeItem> =
+                items.filterNot { item ->
+                    item.channel.key in hiddenEntries ||
+                        item.channel.categoryId in excludedCategoryIds
+                }
+
+            val current = visible(beinSportsChannelMatcher.resolve(currentRaw, catalog))
+            val next = visible(beinSportsChannelMatcher.resolve(nextRaw, catalog))
+
+            if (
+                sequence != beinGuideResolveSequence ||
+                _uiState.value.activeProfileId != profileId
+            ) return@launch
+
+            _uiState.update { latest ->
+                if (latest.activeProfileId == profileId) {
+                    latest.copy(
+                        homeBeinSportsNow = current,
+                        homeBeinSportsNext = next,
+                    )
+                } else {
+                    latest
+                }
+            }
+        }
+    }
+
+    /**
      * Charge les programmes actuellement diffusés depuis /en-ce-moment. Le cache est volontairement
      * très court car cette rangée évolue pendant que l'application est ouverte.
      */
@@ -2057,6 +2150,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                     tvProgrammeRawItems = fetch.programmes
                     resolveTvProgrammeTonight()
                 resolveTvProgrammeNow()
+                resolveBeinSportsGuide()
                 }
         }
     }
@@ -2360,6 +2454,12 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         tvProgrammeNowLoadSequence += 1
         tvProgrammeNowResolveSequence += 1
         tvProgrammeNowRawItems = emptyList()
+        beinGuideLoadJob?.cancel()
+        beinGuideLoadJob = null
+        beinGuideLoadSequence += 1
+        beinGuideResolveSequence += 1
+        beinGuideCurrentRaw = emptyList()
+        beinGuideNextRaw = emptyList()
         epgPrefetchJob?.cancel()
         epgPrefetchJob = null
         epgSyncJob?.cancel()
@@ -2397,6 +2497,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         loadLiveOnSatMatches(forceRefresh = false)
         loadTvProgrammeTonight(forceRefresh = false)
         loadTvProgrammeNow(forceRefresh = false)
+        loadBeinSportsGuide(forceRefresh = false)
     }
 
     private fun showError(error: Throwable) {
@@ -2446,6 +2547,8 @@ data class StreamiaUiState(
     val homeRecommendationRows: List<RecommendationRow> = emptyList(),
     val homeTvProgrammeNow: List<ResolvedTvProgrammeNowItem> = emptyList(),
     val homeTvProgrammeTonight: List<ResolvedTvProgrammeItem> = emptyList(),
+    val homeBeinSportsNow: List<ResolvedBeinProgrammeItem> = emptyList(),
+    val homeBeinSportsNext: List<ResolvedBeinProgrammeItem> = emptyList(),
     val similarMedia: List<RecommendedMedia> = emptyList(),
     val liveOnSatMatches: List<ResolvedLiveOnSatMatch> = emptyList(),
     val liveOnSatLoading: Boolean = false,

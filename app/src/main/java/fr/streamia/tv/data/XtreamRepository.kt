@@ -43,6 +43,7 @@ class XtreamRepository(context: Context) {
     private val liveOnSatRepository = LiveOnSatRepository(context)
     private val tvProgrammeRepository = TvProgrammeRepository(context)
     private val tvProgrammeNowRepository = TvProgrammeNowRepository(context)
+    private val beinSportsGuideRepository = BeinSportsGuideRepository(context)
     private val xmlTvRepository = XmlTvRepository()
     private val m3uParser = M3uParser()
     private val updateChecker = UpdateChecker()
@@ -139,6 +140,10 @@ class XtreamRepository(context: Context) {
     /** Programmes TV français actuellement diffusés, rafraîchis fréquemment. */
     suspend fun loadTvProgrammeNow(forceRefresh: Boolean = false): TvProgrammeNowFetchResult =
         tvProgrammeNowRepository.loadNow(forceRefresh, maxAgeMillis = TV_PROGRAMME_NOW_CACHE_MAX_AGE_MS)
+
+    /** Grille MENA beIN SPORTS : programmes en cours et suivants avec cache court. */
+    suspend fun loadBeinSportsGuide(forceRefresh: Boolean = false): BeinSportsGuideFetchResult =
+        beinSportsGuideRepository.loadGuide(forceRefresh, maxAgeMillis = BEIN_SPORTS_GUIDE_CACHE_MAX_AGE_MS)
 
     /**
      * Recherche indexée en base plutôt que dans le sous-ensemble matérialisé en mémoire : sous
@@ -641,6 +646,10 @@ class XtreamRepository(context: Context) {
 
         // Les programmes "en ce moment" évoluent en continu : cache très court pour rester juste.
         private const val TV_PROGRAMME_NOW_CACHE_MAX_AGE_MS = 2 * 60_000L
+
+        // La grille beIN est utilisée pour le "maintenant" et le "suivant" : garder la même
+        // fraîcheur que le programme TV en direct pour basculer rapidement lors d'un changement.
+        private const val BEIN_SPORTS_GUIDE_CACHE_MAX_AGE_MS = 2 * 60_000L
 
         // Partagé par toutes les instances de XtreamRepository du process : le worker EPG en
         // arrière-plan (EpgSyncWorker) et le ViewModel créent chacun leur propre instance, mais
