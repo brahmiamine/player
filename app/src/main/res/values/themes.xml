@@ -12,7 +12,7 @@
 
     <style name="Theme.Streamia.Starting" parent="Theme.SplashScreen">
         <item name="windowSplashScreenBackground">@color/streamia_night</item>
-        <item name="windowSplashScreenAnimatedIcon">@drawable/streamia_logo_mark</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_splash_logo</item>
         <item name="windowSplashScreenIconBackgroundColor">@android:color/transparent</item>
         <item name="windowSplashScreenAnimationDuration">0</item>
         <item name="postSplashScreenTheme">@style/Theme.Streamia</item>
