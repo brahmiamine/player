@@ -639,6 +639,9 @@ class XtreamRepository(context: Context) {
         // limitent les requêtes vers tv-programme.com tout en renouvelant les données dans la soirée.
         private const val TV_PROGRAMME_CACHE_MAX_AGE_MS = 2 * 60 * 60_000L
 
+        // Les programmes "en ce moment" évoluent en continu : cache très court pour rester juste.
+        private const val TV_PROGRAMME_NOW_CACHE_MAX_AGE_MS = 2 * 60_000L
+
         // Partagé par toutes les instances de XtreamRepository du process : le worker EPG en
         // arrière-plan (EpgSyncWorker) et le ViewModel créent chacun leur propre instance, mais
         // toutes deux visent le même fichier SQLite pour un profil donné. Sans ce verrou, un
