@@ -20,7 +20,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -41,15 +40,11 @@ import fr.streamia.tv.data.isResumable
 import fr.streamia.tv.domain.Catalog
 import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.MediaType
-import fr.streamia.tv.matches.HomeMatchRows
-import fr.streamia.tv.matches.MatchRow
-import fr.streamia.tv.matches.MatchRowItem
-import fr.streamia.tv.matches.MatchTemporalState
-import fr.streamia.tv.matches.reclassifiedAt
 import fr.streamia.tv.recommendation.RecommendationRow
 import fr.streamia.tv.recommendation.RecommendedMedia
 import fr.streamia.tv.tvprogramme.ResolvedTvProgrammeItem
 import fr.streamia.tv.tvprogramme.ResolvedTvProgrammeNowItem
+import fr.streamia.tv.ukguide.ResolvedUkProgrammeItem
 import fr.streamia.tv.ui.theme.Danger
 import fr.streamia.tv.ui.theme.FocusBlueBright
 import fr.streamia.tv.ui.theme.HeadingWeight
@@ -59,10 +54,8 @@ import fr.streamia.tv.ui.theme.Night
 import fr.streamia.tv.ui.theme.RadiusPill
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
-import java.time.Instant
 import java.time.LocalTime
 import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 import java.util.Date
 import java.util.Locale
 
@@ -71,7 +64,7 @@ import java.util.Locale
  * l'accueil garde le même confort quand aucune rangée « Reprendre »/« Favoris » n'est affichée. */
 private val MainGridHeight = 560.dp
 private val CardRowSpacing = 22.dp
-private val TV_PROGRAMME_ZONE: ZoneId = ZoneId.of("Europe/Paris")
+private val UK_GUIDE_ZONE: ZoneId = ZoneId.of("Europe/London")
 private const val TV_PROGRAMME_PROGRESS_REFRESH_MS = 30_000L
 private const val TV_PROGRAMME_DATA_REFRESH_MS = 2 * 60_000L
 
@@ -85,13 +78,13 @@ fun HomeScreen(
     parentalControlEnabled: Boolean = false,
     parentalUnlocked: Boolean = false,
     catalogLoading: Boolean = false,
-    liveMatchRow: MatchRow? = null,
-    upcomingMatchRow: MatchRow? = null,
     recommendationRows: List<RecommendationRow> = emptyList(),
     tvProgrammeNow: List<ResolvedTvProgrammeNowItem> = emptyList(),
     tvProgrammeTonight: List<ResolvedTvProgrammeItem> = emptyList(),
     beinSportsNow: List<ResolvedBeinProgrammeItem> = emptyList(),
     beinSportsNext: List<ResolvedBeinProgrammeItem> = emptyList(),
+    ukGuideNow: List<ResolvedUkProgrammeItem> = emptyList(),
+    ukGuideNext: List<ResolvedUkProgrammeItem> = emptyList(),
     restoreContext: ContentReturnContext? = null,
     onOpenSection: (MediaType) -> Unit,
     onSettings: () -> Unit,
@@ -104,6 +97,7 @@ fun HomeScreen(
     onOpenLiveMatches: () -> Unit,
     onRefreshTvProgrammeNow: () -> Unit,
     onRefreshBeinSportsGuide: () -> Unit,
+    onRefreshUkGuide: () -> Unit,
 ) {
     val firstFocus = remember { FocusRequester() }
     val restoringHome = restoreContext?.origin == ContentReturnOrigin.Home
@@ -162,25 +156,11 @@ fun HomeScreen(
             .toList()
     }
 
-    var matchNowEpochSeconds by remember { mutableLongStateOf(System.currentTimeMillis() / 1000L) }
-    LaunchedEffect(liveMatchRow, upcomingMatchRow) {
-        if (liveMatchRow == null && upcomingMatchRow == null) return@LaunchedEffect
-        while (true) {
-            delay(HOME_MATCH_CLOCK_REFRESH_MS)
-            matchNowEpochSeconds = System.currentTimeMillis() / 1000L
-        }
-    }
-    val timedMatchRows = remember(liveMatchRow, upcomingMatchRow, matchNowEpochSeconds) {
-        HomeMatchRows(liveMatchRow, upcomingMatchRow).reclassifiedAt(matchNowEpochSeconds)
-    }
-    val displayedLiveMatchRow = timedMatchRows.live
-    val displayedUpcomingMatchRow = timedMatchRows.upcomingToday
-
-    var tvProgrammeNowTime by remember { mutableStateOf(LocalTime.now(TV_PROGRAMME_ZONE)) }
+    var tvProgrammeNowEpochMillis by remember { mutableStateOf(System.currentTimeMillis()) }
     LaunchedEffect(tvProgrammeNow) {
         if (tvProgrammeNow.isEmpty()) return@LaunchedEffect
         while (true) {
-            tvProgrammeNowTime = LocalTime.now(TV_PROGRAMME_ZONE)
+            tvProgrammeNowEpochMillis = System.currentTimeMillis()
             delay(TV_PROGRAMME_PROGRESS_REFRESH_MS)
         }
     }
@@ -192,11 +172,20 @@ fun HomeScreen(
             delay(TV_PROGRAMME_PROGRESS_REFRESH_MS)
         }
     }
+    var ukGuideNowTime by remember { mutableStateOf(LocalTime.now(UK_GUIDE_ZONE)) }
+    LaunchedEffect(ukGuideNow) {
+        if (ukGuideNow.isEmpty()) return@LaunchedEffect
+        while (true) {
+            ukGuideNowTime = LocalTime.now(UK_GUIDE_ZONE)
+            delay(TV_PROGRAMME_PROGRESS_REFRESH_MS)
+        }
+    }
     LaunchedEffect(Unit) {
         while (true) {
             delay(TV_PROGRAMME_DATA_REFRESH_MS)
             onRefreshTvProgrammeNow()
             onRefreshBeinSportsGuide()
+            onRefreshUkGuide()
         }
     }
 
@@ -206,73 +195,56 @@ fun HomeScreen(
     // strictement identique à l'ancien écran fixe.
     val focusOnResume = resumeCards.isNotEmpty()
     val focusOnFavorites = !focusOnResume && favoriteCards.isNotEmpty()
-    val focusOnLiveMatches = !focusOnResume && !focusOnFavorites && displayedLiveMatchRow?.items?.isNotEmpty() == true
-    val focusOnUpcomingMatches =
-        !focusOnResume && !focusOnFavorites && !focusOnLiveMatches && displayedUpcomingMatchRow?.items?.isNotEmpty() == true
-    val focusOnMatches = focusOnLiveMatches || focusOnUpcomingMatches
     val focusOnTvProgrammeNow =
-        !focusOnResume && !focusOnFavorites && !focusOnMatches && tvProgrammeNow.isNotEmpty()
+        !focusOnResume && !focusOnFavorites && tvProgrammeNow.isNotEmpty()
     val focusOnTvProgrammeTonight =
-        !focusOnResume && !focusOnFavorites && !focusOnMatches && !focusOnTvProgrammeNow &&
+        !focusOnResume && !focusOnFavorites && !focusOnTvProgrammeNow &&
             tvProgrammeTonight.isNotEmpty()
     val focusOnTvProgramme = focusOnTvProgrammeNow || focusOnTvProgrammeTonight
     val focusOnBeinSportsNow =
-        !focusOnResume && !focusOnFavorites && !focusOnMatches && !focusOnTvProgramme &&
+        !focusOnResume && !focusOnFavorites && !focusOnTvProgramme &&
             beinSportsNow.isNotEmpty()
     val focusOnBeinSportsNext =
-        !focusOnResume && !focusOnFavorites && !focusOnMatches && !focusOnTvProgramme &&
+        !focusOnResume && !focusOnFavorites && !focusOnTvProgramme &&
             !focusOnBeinSportsNow && beinSportsNext.isNotEmpty()
     val focusOnBeinSports = focusOnBeinSportsNow || focusOnBeinSportsNext
+    val focusOnUkGuideNow =
+        !focusOnResume && !focusOnFavorites && !focusOnTvProgramme && !focusOnBeinSports &&
+            ukGuideNow.isNotEmpty()
+    val focusOnUkGuideNext =
+        !focusOnResume && !focusOnFavorites && !focusOnTvProgramme && !focusOnBeinSports &&
+            !focusOnUkGuideNow && ukGuideNext.isNotEmpty()
+    val focusOnUkGuide = focusOnUkGuideNow || focusOnUkGuideNext
     val focusOnRecommendations =
-        !focusOnResume && !focusOnFavorites && !focusOnMatches && !focusOnTvProgramme &&
-            !focusOnBeinSports && recommendationRows.isNotEmpty()
+        !focusOnResume && !focusOnFavorites && !focusOnTvProgramme && !focusOnBeinSports &&
+            !focusOnUkGuide && recommendationRows.isNotEmpty()
     val focusOnGrid =
-        !focusOnResume && !focusOnFavorites && !focusOnMatches && !focusOnTvProgramme &&
-            !focusOnBeinSports && !focusOnRecommendations
+        !focusOnResume && !focusOnFavorites && !focusOnTvProgramme && !focusOnBeinSports &&
+            !focusOnUkGuide && !focusOnRecommendations
 
     val homeListState = rememberLazyListState()
     val restoreTarget = restoreContext?.takeIf { it.origin == ContentReturnOrigin.Home }
-    val effectiveRestoreRowKey = remember(
-        restoreTarget,
-        displayedLiveMatchRow,
-        displayedUpcomingMatchRow,
-    ) {
-        when (restoreTarget?.homeRowKey) {
-            HomeRowKey.LiveMatches, HomeRowKey.UpcomingMatches -> {
-                val matchKey = restoreTarget.itemKey
-                when {
-                    displayedLiveMatchRow?.items?.any { it.event.fingerprint == matchKey } == true ->
-                        HomeRowKey.LiveMatches
-                    displayedUpcomingMatchRow?.items?.any { it.event.fingerprint == matchKey } == true ->
-                        HomeRowKey.UpcomingMatches
-                    // Le match a disparu des deux rangées (il s'est terminé pendant la lecture) :
-                    // renvoyer null évite de viser une rangée sans carte à refocaliser.
-                    else -> null
-                }
-            }
-            else -> restoreTarget?.homeRowKey
-        }
-    }
+    val effectiveRestoreRowKey = restoreTarget?.homeRowKey
     val visibleRowKeys = remember(
         resumeCards,
         favoriteCards,
-        displayedLiveMatchRow,
-        displayedUpcomingMatchRow,
         tvProgrammeNow,
         tvProgrammeTonight,
         beinSportsNow,
         beinSportsNext,
+        ukGuideNow,
+        ukGuideNext,
         recommendationRows,
     ) {
         buildList {
             if (resumeCards.isNotEmpty()) add(HomeRowKey.Resume)
             if (favoriteCards.isNotEmpty()) add(HomeRowKey.Favorites)
-            if (displayedLiveMatchRow?.items?.isNotEmpty() == true) add(HomeRowKey.LiveMatches)
-            if (displayedUpcomingMatchRow?.items?.isNotEmpty() == true) add(HomeRowKey.UpcomingMatches)
             if (tvProgrammeNow.isNotEmpty()) add(HomeRowKey.TvProgrammeNow)
             if (tvProgrammeTonight.isNotEmpty()) add(HomeRowKey.TvProgrammeTonight)
             if (beinSportsNow.isNotEmpty()) add(HomeRowKey.BeinSportsNow)
             if (beinSportsNext.isNotEmpty()) add(HomeRowKey.BeinSportsNext)
+            if (ukGuideNow.isNotEmpty()) add(HomeRowKey.UkGuideNow)
+            if (ukGuideNext.isNotEmpty()) add(HomeRowKey.UkGuideNext)
             recommendationRows.forEach { row -> add(HomeRowKey.recommendation(row.kind)) }
         }
     }
@@ -360,48 +332,12 @@ fun HomeScreen(
             }
         }
 
-        if (displayedLiveMatchRow?.items?.isNotEmpty() == true) {
-            item {
-                Column(Modifier.fillMaxWidth()) {
-                    HomeMatchRow(
-                        row = displayedLiveMatchRow,
-                        firstFocusRequester = if (focusOnLiveMatches) firstFocus else null,
-                        restoreItemKey = restoreTarget
-                            ?.takeIf { effectiveRestoreRowKey == HomeRowKey.LiveMatches }
-                            ?.itemKey,
-                        onOpenMatch = { item ->
-                            onOpenHomeEntry(item.event.channel, HomeRowKey.LiveMatches, item.event.fingerprint)
-                        },
-                    )
-                    Spacer(Modifier.height(CardRowSpacing))
-                }
-            }
-        }
-
-        if (displayedUpcomingMatchRow?.items?.isNotEmpty() == true) {
-            item {
-                Column(Modifier.fillMaxWidth()) {
-                    HomeMatchRow(
-                        row = displayedUpcomingMatchRow,
-                        firstFocusRequester = if (focusOnUpcomingMatches) firstFocus else null,
-                        restoreItemKey = restoreTarget
-                            ?.takeIf { effectiveRestoreRowKey == HomeRowKey.UpcomingMatches }
-                            ?.itemKey,
-                        onOpenMatch = { item ->
-                            onOpenHomeEntry(item.event.channel, HomeRowKey.UpcomingMatches, item.event.fingerprint)
-                        },
-                    )
-                    Spacer(Modifier.height(CardRowSpacing))
-                }
-            }
-        }
-
         if (tvProgrammeNow.isNotEmpty()) {
             item {
                 Column(Modifier.fillMaxWidth()) {
                     TvProgrammeNowRow(
                         items = tvProgrammeNow,
-                        now = tvProgrammeNowTime,
+                        nowEpochMillis = tvProgrammeNowEpochMillis,
                         firstFocusRequester = if (focusOnTvProgrammeNow) firstFocus else null,
                         restoreItemKey = restoreTarget
                             ?.takeIf { it.homeRowKey == HomeRowKey.TvProgrammeNow }
@@ -482,6 +418,56 @@ fun HomeScreen(
                             onOpenHomeEntry(
                                 item.channel,
                                 HomeRowKey.BeinSportsNext,
+                                item.fingerprint,
+                            )
+                        },
+                    )
+                    Spacer(Modifier.height(CardRowSpacing))
+                }
+            }
+        }
+
+        if (ukGuideNow.isNotEmpty()) {
+            item {
+                Column(Modifier.fillMaxWidth()) {
+                    UkGuideProgrammeRow(
+                        title = "UK en direct",
+                        items = ukGuideNow,
+                        now = ukGuideNowTime,
+                        showLive = true,
+                        firstFocusRequester = if (focusOnUkGuideNow) firstFocus else null,
+                        restoreItemKey = restoreTarget
+                            ?.takeIf { it.homeRowKey == HomeRowKey.UkGuideNow }
+                            ?.itemKey,
+                        onOpenProgramme = { item ->
+                            onOpenHomeEntry(
+                                item.channel,
+                                HomeRowKey.UkGuideNow,
+                                item.fingerprint,
+                            )
+                        },
+                    )
+                    Spacer(Modifier.height(CardRowSpacing))
+                }
+            }
+        }
+
+        if (ukGuideNext.isNotEmpty()) {
+            item {
+                Column(Modifier.fillMaxWidth()) {
+                    UkGuideProgrammeRow(
+                        title = "UK suivant",
+                        items = ukGuideNext,
+                        now = ukGuideNowTime,
+                        showLive = false,
+                        firstFocusRequester = if (focusOnUkGuideNext) firstFocus else null,
+                        restoreItemKey = restoreTarget
+                            ?.takeIf { it.homeRowKey == HomeRowKey.UkGuideNext }
+                            ?.itemKey,
+                        onOpenProgramme = { item ->
+                            onOpenHomeEntry(
+                                item.channel,
+                                HomeRowKey.UkGuideNext,
                                 item.fingerprint,
                             )
                         },
@@ -658,108 +644,6 @@ private fun HomeCardRow(
     }
 }
 
-@Composable
-private fun HomeMatchRow(
-    row: MatchRow,
-    firstFocusRequester: FocusRequester?,
-    restoreItemKey: String?,
-    onOpenMatch: (MatchRowItem) -> Unit,
-) {
-    val rowState = rememberLazyListState()
-    val restoreFocus = remember { FocusRequester() }
-    LaunchedEffect(restoreItemKey, row.items) {
-        val targetIndex = row.items.indexOfFirst { it.event.fingerprint == restoreItemKey }
-        if (targetIndex >= 0) {
-            rowState.scrollToItem(targetIndex)
-            delay(RESTORE_FOCUS_DELAY_MS)
-            runCatching { restoreFocus.requestFocus() }
-        }
-    }
-
-    Column(Modifier.fillMaxWidth()) {
-        SectionLabel(row.title, fontSize = 16.sp)
-        Spacer(Modifier.height(10.dp))
-        LazyRow(state = rowState, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            itemsIndexed(row.items, key = { _, item -> item.event.fingerprint }) { index, item ->
-                val cardModifier = when {
-                    item.event.fingerprint == restoreItemKey -> Modifier.focusRequester(restoreFocus)
-                    index == 0 && firstFocusRequester != null -> Modifier.focusRequester(firstFocusRequester)
-                    else -> Modifier
-                }
-                HomeMatchCard(
-                    item = item,
-                    onClick = { onOpenMatch(item) },
-                    modifier = cardModifier,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun HomeMatchCard(
-    item: MatchRowItem,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val event = item.event
-    FocusableSurface(
-        onClick = onClick,
-        modifier = modifier.width(280.dp).height(154.dp),
-    ) {
-        Box(Modifier.fillMaxSize()) {
-            Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 13.dp)) {
-                Text(
-                    matchTimingLabel(item),
-                    color = FocusBlueBright,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                )
-                Spacer(Modifier.height(7.dp))
-                Text(
-                    "${event.participantA} / ${event.participantB}",
-                    color = Ink,
-                    fontSize = 16.sp,
-                    lineHeight = 20.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Spacer(Modifier.weight(1f))
-                event.competition?.let { competition ->
-                    Text(
-                        competition,
-                        color = MutedInk,
-                        fontSize = 10.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Spacer(Modifier.height(4.dp))
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    ChannelLogo(
-                        event.channel.iconUrl,
-                        event.channel.displayName,
-                        Modifier.width(50.dp).height(50.dp),
-                    )
-                    Spacer(Modifier.width(9.dp))
-                    Text(
-                        event.channel.displayName,
-                        color = MutedInk,
-                        fontSize = 12.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
-            if (item.temporalState == MatchTemporalState.Live) {
-                LiveBadge(Modifier.align(Alignment.TopEnd).padding(top = 10.dp, end = 12.dp))
-            }
-        }
-    }
-}
-
 /** Pastille distincte du libellé texte de la carte : signale le direct sans dépendre du texte. */
 @Composable
 private fun LiveBadge(modifier: Modifier = Modifier) {
@@ -776,7 +660,7 @@ private fun LiveBadge(modifier: Modifier = Modifier) {
 @Composable
 private fun TvProgrammeNowRow(
     items: List<ResolvedTvProgrammeNowItem>,
-    now: LocalTime,
+    nowEpochMillis: Long,
     firstFocusRequester: FocusRequester?,
     restoreItemKey: String?,
     onOpenProgramme: (ResolvedTvProgrammeNowItem) -> Unit,
@@ -804,7 +688,7 @@ private fun TvProgrammeNowRow(
                 }
                 TvProgrammeNowCard(
                     item = item,
-                    now = now,
+                    nowEpochMillis = nowEpochMillis,
                     onClick = { onOpenProgramme(item) },
                     modifier = cardModifier,
                 )
@@ -816,13 +700,13 @@ private fun TvProgrammeNowRow(
 @Composable
 private fun TvProgrammeNowCard(
     item: ResolvedTvProgrammeNowItem,
-    now: LocalTime,
+    nowEpochMillis: Long,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val programme = item.programme
     val channel = item.channel
-    val progress = programme.progressAt(now)
+    val progress = programme.progressAt(nowEpochMillis)
 
     FocusableSurface(
         onClick = onClick,
@@ -1165,6 +1049,164 @@ private fun BeinSportsProgrammeCard(
 }
 
 @Composable
+private fun UkGuideProgrammeRow(
+    title: String,
+    items: List<ResolvedUkProgrammeItem>,
+    now: LocalTime,
+    showLive: Boolean,
+    firstFocusRequester: FocusRequester?,
+    restoreItemKey: String?,
+    onOpenProgramme: (ResolvedUkProgrammeItem) -> Unit,
+) {
+    val rowState = rememberLazyListState()
+    val restoreFocus = remember { FocusRequester() }
+    LaunchedEffect(restoreItemKey, items) {
+        val targetIndex = items.indexOfFirst { it.fingerprint == restoreItemKey }
+        if (targetIndex >= 0) {
+            rowState.scrollToItem(targetIndex)
+            delay(RESTORE_FOCUS_DELAY_MS)
+            runCatching { restoreFocus.requestFocus() }
+        }
+    }
+
+    Column(Modifier.fillMaxWidth()) {
+        SectionLabel(title, fontSize = 16.sp)
+        Spacer(Modifier.height(10.dp))
+        LazyRow(state = rowState, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            itemsIndexed(items, key = { _, item -> item.fingerprint }) { index, item ->
+                val cardModifier = when {
+                    item.fingerprint == restoreItemKey -> Modifier.focusRequester(restoreFocus)
+                    index == 0 && firstFocusRequester != null -> Modifier.focusRequester(firstFocusRequester)
+                    else -> Modifier
+                }
+                UkGuideProgrammeCard(
+                    item = item,
+                    now = now,
+                    showLive = showLive,
+                    onClick = { onOpenProgramme(item) },
+                    modifier = cardModifier,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun UkGuideProgrammeCard(
+    item: ResolvedUkProgrammeItem,
+    now: LocalTime,
+    showLive: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val programme = item.programme
+    val channel = item.channel
+    val progress = if (showLive) programme.progressAt(now) else null
+
+    FocusableSurface(
+        onClick = onClick,
+        modifier = modifier.width(280.dp).height(250.dp),
+    ) {
+        Column(Modifier.fillMaxSize().padding(9.dp)) {
+            Box(Modifier.fillMaxWidth().height(112.dp)) {
+                if (!programme.imageUrl.isNullOrBlank()) {
+                    MediaArtwork(
+                        programme.imageUrl,
+                        programme.title,
+                        Modifier.fillMaxSize(),
+                    )
+                } else {
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(MutedInk.copy(alpha = 0.10f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        ChannelLogo(
+                            channel.iconUrl,
+                            channel.displayName,
+                            Modifier.width(76.dp).height(76.dp),
+                        )
+                    }
+                }
+                Text(
+                    programme.timeRangeLabel,
+                    color = Ink,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(7.dp)
+                        .clip(RoundedCornerShape(5.dp))
+                        .background(Night.copy(alpha = 0.9f))
+                        .padding(horizontal = 7.dp, vertical = 4.dp),
+                )
+                if (showLive) {
+                    LiveBadge(Modifier.align(Alignment.TopEnd).padding(7.dp))
+                } else {
+                    Text(
+                        "À SUIVRE",
+                        color = Night,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(7.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(FocusBlueBright)
+                            .padding(horizontal = 7.dp, vertical = 3.dp),
+                    )
+                }
+            }
+            Spacer(Modifier.height(7.dp))
+            Text(
+                programme.title,
+                color = Ink,
+                fontSize = 14.sp,
+                lineHeight = 17.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (progress != null) {
+                Spacer(Modifier.height(7.dp))
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(5.dp)
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(MutedInk.copy(alpha = 0.24f)),
+                ) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth(progress)
+                            .height(5.dp)
+                            .background(FocusBlueBright),
+                    )
+                }
+            }
+            Spacer(Modifier.weight(1f))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                ChannelLogo(
+                    channel.iconUrl,
+                    channel.displayName,
+                    Modifier.width(44.dp).height(44.dp),
+                )
+                Spacer(Modifier.width(7.dp))
+                Text(
+                    channel.displayName,
+                    color = MutedInk,
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun HomeRecommendationRow(
     row: RecommendationRow,
     firstFocusRequester: FocusRequester?,
@@ -1238,24 +1280,7 @@ private fun HomeRecommendationCard(
     }
 }
 
-private fun matchTimingLabel(item: MatchRowItem): String {
-    val dateTime = Instant.ofEpochSecond(item.event.startEpochSeconds)
-        .atZone(ZoneId.systemDefault())
-    val time = dateTime.format(DateTimeFormatter.ofPattern("HH:mm", Locale.getDefault()))
-    return when (item.temporalState) {
-        MatchTemporalState.Live -> "Match"
-        MatchTemporalState.Today -> "Aujourd'hui · $time"
-        MatchTemporalState.Tomorrow -> "Demain · $time"
-        MatchTemporalState.ThisWeek -> {
-            val day = dateTime.format(DateTimeFormatter.ofPattern("EEE", Locale.getDefault()))
-                .replaceFirstChar { it.uppercaseChar() }
-            "$day · $time"
-        }
-    }
-}
-
 private const val RESTORE_FOCUS_DELAY_MS = 60L
-private const val HOME_MATCH_CLOCK_REFRESH_MS = 30_000L
 
 private val HomeCardWidth = 172.dp
 // 128dp d'illustration + jusqu'à 2 lignes de titre en 13sp/16sp de lineHeight + le label de type

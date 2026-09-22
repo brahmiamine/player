@@ -40,21 +40,21 @@ internal class TvProgrammeNowCache(context: Context) {
 
     private fun TvProgrammeNowItem.toJson(): JSONObject = JSONObject().apply {
         put("channelName", channelName)
-        put("startTime", startTime)
-        endTime?.let { put("endTime", it) }
+        put("startEpochMillis", startEpochMillis)
+        put("endEpochMillis", endEpochMillis)
         put("title", title)
         imageUrl?.let { put("imageUrl", it) }
     }
 
     private fun JSONObject.toProgramme() = TvProgrammeNowItem(
         channelName = getString("channelName"),
-        startTime = getString("startTime"),
-        endTime = optString("endTime").takeIf(String::isNotBlank),
+        startEpochMillis = getLong("startEpochMillis"),
+        endEpochMillis = getLong("endEpochMillis"),
         title = getString("title"),
         imageUrl = optString("imageUrl").takeIf(String::isNotBlank),
     )
 
     private companion object {
-        const val FILE_NAME = "tv-programme-now-cache-v1.json"
+        const val FILE_NAME = "tv-programme-now-cache-v2.json"
     }
 }

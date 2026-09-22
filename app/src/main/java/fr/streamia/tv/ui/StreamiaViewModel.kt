@@ -40,8 +40,9 @@ import fr.streamia.tv.tvprogramme.ResolvedTvProgrammeNowItem
 import fr.streamia.tv.tvprogramme.TvProgrammeChannelMatcher
 import fr.streamia.tv.tvprogramme.TvProgrammeItem
 import fr.streamia.tv.tvprogramme.TvProgrammeNowItem
-import fr.streamia.tv.matches.MatchRow
-import fr.streamia.tv.matches.MatchRowEngine
+import fr.streamia.tv.ukguide.ResolvedUkProgrammeItem
+import fr.streamia.tv.ukguide.UkGuideChannelMatcher
+import fr.streamia.tv.ukguide.UkProgrammeItem
 import fr.streamia.tv.recommendation.ContentFeatures
 import fr.streamia.tv.recommendation.RecommendationBuildContext
 import fr.streamia.tv.recommendation.RecommendationEngine
@@ -80,11 +81,6 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     private var connectionTestSequence = 0L
     private var epgGuideLoadSequence = 0L
     private val epgGuideMemoryCache = EpgGuideMemoryCache()
-    private val matchRowEngine = MatchRowEngine()
-    private var homeMatchBuildSequence = 0L
-    private var homeMatchJob: Job? = null
-    private var homeMatchLastBuiltProfileId: String? = null
-    private var homeMatchLastBuiltAtEpochSeconds = 0L
     private val recommendationEngine = RecommendationEngine()
     private var homeRecommendationBuildSequence = 0L
     private var homeRecommendationJob: Job? = null
@@ -108,6 +104,12 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     private var beinGuideLoadJob: Job? = null
     private var beinGuideCurrentRaw: List<BeinProgrammeItem> = emptyList()
     private var beinGuideNextRaw: List<BeinProgrammeItem> = emptyList()
+    private val ukGuideChannelMatcher = UkGuideChannelMatcher()
+    private var ukGuideLoadSequence = 0L
+    private var ukGuideResolveSequence = 0L
+    private var ukGuideLoadJob: Job? = null
+    private var ukGuideCurrentRaw: List<UkProgrammeItem> = emptyList()
+    private var ukGuideNextRaw: List<UkProgrammeItem> = emptyList()
     private var epgSyncJob: Job? = null
     private var epgSyncProfileId: String? = null
     private var epgPrefetchJob: Job? = null
@@ -168,6 +170,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         loadTvProgrammeTonight(forceRefresh = false)
         loadTvProgrammeNow(forceRefresh = false)
         loadBeinSportsGuide(forceRefresh = false)
+        loadUkGuide(forceRefresh = false)
         viewModelScope.launch {
             // Catalogue déjà résolu (favoris/ordre déjà appliqués) persisté lors d'une précédente
             // réconciliation réussie pour ce profil : s'il est encore valide pour l'organisation
@@ -287,15 +290,12 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                     appSettings = repository.appSettings(),
                 )
                 warmEpgGuideCache(profileId)
-                // La rangée Matchs lit sa propre vue Live depuis SQLite en arrière-plan. Ne surtout
-                // pas forcer ici 55k+ chaînes dans le StateFlow du Home : cela augmente fortement
-                // le coût CPU/mémoire au démarrage sur Android TV.
-                refreshHomeMatchRow()
                 refreshHomeRecommendations()
                 loadLiveOnSatMatches(forceRefresh = false)
                 loadTvProgrammeTonight(forceRefresh = false)
         loadTvProgrammeNow(forceRefresh = false)
         loadBeinSportsGuide(forceRefresh = false)
+        loadUkGuide(forceRefresh = false)
                 try {
                     mergeCatalog(repository.openProfile(profileId, knownCache = cachedCatalog))
                 } catch (error: Throwable) {
@@ -369,8 +369,6 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                             epgGuide = null,
                             epgAvailableDates = emptyList(),
                             epgSelectedDate = null,
-                            homeLiveMatchRow = null,
-                            homeUpcomingMatchRow = null,
                         )
                     }
                 }
@@ -552,16 +550,15 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
 
     fun showHome() {
         // Le guide EPG est volontairement conservé en mémoire quand on revient à l'accueil.
-        // La rangée Matchs est recalculée uniquement depuis le cache SQLite local : aucun accès
-        // réseau n'est déclenché par l'ouverture de l'accueil.
         _uiState.update { it.copy(screen = StreamiaScreen.Home, message = null, epgLoading = false) }
-        refreshHomeMatchRow()
         refreshHomeRecommendations()
         resolveTvProgrammeTonight()
         resolveTvProgrammeNow()
         resolveBeinSportsGuide()
+        resolveUkGuide()
         loadTvProgrammeNow(forceRefresh = false)
         loadBeinSportsGuide(forceRefresh = false)
+        loadUkGuide(forceRefresh = false)
     }
     fun showSettings() { _uiState.update { it.copy(screen = StreamiaScreen.Settings, message = null) } }
     fun showTools() { _uiState.update { it.copy(screen = StreamiaScreen.Tools, message = null) } }
@@ -602,6 +599,8 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     fun refreshTvProgrammeNow() = loadTvProgrammeNow(forceRefresh = false)
 
     fun refreshBeinSportsGuide() = loadBeinSportsGuide(forceRefresh = false)
+
+    fun refreshUkGuide() = loadUkGuide(forceRefresh = false)
 
     fun toggleLivePreview() {
         updateAppSettings { it.copy(livePreviewEnabled = !it.livePreviewEnabled) }
@@ -645,12 +644,9 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 epgAvailableDates = emptyList(),
                 epgSelectedDate = null,
                 epgLoading = false,
-                homeLiveMatchRow = null,
-                            homeUpcomingMatchRow = null,
             )
         }
         warmEpgGuideCache(profileId)
-        refreshHomeMatchRow(force = true)
     }
 
     fun toggleAutoPlayNextEpisode() {
@@ -826,10 +822,10 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         if (catalog.isCategoryLoaded(type, Catalog.ALL_CATEGORY_ID)) {
             if (type == MediaType.Live) {
                 startEpgBackgroundSync()
-                refreshHomeMatchRow()
                 resolveTvProgrammeTonight()
                 resolveTvProgrammeNow()
                 resolveBeinSportsGuide()
+                resolveUkGuide()
             }
             return
         }
@@ -841,10 +837,10 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 mergeIntoCatalog(profileId) { base -> base.withFullSectionMaterialized(section, type) }
                 if (type == MediaType.Live) {
                     startEpgBackgroundSync()
-                    refreshHomeMatchRow()
                     resolveTvProgrammeTonight()
                     resolveTvProgrammeNow()
                     resolveBeinSportsGuide()
+                    resolveUkGuide()
                 }
             } finally {
                 categoryLoadsInFlight.remove(loadKey)
@@ -1442,9 +1438,6 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                     // aujourd'hui pour la prochaine ouverture du Guide TV.
                     warmEpgGuideCache(profileId)
                 }
-                if (changed || (_uiState.value.homeLiveMatchRow == null && _uiState.value.homeUpcomingMatchRow == null)) {
-                    refreshHomeMatchRow(force = changed)
-                }
             } catch (error: Throwable) {
                 if (error is CancellationException) throw error
                 if (_uiState.value.activeProfileId == profileId && _uiState.value.screen is StreamiaScreen.Epg) {
@@ -1651,130 +1644,9 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     }
 
     /**
-     * Construit les deux rangées Matchs de l'accueil uniquement depuis l'EPG d'aujourd'hui :
-     * programmes réellement en cours d'un côté, prochains matchs du jour de l'autre. Aucun match
-     * de demain ou de la semaine n'est lu pour l'accueil.
-     */
-    private fun refreshHomeMatchRow(force: Boolean = false) {
-        val state = _uiState.value
-        val profileId = state.activeProfileId ?: return
-        val catalog = state.catalog ?: return
-        val nowEpochSeconds = System.currentTimeMillis() / 1000L
-
-        if (
-            !force &&
-            homeMatchLastBuiltProfileId == profileId &&
-            nowEpochSeconds - homeMatchLastBuiltAtEpochSeconds < HOME_MATCH_REBUILD_INTERVAL_SECONDS
-        ) return
-        if (!force && homeMatchJob?.isActive == true) return
-
-        val offsetHours = state.appSettings.epgTimeOffsetHours
-        val library = state.library
-        val excludedCategoryKeys = if (
-            state.appSettings.parentalControlEnabled && !state.parentalUnlocked
-        ) {
-            library.hiddenCategories + library.lockedCategories
-        } else {
-            library.hiddenCategories
-        }
-        val excludedCategoryIds = catalog.categories.asSequence()
-            .filter { it.type == MediaType.Live && it.key in excludedCategoryKeys }
-            .mapTo(mutableSetOf()) { it.id }
-
-        val sequence = ++homeMatchBuildSequence
-        homeMatchJob?.cancel()
-
-        homeMatchJob = viewModelScope.launch(Dispatchers.Default) {
-            val metadata = runCatching { repository.epgMetadata(profileId) }.getOrNull()
-            if (
-                metadata == null ||
-                metadata.programCount <= 0 ||
-                sequence != homeMatchBuildSequence ||
-                _uiState.value.activeProfileId != profileId
-            ) {
-                if (sequence == homeMatchBuildSequence && _uiState.value.activeProfileId == profileId) {
-                    _uiState.update { current ->
-                        current.copy(homeLiveMatchRow = null, homeUpcomingMatchRow = null)
-                    }
-                }
-                return@launch
-            }
-
-            val liveEntries = if (catalog.isCategoryLoaded(MediaType.Live, Catalog.ALL_CATEGORY_ID)) {
-                catalog.entriesFor(MediaType.Live)
-            } else {
-                runCatching { repository.loadSection(profileId, MediaType.Live) }.getOrNull().orEmpty()
-            }
-            if (liveEntries.isEmpty()) return@launch
-
-            val eligibleLiveEntries = liveEntries.asSequence()
-                .filterNot { it.key in library.hiddenEntries }
-                .filterNot { it.categoryId in excludedCategoryIds }
-                .toList()
-            if (eligibleLiveEntries.isEmpty()) {
-                _uiState.update { current ->
-                    if (current.activeProfileId == profileId) {
-                        current.copy(homeLiveMatchRow = null, homeUpcomingMatchRow = null)
-                    } else current
-                }
-                return@launch
-            }
-
-            val today = LocalDate.now(ZoneId.systemDefault())
-            if (today !in epgDates(metadata, offsetHours)) {
-                _uiState.update { current ->
-                    if (current.activeProfileId == profileId) {
-                        current.copy(homeLiveMatchRow = null, homeUpcomingMatchRow = null)
-                    } else current
-                }
-                return@launch
-            }
-
-            val guide = epgGuideMemoryCache.get(profileId, today, offsetHours) ?: runCatching {
-                val (dayStart, dayEnd) = epgDayBounds(today)
-                repository.cachedEpgGuide(
-                    profileId = profileId,
-                    displayStartEpochSeconds = dayStart,
-                    displayEndEpochSeconds = dayEnd,
-                    offsetHours = offsetHours,
-                )
-            }.getOrNull() ?: return@launch
-            epgGuideMemoryCache.put(profileId, today, offsetHours, guide)
-
-            val programsByChannel = linkedMapOf<MediaEntry, List<fr.streamia.tv.domain.EpgProgram>>()
-            // Une seule résolution chaîne→EPG par entrée : `guide.forEntry` la re-faisait en interne,
-            // ce qui doublait le coût (normalisation + alias) sur des dizaines de milliers de chaînes.
-            eligibleLiveEntries.forEach { channel ->
-                val programs = guide.channelForEntry(channel)?.programs.orEmpty()
-                if (programs.isNotEmpty()) programsByChannel[channel] = programs
-            }
-
-            val rows = matchRowEngine.buildHomeRows(
-                programsByChannel = programsByChannel,
-                nowEpochSeconds = nowEpochSeconds,
-                hiddenEntryKeys = emptySet(),
-                hiddenCategoryIds = emptySet(),
-                limit = HOME_MATCH_ROW_LIMIT,
-            )
-
-            if (sequence != homeMatchBuildSequence || _uiState.value.activeProfileId != profileId) return@launch
-            homeMatchLastBuiltProfileId = profileId
-            homeMatchLastBuiltAtEpochSeconds = System.currentTimeMillis() / 1000L
-            _uiState.update { current ->
-                if (current.activeProfileId == profileId) {
-                    current.copy(
-                        homeLiveMatchRow = rows.live,
-                        homeUpcomingMatchRow = rows.upcomingToday,
-                    )
-                } else current
-            }
-        }
-    }
-
-    /**
      * Construit les rangées « Recommandé pour vous »/« Parce que vous avez regardé… » de l'accueil.
-     * Même philosophie que [refreshHomeMatchRow] : lecture bornée depuis SQLite, calcul CPU sur
-     * Dispatchers.Default, résultat jeté si le profil actif a changé pendant le calcul.
+     * Lecture bornée depuis SQLite, calcul CPU sur Dispatchers.Default, résultat jeté si le profil
+     * actif a changé pendant le calcul.
      */
     private fun refreshHomeRecommendations(force: Boolean = false) {
         val state = _uiState.value
@@ -2065,6 +1937,82 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     }
 
     /**
+     * Charge la grille TV britannique (tvguideuk.com) et en extrait les émissions actuellement
+     * diffusées et suivantes. Même logique que [loadBeinSportsGuide] : le scrape ne dépend pas du
+     * profil, seule la résolution vers la playlist dépend du catalogue Live courant.
+     */
+    private fun loadUkGuide(forceRefresh: Boolean) {
+        val profileId = _uiState.value.activeProfileId ?: return
+        if (!forceRefresh && ukGuideLoadJob?.isActive == true) return
+        if (forceRefresh) ukGuideLoadJob?.cancel()
+
+        val sequence = ++ukGuideLoadSequence
+        ukGuideLoadJob = viewModelScope.launch {
+            runCatching { repository.loadUkGuide(forceRefresh) }
+                .onSuccess { fetch ->
+                    if (
+                        sequence != ukGuideLoadSequence ||
+                        _uiState.value.activeProfileId != profileId
+                    ) {
+                        return@onSuccess
+                    }
+                    ukGuideCurrentRaw = fetch.rows.current
+                    ukGuideNextRaw = fetch.rows.next
+                    resolveUkGuide()
+                }
+        }
+    }
+
+    private fun resolveUkGuide() {
+        val state = _uiState.value
+        val profileId = state.activeProfileId ?: return
+        val catalog = state.catalog ?: return
+        if (ukGuideCurrentRaw.isEmpty() && ukGuideNextRaw.isEmpty()) return
+
+        val excludedCategoryKeys = if (
+            state.appSettings.parentalControlEnabled && !state.parentalUnlocked
+        ) {
+            state.library.hiddenCategories + state.library.lockedCategories
+        } else {
+            state.library.hiddenCategories
+        }
+        val excludedCategoryIds = catalog.categories.asSequence()
+            .filter { it.type == MediaType.Live && it.key in excludedCategoryKeys }
+            .mapTo(mutableSetOf()) { it.id }
+        val hiddenEntries = state.library.hiddenEntries
+        val sequence = ++ukGuideResolveSequence
+        val currentRaw = ukGuideCurrentRaw
+        val nextRaw = ukGuideNextRaw
+
+        viewModelScope.launch(Dispatchers.Default) {
+            fun visible(items: List<ResolvedUkProgrammeItem>): List<ResolvedUkProgrammeItem> =
+                items.filterNot { item ->
+                    item.channel.key in hiddenEntries ||
+                        item.channel.categoryId in excludedCategoryIds
+                }
+
+            val current = visible(ukGuideChannelMatcher.resolve(currentRaw, catalog))
+            val next = visible(ukGuideChannelMatcher.resolve(nextRaw, catalog))
+
+            if (
+                sequence != ukGuideResolveSequence ||
+                _uiState.value.activeProfileId != profileId
+            ) return@launch
+
+            _uiState.update { latest ->
+                if (latest.activeProfileId == profileId) {
+                    latest.copy(
+                        homeUkGuideNow = current,
+                        homeUkGuideNext = next,
+                    )
+                } else {
+                    latest
+                }
+            }
+        }
+    }
+
+    /**
      * Charge les programmes actuellement diffusés depuis /en-ce-moment. Le cache est volontairement
      * très court car cette rangée évolue pendant que l'application est ouverte.
      */
@@ -2151,6 +2099,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                     resolveTvProgrammeTonight()
                 resolveTvProgrammeNow()
                 resolveBeinSportsGuide()
+                resolveUkGuide()
                 }
         }
     }
@@ -2434,11 +2383,6 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
 
     private fun showLogin() {
         epgGuideMemoryCache.clear()
-        homeMatchJob?.cancel()
-        homeMatchJob = null
-        homeMatchBuildSequence += 1
-        homeMatchLastBuiltProfileId = null
-        homeMatchLastBuiltAtEpochSeconds = 0L
         homeRecommendationJob?.cancel()
         homeRecommendationJob = null
         homeRecommendationBuildSequence += 1
@@ -2460,6 +2404,12 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         beinGuideResolveSequence += 1
         beinGuideCurrentRaw = emptyList()
         beinGuideNextRaw = emptyList()
+        ukGuideLoadJob?.cancel()
+        ukGuideLoadJob = null
+        ukGuideLoadSequence += 1
+        ukGuideResolveSequence += 1
+        ukGuideCurrentRaw = emptyList()
+        ukGuideNextRaw = emptyList()
         epgPrefetchJob?.cancel()
         epgPrefetchJob = null
         epgSyncJob?.cancel()
@@ -2498,6 +2448,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         loadTvProgrammeTonight(forceRefresh = false)
         loadTvProgrammeNow(forceRefresh = false)
         loadBeinSportsGuide(forceRefresh = false)
+        loadUkGuide(forceRefresh = false)
     }
 
     private fun showError(error: Throwable) {
@@ -2542,13 +2493,13 @@ data class StreamiaUiState(
     val epgAvailableDates: List<LocalDate> = emptyList(),
     val epgSelectedDate: LocalDate? = null,
     val epgLoading: Boolean = false,
-    val homeLiveMatchRow: MatchRow? = null,
-    val homeUpcomingMatchRow: MatchRow? = null,
     val homeRecommendationRows: List<RecommendationRow> = emptyList(),
     val homeTvProgrammeNow: List<ResolvedTvProgrammeNowItem> = emptyList(),
     val homeTvProgrammeTonight: List<ResolvedTvProgrammeItem> = emptyList(),
     val homeBeinSportsNow: List<ResolvedBeinProgrammeItem> = emptyList(),
     val homeBeinSportsNext: List<ResolvedBeinProgrammeItem> = emptyList(),
+    val homeUkGuideNow: List<ResolvedUkProgrammeItem> = emptyList(),
+    val homeUkGuideNext: List<ResolvedUkProgrammeItem> = emptyList(),
     val similarMedia: List<RecommendedMedia> = emptyList(),
     val liveOnSatMatches: List<ResolvedLiveOnSatMatch> = emptyList(),
     val liveOnSatLoading: Boolean = false,
@@ -2588,8 +2539,6 @@ sealed interface StreamiaScreen {
 
 private const val EPG_PLAYER_REFRESH_MS = 30_000L
 private const val MAX_EPG_DAY_SPAN = 30L
-private const val HOME_MATCH_ROW_LIMIT = 12
-private const val HOME_MATCH_REBUILD_INTERVAL_SECONDS = 5 * 60L
 private const val HOME_RECOMMENDATION_CANDIDATE_LIMIT = 400
 private const val HOME_RECOMMENDATION_RECENT_LIMIT = 240
 private const val HOME_RECOMMENDATION_TASTE_SOURCE_LIMIT = 4

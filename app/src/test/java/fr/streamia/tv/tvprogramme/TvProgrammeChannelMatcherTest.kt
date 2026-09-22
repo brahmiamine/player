@@ -58,7 +58,7 @@ class TvProgrammeChannelMatcherTest {
 
         val result = matcher.resolveNow(
             programmes = listOf(
-                TvProgrammeNowItem("TF1", "20:00", "21:00", "JT 20h"),
+                TvProgrammeNowItem("TF1", 0L, 3_600_000L, "JT 20h"),
             ),
             channels = channels,
         )
