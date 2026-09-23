@@ -5,7 +5,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import fr.streamia.tv.BuildConfig
-import fr.streamia.tv.beinsports.BeinProgrammeItem
 import fr.streamia.tv.beinsports.BeinSportsChannelMatcher
 import fr.streamia.tv.beinsports.ResolvedBeinProgrammeItem
 import fr.streamia.tv.data.AppSettings
@@ -40,11 +39,8 @@ import fr.streamia.tv.liveonsat.withEpgTiming
 import fr.streamia.tv.tvprogramme.ResolvedTvProgrammeItem
 import fr.streamia.tv.tvprogramme.ResolvedTvProgrammeNowItem
 import fr.streamia.tv.tvprogramme.TvProgrammeChannelMatcher
-import fr.streamia.tv.tvprogramme.TvProgrammeItem
-import fr.streamia.tv.tvprogramme.TvProgrammeNowItem
 import fr.streamia.tv.ukguide.ResolvedUkProgrammeItem
 import fr.streamia.tv.ukguide.UkGuideChannelMatcher
-import fr.streamia.tv.ukguide.UkProgrammeItem
 import fr.streamia.tv.recommendation.ContentFeatures
 import fr.streamia.tv.recommendation.RecommendationBuildContext
 import fr.streamia.tv.recommendation.RecommendationEngine
@@ -92,26 +88,41 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     private var liveOnSatLoadSequence = 0L
     private var liveOnSatLoadJob: Job? = null
     private val tvProgrammeChannelMatcher = TvProgrammeChannelMatcher()
-    private var tvProgrammeLoadSequence = 0L
-    private var tvProgrammeResolveSequence = 0L
-    private var tvProgrammeLoadJob: Job? = null
-    private var tvProgrammeRawItems: List<TvProgrammeItem> = emptyList()
-    private var tvProgrammeNowLoadSequence = 0L
-    private var tvProgrammeNowResolveSequence = 0L
-    private var tvProgrammeNowLoadJob: Job? = null
-    private var tvProgrammeNowRawItems: List<TvProgrammeNowItem> = emptyList()
     private val beinSportsChannelMatcher = BeinSportsChannelMatcher()
-    private var beinGuideLoadSequence = 0L
-    private var beinGuideResolveSequence = 0L
-    private var beinGuideLoadJob: Job? = null
-    private var beinGuideCurrentRaw: List<BeinProgrammeItem> = emptyList()
-    private var beinGuideNextRaw: List<BeinProgrammeItem> = emptyList()
     private val ukGuideChannelMatcher = UkGuideChannelMatcher()
-    private var ukGuideLoadSequence = 0L
-    private var ukGuideResolveSequence = 0L
-    private var ukGuideLoadJob: Job? = null
-    private var ukGuideCurrentRaw: List<UkProgrammeItem> = emptyList()
-    private var ukGuideNextRaw: List<UkProgrammeItem> = emptyList()
+
+    // Guides tiers de l'accueil : même cycle chargement → rapprochement → publication, voir [HomeGuide].
+    private val tvProgrammeNowGuide = HomeGuide(
+        fetch = { repository.loadTvProgrammeNow(it) },
+        isEmpty = { it.programmes.isEmpty() },
+    ) { fetch, catalog, visible ->
+        val resolved = tvProgrammeChannelMatcher.resolveNow(fetch.programmes, catalog).filter { visible(it.channel) }
+        ({ state -> state.copy(homeTvProgrammeNow = resolved) })
+    }
+    private val tvProgrammeTonightGuide = HomeGuide(
+        fetch = { repository.loadTvProgrammeTonight(it) },
+        isEmpty = { it.programmes.isEmpty() },
+    ) { fetch, catalog, visible ->
+        val resolved = tvProgrammeChannelMatcher.resolve(fetch.programmes, catalog).filter { visible(it.channel) }
+        ({ state -> state.copy(homeTvProgrammeTonight = resolved) })
+    }
+    private val beinSportsGuide = HomeGuide(
+        fetch = { repository.loadBeinSportsGuide(it) },
+        isEmpty = { it.rows.current.isEmpty() && it.rows.next.isEmpty() },
+    ) { fetch, catalog, visible ->
+        val current = beinSportsChannelMatcher.resolve(fetch.rows.current, catalog).filter { visible(it.channel) }
+        val next = beinSportsChannelMatcher.resolve(fetch.rows.next, catalog).filter { visible(it.channel) }
+        ({ state -> state.copy(homeBeinSportsNow = current, homeBeinSportsNext = next) })
+    }
+    private val ukGuide = HomeGuide(
+        fetch = { repository.loadUkGuide(it) },
+        isEmpty = { it.rows.current.isEmpty() && it.rows.next.isEmpty() },
+    ) { fetch, catalog, visible ->
+        val current = ukGuideChannelMatcher.resolve(fetch.rows.current, catalog).filter { visible(it.channel) }
+        val next = ukGuideChannelMatcher.resolve(fetch.rows.next, catalog).filter { visible(it.channel) }
+        ({ state -> state.copy(homeUkGuideNow = current, homeUkGuideNext = next) })
+    }
+    private val homeGuides = listOf(tvProgrammeNowGuide, tvProgrammeTonightGuide, beinSportsGuide, ukGuide)
     private var epgSyncJob: Job? = null
     private var epgSyncProfileId: String? = null
     private var epgPrefetchJob: Job? = null
@@ -561,13 +572,10 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             )
         }
         refreshHomeRecommendations()
-        resolveTvProgrammeTonight()
-        resolveTvProgrammeNow()
-        resolveBeinSportsGuide()
-        resolveUkGuide()
-        loadTvProgrammeNow(forceRefresh = false)
-        loadBeinSportsGuide(forceRefresh = false)
-        loadUkGuide(forceRefresh = false)
+        homeGuides.forEach { it.resolve() }
+        tvProgrammeNowGuide.load(forceRefresh = false)
+        beinSportsGuide.load(forceRefresh = false)
+        ukGuide.load(forceRefresh = false)
     }
 
     /**
@@ -662,11 +670,11 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
 
     fun refreshLiveOnSatMatches() = loadLiveOnSatMatches(forceRefresh = true)
 
-    fun refreshTvProgrammeNow() = loadTvProgrammeNow(forceRefresh = false)
+    fun refreshTvProgrammeNow() = tvProgrammeNowGuide.load(forceRefresh = false)
 
-    fun refreshBeinSportsGuide() = loadBeinSportsGuide(forceRefresh = false)
+    fun refreshBeinSportsGuide() = beinSportsGuide.load(forceRefresh = false)
 
-    fun refreshUkGuide() = loadUkGuide(forceRefresh = false)
+    fun refreshUkGuide() = ukGuide.load(forceRefresh = false)
 
     fun toggleLivePreview() {
         updateAppSettings { it.copy(livePreviewEnabled = !it.livePreviewEnabled) }
@@ -911,10 +919,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         if (catalog.isCategoryLoaded(type, Catalog.ALL_CATEGORY_ID)) {
             if (type == MediaType.Live) {
                 startEpgBackgroundSync()
-                resolveTvProgrammeTonight()
-                resolveTvProgrammeNow()
-                resolveBeinSportsGuide()
-                resolveUkGuide()
+                homeGuides.forEach { it.resolve() }
             }
             return
         }
@@ -926,10 +931,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 mergeIntoCatalog(profileId) { base -> base.withFullSectionMaterialized(section, type) }
                 if (type == MediaType.Live) {
                     startEpgBackgroundSync()
-                    resolveTvProgrammeTonight()
-                    resolveTvProgrammeNow()
-                    resolveBeinSportsGuide()
-                    resolveUkGuide()
+                    homeGuides.forEach { it.resolve() }
                 }
             } finally {
                 categoryLoadsInFlight.remove(loadKey)
@@ -1967,288 +1969,65 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
      * suivantes. Le scrape ne dépend pas du profil ; seule la résolution vers la playlist dépend
      * du catalogue Live courant.
      */
-    private fun loadBeinSportsGuide(forceRefresh: Boolean) {
-        val profileId = _uiState.value.activeProfileId ?: return
-        if (!forceRefresh && beinGuideLoadJob?.isActive == true) return
-        if (forceRefresh) beinGuideLoadJob?.cancel()
+    /**
+     * Un guide tiers de l'accueil (FR en direct / ce soir, beIN, UK). Le scrape ne dépend d'aucun
+     * profil ; seul le rapprochement avec les chaînes Direct en dépend, fait hors thread UI et
+     * publié seulement s'il est toujours le plus récent pour le profil actif (séquences).
+     */
+    private inner class HomeGuide<Raw : Any>(
+        private val fetch: suspend (forceRefresh: Boolean) -> Raw,
+        private val isEmpty: (Raw) -> Boolean,
+        private val match: (Raw, Catalog, visible: (MediaEntry) -> Boolean) -> (StreamiaUiState) -> StreamiaUiState,
+    ) {
+        private var loadJob: Job? = null
+        private var loadSequence = 0L
+        private var resolveSequence = 0L
+        private var raw: Raw? = null
 
-        val sequence = ++beinGuideLoadSequence
-        beinGuideLoadJob = viewModelScope.launch {
-            runCatching { repository.loadBeinSportsGuide(forceRefresh) }
-                .onSuccess { fetch ->
-                    if (
-                        sequence != beinGuideLoadSequence ||
-                        _uiState.value.activeProfileId != profileId
-                    ) {
-                        return@onSuccess
-                    }
-                    beinGuideCurrentRaw = fetch.rows.current
-                    beinGuideNextRaw = fetch.rows.next
-                    resolveBeinSportsGuide()
-                }
-        }
-    }
-
-    private fun resolveBeinSportsGuide() {
-        val state = _uiState.value
-        val profileId = state.activeProfileId ?: return
-        val catalog = state.catalog ?: return
-        if (beinGuideCurrentRaw.isEmpty() && beinGuideNextRaw.isEmpty()) return
-
-        val excludedCategoryKeys = if (
-            state.appSettings.parentalControlEnabled && !state.parentalUnlocked
-        ) {
-            state.library.hiddenCategories + state.library.lockedCategories
-        } else {
-            state.library.hiddenCategories
-        }
-        val excludedCategoryIds = catalog.categories.asSequence()
-            .filter { it.type == MediaType.Live && it.key in excludedCategoryKeys }
-            .mapTo(mutableSetOf()) { it.id }
-        val hiddenEntries = state.library.hiddenEntries
-        val sequence = ++beinGuideResolveSequence
-        val currentRaw = beinGuideCurrentRaw
-        val nextRaw = beinGuideNextRaw
-
-        viewModelScope.launch(Dispatchers.Default) {
-            fun visible(items: List<ResolvedBeinProgrammeItem>): List<ResolvedBeinProgrammeItem> =
-                items.filterNot { item ->
-                    item.channel.key in hiddenEntries ||
-                        item.channel.categoryId in excludedCategoryIds
-                }
-
-            val current = visible(beinSportsChannelMatcher.resolve(currentRaw, catalog))
-            val next = visible(beinSportsChannelMatcher.resolve(nextRaw, catalog))
-
-            if (
-                sequence != beinGuideResolveSequence ||
-                _uiState.value.activeProfileId != profileId
-            ) return@launch
-
-            _uiState.update { latest ->
-                if (latest.activeProfileId == profileId) {
-                    latest.copy(
-                        homeBeinSportsNow = current,
-                        homeBeinSportsNext = next,
-                    )
-                } else {
-                    latest
+        fun load(forceRefresh: Boolean) {
+            val profileId = _uiState.value.activeProfileId ?: return
+            if (!forceRefresh && loadJob?.isActive == true) return
+            if (forceRefresh) loadJob?.cancel()
+            val sequence = ++loadSequence
+            loadJob = viewModelScope.launch {
+                runCatching { fetch(forceRefresh) }.onSuccess { fetched ->
+                    if (sequence != loadSequence || _uiState.value.activeProfileId != profileId) return@onSuccess
+                    raw = fetched
+                    resolve()
                 }
             }
         }
-    }
 
-    /**
-     * Charge la grille TV britannique (tvguideuk.com) et en extrait les émissions actuellement
-     * diffusées et suivantes. Même logique que [loadBeinSportsGuide] : le scrape ne dépend pas du
-     * profil, seule la résolution vers la playlist dépend du catalogue Live courant.
-     */
-    private fun loadUkGuide(forceRefresh: Boolean) {
-        val profileId = _uiState.value.activeProfileId ?: return
-        if (!forceRefresh && ukGuideLoadJob?.isActive == true) return
-        if (forceRefresh) ukGuideLoadJob?.cancel()
-
-        val sequence = ++ukGuideLoadSequence
-        ukGuideLoadJob = viewModelScope.launch {
-            runCatching { repository.loadUkGuide(forceRefresh) }
-                .onSuccess { fetch ->
-                    if (
-                        sequence != ukGuideLoadSequence ||
-                        _uiState.value.activeProfileId != profileId
-                    ) {
-                        return@onSuccess
-                    }
-                    ukGuideCurrentRaw = fetch.rows.current
-                    ukGuideNextRaw = fetch.rows.next
-                    resolveUkGuide()
+        fun resolve() {
+            val state = _uiState.value
+            val profileId = state.activeProfileId ?: return
+            val catalog = state.catalog ?: return
+            val fetched = raw?.takeUnless(isEmpty) ?: return
+            val excludedCategoryKeys = if (state.appSettings.parentalControlEnabled && !state.parentalUnlocked) {
+                state.library.hiddenCategories + state.library.lockedCategories
+            } else {
+                state.library.hiddenCategories
+            }
+            val excludedCategoryIds = catalog.categories.asSequence()
+                .filter { it.type == MediaType.Live && it.key in excludedCategoryKeys }
+                .mapTo(mutableSetOf()) { it.id }
+            val hiddenEntries = state.library.hiddenEntries
+            val sequence = ++resolveSequence
+            viewModelScope.launch(Dispatchers.Default) {
+                val publish = match(fetched, catalog) { channel ->
+                    channel.key !in hiddenEntries && channel.categoryId !in excludedCategoryIds
                 }
-        }
-    }
-
-    private fun resolveUkGuide() {
-        val state = _uiState.value
-        val profileId = state.activeProfileId ?: return
-        val catalog = state.catalog ?: return
-        if (ukGuideCurrentRaw.isEmpty() && ukGuideNextRaw.isEmpty()) return
-
-        val excludedCategoryKeys = if (
-            state.appSettings.parentalControlEnabled && !state.parentalUnlocked
-        ) {
-            state.library.hiddenCategories + state.library.lockedCategories
-        } else {
-            state.library.hiddenCategories
-        }
-        val excludedCategoryIds = catalog.categories.asSequence()
-            .filter { it.type == MediaType.Live && it.key in excludedCategoryKeys }
-            .mapTo(mutableSetOf()) { it.id }
-        val hiddenEntries = state.library.hiddenEntries
-        val sequence = ++ukGuideResolveSequence
-        val currentRaw = ukGuideCurrentRaw
-        val nextRaw = ukGuideNextRaw
-
-        viewModelScope.launch(Dispatchers.Default) {
-            fun visible(items: List<ResolvedUkProgrammeItem>): List<ResolvedUkProgrammeItem> =
-                items.filterNot { item ->
-                    item.channel.key in hiddenEntries ||
-                        item.channel.categoryId in excludedCategoryIds
-                }
-
-            val current = visible(ukGuideChannelMatcher.resolve(currentRaw, catalog))
-            val next = visible(ukGuideChannelMatcher.resolve(nextRaw, catalog))
-
-            if (
-                sequence != ukGuideResolveSequence ||
-                _uiState.value.activeProfileId != profileId
-            ) return@launch
-
-            _uiState.update { latest ->
-                if (latest.activeProfileId == profileId) {
-                    latest.copy(
-                        homeUkGuideNow = current,
-                        homeUkGuideNext = next,
-                    )
-                } else {
-                    latest
-                }
+                if (sequence != resolveSequence) return@launch
+                _uiState.update { latest -> if (latest.activeProfileId == profileId) publish(latest) else latest }
             }
         }
-    }
 
-    /**
-     * Charge les programmes actuellement diffusés depuis /en-ce-moment. Le cache est volontairement
-     * très court car cette rangée évolue pendant que l'application est ouverte.
-     */
-    private fun loadTvProgrammeNow(forceRefresh: Boolean) {
-        val profileId = _uiState.value.activeProfileId ?: return
-        if (!forceRefresh && tvProgrammeNowLoadJob?.isActive == true) return
-        if (forceRefresh) tvProgrammeNowLoadJob?.cancel()
-
-        val sequence = ++tvProgrammeNowLoadSequence
-        tvProgrammeNowLoadJob = viewModelScope.launch {
-            runCatching { repository.loadTvProgrammeNow(forceRefresh) }
-                .onSuccess { fetch ->
-                    if (
-                        sequence != tvProgrammeNowLoadSequence ||
-                        _uiState.value.activeProfileId != profileId
-                    ) {
-                        return@onSuccess
-                    }
-                    tvProgrammeNowRawItems = fetch.programmes
-                    resolveTvProgrammeNow()
-                }
-        }
-    }
-
-    private fun resolveTvProgrammeNow() {
-        val state = _uiState.value
-        val profileId = state.activeProfileId ?: return
-        val catalog = state.catalog ?: return
-        val programmes = tvProgrammeNowRawItems
-        if (programmes.isEmpty()) return
-
-        val excludedCategoryKeys = if (
-            state.appSettings.parentalControlEnabled && !state.parentalUnlocked
-        ) {
-            state.library.hiddenCategories + state.library.lockedCategories
-        } else {
-            state.library.hiddenCategories
-        }
-        val excludedCategoryIds = catalog.categories.asSequence()
-            .filter { it.type == MediaType.Live && it.key in excludedCategoryKeys }
-            .mapTo(mutableSetOf()) { it.id }
-        val hiddenEntries = state.library.hiddenEntries
-        val sequence = ++tvProgrammeNowResolveSequence
-
-        viewModelScope.launch(Dispatchers.Default) {
-            val resolved = tvProgrammeChannelMatcher.resolveNow(programmes, catalog)
-                .filterNot { item ->
-                    item.channel.key in hiddenEntries || item.channel.categoryId in excludedCategoryIds
-                }
-
-            if (
-                sequence != tvProgrammeNowResolveSequence ||
-                _uiState.value.activeProfileId != profileId
-            ) return@launch
-
-            _uiState.update { current ->
-                if (current.activeProfileId == profileId) {
-                    current.copy(homeTvProgrammeNow = resolved)
-                } else {
-                    current
-                }
-            }
-        }
-    }
-
-    /**
-     * Charge le programme TV français du soir depuis tv-programme.com. Le scrape est indépendant
-     * de la playlist ; le rapprochement avec les chaînes n'est publié qu'après disponibilité du
-     * catalogue Live du profil courant.
-     */
-    private fun loadTvProgrammeTonight(forceRefresh: Boolean) {
-        val profileId = _uiState.value.activeProfileId ?: return
-        if (!forceRefresh && tvProgrammeLoadJob?.isActive == true) return
-        if (forceRefresh) tvProgrammeLoadJob?.cancel()
-
-        val sequence = ++tvProgrammeLoadSequence
-        tvProgrammeLoadJob = viewModelScope.launch {
-            runCatching { repository.loadTvProgrammeTonight(forceRefresh) }
-                .onSuccess { fetch ->
-                    if (sequence != tvProgrammeLoadSequence || _uiState.value.activeProfileId != profileId) {
-                        return@onSuccess
-                    }
-                    tvProgrammeRawItems = fetch.programmes
-                    resolveTvProgrammeTonight()
-                resolveTvProgrammeNow()
-                resolveBeinSportsGuide()
-                resolveUkGuide()
-                }
-        }
-    }
-
-    /**
-     * Associe le programme aux seules catégories Live commençant par FR/fr. Le matcher choisit,
-     * pour un même nom de chaîne, la variante 4K > UHD > FHD > HD > SD. Le calcul est hors thread
-     * UI car certains fournisseurs exposent plusieurs milliers de chaînes françaises/variantes.
-     */
-    private fun resolveTvProgrammeTonight() {
-        val state = _uiState.value
-        val profileId = state.activeProfileId ?: return
-        val catalog = state.catalog ?: return
-        val programmes = tvProgrammeRawItems
-        if (programmes.isEmpty()) return
-
-        val excludedCategoryKeys = if (
-            state.appSettings.parentalControlEnabled && !state.parentalUnlocked
-        ) {
-            state.library.hiddenCategories + state.library.lockedCategories
-        } else {
-            state.library.hiddenCategories
-        }
-        val excludedCategoryIds = catalog.categories.asSequence()
-            .filter { it.type == MediaType.Live && it.key in excludedCategoryKeys }
-            .mapTo(mutableSetOf()) { it.id }
-        val hiddenEntries = state.library.hiddenEntries
-        val sequence = ++tvProgrammeResolveSequence
-
-        viewModelScope.launch(Dispatchers.Default) {
-            val resolved = tvProgrammeChannelMatcher.resolve(programmes, catalog)
-                .filterNot { item ->
-                    item.channel.key in hiddenEntries || item.channel.categoryId in excludedCategoryIds
-                }
-
-            if (
-                sequence != tvProgrammeResolveSequence ||
-                _uiState.value.activeProfileId != profileId
-            ) return@launch
-
-            _uiState.update { current ->
-                if (current.activeProfileId == profileId) {
-                    current.copy(homeTvProgrammeTonight = resolved)
-                } else {
-                    current
-                }
-            }
+        fun reset() {
+            loadJob?.cancel()
+            loadJob = null
+            loadSequence += 1
+            resolveSequence += 1
+            raw = null
         }
     }
 
@@ -2499,28 +2278,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         homeRecommendationBuildSequence += 1
         homeRecommendationLastBuiltProfileId = null
         homeRecommendationLastBuiltAtMillis = 0L
-        tvProgrammeLoadJob?.cancel()
-        tvProgrammeLoadJob = null
-        tvProgrammeLoadSequence += 1
-        tvProgrammeResolveSequence += 1
-        tvProgrammeRawItems = emptyList()
-        tvProgrammeNowLoadJob?.cancel()
-        tvProgrammeNowLoadJob = null
-        tvProgrammeNowLoadSequence += 1
-        tvProgrammeNowResolveSequence += 1
-        tvProgrammeNowRawItems = emptyList()
-        beinGuideLoadJob?.cancel()
-        beinGuideLoadJob = null
-        beinGuideLoadSequence += 1
-        beinGuideResolveSequence += 1
-        beinGuideCurrentRaw = emptyList()
-        beinGuideNextRaw = emptyList()
-        ukGuideLoadJob?.cancel()
-        ukGuideLoadJob = null
-        ukGuideLoadSequence += 1
-        ukGuideResolveSequence += 1
-        ukGuideCurrentRaw = emptyList()
-        ukGuideNextRaw = emptyList()
+        homeGuides.forEach { it.reset() }
         epgPrefetchJob?.cancel()
         epgPrefetchJob = null
         epgSyncJob?.cancel()
@@ -2568,10 +2326,10 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         secondaryLoadsJob = viewModelScope.launch {
             delay(initialDelayMs)
             val loads = listOf<() -> Unit>(
-                { loadTvProgrammeNow(forceRefresh = false) },
-                { loadBeinSportsGuide(forceRefresh = false) },
-                { loadUkGuide(forceRefresh = false) },
-                { loadTvProgrammeTonight(forceRefresh = false) },
+                { tvProgrammeNowGuide.load(forceRefresh = false) },
+                { beinSportsGuide.load(forceRefresh = false) },
+                { ukGuide.load(forceRefresh = false) },
+                { tvProgrammeTonightGuide.load(forceRefresh = false) },
                 { loadLiveOnSatMatches(forceRefresh = false) },
             )
             loads.forEach { load ->
