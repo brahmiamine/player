@@ -1,5 +1,6 @@
 package fr.streamia.tv
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -17,6 +18,8 @@ import fr.streamia.tv.ui.StreamiaViewModelFactory
 import fr.streamia.tv.work.EpgSyncScheduler
 
 class MainActivity : ComponentActivity() {
+    private lateinit var viewModel: StreamiaViewModel
+
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
@@ -30,11 +33,20 @@ class MainActivity : ComponentActivity() {
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
 
-        val viewModel = ViewModelProvider(
+        viewModel = ViewModelProvider(
             this,
             StreamiaViewModelFactory(XtreamRepository(applicationContext)),
         )[StreamiaViewModel::class.java]
 
+        // Lancement depuis une carte « Continuer à regarder » de Google TV : la reprise passe avant
+        // la restauration de session habituelle (StreamiaTvRoot l'ignore dès qu'un profil est actif).
+        viewModel.openResumeLink(intent?.data)
         setContent { StreamiaTvRoot(viewModel) }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        viewModel.openResumeLink(intent.data)
     }
 }

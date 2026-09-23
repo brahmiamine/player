@@ -1,5 +1,6 @@
 package fr.streamia.tv.ui
 
+import fr.streamia.tv.data.WatchNextPublisher
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -1091,6 +1092,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             libraryMutation.withLock {
                 val history = withContext(Dispatchers.IO) {
                     repository.recordPlayback(profileId, entry, positionMs, durationMs)
+                    repository.publishWatchNext(profileId)
                     repository.library(profileId).history
                 }
                 _uiState.update { state ->
@@ -1108,6 +1110,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         val profileId = _uiState.value.activeProfileId ?: return
         repository.clearHistory(profileId, type)
         refreshLibraryPresentation()
+        viewModelScope.launch(Dispatchers.IO) { repository.publishWatchNext(profileId) }
     }
 
     fun setCategoryOrder(type: MediaType, categoryKeys: List<String>) {
@@ -1236,6 +1239,20 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             emptySet()
         }
         return LiveZapIndex(catalog, state.library.hiddenEntries, lockedCategoryIds).also { zapIndexCache = key to it }
+    }
+
+    /**
+     * Carte « Continuer à regarder » de Google TV (voir [WatchNextPublisher.resumeUri]) : reprend le
+     * contenu à sa position, par le même chemin rapide que la reprise au démarrage.
+     */
+    fun openResumeLink(uri: Uri?): Boolean {
+        if (uri?.scheme != WatchNextPublisher.SCHEME || uri.host != WatchNextPublisher.HOST_RESUME) return false
+        val profileId = uri.getQueryParameter("profile") ?: return false
+        val key = uri.getQueryParameter("key") ?: return false
+        if (repository.profile(profileId) == null) return false
+        val entry = repository.library(profileId).history.firstOrNull { it.entry.key == key }?.entry ?: return false
+        resumeStartup(profileId, entry, returnToSeries = entry.type == MediaType.Series)
+        return true
     }
 
     /** Revient à la chaîne regardée juste avant (un second appui ramène à la chaîne d'origine). */

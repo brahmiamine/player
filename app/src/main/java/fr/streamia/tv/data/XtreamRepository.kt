@@ -459,6 +459,11 @@ class XtreamRepository(context: Context) {
     fun verifyParentalPin(pin: String): Boolean = appSettingsStore.verifyParentalPin(pin)
     fun recordPlayback(profileId: String, entry: MediaEntry, positionMs: Long, durationMs: Long) =
         libraryStore.recordPlayback(profileId, entry, positionMs, durationMs)
+    private val watchNextPublisher = WatchNextPublisher(appContext)
+
+    /** Met à jour la rangée « Continuer à regarder » de Google TV depuis l'historique (sur IO). */
+    fun publishWatchNext(profileId: String) = watchNextPublisher.publish(profileId, libraryStore.snapshot(profileId).history)
+
     fun resumePosition(profileId: String, entryKey: String): Long = libraryStore.resumePosition(profileId, entryKey)
     fun clearHistory(profileId: String, type: MediaType? = null) = libraryStore.clearHistory(profileId, type)
     fun setCategoryOrder(profileId: String, type: MediaType, categoryKeys: List<String>) =

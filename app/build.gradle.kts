@@ -143,6 +143,8 @@ dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
 
     implementation("androidx.core:core-ktx:1.17.0")
+    // Rangée « Continuer à regarder » de l'accueil Google TV (Watch Next).
+    implementation("androidx.tvprovider:tvprovider:1.1.0")
     // Installe le baseline profile sur les APK installés hors Play Store (distribution directe).
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")
     "baselineProfile"(project(":baselineprofile"))
