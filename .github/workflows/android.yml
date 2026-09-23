@@ -45,10 +45,10 @@ jobs:
       - name: Install Android 36 platform
         run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
 
-      - name: Set up Gradle 8.13
+      - name: Set up Gradle 9.6.0
         uses: gradle/actions/setup-gradle@v6
         with:
-          gradle-version: "8.13"
+          gradle-version: "9.6.0"
 
       - name: Unit tests and lint
         id: unit_tests_lint
