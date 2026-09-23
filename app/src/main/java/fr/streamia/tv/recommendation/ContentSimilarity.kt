@@ -180,26 +180,43 @@ class MetadataSimilarityEngine(
         features.releaseDate?.takeIf(String::isNotBlank)?.let { add("Date: $it") }
     }.joinToString(". ").take(MAX_EMBEDDING_TEXT_CHARS)
 
-    private fun titleTokens(value: String): Set<String> = rawTokens(value, minLength = 2)
+    internal fun titleTokens(value: String): Set<String> = rawTokens(value, minLength = 2)
         .filterNotTo(linkedSetOf()) { token ->
             token in TITLE_NOISE_TOKENS || token in STOP_WORDS || YEAR_TOKEN.matches(token)
         }
 
     private fun cleanTitle(value: String): String = titleTokens(value).joinToString(" ")
 
-    private fun genreTokens(value: String?): Set<String> = rawTokens(value, minLength = 2)
+    internal fun genreTokens(value: String?): Set<String> = rawTokens(value, minLength = 2)
         .mapTo(linkedSetOf()) { token -> GENRE_ALIASES[token] ?: token }
 
-    private fun personTokens(value: String?): Set<String> = rawTokens(value, minLength = 2)
+    internal fun personTokens(value: String?): Set<String> = rawTokens(value, minLength = 2)
         .filterNotTo(linkedSetOf()) { it in PERSON_NOISE_TOKENS }
 
     /**
      * Canonicalisation très légère des mots d'intrigue. Elle rapproche les variantes françaises
      * et anglaises les plus fréquentes sans modèle lourd ni stemming agressif sur Android TV.
      */
-    private fun plotTokens(value: String?): Set<String> = rawTokens(value, minLength = 3)
-        .filterNot { it in STOP_WORDS || it in TITLE_NOISE_TOKENS }
+    internal fun plotTokens(value: String?): Set<String> = rawTokens(value, minLength = 3)
+        .filterNot { it in STOP_WORDS || it in PLOT_STOP_WORDS || it in TITLE_NOISE_TOKENS }
+        .map(::stem)
+        .filterNot { it in PLOT_STOP_WORDS }
         .mapTo(linkedSetOf()) { token -> PLOT_TOKEN_ALIASES[token] ?: token }
+
+    /**
+     * Racine minimale FR/EN (pluriels, féminins et formes verbales les plus courantes) : suffit à
+     * rapprocher « vampires »/« vampire », « tueuse »/« tueur », « killing »/« killer » sans
+     * stemmer complet, trop coûteux et trop agressif sur des synopsis courts.
+     */
+    private fun stem(token: String): String {
+        if (token.length < 5 || !token[0].isLetter() || token[0].code > 0x24F) return token
+        for ((suffix, replacement) in STEM_SUFFIXES) {
+            if (token.length - suffix.length >= 4 && token.endsWith(suffix)) {
+                return token.dropLast(suffix.length) + replacement
+            }
+        }
+        return token
+    }
 
     private fun tokens(value: String?): Set<String> = rawTokens(value, minLength = 3)
         .filterNotTo(linkedSetOf()) { it in STOP_WORDS || it in TITLE_NOISE_TOKENS }
@@ -267,6 +284,8 @@ class MetadataSimilarityEngine(
             "survive" to "survival",
             "survives" to "survival",
             "surviving" to "survival",
+            "surviv" to "survival",
+            "ennemy" to "enemy",
             "ennemi" to "enemy",
             "ennemis" to "enemy",
             "ennemie" to "enemy",
@@ -340,6 +359,30 @@ class MetadataSimilarityEngine(
             "biopic" to "biography",
             "sport" to "sport",
             "sports" to "sport",
+        )
+
+        // Ordre important : suffixes les plus longs d'abord.
+        val STEM_SUFFIXES = listOf(
+            "euses" to "eur", "euse" to "eur", "eurs" to "eur", "ieres" to "ier", "iere" to "ier",
+            "ings" to "", "ing" to "", "ers" to "er", "ies" to "y", "aux" to "al",
+            "ees" to "e", "es" to "e", "s" to "", "x" to "",
+        )
+
+        // Mots trop fréquents dans les synopsis pour prouver une ressemblance d'histoire.
+        val PLOT_STOP_WORDS = setOf(
+            "plus", "tout", "tous", "toute", "toutes", "mais", "comme", "lorsque", "quand", "alors",
+            "elle", "elles", "ils", "lui", "sont", "etre", "avoir", "fait", "faire", "doit", "peut",
+            "entre", "vers", "sans", "sous", "chez", "encore", "deja", "tres", "bien", "meme",
+            "autre", "autres", "cette", "celui", "celle", "dont", "mais", "donc", "ainsi", "depuis",
+            "jour", "jours", "annee", "annees", "temps", "vie", "monde", "homme", "femme", "jeune",
+            "nouveau", "nouvelle", "premier", "premiere", "grand", "grande", "petit", "petite",
+            "decide", "decouvre", "tente", "essaie", "devient", "retrouve", "va", "vont", "leur",
+            "their", "they", "them", "his", "her", "him", "she", "who", "when", "where", "which",
+            "while", "what", "will", "must", "can", "has", "have", "been", "are", "was", "were",
+            "but", "not", "all", "one", "two", "new", "life", "world", "man", "woman", "young",
+            "years", "year", "day", "days", "time", "only", "also", "own", "find", "finds", "gets",
+            "becomes", "tries", "takes", "discovers", "decides", "about", "over", "more", "most",
+            "film", "movie", "serie", "series", "saison", "season", "episode", "histoire", "story",
         )
 
         val STOP_WORDS = setOf(

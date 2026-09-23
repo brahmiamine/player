@@ -1717,7 +1717,9 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                         repository.similarityCandidates(profileId, source, HOME_RECOMMENDATION_PER_SOURCE_LIMIT)
                     }.getOrDefault(emptyList())
                 }
-                (recent + tasteCandidates)
+                // Candidats liés aux goûts d'abord : avec « récents » en tête, la limite coupait
+                // justement les contenus proches de ce que l'utilisateur regarde.
+                (tasteCandidates + recent)
                     .distinctBy(MediaEntry::key)
                     .take(HOME_RECOMMENDATION_CANDIDATE_LIMIT)
             }
@@ -1738,6 +1740,11 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 repository.recommendationContentFeatures(profileId, detailsSource)
             }.getOrDefault(emptyMap())
             val feedback = runCatching { repository.recommendationFeedback(profileId) }.getOrDefault(emptyMap())
+            val boostsBySource = tasteSources.associate { source ->
+                source.key to runCatching {
+                    repository.similarityBoosts(profileId, source, detailsByKey[source.key])
+                }.getOrDefault(emptyMap())
+            }
 
             if (sequence != homeRecommendationBuildSequence || _uiState.value.activeProfileId != profileId) return@launch
 
@@ -1756,6 +1763,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                     hiddenCategoryIds = excludedCategoryIds,
                 ),
                 nowMillis = nowMillis,
+                boostsBySource = boostsBySource,
             )
             val snapshot = recommendationEngine.buildSnapshot(profileId, context)
 
@@ -1794,12 +1802,13 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             .filter { it.key in excludedCategoryKeys }
             .mapTo(mutableSetOf()) { it.id }
 
+        val sourceFeatures = ContentFeatures.from(entry, details)
         val candidates = runCatching {
-            repository.similarityCandidates(profileId, entry, SIMILAR_CANDIDATE_LIMIT)
+            repository.similarityCandidates(profileId, entry, SIMILAR_CANDIDATE_LIMIT, sourceFeatures)
         }.getOrDefault(emptyList())
         if (candidates.isEmpty()) return
+        val boosts = runCatching { repository.similarityBoosts(profileId, entry, sourceFeatures) }.getOrDefault(emptyMap())
 
-        val sourceFeatures = ContentFeatures.from(entry, details)
         val detailsByKey = runCatching {
             repository.recommendationContentFeatures(profileId, candidates)
         }.getOrDefault(emptyMap()).toMutableMap()
@@ -1830,6 +1839,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 hiddenCategoryIds = hiddenCategoryIds,
                 limit = SIMILAR_RESULT_LIMIT,
                 minimumScore = SIMILAR_DETAIL_MIN_SCORE,
+                boosts = boosts,
             )
         }
 
