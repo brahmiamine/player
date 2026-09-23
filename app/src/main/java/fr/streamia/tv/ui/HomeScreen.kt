@@ -64,7 +64,8 @@ import java.util.Locale
 /** Hauteur allouée à la grille d'actions principale : proche de la surface qu'occupait
  * l'ancien `fillMaxSize()` (écran logique 1280x720, moins l'en-tête et les marges), pour que
  * l'accueil garde le même confort quand aucune rangée « Reprendre »/« Favoris » n'est affichée. */
-private val MainGridHeight = 560.dp
+// Grille compacte : laisse la place aux rangées de contenu sous la navigation principale.
+private val MainGridHeight = 300.dp
 private val CardRowSpacing = 22.dp
 private val UK_GUIDE_ZONE: ZoneId = ZoneId.of("Europe/London")
 private const val TV_PROGRAMME_PROGRESS_REFRESH_MS = 30_000L
@@ -534,7 +535,7 @@ private fun MainActionGrid(
 ) {
     Row(
         modifier,
-        horizontalArrangement = Arrangement.spacedBy(18.dp),
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         val liveTileEnabled = !catalogLoading && catalog.count(MediaType.Live) > 0
         HomeTile(
@@ -544,7 +545,7 @@ private fun MainActionGrid(
             modifier = Modifier
                 .then(if (firstFocus != null && liveTileEnabled) Modifier.focusRequester(firstFocus) else Modifier)
                 .gridFocus(gridFocusRequester, focusTarget == HomeFocusTarget.Live)
-                .width(360.dp)
+                .width(300.dp)
                 .fillMaxSize(),
             onClick = { onOpenSection(MediaType.Live) },
             enabled = liveTileEnabled,
@@ -552,10 +553,10 @@ private fun MainActionGrid(
         )
 
         Column(
-            Modifier.width(360.dp).fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(18.dp),
+            Modifier.width(400.dp).fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 HomeTile(
                     title = "Films",
                     subtitle = if (catalogLoading) "Chargement…" else "${catalog.count(MediaType.Movie)} contenus",
@@ -575,7 +576,7 @@ private fun MainActionGrid(
                     enabled = !catalogLoading && catalog.count(MediaType.Series) > 0,
                 )
             }
-            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 HomeTile(
                     title = "Recherche",
                     subtitle = "Tout le catalogue",
@@ -599,7 +600,7 @@ private fun MainActionGrid(
 
         Column(
             Modifier.weight(1f).fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(18.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             HomeAction(
                 StreamiaIconGlyph.Settings,
@@ -1053,27 +1054,27 @@ private fun HomeTile(
 ) {
     FocusableSurface(onClick = onClick, enabled = enabled, accent = prominent, modifier = modifier) {
         Column(
-            Modifier.fillMaxSize().padding(if (prominent) 34.dp else 22.dp),
+            Modifier.fillMaxSize().padding(if (prominent) 20.dp else 10.dp),
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                 StreamiaIcon(
                     glyph,
-                    size = if (prominent) 64.dp else 42.dp,
+                    size = if (prominent) 48.dp else 30.dp,
                     tint = if (prominent) Ink else FocusBlueBright,
                 )
             }
-            Spacer(Modifier.height(if (prominent) 24.dp else 12.dp))
+            Spacer(Modifier.height(if (prominent) 14.dp else 6.dp))
             Text(
                 title,
                 color = Ink,
-                fontSize = if (prominent) 29.sp else 20.sp,
+                fontSize = if (prominent) 26.sp else 18.sp,
                 fontWeight = HeadingWeight,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth(),
             )
-            Spacer(Modifier.height(5.dp))
+            Spacer(Modifier.height(3.dp))
             Text(
                 subtitle,
                 color = if (prominent) Ink.copy(alpha = 0.75f) else MutedInk,
@@ -1094,10 +1095,10 @@ private fun HomeAction(
     enabled: Boolean = true,
 ) {
     FocusableSurface(onClick = onClick, enabled = enabled, modifier = modifier.fillMaxWidth()) {
-        Row(Modifier.fillMaxSize().padding(horizontal = 26.dp), verticalAlignment = Alignment.CenterVertically) {
-            StreamiaIcon(glyph, size = 26.dp)
-            Spacer(Modifier.width(18.dp))
-            Text(title, color = Ink, fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
+        Row(Modifier.fillMaxSize().padding(horizontal = 22.dp), verticalAlignment = Alignment.CenterVertically) {
+            StreamiaIcon(glyph, size = 24.dp)
+            Spacer(Modifier.width(16.dp))
+            Text(title, color = Ink, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
         }
     }
 }
