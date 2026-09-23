@@ -1400,52 +1400,12 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         epgChannelJob?.cancel()
         epgChannelJob = viewModelScope.launch {
             val now = System.currentTimeMillis() / 1000
-
-            // 1) Requête SQLite ultra-courte par chaîne quand l'alias fournisseur correspond
-            // exactement au XMLTV.
-            val cached = runCatching {
-                repository.cachedEpgNow(profileId, entry, now, offsetHours)
-            }.getOrNull()
-            if (cached != null && !cached.isEmpty) {
-                updatePlayerEpgIfCurrent(entry, cached)
+            localEpgNow(profileId, entry, now, offsetHours)?.let {
+                updatePlayerEpgIfCurrent(entry, it)
                 return@launch
             }
 
-            // 2) Le guide déjà matérialisé contient des alias plus tolérants
-            // ("FR: TF1 4K" ↔ "TF1.fr"/"TF1 HD"). Ses horaires sont déjà décalés : offset 0.
-            val guideContext = _uiState.value.epgGuide
-                ?.forEntry(entry)
-                ?.epgNowContextAt(nowEpochSeconds = now)
-            if (guideContext != null && !guideContext.isEmpty) {
-                updatePlayerEpgIfCurrent(entry, guideContext)
-                return@launch
-            }
-
-            // 3) L'utilisateur peut avoir laissé le Guide TV sur hier/demain. Dans ce cas
-            // epgGuide ne représente plus aujourd'hui : récupérer silencieusement la journée
-            // courante depuis SQLite, la conserver dans le petit LRU, puis refaire la résolution
-            // d'alias. Toujours aucun réseau.
-            val today = LocalDate.now(ZoneId.systemDefault())
-            val todayGuide = epgGuideMemoryCache.get(profileId, today, offsetHours) ?: runCatching {
-                val (dayStart, dayEnd) = epgDayBounds(today)
-                repository.cachedEpgGuide(
-                    profileId = profileId,
-                    displayStartEpochSeconds = dayStart,
-                    displayEndEpochSeconds = dayEnd,
-                    offsetHours = offsetHours,
-                )
-            }.getOrNull()?.also {
-                epgGuideMemoryCache.put(profileId, today, offsetHours, it)
-            }
-            val todayContext = todayGuide
-                ?.forEntry(entry)
-                ?.epgNowContextAt(nowEpochSeconds = now)
-            if (todayContext != null && !todayContext.isEmpty) {
-                updatePlayerEpgIfCurrent(entry, todayContext)
-                return@launch
-            }
-
-            // 4) Dernier repli : l'EPG court Xtream, utile lors d'un tout premier démarrage avant
+            // Dernier repli : l'EPG court Xtream, utile lors d'un tout premier démarrage avant
             // que le XMLTV local ait fini d'être réchauffé.
             val programs = runCatching { repository.shortEpg(credentials, entry.id) }.getOrNull().orEmpty()
             if (programs.isEmpty()) return@launch
@@ -1456,6 +1416,37 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             )
             updatePlayerEpgIfCurrent(entry, fallback)
         }
+    }
+
+    /**
+     * Programme en cours/suivant depuis les données locales uniquement (aucun réseau), du plus
+     * précis au plus tolérant :
+     * 1) requête SQLite courte quand l'alias fournisseur correspond exactement au XMLTV ;
+     * 2) le guide déjà affiché, dont les alias sont plus tolérants ("FR: TF1 4K" ↔ "TF1.fr") et
+     *    les horaires déjà décalés ;
+     * 3) la journée courante (le Guide TV peut être resté sur hier/demain), relue depuis SQLite
+     *    une fois puis gardée dans le petit LRU mémoire.
+     */
+    private suspend fun localEpgNow(profileId: String, entry: MediaEntry, now: Long, offsetHours: Int): EpgNowContext? {
+        runCatching { repository.cachedEpgNow(profileId, entry, now, offsetHours) }.getOrNull()
+            ?.takeUnless { it.isEmpty }
+            ?.let { return it }
+
+        _uiState.value.epgGuide?.forEntry(entry)?.epgNowContextAt(nowEpochSeconds = now)
+            ?.takeUnless { it.isEmpty }
+            ?.let { return it }
+
+        val today = LocalDate.now(ZoneId.systemDefault())
+        val todayGuide = epgGuideMemoryCache.get(profileId, today, offsetHours) ?: runCatching {
+            val (dayStart, dayEnd) = epgDayBounds(today)
+            repository.cachedEpgGuide(
+                profileId = profileId,
+                displayStartEpochSeconds = dayStart,
+                displayEndEpochSeconds = dayEnd,
+                offsetHours = offsetHours,
+            )
+        }.getOrNull()?.also { epgGuideMemoryCache.put(profileId, today, offsetHours, it) }
+        return todayGuide?.forEntry(entry)?.epgNowContextAt(nowEpochSeconds = now)?.takeUnless { it.isEmpty }
     }
 
     private fun updatePlayerEpgIfCurrent(entry: MediaEntry, context: EpgNowContext) {
@@ -1473,34 +1464,8 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 if (current.key != entry.key || current.type != MediaType.Live) return@launch
                 val profileId = state.activeProfileId ?: return@launch
                 val now = System.currentTimeMillis() / 1000
-                val cached = runCatching {
-                    repository.cachedEpgNow(
-                        profileId = profileId,
-                        entry = current,
-                        nowEpochSeconds = now,
-                        offsetHours = state.appSettings.epgTimeOffsetHours,
-                    )
-                }.getOrNull()
-                when {
-                    cached != null && !cached.isEmpty -> updatePlayerEpgIfCurrent(current, cached)
-                    else -> {
-                        // Même repli tolérant que [loadEpg] : indispensable pour les chaînes dont
-                        // le nom playlist est décoré (pays, VIP, 4K...) mais dont le XMLTV est déjà
-                        // correctement visible dans le Guide TV.
-                        val fromGuide = state.epgGuide
-                            ?.forEntry(current)
-                            ?.epgNowContextAt(nowEpochSeconds = now)
-                            ?.takeUnless { it.isEmpty }
-                            ?: epgGuideMemoryCache
-                                .get(profileId, LocalDate.now(ZoneId.systemDefault()), state.appSettings.epgTimeOffsetHours)
-                                ?.forEntry(current)
-                                ?.epgNowContextAt(nowEpochSeconds = now)
-                                ?.takeUnless { it.isEmpty }
-                        if (fromGuide != null) {
-                            updatePlayerEpgIfCurrent(current, fromGuide)
-                        }
-                    }
-                }
+                localEpgNow(profileId, current, now, state.appSettings.epgTimeOffsetHours)
+                    ?.let { updatePlayerEpgIfCurrent(current, it) }
             }
         }
     }
