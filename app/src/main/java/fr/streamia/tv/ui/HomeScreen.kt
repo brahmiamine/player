@@ -56,6 +56,7 @@ import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.time.LocalTime
 import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.Date
 import java.util.Locale
 
@@ -86,6 +87,8 @@ fun HomeScreen(
     ukGuideNow: List<ResolvedUkProgrammeItem> = emptyList(),
     ukGuideNext: List<ResolvedUkProgrammeItem> = emptyList(),
     restoreContext: ContentReturnContext? = null,
+    focusTarget: HomeFocusTarget? = null,
+    onFocusConsumed: () -> Unit = {},
     onOpenSection: (MediaType) -> Unit,
     onSettings: () -> Unit,
     onSearch: () -> Unit,
@@ -100,9 +103,10 @@ fun HomeScreen(
     onRefreshUkGuide: () -> Unit,
 ) {
     val firstFocus = remember { FocusRequester() }
+    val gridFocusRequester = remember { FocusRequester() }
     val restoringHome = restoreContext?.origin == ContentReturnOrigin.Home
-    LaunchedEffect(restoringHome) {
-        if (!restoringHome) runCatching { firstFocus.requestFocus() }
+    LaunchedEffect(restoringHome, focusTarget) {
+        if (!restoringHome && focusTarget == null) runCatching { firstFocus.requestFocus() }
     }
 
     // Comme pour le guide TV, une catégorie verrouillée et pas encore déverrouillée cette session
@@ -193,30 +197,34 @@ fun HomeScreen(
     // demander le focus d'un composant pas encore composé (grille hors écran si les deux rangées
     // sont présentes). Sans historique ni favori (cas courant après import), le comportement est
     // strictement identique à l'ancien écran fixe.
-    val focusOnResume = resumeCards.isNotEmpty()
-    val focusOnFavorites = !focusOnResume && favoriteCards.isNotEmpty()
+    // Une carte précise de la grille à refocaliser (retour depuis une tuile) l'emporte sur le focus
+    // par défaut : les rangées ne réclament alors pas le focus. Un retour vers une carte de rangée
+    // (origine « Home ») reste prioritaire.
+    val preferGridFocus = focusTarget != null && !restoringHome
+    val focusOnResume = !preferGridFocus && resumeCards.isNotEmpty()
+    val focusOnFavorites = !preferGridFocus && !focusOnResume && favoriteCards.isNotEmpty()
     val focusOnTvProgrammeNow =
-        !focusOnResume && !focusOnFavorites && tvProgrammeNow.isNotEmpty()
+        !preferGridFocus && !focusOnResume && !focusOnFavorites && tvProgrammeNow.isNotEmpty()
     val focusOnTvProgrammeTonight =
-        !focusOnResume && !focusOnFavorites && !focusOnTvProgrammeNow &&
+        !preferGridFocus && !focusOnResume && !focusOnFavorites && !focusOnTvProgrammeNow &&
             tvProgrammeTonight.isNotEmpty()
     val focusOnTvProgramme = focusOnTvProgrammeNow || focusOnTvProgrammeTonight
     val focusOnBeinSportsNow =
-        !focusOnResume && !focusOnFavorites && !focusOnTvProgramme &&
+        !preferGridFocus && !focusOnResume && !focusOnFavorites && !focusOnTvProgramme &&
             beinSportsNow.isNotEmpty()
     val focusOnBeinSportsNext =
-        !focusOnResume && !focusOnFavorites && !focusOnTvProgramme &&
+        !preferGridFocus && !focusOnResume && !focusOnFavorites && !focusOnTvProgramme &&
             !focusOnBeinSportsNow && beinSportsNext.isNotEmpty()
     val focusOnBeinSports = focusOnBeinSportsNow || focusOnBeinSportsNext
     val focusOnUkGuideNow =
-        !focusOnResume && !focusOnFavorites && !focusOnTvProgramme && !focusOnBeinSports &&
+        !preferGridFocus && !focusOnResume && !focusOnFavorites && !focusOnTvProgramme && !focusOnBeinSports &&
             ukGuideNow.isNotEmpty()
     val focusOnUkGuideNext =
-        !focusOnResume && !focusOnFavorites && !focusOnTvProgramme && !focusOnBeinSports &&
+        !preferGridFocus && !focusOnResume && !focusOnFavorites && !focusOnTvProgramme && !focusOnBeinSports &&
             !focusOnUkGuideNow && ukGuideNext.isNotEmpty()
     val focusOnUkGuide = focusOnUkGuideNow || focusOnUkGuideNext
     val focusOnRecommendations =
-        !focusOnResume && !focusOnFavorites && !focusOnTvProgramme && !focusOnBeinSports &&
+        !preferGridFocus && !focusOnResume && !focusOnFavorites && !focusOnTvProgramme && !focusOnBeinSports &&
             !focusOnUkGuide && recommendationRows.isNotEmpty()
     val focusOnGrid =
         !focusOnResume && !focusOnFavorites && !focusOnTvProgramme && !focusOnBeinSports &&
@@ -260,6 +268,22 @@ fun HomeScreen(
         }
     }
 
+    // Retour depuis une tuile (TV en direct, Films, Séries, Recherche, Guide TV, Paramètres…) :
+    // on fait défiler jusqu'à la grille d'actions puis on repose le focus sur la même carte.
+    val gridListIndex = 1 + visibleRowKeys.size
+    LaunchedEffect(focusTarget, gridListIndex, restoringHome) {
+        if (focusTarget == null) return@LaunchedEffect
+        if (restoringHome) {
+            // Un retour vers une carte de rangée prime : on abandonne la cible de grille.
+            onFocusConsumed()
+            return@LaunchedEffect
+        }
+        homeListState.scrollToItem(gridListIndex)
+        delay(RESTORE_FOCUS_DELAY_MS)
+        runCatching { gridFocusRequester.requestFocus() }
+        onFocusConsumed()
+    }
+
     LazyColumn(
         state = homeListState,
         modifier = Modifier
@@ -273,22 +297,26 @@ fun HomeScreen(
                         Modifier.fillMaxWidth().padding(horizontal = 26.dp, vertical = 14.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        StreamiaLogo()
-                        Spacer(Modifier.weight(1f))
-                        Column(horizontalAlignment = Alignment.End) {
-                            profileName?.takeIf(String::isNotBlank)?.let {
-                                Text(it, color = Ink, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                        Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                            StreamiaLogo()
+                        }
+                        LocalClockText()
+                        Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
+                            Column(horizontalAlignment = Alignment.End) {
+                                profileName?.takeIf(String::isNotBlank)?.let {
+                                    Text(it, color = Ink, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                                }
+                                val expiry = catalog.account?.expiresAtEpochSeconds?.let(::formatExpiry)
+                                Text(
+                                    buildString {
+                                        append(if (offline) "Mode cache" else "Liste connectée")
+                                        if (catalogLoading) append(" · chargement du catalogue…")
+                                        if (expiry != null) append(" · expire le $expiry")
+                                    },
+                                    color = if (offline) FocusBlueBright else MutedInk,
+                                    fontSize = 13.sp,
+                                )
                             }
-                            val expiry = catalog.account?.expiresAtEpochSeconds?.let(::formatExpiry)
-                            Text(
-                                buildString {
-                                    append(if (offline) "Mode cache" else "Liste connectée")
-                                    if (catalogLoading) append(" · chargement du catalogue…")
-                                    if (expiry != null) append(" · expire le $expiry")
-                                },
-                                color = if (offline) FocusBlueBright else MutedInk,
-                                fontSize = 13.sp,
-                            )
                         }
                     }
                 }
@@ -498,7 +526,9 @@ fun HomeScreen(
                 catalog = catalog,
                 catalogLoading = catalogLoading,
                 busy = busy,
-                firstFocus = if (focusOnGrid) firstFocus else null,
+                firstFocus = if (focusOnGrid && !preferGridFocus) firstFocus else null,
+                focusTarget = focusTarget,
+                gridFocusRequester = gridFocusRequester,
                 onOpenSection = onOpenSection,
                 onSearch = onSearch,
                 onEpg = onEpg,
@@ -518,6 +548,8 @@ private fun MainActionGrid(
     catalogLoading: Boolean,
     busy: Boolean,
     firstFocus: FocusRequester?,
+    focusTarget: HomeFocusTarget?,
+    gridFocusRequester: FocusRequester,
     onOpenSection: (MediaType) -> Unit,
     onSettings: () -> Unit,
     onSearch: () -> Unit,
@@ -538,6 +570,7 @@ private fun MainActionGrid(
             glyph = StreamiaIconGlyph.Live,
             modifier = Modifier
                 .then(if (firstFocus != null && liveTileEnabled) Modifier.focusRequester(firstFocus) else Modifier)
+                .gridFocus(gridFocusRequester, focusTarget == HomeFocusTarget.Live)
                 .width(360.dp)
                 .fillMaxSize(),
             onClick = { onOpenSection(MediaType.Live) },
@@ -554,7 +587,8 @@ private fun MainActionGrid(
                     title = "Films",
                     subtitle = if (catalogLoading) "Chargement…" else "${catalog.count(MediaType.Movie)} contenus",
                     glyph = StreamiaIconGlyph.Movie,
-                    modifier = Modifier.weight(1f).fillMaxSize(),
+                    modifier = Modifier.weight(1f).fillMaxSize()
+                        .gridFocus(gridFocusRequester, focusTarget == HomeFocusTarget.Movies),
                     onClick = { onOpenSection(MediaType.Movie) },
                     enabled = !catalogLoading && catalog.count(MediaType.Movie) > 0,
                 )
@@ -562,7 +596,8 @@ private fun MainActionGrid(
                     title = "Séries",
                     subtitle = if (catalogLoading) "Chargement…" else "${catalog.count(MediaType.Series)} contenus",
                     glyph = StreamiaIconGlyph.Series,
-                    modifier = Modifier.weight(1f).fillMaxSize(),
+                    modifier = Modifier.weight(1f).fillMaxSize()
+                        .gridFocus(gridFocusRequester, focusTarget == HomeFocusTarget.Series),
                     onClick = { onOpenSection(MediaType.Series) },
                     enabled = !catalogLoading && catalog.count(MediaType.Series) > 0,
                 )
@@ -572,7 +607,8 @@ private fun MainActionGrid(
                     title = "Recherche",
                     subtitle = "Tout le catalogue",
                     glyph = StreamiaIconGlyph.Search,
-                    modifier = Modifier.weight(1f).fillMaxSize(),
+                    modifier = Modifier.weight(1f).fillMaxSize()
+                        .gridFocus(gridFocusRequester, focusTarget == HomeFocusTarget.Search),
                     onClick = onSearch,
                     enabled = !catalogLoading,
                 )
@@ -580,7 +616,8 @@ private fun MainActionGrid(
                     title = "Guide TV",
                     subtitle = "EPG",
                     glyph = StreamiaIconGlyph.Guide,
-                    modifier = Modifier.weight(1f).fillMaxSize(),
+                    modifier = Modifier.weight(1f).fillMaxSize()
+                        .gridFocus(gridFocusRequester, focusTarget == HomeFocusTarget.Guide),
                     onClick = onEpg,
                     enabled = !catalogLoading && catalog.count(MediaType.Live) > 0,
                 )
@@ -595,14 +632,35 @@ private fun MainActionGrid(
                 StreamiaIconGlyph.Settings,
                 "Paramètres",
                 onSettings,
-                Modifier.weight(1f).then(if (firstFocus != null && !liveTileEnabled) Modifier.focusRequester(firstFocus) else Modifier),
+                Modifier.weight(1f)
+                    .then(if (firstFocus != null && !liveTileEnabled) Modifier.focusRequester(firstFocus) else Modifier)
+                    .gridFocus(gridFocusRequester, focusTarget == HomeFocusTarget.Settings),
             )
-            HomeAction(StreamiaIconGlyph.Refresh, if (busy || catalogLoading) "Chargement…" else "Actualiser", onRefresh, Modifier.weight(1f), enabled = !busy && !catalogLoading)
-            HomeAction(StreamiaIconGlyph.Guide, "Matchs du jour", onOpenLiveMatches, Modifier.weight(1f))
-            HomeAction(StreamiaIconGlyph.Swap, "Changer de liste", onChangePlaylist, Modifier.weight(1f))
+            HomeAction(
+                StreamiaIconGlyph.Refresh,
+                if (busy || catalogLoading) "Chargement…" else "Actualiser",
+                onRefresh,
+                Modifier.weight(1f).gridFocus(gridFocusRequester, focusTarget == HomeFocusTarget.Refresh),
+                enabled = !busy && !catalogLoading,
+            )
+            HomeAction(
+                StreamiaIconGlyph.Guide,
+                "Matchs du jour",
+                onOpenLiveMatches,
+                Modifier.weight(1f).gridFocus(gridFocusRequester, focusTarget == HomeFocusTarget.LiveMatches),
+            )
+            HomeAction(
+                StreamiaIconGlyph.Swap,
+                "Changer de liste",
+                onChangePlaylist,
+                Modifier.weight(1f).gridFocus(gridFocusRequester, focusTarget == HomeFocusTarget.ChangePlaylist),
+            )
         }
     }
 }
+
+private fun Modifier.gridFocus(requester: FocusRequester, matches: Boolean): Modifier =
+    if (matches) focusRequester(requester) else this
 
 @Composable
 private fun HomeCardRow(
@@ -765,8 +823,8 @@ private fun TvProgrammeNowCard(
                 ChannelLogo(
                     channel.iconUrl,
                     channel.displayName,
-                    Modifier.width(90.dp).height(90.dp),
-                    imagePadding = 1,
+                    Modifier.width(80.dp).height(80.dp),
+                    imagePadding = 2,
                 )
                 Spacer(Modifier.width(7.dp))
                 Text(
@@ -866,8 +924,8 @@ private fun TvProgrammeTonightCard(
                 ChannelLogo(
                     channel.iconUrl,
                     channel.displayName,
-                    Modifier.width(90.dp).height(90.dp),
-                    imagePadding = 1,
+                    Modifier.width(80.dp).height(80.dp),
+                    imagePadding = 2,
                 )
                 Spacer(Modifier.width(7.dp))
                 Text(
@@ -957,10 +1015,10 @@ private fun BeinSportsProgrammeCard(
                             .background(MutedInk.copy(alpha = 0.10f)),
                         contentAlignment = Alignment.Center,
                     ) {
-                        ChannelLogo(
-                            channel.iconUrl,
-                            channel.displayName,
-                            Modifier.width(76.dp).height(76.dp),
+                        StreamiaIcon(
+                            StreamiaIconGlyph.Live,
+                            tint = MutedInk.copy(alpha = 0.55f),
+                            size = 44.dp,
                         )
                     }
                 }
@@ -1035,8 +1093,8 @@ private fun BeinSportsProgrammeCard(
                 ChannelLogo(
                     channel.iconUrl,
                     channel.displayName,
-                    Modifier.width(90.dp).height(90.dp),
-                    imagePadding = 1,
+                    Modifier.width(80.dp).height(80.dp),
+                    imagePadding = 2,
                 )
                 Spacer(Modifier.width(7.dp))
                 Text(
@@ -1126,10 +1184,10 @@ private fun UkGuideProgrammeCard(
                             .background(MutedInk.copy(alpha = 0.10f)),
                         contentAlignment = Alignment.Center,
                     ) {
-                        ChannelLogo(
-                            channel.iconUrl,
-                            channel.displayName,
-                            Modifier.width(76.dp).height(76.dp),
+                        StreamiaIcon(
+                            StreamiaIconGlyph.Live,
+                            tint = MutedInk.copy(alpha = 0.55f),
+                            size = 44.dp,
                         )
                     }
                 }
@@ -1194,8 +1252,8 @@ private fun UkGuideProgrammeCard(
                 ChannelLogo(
                     channel.iconUrl,
                     channel.displayName,
-                    Modifier.width(90.dp).height(90.dp),
-                    imagePadding = 1,
+                    Modifier.width(80.dp).height(80.dp),
+                    imagePadding = 2,
                 )
                 Spacer(Modifier.width(7.dp))
                 Text(
@@ -1404,6 +1462,31 @@ private fun HomeAction(
         }
     }
 }
+
+/**
+ * Horloge locale de l'en-tête (heures:minutes:secondes), rafraîchie chaque seconde. L'état vit
+ * dans ce composable pour que seule cette zone se recompose, et non toute la liste d'accueil.
+ */
+@Composable
+private fun LocalClockText(modifier: Modifier = Modifier) {
+    var now by remember { mutableStateOf(LocalTime.now()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            now = LocalTime.now()
+            // Se recale sur la frontière de la seconde suivante pour éviter la dérive.
+            delay(1_000L - System.currentTimeMillis() % 1_000L)
+        }
+    }
+    Text(
+        text = now.format(ClockFormatter),
+        color = Ink,
+        fontSize = 24.sp,
+        fontWeight = FontWeight.Bold,
+        modifier = modifier,
+    )
+}
+
+private val ClockFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm:ss")
 
 private fun formatExpiry(epochSeconds: Long): String =
     SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date(epochSeconds * 1000L))

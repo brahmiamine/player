@@ -123,19 +123,15 @@ fun FocusableSurface(
         else -> Color.Black.copy(alpha = 0.35f)
     }
 
+    // Le scale/l'ombre de focus sont appliqués à une Box interne, jamais à `modifier` lui-même :
+    // Modifier.scale() fait grandir les bounds vus par le système de focus (boundsInParent inclut
+    // les graphicsLayer), donc les mettre sur le nœud focusable faisait grandir sa zone à chaque
+    // frame de l'animation et déclenchait un bringIntoView vertical de la LazyColumn parente à
+    // chaque changement de focus horizontal dans une LazyRow — d'où le tremblement de tout l'écran
+    // en se déplaçant entre les cards. La Box externe (focus/clic) garde une taille fixe ; seule la
+    // Box interne se redimensionne visuellement.
     Box(
         modifier = modifier
-            .scale(scale)
-            .shadow(elevation, shape, clip = false, ambientColor = glowColor, spotColor = glowColor)
-            .clip(shape)
-            .then(
-                if (accent) {
-                    Modifier.background(Brush.verticalGradient(listOf(AccentPinkLight, AccentPink)), shape)
-                } else {
-                    Modifier.background(background, shape)
-                },
-            )
-            .border(border, shape)
             .onFocusChanged {
                 focused = it.isFocused
                 if (it.isFocused) onFocused?.invoke()
@@ -172,7 +168,24 @@ fun FocusableSurface(
             ),
         contentAlignment = Alignment.CenterStart,
     ) {
-        content()
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .scale(scale)
+                .shadow(elevation, shape, clip = false, ambientColor = glowColor, spotColor = glowColor)
+                .clip(shape)
+                .then(
+                    if (accent) {
+                        Modifier.background(Brush.verticalGradient(listOf(AccentPinkLight, AccentPink)), shape)
+                    } else {
+                        Modifier.background(background, shape)
+                    },
+                )
+                .border(border, shape),
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            content()
+        }
     }
 }
 

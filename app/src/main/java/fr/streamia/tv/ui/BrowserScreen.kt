@@ -47,6 +47,7 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -420,9 +421,24 @@ private fun BrowserHeader(
                     idleBackground = idleBackground,
                     modifier = Modifier.width(104.dp).height(44.dp),
                 ) {
-                    Column(Modifier.padding(horizontal = 10.dp)) {
-                        Text(type.displayName, color = Ink, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        Text(catalog.count(type).toString(), color = MutedInk, fontSize = 11.sp)
+                    Column(
+                        Modifier.fillMaxSize().padding(horizontal = 10.dp),
+                        verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Text(
+                            type.displayName,
+                            color = Ink,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            textAlign = TextAlign.Center,
+                        )
+                        Text(
+                            catalog.count(type).toString(),
+                            color = MutedInk,
+                            fontSize = 11.sp,
+                            textAlign = TextAlign.Center,
+                        )
                     }
                 }
                 Spacer(Modifier.width(6.dp))
@@ -434,18 +450,14 @@ private fun BrowserHeader(
             HeaderAction("EPG", 68.dp, onEpg, catalog.count(MediaType.Live) > 0, idleBackground = idleBackground)
             Spacer(Modifier.width(6.dp))
             HeaderAction("Paramètres", 52.dp, onSettings, glyph = StreamiaIconGlyph.Settings, idleBackground = idleBackground)
-            Spacer(Modifier.width(10.dp))
-            Box(Modifier.size(6.dp).background(if (offline) WarmSignal else Color(0xFF8FBFA0)))
-            Spacer(Modifier.width(5.dp))
-            Text(
-                when {
-                    busy -> "Chargement…"
-                    offline -> "Cache"
-                    else -> "Local / en ligne"
-                },
-                color = if (offline) WarmSignal else MutedInk,
-                fontSize = 12.sp,
-            )
+            if (busy || offline) {
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    if (busy) "Chargement…" else "Cache",
+                    color = if (offline) WarmSignal else MutedInk,
+                    fontSize = 12.sp,
+                )
+            }
         }
     }
     if (translucent) {
@@ -480,7 +492,9 @@ private fun HeaderAction(
         if (glyph != null) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { StreamiaIcon(glyph, size = 22.dp) }
         } else {
-            Text(label, color = Ink, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 10.dp))
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(label, color = Ink, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            }
         }
     }
 }
@@ -928,19 +942,6 @@ private fun LivePreview(
                     modifier = Modifier.align(Alignment.Center),
                 )
             }
-        Text(
-            if (enabled) "Aperçu en direct" else "Aperçu désactivé",
-            color = Ink,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Bold,
-            // Décalé sous le bandeau du haut, qui flotte maintenant par-dessus cette même vidéo
-            // plein écran (voir BrowserScreen) et couvrirait sinon ce badge.
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(top = BROWSER_HEADER_HEIGHT)
-                .background(Night.copy(alpha = 0.82f))
-                .padding(horizontal = 12.dp, vertical = 7.dp),
-        )
     }
 }
 
@@ -1048,10 +1049,6 @@ private fun CategoryRail(
       Column(Modifier.fillMaxSize().padding(14.dp)) {
         Row(Modifier.fillMaxWidth().padding(start = 3.dp, bottom = 7.dp), verticalAlignment = Alignment.CenterVertically) {
             SectionLabel("Catégories")
-            if (type != MediaType.Live) {
-                Spacer(Modifier.weight(1f))
-                Text("OK choisir · OK long favori", color = MutedInk, fontSize = 12.sp)
-            }
         }
         LazyColumn(
             state = listState,

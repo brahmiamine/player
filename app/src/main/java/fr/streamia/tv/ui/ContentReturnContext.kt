@@ -9,6 +9,23 @@ enum class ContentReturnOrigin {
     LiveMatches,
 }
 
+/**
+ * Carte de l'accueil à refocaliser au retour, pour que « Retour » depuis un écran ouvert via une
+ * tuile (TV en direct, Films, Séries, Recherche, Guide TV, Paramètres…) ramène le focus sur cette
+ * même tuile plutôt que sur la première rangée.
+ */
+enum class HomeFocusTarget {
+    Live,
+    Movies,
+    Series,
+    Search,
+    Guide,
+    Settings,
+    Refresh,
+    LiveMatches,
+    ChangePlaylist,
+}
+
 data class ContentReturnContext(
     val origin: ContentReturnOrigin,
     val homeRowKey: String? = null,

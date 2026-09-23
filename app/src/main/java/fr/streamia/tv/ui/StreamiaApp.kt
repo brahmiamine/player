@@ -105,6 +105,8 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     ukGuideNow = state.homeUkGuideNow,
                     ukGuideNext = state.homeUkGuideNext,
                     restoreContext = state.contentReturnContext,
+                    focusTarget = state.homeFocusTarget,
+                    onFocusConsumed = viewModel::consumeHomeFocusTarget,
                     onOpenSection = viewModel::openSection,
                     onSettings = viewModel::showSettings,
                     onSearch = viewModel::showSearch,
@@ -193,7 +195,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onImportBackup = viewModel::importBackup,
                     onAbout = viewModel::showAbout,
                     onParentalControl = viewModel::showParentalControl,
-                    onBack = viewModel::showHome,
+                    onBack = viewModel::backFromMenu,
                 )
 
                 state.screen is StreamiaScreen.ParentalControl -> ParentalControlScreen(
@@ -201,7 +203,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onSetPin = viewModel::setParentalPin,
                     onVerifyPin = viewModel::verifyParentalPin,
                     onDisable = viewModel::disableParentalControl,
-                    onBack = viewModel::showSettings,
+                    onBack = viewModel::backFromMenu,
                 )
 
                 state.screen is StreamiaScreen.Tools -> ToolsScreen(
@@ -226,14 +228,14 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onExportBackup = viewModel::exportBackup,
                     onImportBackup = viewModel::importBackup,
                     onAbout = viewModel::showAbout,
-                    onBack = viewModel::showSettings,
+                    onBack = viewModel::backFromMenu,
                 )
 
                 state.screen is StreamiaScreen.About -> AboutScreen(
                     versionName = BuildConfig.VERSION_NAME,
                     onLoadCacheSize = viewModel::cacheSizeBytes,
                     onLoadEpgCacheSize = viewModel::epgCacheSizeBytes,
-                    onBack = viewModel::showSettings,
+                    onBack = viewModel::backFromMenu,
                 )
 
                 state.screen is StreamiaScreen.Search && state.catalog != null -> SearchScreen(
@@ -248,7 +250,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onTypeChange = viewModel::updateSearchType,
                     onOpenEntry = viewModel::openSearchEntry,
                     onToggleEntryFavorite = viewModel::toggleEntryFavorite,
-                    onBack = viewModel::showHome,
+                    onBack = viewModel::backFromMenu,
                 )
 
                 state.screen is StreamiaScreen.LiveMatches -> LiveOnSatScreen(
@@ -264,7 +266,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                         ?.itemKey,
                     onOpenChannel = viewModel::openLiveMatchChannel,
                     onRefresh = viewModel::refreshLiveOnSatMatches,
-                    onBack = viewModel::showHome,
+                    onBack = viewModel::backFromMenu,
                 )
 
                 state.screen is StreamiaScreen.Epg && state.catalog != null -> EpgScreen(
@@ -282,7 +284,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onOpenChannel = viewModel::openEntry,
                     onSelectDate = viewModel::selectEpgDate,
                     onReload = viewModel::reloadEpg,
-                    onBack = viewModel::showHome,
+                    onBack = viewModel::backFromMenu,
                 )
 
                 state.screen is StreamiaScreen.Organizer && state.catalog != null -> OrganizerScreen(

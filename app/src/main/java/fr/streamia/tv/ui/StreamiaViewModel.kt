@@ -550,7 +550,14 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
 
     fun showHome() {
         // Le guide EPG est volontairement conservé en mémoire quand on revient à l'accueil.
-        _uiState.update { it.copy(screen = StreamiaScreen.Home, message = null, epgLoading = false) }
+        _uiState.update {
+            it.copy(
+                screen = StreamiaScreen.Home,
+                menuBackStack = emptyList(),
+                message = null,
+                epgLoading = false,
+            )
+        }
         refreshHomeRecommendations()
         resolveTvProgrammeTonight()
         resolveTvProgrammeNow()
@@ -560,14 +567,60 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         loadBeinSportsGuide(forceRefresh = false)
         loadUkGuide(forceRefresh = false)
     }
-    fun showSettings() { _uiState.update { it.copy(screen = StreamiaScreen.Settings, message = null) } }
-    fun showTools() { _uiState.update { it.copy(screen = StreamiaScreen.Tools, message = null) } }
-    fun showAbout() { _uiState.update { it.copy(screen = StreamiaScreen.About, message = null) } }
+
+    /**
+     * Ouvre un écran « de menu » (Recherche, EPG, Paramètres, Outils…) en empilant l'écran courant :
+     * Retour ramène ainsi à l'écran d'où l'on vient — notamment Direct/Films/Séries — au lieu de
+     * renvoyer systématiquement à l'accueil. Les écrans de contenu (lecteur, fiche film/série) ne
+     * sont jamais empilés, ils gardent leur propre logique de retour.
+     */
+    private fun navigateToMenu(
+        target: StreamiaScreen,
+        homeFocus: HomeFocusTarget? = null,
+        update: (StreamiaUiState) -> StreamiaUiState = { it },
+    ) {
+        _uiState.update { state ->
+            val pushed = when (state.screen) {
+                target -> state.menuBackStack
+                is StreamiaScreen.Player, is StreamiaScreen.MovieDetails, is StreamiaScreen.Series ->
+                    state.menuBackStack
+                else -> state.menuBackStack + state.screen
+            }
+            // La carte à refocaliser n'est mémorisée que lorsqu'on quitte réellement l'accueil.
+            val focus = if (state.screen == StreamiaScreen.Home && homeFocus != null) homeFocus else state.homeFocusTarget
+            update(state).copy(screen = target, menuBackStack = pushed, message = null, homeFocusTarget = focus)
+        }
+    }
+
+    /** Consommé par l'accueil une fois le focus reposé sur la carte mémorisée. */
+    fun consumeHomeFocusTarget() {
+        _uiState.update { if (it.homeFocusTarget == null) it else it.copy(homeFocusTarget = null) }
+    }
+
+    /** Retour depuis un écran de menu : revient à l'écran empilé, sinon à l'accueil. */
+    fun backFromMenu() {
+        val state = _uiState.value
+        when (val target = state.menuBackStack.lastOrNull()) {
+            null, StreamiaScreen.Home -> showHome()
+            else -> _uiState.update {
+                it.copy(
+                    screen = target,
+                    menuBackStack = state.menuBackStack.dropLast(1),
+                    message = null,
+                    epgLoading = false,
+                )
+            }
+        }
+    }
+
+    fun showSettings() = navigateToMenu(StreamiaScreen.Settings, HomeFocusTarget.Settings)
+    fun showTools() = navigateToMenu(StreamiaScreen.Tools)
+    fun showAbout() = navigateToMenu(StreamiaScreen.About)
 
     suspend fun cacheSizeBytes(): Long = repository.cacheSizeBytes()
     suspend fun epgCacheSizeBytes(): Long = repository.epgCacheSizeBytes()
-    fun showParentalControl() { _uiState.update { it.copy(screen = StreamiaScreen.ParentalControl, message = null) } }
-    fun showSearch() { _uiState.update { it.copy(screen = StreamiaScreen.Search, message = null) } }
+    fun showParentalControl() = navigateToMenu(StreamiaScreen.ParentalControl)
+    fun showSearch() = navigateToMenu(StreamiaScreen.Search, HomeFocusTarget.Search)
 
     fun updateSearchQuery(query: String) {
         _uiState.update {
@@ -590,7 +643,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     }
 
     fun showLiveMatches() {
-        _uiState.update { it.copy(screen = StreamiaScreen.LiveMatches, message = null) }
+        navigateToMenu(StreamiaScreen.LiveMatches, HomeFocusTarget.LiveMatches)
         loadLiveOnSatMatches(forceRefresh = false)
     }
 
@@ -680,7 +733,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
      * des listes complètes des trois types, pas seulement de la catégorie visitée.
      */
     fun showOrganizer() {
-        _uiState.update { it.copy(screen = StreamiaScreen.Organizer, message = null) }
+        navigateToMenu(StreamiaScreen.Organizer)
         MediaType.entries.forEach(::ensureSectionLoaded)
     }
     fun showBrowser() { _uiState.update { it.copy(screen = StreamiaScreen.Browser, message = null) } }
@@ -691,7 +744,13 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 screen = StreamiaScreen.Browser,
                 browserType = type,
                 browserCategoryId = null,
+                menuBackStack = emptyList(),
                 message = null,
+                homeFocusTarget = when (type) {
+                    MediaType.Live -> HomeFocusTarget.Live
+                    MediaType.Movie -> HomeFocusTarget.Movies
+                    MediaType.Series -> HomeFocusTarget.Series
+                },
             )
         }
     }
@@ -856,14 +915,10 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
 
     fun showEpg() {
         if (_uiState.value.activeProfileId == null) return
-        _uiState.update {
-            it.copy(
-                screen = StreamiaScreen.Epg,
-                // Si une journée est déjà matérialisée (retour depuis Accueil/Player), on l'affiche
-                // immédiatement. Une éventuelle lecture SQLite ou resynchro se fait derrière.
-                epgLoading = it.epgGuide == null,
-                message = null,
-            )
+        navigateToMenu(StreamiaScreen.Epg, HomeFocusTarget.Guide) { state ->
+            // Si une journée est déjà matérialisée (retour depuis Accueil/Player), on l'affiche
+            // immédiatement. Une éventuelle lecture SQLite ou resynchro se fait derrière.
+            state.copy(epgLoading = state.epgGuide == null)
         }
         ensureSectionLoaded(MediaType.Live)
         loadEpgGuideFromCache(_uiState.value.epgSelectedDate)
@@ -1135,7 +1190,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     }
 
     fun closeOrganizer() {
-        showTools()
+        backFromMenu()
         val profileId = _uiState.value.activeProfileId ?: return
         viewModelScope.launch(Dispatchers.IO) {
             catalogLayoutMutation.withLock {
@@ -2517,6 +2572,13 @@ data class StreamiaUiState(
     val searchQuery: String = "",
     val searchType: MediaType? = null,
     val contentReturnContext: ContentReturnContext? = null,
+    /**
+     * Pile des écrans de menu traversés (Accueil, Direct/Films/Séries, Paramètres, Recherche, EPG,
+     * Outils…). Elle permet à Retour de revenir à l'écran d'où l'on vient au lieu de l'accueil.
+     */
+    val menuBackStack: List<StreamiaScreen> = emptyList(),
+    /** Carte de l'accueil à refocaliser au retour (voir [HomeFocusTarget]). */
+    val homeFocusTarget: HomeFocusTarget? = null,
     val lastViewedEntry: MediaEntry? = null,
 )
 

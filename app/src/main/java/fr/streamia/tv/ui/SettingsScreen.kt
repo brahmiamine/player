@@ -169,10 +169,10 @@ fun SettingsScreen(
 
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             SettingsSectionTitle("Lecture & direct")
-            Row(Modifier.fillMaxWidth().height(132.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(Modifier.fillMaxWidth().height(88.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 SettingsTile(
                     glyph = StreamiaIconGlyph.Live,
                     title = "Aperçu TV en direct",
@@ -222,9 +222,6 @@ fun SettingsScreen(
                     },
                     modifier = Modifier.weight(1f),
                 )
-            }
-
-            Row(Modifier.fillMaxWidth().height(132.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 SettingsTile(
                     glyph = StreamiaIconGlyph.Live,
                     title = "Format vidéo",
@@ -239,6 +236,9 @@ fun SettingsScreen(
                     },
                     modifier = Modifier.weight(1f),
                 )
+            }
+
+            Row(Modifier.fillMaxWidth().height(88.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 SettingsTile(
                     glyph = StreamiaIconGlyph.Live,
                     title = "Format du flux Live",
@@ -267,10 +267,12 @@ fun SettingsScreen(
                     },
                     modifier = Modifier.weight(1f),
                 )
+                Spacer(Modifier.weight(1f))
+                Spacer(Modifier.weight(1f))
             }
 
             SettingsSectionTitle("Catalogue & affichage")
-            Row(Modifier.fillMaxWidth().height(132.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(Modifier.fillMaxWidth().height(88.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 SettingsTile(
                     glyph = StreamiaIconGlyph.Reorder,
                     title = "Tri des chaînes",
@@ -313,9 +315,6 @@ fun SettingsScreen(
                     },
                     modifier = Modifier.weight(1f),
                 )
-            }
-
-            Row(Modifier.fillMaxWidth().height(132.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 SettingsTile(
                     glyph = StreamiaIconGlyph.Series,
                     title = "Épisode suivant auto.",
@@ -336,6 +335,9 @@ fun SettingsScreen(
                     modifier = Modifier.weight(1f),
                     selected = settings.autoPlayNextEpisode,
                 )
+            }
+
+            Row(Modifier.fillMaxWidth().height(88.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 SettingsTile(
                     glyph = StreamiaIconGlyph.Reorder,
                     title = "Taille des sous-titres",
@@ -370,15 +372,15 @@ fun SettingsScreen(
                     modifier = Modifier.weight(1f),
                     selected = settings.subtitleBackgroundEnabled,
                 )
+                Spacer(Modifier.weight(1f))
+                Spacer(Modifier.weight(1f))
             }
 
             SettingsSectionTitle("Outils & gestion")
-            Row(Modifier.fillMaxWidth().height(132.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(Modifier.fillMaxWidth().height(88.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 SettingsTile(StreamiaIconGlyph.Search, "Recherche", "Chaînes, films et séries", onSearch, Modifier.weight(1f))
                 SettingsTile(StreamiaIconGlyph.Guide, "Guide TV", "EPG et grille des chaînes", onEpg, Modifier.weight(1f))
                 SettingsTile(StreamiaIconGlyph.Reorder, "Organiser", "Catégories et contenus", onOrganizer, Modifier.weight(1f))
-            }
-            Row(Modifier.fillMaxWidth().height(132.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 SettingsTile(
                     StreamiaIconGlyph.Refresh,
                     if (busy) "Actualisation…" else "Actualiser",
@@ -387,6 +389,8 @@ fun SettingsScreen(
                     Modifier.weight(1f),
                     enabled = !busy,
                 )
+            }
+            Row(Modifier.fillMaxWidth().height(88.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 SettingsTile(
                     StreamiaIconGlyph.Swap,
                     "Changer de liste",
@@ -408,10 +412,13 @@ fun SettingsScreen(
                     Modifier.weight(1f),
                     selected = settings.parentalControlEnabled,
                 )
+                Spacer(Modifier.weight(1f))
+                Spacer(Modifier.weight(1f))
             }
 
             SettingsSectionTitle("Données & application")
-            Row(Modifier.fillMaxWidth().height(132.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(Modifier.fillMaxWidth().height(88.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                val allHistoryCount = liveHistoryCount + movieHistoryCount + seriesHistoryCount
                 SettingsTile(
                     StreamiaIconGlyph.Delete,
                     "Historique Direct",
@@ -454,10 +461,6 @@ fun SettingsScreen(
                     Modifier.weight(1f),
                     enabled = seriesHistoryCount > 0,
                 )
-            }
-
-            Row(Modifier.fillMaxWidth().height(132.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                val allHistoryCount = liveHistoryCount + movieHistoryCount + seriesHistoryCount
                 SettingsTile(
                     StreamiaIconGlyph.Delete,
                     "Effacer tout l'historique",
@@ -472,6 +475,9 @@ fun SettingsScreen(
                     Modifier.weight(1f),
                     enabled = allHistoryCount > 0,
                 )
+            }
+
+            Row(Modifier.fillMaxWidth().height(88.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 SettingsTile(
                     StreamiaIconGlyph.Refresh,
                     if (updateChecking) "Vérification…" else "Mises à jour",
@@ -487,9 +493,6 @@ fun SettingsScreen(
                     onAbout,
                     Modifier.weight(1f),
                 )
-            }
-
-            Row(Modifier.fillMaxWidth().height(132.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 SettingsTile(
                     StreamiaIconGlyph.Swap,
                     "Sauvegarder les réglages",
@@ -504,7 +507,6 @@ fun SettingsScreen(
                     { importLauncher.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) },
                     Modifier.weight(1f),
                 )
-                Spacer(Modifier.weight(1f))
             }
         }
 
@@ -543,9 +545,9 @@ private fun SettingsSectionTitle(title: String) {
     Text(
         title,
         color = FocusBlueBright,
-        fontSize = 16.sp,
+        fontSize = 14.sp,
         fontWeight = HeadingWeight,
-        modifier = Modifier.padding(top = 8.dp, bottom = 2.dp),
+        modifier = Modifier.padding(top = 4.dp, bottom = 2.dp),
     )
 }
 
@@ -677,14 +679,14 @@ internal fun SettingsTile(
         modifier = modifier.fillMaxSize(),
     ) {
         Column(
-            Modifier.fillMaxSize().padding(horizontal = 18.dp, vertical = 14.dp),
+            Modifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.Center,
         ) {
-            StreamiaIcon(glyph, size = 30.dp)
-            Spacer(Modifier.height(9.dp))
-            Text(title, color = Ink, fontSize = 18.sp, fontWeight = HeadingWeight, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Spacer(Modifier.height(4.dp))
-            Text(subtitle, color = MutedInk, fontSize = 12.sp, lineHeight = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            StreamiaIcon(glyph, size = 22.dp)
+            Spacer(Modifier.height(5.dp))
+            Text(title, color = Ink, fontSize = 16.sp, fontWeight = HeadingWeight, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Spacer(Modifier.height(3.dp))
+            Text(subtitle, color = MutedInk, fontSize = 11.sp, lineHeight = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
