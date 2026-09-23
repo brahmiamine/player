@@ -33,7 +33,8 @@ class LivePlaybackSession(context: Context, bufferMode: BufferMode = BufferMode.
     fun playUrl(key: String, url: String) {
         entryKey = key
         activeUrl = url
-        player.stop()
+        // Pas de stop() : remplacer directement l'élément laisse ExoPlayer réutiliser les décodeurs
+        // déjà initialisés au lieu de les libérer puis recréer à chaque zap.
         player.setMediaItem(MediaItem.fromUri(url))
         player.prepare()
         player.play()

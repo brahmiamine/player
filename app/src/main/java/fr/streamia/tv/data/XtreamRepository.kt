@@ -622,7 +622,7 @@ class XtreamRepository(context: Context) {
     private fun normalizeRemoteUrl(raw: String): String {
         val value = raw.trim()
         require(value.isNotBlank()) { "L'URL ne peut pas être vide." }
-        return if (value.contains("://")) value else "http://$value"
+        return if (value.contains("://")) value else "https://$value"
     }
 
     private fun queryDisplayName(uri: Uri): String? = runCatching {

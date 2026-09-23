@@ -32,8 +32,9 @@ Ajoutez ces quatre secrets :
 | `RELEASE_KEY_ALIAS` | `streamia` (ou l'alias choisi à l'étape 1) |
 | `RELEASE_KEY_PASSWORD` | Le mot de passe de la clé |
 
-Tant que ces secrets ne sont pas configurés, la CI continue de fonctionner normalement et
-retombe sur la clé debug (comportement actuel, inchangé).
+Tant que ces secrets ne sont pas configurés, la build `optimized`/`release` **échoue** (les
+tests et l'APK debug restent produits) : aucun APK public n'est plus signé avec la clé debug.
+Pour un essai local sur son propre boîtier : `gradle assembleOptimized -PallowDebugSignedRelease`.
 
 ## 3. Effet une fois les secrets ajoutés
 

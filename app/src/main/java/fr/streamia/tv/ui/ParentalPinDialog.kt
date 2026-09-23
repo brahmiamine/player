@@ -89,7 +89,7 @@ fun ParentalPinDialog(
                         if (onSubmit(next)) {
                             errorMessage = null
                         } else {
-                            errorMessage = "Code incorrect"
+                            errorMessage = "Code incorrect — après 5 erreurs, patientez avant de réessayer"
                             pin = ""
                         }
                     } else {

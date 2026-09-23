@@ -29,7 +29,8 @@ import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.domain.SeriesDetails
 import fr.streamia.tv.domain.SeriesEpisode
 import fr.streamia.tv.domain.ServerCredentials
-import fr.streamia.tv.domain.adjacentTo
+import fr.streamia.tv.domain.LiveZapIndex
+import fr.streamia.tv.logging.CrashReporter
 import fr.streamia.tv.domain.epgNowContextAt
 import fr.streamia.tv.domain.withTimeOffset
 import fr.streamia.tv.liveonsat.ChannelMatcher
@@ -116,6 +117,10 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     private var epgPrefetchJob: Job? = null
     private var epgChannelJob: Job? = null
     private var epgTickerJob: Job? = null
+    private var zapJob: Job? = null
+    // Clé comparée par identité des instances (catalogue/ensembles), recalculée seulement quand
+    // l'un d'eux change réellement.
+    private var zapIndexCache: Pair<List<Any>, LiveZapIndex>? = null
     // Lu/écrit uniquement depuis le thread principal (appelants Compose) : évite de relancer une
     // requête SQLite déjà en vol pour la même page quand plusieurs recompositions déclenchent le
     // même chargement (ex. sélection rapide de catégories, LaunchedEffect qui se relance).
@@ -726,6 +731,11 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         updateAppSettings { it.copy(subtitleBackgroundEnabled = !it.subtitleBackgroundEnabled) }
     }
 
+    fun toggleCrashReports() {
+        updateAppSettings { it.copy(crashReportsEnabled = !it.crashReportsEnabled) }
+        CrashReporter.setCollectionEnabled(_uiState.value.appSettings.crashReportsEnabled)
+    }
+
     fun toggleHomeBlock(block: HomeBlock) {
         updateAppSettings {
             it.copy(
@@ -1225,6 +1235,8 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     }
 
     fun closePlayer(forceBrowser: Boolean = false) {
+        zapJob?.cancel()
+        if (_uiState.value.pendingZapEntry != null) _uiState.update { it.copy(pendingZapEntry = null) }
         val profileId = _uiState.value.activeProfileId
         val player = _uiState.value.screen as? StreamiaScreen.Player
         _uiState.update {
@@ -1277,26 +1289,38 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         val state = _uiState.value
         val current = (state.screen as? StreamiaScreen.Player)?.entry ?: return
         if (current.type != MediaType.Live) return
-        // Le repli sur allLive peut faire sauter le zapping dans une autre catégorie que celle en
-        // cours : si elle est verrouillée et pas encore déverrouillée cette session, elle doit être
-        // exclue comme si elle était masquée — il n'y a pas d'écran de code pendant le zapping.
-        val lockedCategoryIds = if (state.appSettings.parentalControlEnabled && !state.parentalUnlocked) {
-            state.catalog?.categoriesFor(MediaType.Live)
-                .orEmpty()
+        val catalog = state.catalog ?: return
+        // Zap rapide : chaque appui avance depuis la chaîne déjà annoncée (pas depuis celle qui
+        // joue), le bandeau s'affiche tout de suite, et le flux ne démarre qu'une fois les appuis
+        // terminés — enchaîner CH+ ne lance plus un flux réseau (et un EPG) par chaîne traversée.
+        val from = state.pendingZapEntry ?: current
+        val next = liveZapIndex(state, catalog).adjacent(from, delta) ?: return
+        _uiState.update { it.copy(pendingZapEntry = next) }
+        zapJob?.cancel()
+        zapJob = viewModelScope.launch {
+            delay(ZAP_SETTLE_MS)
+            _uiState.update { it.copy(pendingZapEntry = null) }
+            if (next.key != current.key) openPlayer(next, returnToSeries = false)
+        }
+    }
+
+    /**
+     * Le repli sur toutes les chaînes peut faire sauter le zapping dans une autre catégorie : une
+     * catégorie verrouillée et pas encore déverrouillée cette session est exclue comme si elle était
+     * masquée — il n'y a pas d'écran de code pendant le zapping.
+     */
+    private fun liveZapIndex(state: StreamiaUiState, catalog: Catalog): LiveZapIndex {
+        val locked = state.appSettings.parentalControlEnabled && !state.parentalUnlocked
+        val key = listOf(catalog, state.library.hiddenEntries, state.library.lockedCategories, locked)
+        zapIndexCache?.takeIf { it.first == key }?.let { return it.second }
+        val lockedCategoryIds = if (locked) {
+            catalog.categoriesFor(MediaType.Live)
                 .filter { it.key in state.library.lockedCategories }
                 .mapTo(mutableSetOf(), MediaCategory::id)
         } else {
             emptySet()
         }
-        val sameCategory = state.catalog?.entriesIn(MediaType.Live, current.categoryId)
-            .orEmpty()
-            .filterNot { it.key in state.library.hiddenEntries }
-        val allLive = state.catalog?.entriesFor(MediaType.Live)
-            .orEmpty()
-            .filterNot { it.key in state.library.hiddenEntries || it.categoryId in lockedCategoryIds }
-        val pool = if (sameCategory.size > 1) sameCategory else allLive
-        val next = pool.adjacentTo(current.key, delta) ?: return
-        openPlayer(next, returnToSeries = false)
+        return LiveZapIndex(catalog, state.library.hiddenEntries, lockedCategoryIds).also { zapIndexCache = key to it }
     }
 
     fun dismissMessage() { _uiState.update { it.copy(message = null) } }
@@ -2614,6 +2638,8 @@ data class StreamiaUiState(
     /** Carte de l'accueil à refocaliser au retour (voir [HomeFocusTarget]). */
     val homeFocusTarget: HomeFocusTarget? = null,
     val lastViewedEntry: MediaEntry? = null,
+    /** Chaîne annoncée par un zap rapide en cours, pas encore lancée (voir [StreamiaViewModel.zap]). */
+    val pendingZapEntry: MediaEntry? = null,
 )
 
 sealed interface StreamiaScreen {
@@ -2639,6 +2665,7 @@ sealed interface StreamiaScreen {
 }
 
 private const val EPG_PLAYER_REFRESH_MS = 30_000L
+private const val ZAP_SETTLE_MS = 350L
 private const val MAX_EPG_DAY_SPAN = 30L
 private const val HOME_RECOMMENDATION_CANDIDATE_LIMIT = 400
 private const val HOME_RECOMMENDATION_RECENT_LIMIT = 240

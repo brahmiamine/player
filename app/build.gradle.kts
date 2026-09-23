@@ -95,6 +95,22 @@ android {
     }
 }
 
+// Un APK release/optimized signé avec la clé debug ne doit jamais être publié : il serait
+// incompatible avec les mises à jour signées et réinstallable par n'importe qui possédant une clé
+// debug. Sans les variables RELEASE_*, ces builds échouent donc, sauf opt-in local explicite
+// (`-PallowDebugSignedRelease`) pour un essai sur son propre boîtier.
+gradle.taskGraph.whenReady {
+    val signedVariantRequested = allTasks.any { task ->
+        task.project == project && Regex("^(assemble|package|bundle)(Release|Optimized)$").matches(task.name)
+    }
+    if (signedVariantRequested && System.getenv("RELEASE_STORE_FILE").isNullOrBlank() && !project.hasProperty("allowDebugSignedRelease")) {
+        throw GradleException(
+            "Clé de signature release absente (RELEASE_STORE_FILE, RELEASE_STORE_PASSWORD, RELEASE_KEY_ALIAS, " +
+                "RELEASE_KEY_PASSWORD). Voir docs/release-signing.md, ou -PallowDebugSignedRelease pour un essai local.",
+        )
+    }
+}
+
 androidComponents {
     // L'app est distribuée en APK direct (pas de Play Store pour découper par appareil) ; les
     // boîtiers/clés Android TV sont quasi exclusivement ARM, donc on n'embarque pas les .so
@@ -132,10 +148,6 @@ dependencies {
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.animation:animation")
     implementation("androidx.tv:tv-material:1.1.0")
-    // Flou temps réel derrière les panneaux de verre du thème iOS Glass : dégrade proprement en
-    // aplat teinté (sans flou) sous Android 13, plutôt qu'un RenderEffect maison fragile d'une
-    // version de Compose à l'autre. Voir fr.streamia.tv.ui.theme.GlassSurface.
-    implementation("dev.chrisbanes.haze:haze:1.7.2")
     implementation("androidx.media3:media3-exoplayer:$media3Version")
     implementation("androidx.media3:media3-exoplayer-hls:$media3Version")
     implementation("androidx.media3:media3-datasource-okhttp:$media3Version")

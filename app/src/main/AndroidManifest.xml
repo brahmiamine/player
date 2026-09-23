@@ -22,6 +22,10 @@
         android:theme="@style/Theme.Streamia.Starting"
         android:usesCleartextTraffic="true">
 
+        <meta-data
+            android:name="firebase_crashlytics_collection_enabled"
+            android:value="false" />
+
         <activity
             android:name=".MainActivity"
             android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|screenLayout|smallestScreenSize|uiMode"

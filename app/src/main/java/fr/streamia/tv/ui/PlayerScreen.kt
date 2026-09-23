@@ -141,6 +141,8 @@ fun PlayerScreen(
     liveReturnsToSource: Boolean,
     onBack: () -> Unit,
     onZap: (Int) -> Unit,
+    /** Chaîne annoncée par un zap rapide, affichée avant que son flux ne démarre. */
+    pendingZapEntry: MediaEntry? = null,
     onEntrySelected: (MediaEntry) -> Unit,
     onProgress: (MediaEntry, Long, Long) -> Unit,
     onCycleVideoAspect: () -> Unit,
@@ -701,6 +703,25 @@ fun PlayerScreen(
                 durationMs = durationMs,
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
+        }
+
+        pendingZapEntry?.let { target ->
+            Row(
+                Modifier
+                    .align(Alignment.TopStart)
+                    .padding(34.dp)
+                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(RadiusTile))
+                    .background(Night.copy(alpha = 0.86f))
+                    .border(BorderStroke(1.dp, GlassBorder), androidx.compose.foundation.shape.RoundedCornerShape(RadiusTile))
+                    .padding(horizontal = 18.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(target.number.toString(), color = FocusBlueBright, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.width(14.dp))
+                ChannelLogo(target.iconUrl, target.displayName, Modifier.size(52.dp))
+                Spacer(Modifier.width(14.dp))
+                Text(target.displayName, color = Ink, fontSize = 22.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+            }
         }
 
         if (numberBuffer.isNotBlank()) {

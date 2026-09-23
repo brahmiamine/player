@@ -58,10 +58,7 @@ class XtreamUrlBuilderTest {
             "https://provider.test:443/live/u/p/7.ts?token=a%20b",
             XtreamUrlBuilder.alternateTransportUrl("http://provider.test:443/live/u/p/7.ts?token=a%20b"),
         )
-        assertEquals(
-            "http://provider.test:8443/player_api.php?username=u&password=p",
-            XtreamUrlBuilder.alternateTransportUrl("https://provider.test:8443/player_api.php?username=u&password=p"),
-        )
+        assertNull(XtreamUrlBuilder.alternateTransportUrl("https://provider.test:8443/player_api.php?username=u&password=p"))
         assertNull(XtreamUrlBuilder.alternateTransportUrl("ftp://provider.test/file"))
     }
 

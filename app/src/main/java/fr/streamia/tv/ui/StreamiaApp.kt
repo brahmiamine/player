@@ -18,7 +18,6 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
 import fr.streamia.tv.ui.theme.FocusBlueBright
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -38,7 +37,6 @@ import fr.streamia.tv.data.AppSettings
 import fr.streamia.tv.data.HomeBlock
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.ui.PlayerView
-import dev.chrisbanes.haze.HazeState
 
 @Composable
 fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackSession) {
@@ -63,11 +61,8 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
         }
     }
 
-    val glassHaze = remember { HazeState() }
-
     StreamiaTheme {
         ResponsiveTvViewport {
-          CompositionLocalProvider(LocalGlassHaze provides glassHaze) {
             Box(Modifier.fillMaxSize()) {
               GlassBackdrop(glassBlobsFor(state.screen))
               when {
@@ -188,6 +183,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onToggleAutoPlayNextEpisode = viewModel::toggleAutoPlayNextEpisode,
                     onCycleSubtitleSizeScale = viewModel::cycleSubtitleSizeScale,
                     onToggleSubtitleBackground = viewModel::toggleSubtitleBackground,
+                    onToggleCrashReports = viewModel::toggleCrashReports,
                     onToggleHomeBlock = viewModel::toggleHomeBlock,
                     onSearch = viewModel::showSearch,
                     onEpg = viewModel::showEpg,
@@ -381,6 +377,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                             viewModel.closePlayer()
                         },
                         onZap = viewModel::zap,
+                        pendingZapEntry = state.pendingZapEntry,
                         onEntrySelected = viewModel::openEntry,
                         onProgress = viewModel::recordPlayback,
                         onCycleVideoAspect = viewModel::cycleVideoAspect,
@@ -391,7 +388,6 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                 else -> BootScreen()
               }
             }
-          }
         }
     }
 }

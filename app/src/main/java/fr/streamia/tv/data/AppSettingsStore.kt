@@ -4,6 +4,8 @@ import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
 import java.security.MessageDigest
+import javax.crypto.SecretKeyFactory
+import javax.crypto.spec.PBEKeySpec
 import java.security.SecureRandom
 
 enum class VideoAspectSetting { Fit, Fill, Zoom }
@@ -39,6 +41,8 @@ data class AppSettings(
     val autoPlayNextEpisode: Boolean = true,
     val subtitleSizeScale: Float = 1.0f,
     val subtitleBackgroundEnabled: Boolean = true,
+    /** Consentement à l'envoi des rapports de plantage anonymisés (Crashlytics). */
+    val crashReportsEnabled: Boolean = true,
     /** Un code est enregistré (voir [AppSettingsStore.setParentalPin]) et le verrouillage est actif. */
     val parentalControlEnabled: Boolean = false,
     /** Blocs de l'accueil désactivés par l'utilisateur. Vide = tous les blocs actifs (défaut). */
@@ -140,6 +144,7 @@ class AppSettingsStore(context: Context) {
         subtitleSizeScale = preferences.getFloat(KEY_SUBTITLE_SIZE_SCALE, 1.0f)
             .takeIf { it in AppSettings.SUBTITLE_SIZE_SCALES } ?: 1.0f,
         subtitleBackgroundEnabled = preferences.getBoolean(KEY_SUBTITLE_BACKGROUND_ENABLED, true),
+        crashReportsEnabled = preferences.getBoolean(KEY_CRASH_REPORTS_ENABLED, true),
         parentalControlEnabled = preferences.getBoolean(KEY_PARENTAL_ENABLED, false) &&
             preferences.getString(KEY_PARENTAL_PIN_HASH, null) != null,
         disabledHomeBlocks = preferences.getStringSet(KEY_DISABLED_HOME_BLOCKS, null)
@@ -161,6 +166,7 @@ class AppSettingsStore(context: Context) {
             .putBoolean(KEY_AUTO_PLAY_NEXT_EPISODE, settings.autoPlayNextEpisode)
             .putFloat(KEY_SUBTITLE_SIZE_SCALE, settings.subtitleSizeScale)
             .putBoolean(KEY_SUBTITLE_BACKGROUND_ENABLED, settings.subtitleBackgroundEnabled)
+            .putBoolean(KEY_CRASH_REPORTS_ENABLED, settings.crashReportsEnabled)
             .putBoolean(KEY_PARENTAL_ENABLED, settings.parentalControlEnabled)
             .putStringSet(KEY_DISABLED_HOME_BLOCKS, settings.disabledHomeBlocks.mapTo(mutableSetOf()) { it.name })
             .apply()
@@ -182,7 +188,10 @@ class AppSettingsStore(context: Context) {
         val salt = ByteArray(16).also(SecureRandom()::nextBytes).toHex()
         preferences.edit()
             .putString(KEY_PARENTAL_PIN_SALT, salt)
-            .putString(KEY_PARENTAL_PIN_HASH, hashPin(pin, salt))
+            .putString(KEY_PARENTAL_PIN_HASH, slowHashPin(pin, salt))
+            .putString(KEY_PARENTAL_PIN_ALGORITHM, PIN_ALGORITHM_PBKDF2)
+            .putInt(KEY_PARENTAL_PIN_FAILURES, 0)
+            .putLong(KEY_PARENTAL_PIN_LOCKED_UNTIL, 0L)
             .putBoolean(KEY_PARENTAL_ENABLED, true)
             .apply()
         return load()
@@ -193,16 +202,48 @@ class AppSettingsStore(context: Context) {
         preferences.edit()
             .remove(KEY_PARENTAL_PIN_SALT)
             .remove(KEY_PARENTAL_PIN_HASH)
+            .remove(KEY_PARENTAL_PIN_ALGORITHM)
+            .remove(KEY_PARENTAL_PIN_FAILURES)
+            .remove(KEY_PARENTAL_PIN_LOCKED_UNTIL)
             .putBoolean(KEY_PARENTAL_ENABLED, false)
             .apply()
         return load()
     }
 
-    fun verifyParentalPin(pin: String): Boolean {
+    /**
+     * Vérifie le code en respectant le blocage progressif après plusieurs échecs (persisté : relancer
+     * l'app ne le remet pas à zéro). Un code à 4 chiffres n'a que 10 000 valeurs : sans ce blocage,
+     * il se trouve à la télécommande.
+     */
+    fun verifyParentalPin(pin: String, nowMillis: Long = System.currentTimeMillis()): Boolean {
         val salt = preferences.getString(KEY_PARENTAL_PIN_SALT, null) ?: return false
         val storedHash = preferences.getString(KEY_PARENTAL_PIN_HASH, null) ?: return false
-        return hashPin(pin, salt) == storedHash
+        if (nowMillis < preferences.getLong(KEY_PARENTAL_PIN_LOCKED_UNTIL, 0L)) return false
+        val legacy = preferences.getString(KEY_PARENTAL_PIN_ALGORITHM, null) != PIN_ALGORITHM_PBKDF2
+        val correct = (if (legacy) hashPin(pin, salt) else slowHashPin(pin, salt)) == storedHash
+        if (correct) {
+            val edit = preferences.edit()
+                .putInt(KEY_PARENTAL_PIN_FAILURES, 0)
+                .putLong(KEY_PARENTAL_PIN_LOCKED_UNTIL, 0L)
+            // Migration silencieuse de l'ancien SHA-256 rapide vers PBKDF2 au premier succès.
+            if (legacy) {
+                edit.putString(KEY_PARENTAL_PIN_HASH, slowHashPin(pin, salt))
+                    .putString(KEY_PARENTAL_PIN_ALGORITHM, PIN_ALGORITHM_PBKDF2)
+            }
+            edit.apply()
+        } else {
+            val failures = preferences.getInt(KEY_PARENTAL_PIN_FAILURES, 0) + 1
+            preferences.edit()
+                .putInt(KEY_PARENTAL_PIN_FAILURES, failures)
+                .putLong(KEY_PARENTAL_PIN_LOCKED_UNTIL, nowMillis + pinLockoutMillis(failures))
+                .apply()
+        }
+        return correct
     }
+
+    /** Temps restant avant de pouvoir retenter un code, 0 si aucun blocage. */
+    fun parentalPinLockRemainingMillis(nowMillis: Long = System.currentTimeMillis()): Long =
+        (preferences.getLong(KEY_PARENTAL_PIN_LOCKED_UNTIL, 0L) - nowMillis).coerceAtLeast(0L)
 
     private companion object {
         const val PREFERENCES_NAME = "streamia-app-settings-v1"
@@ -218,10 +259,15 @@ class AppSettingsStore(context: Context) {
         const val KEY_AUTO_PLAY_NEXT_EPISODE = "auto_play_next_episode"
         const val KEY_SUBTITLE_SIZE_SCALE = "subtitle_size_scale"
         const val KEY_SUBTITLE_BACKGROUND_ENABLED = "subtitle_background_enabled"
+        const val KEY_CRASH_REPORTS_ENABLED = "crash_reports_enabled"
         const val KEY_PARENTAL_ENABLED = "parental_control_enabled"
         const val KEY_DISABLED_HOME_BLOCKS = "disabled_home_blocks"
         const val KEY_PARENTAL_PIN_SALT = "parental_pin_salt"
         const val KEY_PARENTAL_PIN_HASH = "parental_pin_hash"
+        const val KEY_PARENTAL_PIN_ALGORITHM = "parental_pin_algorithm"
+        const val KEY_PARENTAL_PIN_FAILURES = "parental_pin_failures"
+        const val KEY_PARENTAL_PIN_LOCKED_UNTIL = "parental_pin_locked_until"
+        const val PIN_ALGORITHM_PBKDF2 = "pbkdf2-sha256"
     }
 }
 
@@ -231,6 +277,26 @@ class AppSettingsStore(context: Context) {
  */
 internal fun hashPin(pin: String, salt: String): String =
     MessageDigest.getInstance("SHA-256").digest((salt + pin).toByteArray(Charsets.UTF_8)).toHex()
+
+/** PBKDF2 : coûteux volontairement, pour qu'une fuite des préférences ne livre pas le code en 10 000 SHA-256. */
+internal fun slowHashPin(pin: String, salt: String): String {
+    val spec = PBEKeySpec(pin.toCharArray(), salt.toByteArray(Charsets.UTF_8), PIN_PBKDF2_ITERATIONS, 256)
+    return try {
+        SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded.toHex()
+    } finally {
+        spec.clearPassword()
+    }
+}
+
+/** Aucun délai sous 5 échecs, puis 30 s doublées à chaque échec supplémentaire, plafonné à 15 min. */
+internal fun pinLockoutMillis(failures: Int): Long {
+    if (failures < PIN_FREE_ATTEMPTS) return 0L
+    val exponent = (failures - PIN_FREE_ATTEMPTS).coerceAtMost(5)
+    return (30_000L shl exponent).coerceAtMost(15 * 60_000L)
+}
+
+private const val PIN_PBKDF2_ITERATIONS = 40_000
+private const val PIN_FREE_ATTEMPTS = 5
 
 private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it) }
 

@@ -26,4 +26,19 @@ class ParentalPinHashTest {
         assertNotEquals("1234", hash)
         org.junit.Assert.assertFalse(hash.contains("1234"))
     }
+
+    @Test
+    fun `slow hash is deterministic per salt and differs from the legacy hash`() {
+        assertEquals(slowHashPin("1234", "salt-a"), slowHashPin("1234", "salt-a"))
+        assertNotEquals(slowHashPin("1234", "salt-a"), slowHashPin("1234", "salt-b"))
+        assertNotEquals(hashPin("1234", "salt-a"), slowHashPin("1234", "salt-a"))
+    }
+
+    @Test
+    fun `lockout starts after five failures, doubles and is capped`() {
+        assertEquals(0L, pinLockoutMillis(4))
+        assertEquals(30_000L, pinLockoutMillis(5))
+        assertEquals(60_000L, pinLockoutMillis(6))
+        assertEquals(15 * 60_000L, pinLockoutMillis(50))
+    }
 }
