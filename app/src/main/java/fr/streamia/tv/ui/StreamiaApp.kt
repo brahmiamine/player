@@ -378,6 +378,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                             viewModel.closePlayer()
                         },
                         onZap = viewModel::zap,
+                        onPreviousChannel = viewModel::previousChannel,
                         pendingZapEntry = playerState.pendingZapEntry,
                         onEntrySelected = viewModel::openEntry,
                         onProgress = viewModel::recordPlayback,

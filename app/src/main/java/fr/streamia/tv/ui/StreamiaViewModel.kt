@@ -129,6 +129,9 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     private var epgChannelJob: Job? = null
     private var epgTickerJob: Job? = null
     private var zapJob: Job? = null
+    /** Chaîne Direct regardée juste avant la chaîne courante, pour « dernière chaîne ». */
+    private var previousLiveEntry: MediaEntry? = null
+    private var lastLiveEntry: MediaEntry? = null
     private var secondaryLoadsJob: Job? = null
     // Clé comparée par identité des instances (catalogue/ensembles), recalculée seulement quand
     // l'un d'eux change réellement.
@@ -217,6 +220,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 }
         }
         if (entry.type == MediaType.Live) {
+            lastLiveEntry = entry
             loadEpg(entry)
             startEpgTicker(entry)
         } else {
@@ -1232,6 +1236,16 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         return LiveZapIndex(catalog, state.library.hiddenEntries, lockedCategoryIds).also { zapIndexCache = key to it }
     }
 
+    /** Revient à la chaîne regardée juste avant (un second appui ramène à la chaîne d'origine). */
+    fun previousChannel() {
+        val current = (_uiState.value.screen as? StreamiaScreen.Player)?.entry ?: return
+        if (current.type != MediaType.Live) return
+        val target = previousLiveEntry?.takeIf { it.key != current.key } ?: return
+        zapJob?.cancel()
+        _playerState.update { it.copy(pendingZapEntry = null) }
+        openPlayer(target, returnToSeries = false)
+    }
+
     fun dismissMessage() { _uiState.update { it.copy(message = null) } }
 
     fun logout() {
@@ -1242,6 +1256,11 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     }
 
     private fun openPlayer(entry: MediaEntry, returnToSeries: Boolean, returnToDetails: Boolean = false) {
+        // Toute chaîne ouverte en plein écran compte, qu'on y arrive par zap ou via la liste Direct.
+        if (entry.type == MediaType.Live) {
+            lastLiveEntry?.takeIf { it.key != entry.key }?.let { previousLiveEntry = it }
+            lastLiveEntry = entry
+        }
         val profileId = _uiState.value.activeProfileId
         val resume = if (profileId != null && entry.type != MediaType.Live) repository.resumePosition(profileId, entry.key) else 0L
         _playerState.update { it.copy(epg = EpgNowContext()) }
@@ -2118,6 +2137,8 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     }
 
     private fun showLogin() {
+        previousLiveEntry = null
+        lastLiveEntry = null
         secondaryLoadsJob?.cancel()
         zapJob?.cancel()
         _playerState.value = PlayerUiState()

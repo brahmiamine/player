@@ -16,6 +16,9 @@ class PlaybackControlsTest {
     @Test
     fun `dedicated rewind and fast forward keys seek VOD`() {
         assertEquals(PlaybackRemoteAction.SeekBackward, playbackRemoteAction(MediaType.Movie, PlaybackRemoteButton.Rewind))
+        assertEquals(PlaybackRemoteAction.PreviousChannel, playbackRemoteAction(MediaType.Live, PlaybackRemoteButton.Rewind))
+        assertEquals(PlaybackRemoteAction.PreviousChannel, playbackRemoteAction(MediaType.Live, PlaybackRemoteButton.LastChannel))
+        assertEquals(PlaybackRemoteAction.None, playbackRemoteAction(MediaType.Movie, PlaybackRemoteButton.LastChannel))
         assertEquals(PlaybackRemoteAction.SeekForward, playbackRemoteAction(MediaType.Series, PlaybackRemoteButton.FastForward))
     }
 

@@ -15,6 +15,7 @@ enum class PlaybackRemoteButton {
     Rewind,
     FastForward,
     Info,
+    LastChannel,
     Other,
 }
 
@@ -28,6 +29,7 @@ enum class PlaybackRemoteAction {
     TogglePlayback,
     SeekBackward,
     SeekForward,
+    PreviousChannel,
 }
 
 fun playbackRemoteAction(type: MediaType, button: PlaybackRemoteButton): PlaybackRemoteAction =
@@ -40,7 +42,10 @@ fun playbackRemoteAction(type: MediaType, button: PlaybackRemoteButton): Playbac
         PlaybackRemoteButton.Down -> if (type == MediaType.Live) PlaybackRemoteAction.ZapPrevious else PlaybackRemoteAction.None
         PlaybackRemoteButton.Left -> if (type == MediaType.Live) PlaybackRemoteAction.OpenLivePicker else PlaybackRemoteAction.SeekBackward
         PlaybackRemoteButton.Right -> if (type == MediaType.Live) PlaybackRemoteAction.OpenSettings else PlaybackRemoteAction.SeekForward
-        PlaybackRemoteButton.Rewind -> if (type == MediaType.Live) PlaybackRemoteAction.None else PlaybackRemoteAction.SeekBackward
+        // En Direct, ⏪ n'a rien à reculer : il sert de « dernière chaîne », comme la touche dédiée
+        // des télécommandes qui en ont une.
+        PlaybackRemoteButton.Rewind -> if (type == MediaType.Live) PlaybackRemoteAction.PreviousChannel else PlaybackRemoteAction.SeekBackward
+        PlaybackRemoteButton.LastChannel -> if (type == MediaType.Live) PlaybackRemoteAction.PreviousChannel else PlaybackRemoteAction.None
         PlaybackRemoteButton.FastForward -> if (type == MediaType.Live) PlaybackRemoteAction.None else PlaybackRemoteAction.SeekForward
         PlaybackRemoteButton.Info -> if (type == MediaType.Live) PlaybackRemoteAction.ToggleHud else PlaybackRemoteAction.OpenSettings
         PlaybackRemoteButton.Other -> PlaybackRemoteAction.None

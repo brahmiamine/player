@@ -140,6 +140,8 @@ fun PlayerScreen(
     liveReturnsToSource: Boolean,
     onBack: () -> Unit,
     onZap: (Int) -> Unit,
+    /** Dernière chaîne regardée (⏪ ou touche « dernière chaîne »). */
+    onPreviousChannel: () -> Unit = {},
     /** Chaîne annoncée par un zap rapide, affichée avant que son flux ne démarre. */
     pendingZapEntry: MediaEntry? = null,
     onEntrySelected: (MediaEntry) -> Unit,
@@ -584,6 +586,7 @@ fun PlayerScreen(
                 when (remoteAction) {
                     PlaybackRemoteAction.ZapPrevious -> { onZap(-1); true }
                     PlaybackRemoteAction.ZapNext -> { onZap(1); true }
+                    PlaybackRemoteAction.PreviousChannel -> { onPreviousChannel(); true }
                     PlaybackRemoteAction.OpenLivePicker -> {
                         returningToBrowser = true
                         PlayerOverlayController.requestReturnToBrowser()
@@ -1029,7 +1032,7 @@ private fun PlayerInfoBand(
             Text(if (isPlaying) "⏸ Lecture" else "▶ Pause", color = Ink, fontSize = 13.sp)
             Spacer(Modifier.width(20.dp))
             if (entry.type == MediaType.Live) {
-                Text("OK infos · ← liste · ↑ ↓ zap · 0–9 chaîne", color = MutedInk, fontSize = 13.sp)
+                Text("OK infos · ← liste · ↑ ↓ zap · ⏪ dernière chaîne · 0–9 chaîne", color = MutedInk, fontSize = 13.sp)
                 Spacer(Modifier.width(20.dp))
             } else {
                 Text("← −10 s · +10 s → · Lecture/Pause", color = MutedInk, fontSize = 13.sp)
@@ -1232,6 +1235,7 @@ private fun Int.toPlaybackRemoteButton(): PlaybackRemoteButton = when (this) {
     AndroidKeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> PlaybackRemoteButton.PlayPause
 
     AndroidKeyEvent.KEYCODE_MEDIA_REWIND -> PlaybackRemoteButton.Rewind
+    AndroidKeyEvent.KEYCODE_LAST_CHANNEL -> PlaybackRemoteButton.LastChannel
     AndroidKeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> PlaybackRemoteButton.FastForward
     else -> PlaybackRemoteButton.Other
 }
