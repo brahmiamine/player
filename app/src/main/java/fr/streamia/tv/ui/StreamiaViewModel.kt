@@ -127,6 +127,8 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     // même chargement (ex. sélection rapide de catégories, LaunchedEffect qui se relance).
     private val categoryLoadsInFlight = mutableSetOf<String>()
     val uiState: StateFlow<StreamiaUiState> = _uiState.asStateFlow()
+    private val _playerState = MutableStateFlow(PlayerUiState())
+    val playerState: StateFlow<PlayerUiState> = _playerState.asStateFlow()
 
     init {
         _uiState.value = StreamiaUiState(
@@ -363,9 +365,9 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 epgGuideMemoryCache.clearProfile(profileId)
                 repository.clearEpgCache(profileId)
                 if (_uiState.value.activeProfileId == profileId) {
+                    _playerState.update { it.copy(epg = EpgNowContext()) }
                     _uiState.update {
                         it.copy(
-                            epg = EpgNowContext(),
                             epgGuide = null,
                             epgAvailableDates = emptyList(),
                             epgSelectedDate = null,
@@ -1230,7 +1232,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
 
     fun closePlayer(forceBrowser: Boolean = false) {
         zapJob?.cancel()
-        if (_uiState.value.pendingZapEntry != null) _uiState.update { it.copy(pendingZapEntry = null) }
+        _playerState.value = PlayerUiState()
         val profileId = _uiState.value.activeProfileId
         val player = _uiState.value.screen as? StreamiaScreen.Player
         _uiState.update {
@@ -1249,7 +1251,6 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                     it.catalogHydrating -> StreamiaScreen.Home
                     else -> StreamiaScreen.Browser
                 },
-                epg = EpgNowContext(),
                 resumePositionMs = 0,
             )
         }
@@ -1287,13 +1288,13 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         // Zap rapide : chaque appui avance depuis la chaîne déjà annoncée (pas depuis celle qui
         // joue), le bandeau s'affiche tout de suite, et le flux ne démarre qu'une fois les appuis
         // terminés — enchaîner CH+ ne lance plus un flux réseau (et un EPG) par chaîne traversée.
-        val from = state.pendingZapEntry ?: current
+        val from = _playerState.value.pendingZapEntry ?: current
         val next = liveZapIndex(state, catalog).adjacent(from, delta) ?: return
-        _uiState.update { it.copy(pendingZapEntry = next) }
+        _playerState.update { it.copy(pendingZapEntry = next) }
         zapJob?.cancel()
         zapJob = viewModelScope.launch {
             delay(ZAP_SETTLE_MS)
-            _uiState.update { it.copy(pendingZapEntry = null) }
+            _playerState.update { it.copy(pendingZapEntry = null) }
             if (next.key != current.key) openPlayer(next, returnToSeries = false)
         }
     }
@@ -1329,11 +1330,11 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     private fun openPlayer(entry: MediaEntry, returnToSeries: Boolean, returnToDetails: Boolean = false) {
         val profileId = _uiState.value.activeProfileId
         val resume = if (profileId != null && entry.type != MediaType.Live) repository.resumePosition(profileId, entry.key) else 0L
+        _playerState.update { it.copy(epg = EpgNowContext()) }
         _uiState.update {
             it.copy(
                 screen = StreamiaScreen.Player(entry, returnToSeries, returnToDetails),
                 message = null,
-                epg = EpgNowContext(),
                 resumePositionMs = resume,
                 lastViewedEntry = entry,
             )
@@ -1457,7 +1458,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
 
     private fun updatePlayerEpgIfCurrent(entry: MediaEntry, context: EpgNowContext) {
         val current = (_uiState.value.screen as? StreamiaScreen.Player)?.entry
-        if (current?.key == entry.key) _uiState.update { it.copy(epg = context) }
+        if (current?.key == entry.key) _playerState.update { it.copy(epg = context) }
     }
 
     private fun startEpgTicker(entry: MediaEntry) {
@@ -1697,7 +1698,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             // tomber sur un alias SQLite trop strict. Maintenant que le guide du jour est en RAM,
             // relancer immédiatement la résolution plutôt que d'attendre le ticker de 30 secondes.
             val player = (_uiState.value.screen as? StreamiaScreen.Player)?.entry
-            if (player?.type == MediaType.Live && _uiState.value.epg.current == null) {
+            if (player?.type == MediaType.Live && _playerState.value.epg.current == null) {
                 loadEpg(player)
             }
 
@@ -2490,6 +2491,8 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
 
     private fun showLogin() {
         secondaryLoadsJob?.cancel()
+        zapJob?.cancel()
+        _playerState.value = PlayerUiState()
         epgGuideMemoryCache.clear()
         homeRecommendationJob?.cancel()
         homeRecommendationJob = null
@@ -2615,7 +2618,6 @@ data class StreamiaUiState(
     val message: String? = null,
     val mediaDetails: MediaDetails? = null,
     val seriesDetails: SeriesDetails? = null,
-    val epg: EpgNowContext = EpgNowContext(),
     val epgGuide: EpgGuide? = null,
     val epgAvailableDates: List<LocalDate> = emptyList(),
     val epgSelectedDate: LocalDate? = null,
@@ -2652,6 +2654,14 @@ data class StreamiaUiState(
     /** Carte de l'accueil à refocaliser au retour (voir [HomeFocusTarget]). */
     val homeFocusTarget: HomeFocusTarget? = null,
     val lastViewedEntry: MediaEntry? = null,
+)
+
+/**
+ * État du lecteur qui change souvent (EPG courant rafraîchi toutes les 30 s, zap en cours) : dans
+ * son propre flux, lu seulement par l'écran lecteur, pour ne pas invalider la racine de l'app.
+ */
+data class PlayerUiState(
+    val epg: EpgNowContext = EpgNowContext(),
     /** Chaîne annoncée par un zap rapide en cours, pas encore lancée (voir [StreamiaViewModel.zap]). */
     val pendingZapEntry: MediaEntry? = null,
 )

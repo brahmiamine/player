@@ -4,6 +4,7 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.gms.google-services")
     id("com.google.firebase.crashlytics")
+    id("androidx.baselineprofile")
 }
 
 android {
@@ -139,6 +140,9 @@ dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
 
     implementation("androidx.core:core-ktx:1.17.0")
+    // Installe le baseline profile sur les APK installés hors Play Store (distribution directe).
+    implementation("androidx.profileinstaller:profileinstaller:1.4.1")
+    "baselineProfile"(project(":baselineprofile"))
     implementation("androidx.core:core-splashscreen:1.2.0")
     implementation("androidx.activity:activity-compose:1.12.1")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
