@@ -15,10 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -31,8 +28,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import fr.streamia.tv.ui.theme.RaisedSurface
+import androidx.compose.runtime.key
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
 import fr.streamia.tv.domain.Catalog
@@ -62,11 +65,16 @@ import java.util.Locale
 private const val CLOCK_REFRESH_MS = 30_000L
 
 private val ChannelLabelWidth = 224.dp
-private val RowContentHeight = 92.dp
-private val MinBlockWidth = 150.dp
+private val RowContentHeight = 84.dp
+private val TimeRulerHeight = 30.dp
 
-/** Largeur d'une minute de programme dans la grille : 1h ≈ 190dp, un film de 2h ≈ 380dp. */
-private val ProgramMinuteWidth = 3.15.dp
+/**
+ * Fenêtre horaire commune à toutes les chaînes (grille alignée façon décodeur) : 2 h visibles,
+ * décalée d'une heure quand le focus atteint un bord.
+ */
+private const val WINDOW_SECONDS = 2 * 3_600L
+private const val WINDOW_STEP_SECONDS = 3_600L
+private const val HALF_HOUR = 1_800L
 
 private val DayLabelFormatter = DateTimeFormatter.ofPattern("EEEE d MMMM", Locale.FRENCH)
 
@@ -139,6 +147,12 @@ fun EpgScreen(
     val isToday = displayDate == LocalDate.now(zone)
     val dayStart = displayDate.atStartOfDay(zone).toEpochSecond()
     val dayEnd = displayDate.plusDays(1).atStartOfDay(zone).toEpochSecond()
+    // Ouvre la fenêtre sur l'heure courante (même heure pour un autre jour), une demi-heure avant
+    // pour voir ce qui vient de commencer.
+    var windowStart by remember(dayStart) {
+        val secondsIntoDay = (System.currentTimeMillis() / 1000 - LocalDate.now(zone).atStartOfDay(zone).toEpochSecond())
+        mutableStateOf(clampWindow(dayStart + secondsIntoDay / HALF_HOUR * HALF_HOUR - HALF_HOUR, dayStart, dayEnd))
+    }
 
     BackHandler {
         if (selected != null) selected = null else onBack()
@@ -211,18 +225,26 @@ fun EpgScreen(
                         channels.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Text("Aucune chaîne dans cette catégorie.", color = MutedInk, fontSize = TypeSectionTitle)
                         }
-                        else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            items(channels, key = MediaEntry::key) { channel ->
-                                ChannelGridRow(
-                                    channel = channel,
-                                    programs = guide?.forEntry(channel).orEmpty(),
-                                    dayStart = dayStart,
-                                    dayEnd = dayEnd,
-                                    isToday = isToday,
-                                    nowEpoch = nowEpoch,
-                                    selectedKey = selected?.let { if (it.channel.key == channel.key) it.program.blockKey(channel) else null },
-                                    onSelectProgram = { program -> selected = SelectedProgram(channel, program) },
-                                )
+                        else -> Column(Modifier.fillMaxSize()) {
+                            TimeRuler(windowStart = windowStart, nowEpoch = nowEpoch)
+                            Spacer(Modifier.height(6.dp))
+                            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                items(channels, key = MediaEntry::key) { channel ->
+                                    ChannelGridRow(
+                                        channel = channel,
+                                        programs = guide?.forEntry(channel).orEmpty(),
+                                        windowStart = windowStart,
+                                        nowEpoch = nowEpoch,
+                                        selectedKey = selected?.let { if (it.channel.key == channel.key) it.program.blockKey(channel) else null },
+                                        onSelectProgram = { program -> selected = SelectedProgram(channel, program) },
+                                        onShiftWindow = { direction ->
+                                            val next = clampWindow(windowStart + direction * WINDOW_STEP_SECONDS, dayStart, dayEnd)
+                                            val moved = next != windowStart
+                                            windowStart = next
+                                            moved
+                                        },
+                                    )
+                                }
                             }
                         }
                     }
@@ -292,21 +314,50 @@ private fun DayNavigator(
     }
 }
 
+/** Réglette des heures au-dessus de la grille, alignée sur la colonne des programmes. */
+@Composable
+private fun TimeRuler(windowStart: Long, nowEpoch: Long) {
+    Row(Modifier.fillMaxWidth().height(TimeRulerHeight)) {
+        Spacer(Modifier.width(ChannelLabelWidth + 10.dp))
+        BoxWithConstraints(Modifier.weight(1f).fillMaxHeight()) {
+            val perSecond = maxWidth / WINDOW_SECONDS.toFloat()
+            var tick = (windowStart + HALF_HOUR - 1) / HALF_HOUR * HALF_HOUR
+            while (tick < windowStart + WINDOW_SECONDS) {
+                Text(
+                    formatClock(tick),
+                    color = MutedInk,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.offset(x = perSecond * (tick - windowStart).toFloat()).align(Alignment.CenterStart),
+                )
+                tick += HALF_HOUR
+            }
+            if (nowEpoch in windowStart until windowStart + WINDOW_SECONDS) {
+                Box(
+                    Modifier
+                        .offset(x = perSecond * (nowEpoch - windowStart).toFloat())
+                        .width(2.dp)
+                        .fillMaxHeight()
+                        .background(FocusBlueBright),
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun ChannelGridRow(
     channel: MediaEntry,
     programs: List<EpgProgram>,
-    dayStart: Long,
-    dayEnd: Long,
-    isToday: Boolean,
+    windowStart: Long,
     nowEpoch: Long,
     selectedKey: String?,
     onSelectProgram: (EpgProgram) -> Unit,
+    /** Décale la fenêtre d'un pas (-1 / +1) ; `false` si elle est déjà en butée du jour. */
+    onShiftWindow: (Int) -> Boolean,
 ) {
-    val dayBlocks = remember(programs, dayStart, dayEnd) { dayBlocksFor(programs, dayStart, dayEnd) }
-    val liveIndex = remember(dayBlocks, isToday, nowEpoch) {
-        if (isToday) dayBlocks.indexOfFirst { it.program.isLiveAt(nowEpoch) } else -1
-    }
+    val windowEnd = windowStart + WINDOW_SECONDS
+    val blocks = remember(programs, windowStart) { blocksInWindow(programs, windowStart, windowEnd) }
 
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Box(
@@ -335,62 +386,80 @@ private fun ChannelGridRow(
             }
         }
         Spacer(Modifier.width(10.dp))
-        if (dayBlocks.isEmpty()) {
-            Box(
-                Modifier
-                    .width(280.dp)
-                    .height(RowContentHeight)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(Night.copy(alpha = 0.55f)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text("Aucun programme ce jour-là", color = MutedInk, fontSize = 12.sp)
+        BoxWithConstraints(Modifier.weight(1f).height(RowContentHeight)) {
+            val perSecond = maxWidth / WINDOW_SECONDS.toFloat()
+            if (blocks.isEmpty()) {
+                // Rangée sans programme dans la fenêtre : reste focalisable pour continuer à naviguer
+                // (↑ ↓ entre chaînes, ← → pour déplacer la fenêtre).
+                FocusableSurface(
+                    onClick = {},
+                    idleBackground = Night.copy(alpha = 0.55f),
+                    modifier = Modifier.fillMaxSize().windowEdgeKeys(isFirst = true, isLast = true, onShiftWindow),
+                ) {
+                    Text("Aucun programme sur ce créneau", color = MutedInk, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 12.dp))
+                }
             }
-        } else {
-            val listState = rememberLazyListState(initialFirstVisibleItemIndex = liveIndex.coerceAtLeast(0))
-            // rememberLazyListState() ne relit initialFirstVisibleItemIndex qu'à la création : sans
-            // ce recalage explicite, changer de jour garde le défilement du jour précédent alors que
-            // dayBlocks (et donc liveIndex) ont changé, laissant le programme en cours hors écran.
-            LaunchedEffect(dayStart) { listState.scrollToItem(liveIndex.coerceAtLeast(0)) }
-            LazyRow(state = listState, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                itemsIndexed(dayBlocks, key = { _, block -> block.program.blockKey(channel) }) { _, block ->
-                    val isLive = isToday && block.program.isLiveAt(nowEpoch)
+            blocks.forEachIndexed { index, block ->
+                key(block.program.blockKey(channel)) {
+                    val isLive = block.program.isLiveAt(nowEpoch)
                     ProgramBlock(
                         program = block.program,
-                        width = block.widthDp,
                         isLive = isLive,
                         liveFraction = if (isLive) block.program.elapsedFraction(nowEpoch) else 0f,
                         selected = selectedKey == block.program.blockKey(channel),
                         onClick = { onSelectProgram(block.program) },
+                        modifier = Modifier
+                            .offset(x = perSecond * (block.clippedStart - windowStart).toFloat())
+                            .width((perSecond * (block.clippedEnd - block.clippedStart).toFloat() - 4.dp).coerceAtLeast(12.dp))
+                            .windowEdgeKeys(isFirst = index == 0, isLast = index == blocks.lastIndex, onShiftWindow),
                     )
                 }
+            }
+            if (nowEpoch in windowStart until windowEnd) {
+                Box(
+                    Modifier
+                        .offset(x = perSecond * (nowEpoch - windowStart).toFloat())
+                        .width(2.dp)
+                        .fillMaxHeight()
+                        .background(FocusBlueBright.copy(alpha = 0.7f)),
+                )
             }
         }
     }
 }
 
+/**
+ * ← sur le premier programme visible / → sur le dernier : décale la fenêtre au lieu de laisser le
+ * focus sortir de la grille. Le focus reste sur le programme, et l'appui suivant atteint les
+ * programmes devenus visibles.
+ */
+private fun Modifier.windowEdgeKeys(isFirst: Boolean, isLast: Boolean, onShiftWindow: (Int) -> Boolean): Modifier =
+    onPreviewKeyEvent { event ->
+        if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+        when (event.nativeKeyEvent.keyCode) {
+            android.view.KeyEvent.KEYCODE_DPAD_RIGHT -> isLast && onShiftWindow(1)
+            android.view.KeyEvent.KEYCODE_DPAD_LEFT -> isFirst && onShiftWindow(-1)
+            else -> false
+        }
+    }
+
 @Composable
 private fun ProgramBlock(
     program: EpgProgram,
-    width: Dp,
     isLive: Boolean,
     liveFraction: Float,
     selected: Boolean,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     FocusableSurface(
         onClick = onClick,
         selected = selected,
-        modifier = Modifier.width(width).height(RowContentHeight),
+        idleBackground = if (isLive) RaisedSurface else DeepSurface,
+        modifier = modifier.height(RowContentHeight),
     ) {
         Column(Modifier.fillMaxSize().padding(horizontal = 10.dp, vertical = 8.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(program.timeRange(), color = if (isLive) FocusBlueBright else MutedInk, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                if (isLive) {
-                    Spacer(Modifier.width(6.dp))
-                    Text("EN DIRECT", color = FocusBlueBright, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                }
-            }
+            Text(program.timeRange(), color = if (isLive) FocusBlueBright else MutedInk, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
             Spacer(Modifier.height(4.dp))
             Text(
                 program.title,
@@ -449,25 +518,23 @@ private fun ProgramDetailsPanel(
     }
 }
 
-private data class DayBlock(val program: EpgProgram, val clippedStart: Long, val clippedEnd: Long) {
-    val widthDp: Dp
-        get() {
-            val minutes = (clippedEnd - clippedStart) / 60f
-            return (ProgramMinuteWidth * minutes).coerceAtLeast(MinBlockWidth)
-        }
-}
+internal data class WindowBlock(val program: EpgProgram, val clippedStart: Long, val clippedEnd: Long)
 
-/** Découpe et ordonne les programmes d'une chaîne sur la fenêtre [dayStart, dayEnd), en ignorant les entrées sans horaires exploitables. */
-private fun dayBlocksFor(programs: List<EpgProgram>, dayStart: Long, dayEnd: Long): List<DayBlock> =
+/** Programmes visibles dans [windowStart, windowEnd), rognés à la fenêtre et triés par heure. */
+internal fun blocksInWindow(programs: List<EpgProgram>, windowStart: Long, windowEnd: Long): List<WindowBlock> =
     programs.asSequence()
         .mapNotNull { program ->
             val start = program.startEpochSeconds ?: return@mapNotNull null
             val end = program.endEpochSeconds ?: return@mapNotNull null
-            if (end <= start || end <= dayStart || start >= dayEnd) return@mapNotNull null
-            DayBlock(program, maxOf(start, dayStart), minOf(end, dayEnd))
+            if (end <= start || end <= windowStart || start >= windowEnd) return@mapNotNull null
+            WindowBlock(program, maxOf(start, windowStart), minOf(end, windowEnd))
         }
         .sortedBy { it.clippedStart }
         .toList()
+
+/** Garde la fenêtre de 2 h à l'intérieur de la journée affichée. */
+internal fun clampWindow(start: Long, dayStart: Long, dayEnd: Long): Long =
+    start.coerceIn(dayStart, (dayEnd - WINDOW_SECONDS).coerceAtLeast(dayStart))
 
 private fun EpgProgram.blockKey(channel: MediaEntry): String = "${channel.key}:${startEpochSeconds}:$title"
 
