@@ -86,12 +86,35 @@ internal class CatalogDatabase(context: Context) :
         db.execSQL(
             "CREATE INDEX idx_catalog_tvg ON catalog_entries(profile_id, media_type, tvg_id)",
         )
+        createSearchIndex(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        // Version 1 is the first SQLite catalogue. Future versions must use explicit migrations;
-        // never wipe a valid provider cache during an application upgrade.
-        check(oldVersion == newVersion) { "Unsupported catalog database migration $oldVersion -> $newVersion" }
+        // Explicit migrations only: never wipe a valid provider cache during an application upgrade.
+        if (oldVersion < 2) {
+            createSearchIndex(db)
+            rebuildSearchIndex(db)
+        }
+    }
+
+    /**
+     * Index plein texte (FTS4, contenu externe sur catalog_entries) : la recherche par préfixe de
+     * mots devient une requête indexée au lieu d'un `LIKE '%…%'` qui parcourait tout le catalogue
+     * à chaque frappe. Accents ignorés quand le tokenizer unicode61 est disponible ; si FTS est
+     * absent du SQLite de l'appareil, la recherche reste sur `LIKE` (voir [search]).
+     */
+    private fun createSearchIndex(db: SQLiteDatabase) {
+        val columns = "content=\"catalog_entries\", name, display_name, tvg_id"
+        runCatching {
+            db.execSQL("CREATE VIRTUAL TABLE IF NOT EXISTS $SEARCH_TABLE USING fts4($columns, tokenize=unicode61 \"remove_diacritics=1\")")
+        }.recoverCatching {
+            db.execSQL("CREATE VIRTUAL TABLE IF NOT EXISTS $SEARCH_TABLE USING fts4($columns)")
+        }
+    }
+
+    /** Contenu externe : l'index est reconstruit à chaque remplacement de catalogue validé. */
+    private fun rebuildSearchIndex(db: SQLiteDatabase) {
+        runCatching { db.execSQL("INSERT INTO $SEARCH_TABLE($SEARCH_TABLE) VALUES('rebuild')") }
     }
 
     fun hasProfile(profileId: String): Boolean = readableDatabase.rawQuery(
@@ -220,6 +243,7 @@ internal class CatalogDatabase(context: Context) :
                     }
                 }
                 check(db.insertOrThrow("catalog_profiles", null, profileValues) != -1L)
+                rebuildSearchIndex(db)
                 db.setTransactionSuccessful()
             } finally {
                 categoryStatement?.close()
@@ -248,6 +272,7 @@ internal class CatalogDatabase(context: Context) :
             db.delete("catalog_entries", "profile_id = ?", arrayOf(profileId))
             db.delete("catalog_categories", "profile_id = ?", arrayOf(profileId))
             db.delete("catalog_profiles", "profile_id = ?", arrayOf(profileId))
+            rebuildSearchIndex(db)
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()
@@ -376,6 +401,39 @@ internal class CatalogDatabase(context: Context) :
     ).use(::readEntries)
 
     fun search(profileId: String, query: String, type: MediaType? = null, limit: Int = 500): List<MediaEntry> {
+        // Recherche indexée par préfixe de mots d'abord ; repli sur la sous-chaîne (LIKE) si elle ne
+        // trouve rien (fragment au milieu d'un mot) ou si FTS est indisponible sur l'appareil.
+        val matchQuery = ftsMatchQuery(query)
+        if (matchQuery != null) {
+            runCatching { searchIndexed(profileId, matchQuery, type, limit) }
+                .getOrNull()
+                ?.takeIf { it.isNotEmpty() }
+                ?.let { return it }
+        }
+        return searchLike(profileId, query, type, limit)
+    }
+
+    private fun searchIndexed(profileId: String, matchQuery: String, type: MediaType?, limit: Int): List<MediaEntry> {
+        val typeClause = if (type == null) "" else " AND media_type = ?"
+        val args = buildList {
+            add(matchQuery)
+            add(profileId)
+            if (type != null) add(type.name)
+            add(limit.coerceIn(1, MAX_SEARCH_RESULTS).toString())
+        }.toTypedArray()
+        return readableDatabase.rawQuery(
+            """
+            SELECT ${ENTRY_COLUMNS.joinToString()} FROM catalog_entries
+            WHERE rowid IN (SELECT docid FROM $SEARCH_TABLE WHERE $SEARCH_TABLE MATCH ?)
+              AND profile_id = ? AND navigable = 1$typeClause
+            ORDER BY number, media_id
+            LIMIT ?
+            """.trimIndent(),
+            args,
+        ).use(::readEntries)
+    }
+
+    private fun searchLike(profileId: String, query: String, type: MediaType?, limit: Int): List<MediaEntry> {
         val needle = "%${query.trim()}%"
         if (query.isBlank()) return emptyList()
         val typeClause = if (type == null) "" else " AND media_type = ?"
@@ -611,7 +669,8 @@ internal class CatalogDatabase(context: Context) :
 
     private companion object {
         const val DATABASE_NAME = "catalog-v5.db"
-        const val DATABASE_VERSION = 1
+        const val DATABASE_VERSION = 2
+        const val SEARCH_TABLE = "catalog_entries_fts"
         const val DEFAULT_RECENT_PER_TYPE = 8
         const val MAX_PAGE_SIZE = 500
         const val MAX_SEARCH_RESULTS = 1_000
@@ -632,3 +691,13 @@ internal class CatalogDatabase(context: Context) :
         )
     }
 }
+/**
+ * Requête FTS « chaque mot commence par… » : `tf1 hd` → `tf1* hd*`. Ne garde que lettres et
+ * chiffres (aucune syntaxe FTS injectable), `null` si rien d'exploitable.
+ */
+internal fun ftsMatchQuery(query: String): String? =
+    query.lowercase()
+        .split(Regex("[^\\p{L}\\p{N}]+"))
+        .filter(String::isNotBlank)
+        .takeIf { it.isNotEmpty() }
+        ?.joinToString(" ") { "$it*" }
