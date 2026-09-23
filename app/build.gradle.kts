@@ -39,7 +39,13 @@ android {
         applicationId = "fr.streamia.tv"
         minSdk = 23
         targetSdk = 36
-        versionCode = 16
+        // Numéro de version = nombre de commits : il augmente à chaque commit et vaut la même chose
+        // en local et en CI, donc chaque APK s'installe en mise à jour du précédent (Android refuse
+        // un numéro plus petit). Repli sur 16 hors dépôt git.
+        versionCode = providers.exec {
+            commandLine("git", "rev-list", "--count", "HEAD")
+            isIgnoreExitValue = true
+        }.standardOutput.asText.get().trim().toIntOrNull()?.coerceAtLeast(16) ?: 16
         versionName = "1.5.7"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
