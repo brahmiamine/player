@@ -92,6 +92,7 @@ fun HomeScreen(
     beinSportsNext: List<ResolvedBeinProgrammeItem> = emptyList(),
     ukGuideNow: List<ResolvedUkProgrammeItem> = emptyList(),
     ukGuideNext: List<ResolvedUkProgrammeItem> = emptyList(),
+    liveMatches: List<fr.streamia.tv.liveonsat.ResolvedLiveOnSatMatch> = emptyList(),
     restoreContext: ContentReturnContext? = null,
     focusTarget: HomeFocusTarget? = null,
     onFocusConsumed: () -> Unit = {},
@@ -168,6 +169,19 @@ fun HomeScreen(
             .toList()
     }
 
+    // 10 dernières chaînes regardées : l'historique est déjà trié du plus récent au plus ancien.
+    val recentChannelCards = remember(catalog, library.history, library.hiddenEntries, hiddenCategoryIdsByType) {
+        library.history.asSequence()
+            .filter {
+                it.entry.type == MediaType.Live &&
+                    it.entry.key !in library.hiddenEntries &&
+                    it.entry.categoryId !in hiddenCategoryIdsByType[MediaType.Live].orEmpty()
+            }
+            .map { (catalog.entry(it.entry.key) ?: it.entry) to null as Float? }
+            .take(10)
+            .toList()
+    }
+
     // Chaînes tunisiennes : catégorie ou chaîne dont le nom commence par « TN » (« |TN| », « TN: »…),
     // mot entier pour ne pas attraper « TNT ».
     val tunisiaCards = remember(catalog, library.hiddenEntries, hiddenCategoryIdsByType) {
@@ -187,7 +201,7 @@ fun HomeScreen(
 
     // Une seule horloge pour toutes les rangées « en direct » (au lieu d'une boucle par rangée,
     // chacune invalidant l'accueil de son côté).
-    val hasLiveRows = tvProgrammeNow.isNotEmpty() || beinSportsNow.isNotEmpty() || ukGuideNow.isNotEmpty()
+    val hasLiveRows = liveMatches.isNotEmpty() || tvProgrammeNow.isNotEmpty() || beinSportsNow.isNotEmpty() || ukGuideNow.isNotEmpty()
     var liveRowsNowEpochMillis by remember { mutableStateOf(System.currentTimeMillis()) }
     LaunchedEffect(hasLiveRows) {
         if (!hasLiveRows) return@LaunchedEffect
@@ -195,6 +209,9 @@ fun HomeScreen(
             liveRowsNowEpochMillis = System.currentTimeMillis()
             delay(TV_PROGRAMME_PROGRESS_REFRESH_MS)
         }
+    }
+    val liveMatchCards = remember(liveMatches, liveRowsNowEpochMillis) {
+        liveMatchCards(liveMatches, liveRowsNowEpochMillis / 1000)
     }
     val tvProgrammeNowEpochMillis = liveRowsNowEpochMillis
     val beinNowEpochMillis = liveRowsNowEpochMillis
@@ -227,6 +244,8 @@ fun HomeScreen(
     val visibleRowKeys = remember(
         resumeCards,
         favoriteCards,
+        liveMatchCards,
+        recentChannelCards,
         tunisiaCards,
         tvProgrammeNow,
         tvProgrammeTonight,
@@ -239,6 +258,8 @@ fun HomeScreen(
         buildList {
             if (resumeCards.isNotEmpty()) add(HomeRowKey.Resume)
             if (favoriteCards.isNotEmpty()) add(HomeRowKey.Favorites)
+            if (liveMatchCards.isNotEmpty()) add(HomeRowKey.LiveMatches)
+            if (recentChannelCards.isNotEmpty()) add(HomeRowKey.RecentChannels)
             if (tunisiaCards.isNotEmpty()) add(HomeRowKey.Tunisia)
             if (tvProgrammeNow.isNotEmpty()) add(HomeRowKey.TvProgrammeNow)
             if (tvProgrammeTonight.isNotEmpty()) add(HomeRowKey.TvProgrammeTonight)
@@ -373,6 +394,35 @@ fun HomeScreen(
             }
         }
 
+        if (liveMatchCards.isNotEmpty()) {
+            item {
+                LiveMatchesRow(
+                    cards = liveMatchCards,
+                    onOpen = { card -> onOpenHomeEntry(card.channel, HomeRowKey.LiveMatches, card.key) },
+                    modifier = Modifier.padding(bottom = CardRowSpacing),
+                )
+            }
+        }
+
+        if (recentChannelCards.isNotEmpty()) {
+            item {
+                Column(Modifier.fillMaxWidth()) {
+                    HomeCardRow(
+                        title = "Dernières chaînes regardées",
+                        entries = recentChannelCards,
+                        firstFocusRequester = null,
+                        restoreItemKey = restoreTarget
+                            ?.takeIf { it.homeRowKey == HomeRowKey.RecentChannels }
+                            ?.itemKey,
+                        onEntryClick = { entry ->
+                            onOpenHomeEntry(entry, HomeRowKey.RecentChannels, entry.key)
+                        },
+                    )
+                    Spacer(Modifier.height(CardRowSpacing))
+                }
+            }
+        }
+
         if (tunisiaCards.isNotEmpty()) {
             item {
                 Column(Modifier.fillMaxWidth()) {
@@ -390,6 +440,10 @@ fun HomeScreen(
                     Spacer(Modifier.height(CardRowSpacing))
                 }
             }
+        }
+
+        item(key = "football-scores") {
+            FootballScoresRow(Modifier.padding(bottom = CardRowSpacing))
         }
 
         if (tvProgrammeNow.isNotEmpty()) {
@@ -718,7 +772,7 @@ private fun HomeCardRow(
 
 /** Pastille distincte du libellé texte de la carte : signale le direct sans dépendre du texte. */
 @Composable
-private fun LiveBadge(modifier: Modifier = Modifier) {
+internal fun LiveBadge(modifier: Modifier = Modifier) {
     Box(
         modifier
             .clip(RoundedCornerShape(4.dp))
