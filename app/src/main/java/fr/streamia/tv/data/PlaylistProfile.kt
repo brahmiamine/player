@@ -27,12 +27,19 @@ data class PlaylistProfile(
         return ServerCredentials(server, user, pass)
     }
 
-    /** Intervalle réservé aux playlists M3U distantes. Le catalogue Xtream n'expire jamais. */
+    /**
+     * Intervalle d'actualisation du catalogue. Un catalogue Xtream (souvent des centaines de milliers
+     * de lignes) n'est relu qu'une fois par jour au plus, même si l'intervalle du profil est plus court.
+     */
     fun isCatalogRefreshDue(now: Long = System.currentTimeMillis()): Boolean {
-        val interval = autoRefreshHours.coerceIn(1, 168) * 60L * 60L * 1000L
-        return lastRefreshAt <= 0L || now - lastRefreshAt >= interval
+        val hours = autoRefreshHours.coerceIn(1, 168).let { if (kind == PlaylistKind.Xtream) maxOf(it, XTREAM_MIN_REFRESH_HOURS) else it }
+        return lastRefreshAt <= 0L || now - lastRefreshAt >= hours * 60L * 60L * 1000L
     }
 
     fun shouldAutoRefresh(now: Long = System.currentTimeMillis()): Boolean =
-        isRemoteM3u && isCatalogRefreshDue(now)
+        (isRemoteM3u || kind == PlaylistKind.Xtream) && isCatalogRefreshDue(now)
+
+    private companion object {
+        const val XTREAM_MIN_REFRESH_HOURS = 24
+    }
 }

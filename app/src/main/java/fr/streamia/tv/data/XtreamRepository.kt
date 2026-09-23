@@ -190,15 +190,6 @@ class XtreamRepository(context: Context) {
             )
         }
 
-    /** Xtream est permanent en cache : seul le bouton Actualiser contacte de nouveau le fournisseur. */
-    fun shouldRefreshProfile(profileId: String): Boolean {
-        val profile = playlistStore.find(profileId) ?: return false
-        return when (profile.kind) {
-            PlaylistKind.Xtream -> profile.shouldAutoRefresh()
-            PlaylistKind.M3u -> profile.shouldAutoRefresh()
-        }
-    }
-
     /**
      * Ouvre d'abord le cache local afin que l'interface soit disponible immédiatement.
      * Un cache Xtream est toujours renvoyé comme Local, sans date d'expiration.
@@ -215,7 +206,8 @@ class XtreamRepository(context: Context) {
             ?: cache.load(profile.id)?.takeIf { profile.kind != PlaylistKind.Xtream || it.hasPlayableContent() }
         if (credentials != null && cached != null) {
             credentialsStore.save(credentials)
-            val source = if (profile.kind == PlaylistKind.M3u && shouldRefreshProfile(profile.id)) {
+            // Catalogue expiré : servi tout de suite depuis le cache, puis actualisé en arrière-plan.
+            val source = if (profile.shouldAutoRefresh()) {
                 CatalogSource.Cache
             } else {
                 CatalogSource.Local

@@ -210,7 +210,11 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             runCatching { repository.openProfile(profileId) }
                 .onSuccess { loaded ->
                     mergeCatalog(loaded)
-                    if (loaded.source == CatalogSource.Cache) refreshSilently(profileId)
+                    if (loaded.source == CatalogSource.Cache) {
+                        // Reprise directe dans le lecteur : la vidéo d'abord, l'actualisation ensuite.
+                        delay(CATALOG_BACKGROUND_REFRESH_DELAY_MS)
+                        refreshSilently(profileId)
+                    }
                 }
                 .onFailure {
                     _uiState.update { state ->
@@ -315,7 +319,14 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 refreshHomeRecommendations()
                 scheduleSecondaryLoads(STARTUP_SECONDARY_LOADS_HOME_DELAY_MS)
                 try {
-                    mergeCatalog(repository.openProfile(profileId, knownCache = cachedCatalog))
+                    val loaded = repository.openProfile(profileId, knownCache = cachedCatalog)
+                    mergeCatalog(loaded)
+                    if (loaded.source == CatalogSource.Cache) {
+                        // Catalogue expiré : actualisation silencieuse une fois l'accueil et ses guides
+                        // chargés, pour ne pas concurrencer le démarrage (lectures WAL non bloquées).
+                        delay(CATALOG_BACKGROUND_REFRESH_DELAY_MS)
+                        refreshSilently(profileId)
+                    }
                 } catch (error: Throwable) {
                     _uiState.update { state ->
                         if (state.activeProfileId == profileId) state.copy(offline = true, message = error.safeMessage())
@@ -2353,6 +2364,7 @@ private const val ZAP_SETTLE_MS = 350L
 private const val STARTUP_SECONDARY_LOADS_HOME_DELAY_MS = 1_200L
 private const val STARTUP_SECONDARY_LOADS_PLAYER_DELAY_MS = 8_000L
 private const val SECONDARY_LOADS_GAP_MS = 600L
+private const val CATALOG_BACKGROUND_REFRESH_DELAY_MS = 20_000L
 private const val MAX_EPG_DAY_SPAN = 30L
 private const val HOME_RECOMMENDATION_CANDIDATE_LIMIT = 400
 private const val HOME_RECOMMENDATION_RECENT_LIMIT = 240

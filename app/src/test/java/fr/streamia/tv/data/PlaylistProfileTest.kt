@@ -6,7 +6,7 @@ import org.junit.Test
 
 class PlaylistProfileTest {
     @Test
-    fun `fresh Xtream catalog never requests automatic refresh`() {
+    fun `fresh Xtream catalog does not request automatic refresh`() {
         val now = 100_000_000L
         val profile = PlaylistProfile(
             id = "xtream",
@@ -23,7 +23,7 @@ class PlaylistProfileTest {
     }
 
     @Test
-    fun `expired Xtream catalog still never requests automatic refresh`() {
+    fun `Xtream catalog refreshes at most once a day even with a shorter interval`() {
         val now = 100_000_000L
         val profile = PlaylistProfile(
             id = "xtream",
@@ -34,6 +34,7 @@ class PlaylistProfileTest {
         )
 
         assertFalse(profile.shouldAutoRefresh(now))
+        assertTrue(profile.copy(lastRefreshAt = now - 24L * 60L * 60L * 1000L).shouldAutoRefresh(now))
     }
 
     @Test
