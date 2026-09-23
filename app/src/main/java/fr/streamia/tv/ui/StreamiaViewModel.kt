@@ -1436,18 +1436,23 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             ?.takeUnless { it.isEmpty }
             ?.let { return it }
 
-        val today = LocalDate.now(ZoneId.systemDefault())
-        val todayGuide = epgGuideMemoryCache.get(profileId, today, offsetHours) ?: runCatching {
-            val (dayStart, dayEnd) = epgDayBounds(today)
+        return todayEpgGuide(profileId, offsetHours)?.forEntry(entry)?.epgNowContextAt(nowEpochSeconds = now)?.takeUnless { it.isEmpty }
+    }
+
+    private suspend fun todayEpgGuide(profileId: String, offsetHours: Int): EpgGuide? =
+        epgGuideFor(profileId, LocalDate.now(ZoneId.systemDefault()), offsetHours)
+
+    /** Guide d'une journée : LRU mémoire, sinon relu une fois depuis SQLite puis mis en LRU (jamais de réseau). */
+    private suspend fun epgGuideFor(profileId: String, date: LocalDate, offsetHours: Int): EpgGuide? =
+        epgGuideMemoryCache.get(profileId, date, offsetHours) ?: runCatching {
+            val (dayStart, dayEnd) = epgDayBounds(date)
             repository.cachedEpgGuide(
                 profileId = profileId,
                 displayStartEpochSeconds = dayStart,
                 displayEndEpochSeconds = dayEnd,
                 offsetHours = offsetHours,
             )
-        }.getOrNull()?.also { epgGuideMemoryCache.put(profileId, today, offsetHours, it) }
-        return todayGuide?.forEntry(entry)?.epgNowContextAt(nowEpochSeconds = now)?.takeUnless { it.isEmpty }
-    }
+        }.getOrNull()?.also { epgGuideMemoryCache.put(profileId, date, offsetHours, it) }
 
     private fun updatePlayerEpgIfCurrent(entry: MediaEntry, context: EpgNowContext) {
         val current = (_uiState.value.screen as? StreamiaScreen.Player)?.entry
@@ -1639,16 +1644,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             val date = preferredDate?.takeIf { it in dates }
                 ?: dates.firstOrNull { it == today }
                 ?: dates.first()
-            val guide = epgGuideMemoryCache.get(profileId, date, offsetHours) ?: runCatching {
-                val (dayStart, dayEnd) = epgDayBounds(date)
-                repository.cachedEpgGuide(
-                    profileId = profileId,
-                    displayStartEpochSeconds = dayStart,
-                    displayEndEpochSeconds = dayEnd,
-                    offsetHours = offsetHours,
-                )
-            }.getOrNull() ?: return@launch
-            epgGuideMemoryCache.put(profileId, date, offsetHours, guide)
+            val guide = epgGuideFor(profileId, date, offsetHours) ?: return@launch
 
             _uiState.update { current ->
                 if (current.activeProfileId == profileId && current.screen !is StreamiaScreen.Epg) {
@@ -1695,19 +1691,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         epgPrefetchJob = viewModelScope.launch {
             for (neighbor in neighbors) {
                 if (_uiState.value.activeProfileId != profileId) return@launch
-                if (epgGuideMemoryCache.get(profileId, neighbor, offsetHours) != null) continue
-                val (dayStart, dayEnd) = epgDayBounds(neighbor)
-                val guide = runCatching {
-                    repository.cachedEpgGuide(
-                        profileId = profileId,
-                        displayStartEpochSeconds = dayStart,
-                        displayEndEpochSeconds = dayEnd,
-                        offsetHours = offsetHours,
-                    )
-                }.getOrNull() ?: continue
-                if (_uiState.value.activeProfileId == profileId) {
-                    epgGuideMemoryCache.put(profileId, neighbor, offsetHours, guide)
-                }
+                epgGuideFor(profileId, neighbor, offsetHours)
             }
         }
     }
@@ -2064,19 +2048,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         }
         if (matcherCatalog.entriesFor(MediaType.Live).isEmpty()) return
 
-        val todayGuide = run {
-            val today = LocalDate.now(ZoneId.systemDefault())
-            val offsetHours = state.appSettings.epgTimeOffsetHours
-            epgGuideMemoryCache.get(profileId, today, offsetHours) ?: runCatching {
-                val (dayStart, dayEnd) = epgDayBounds(today)
-                repository.cachedEpgGuide(
-                    profileId = profileId,
-                    displayStartEpochSeconds = dayStart,
-                    displayEndEpochSeconds = dayEnd,
-                    offsetHours = offsetHours,
-                )
-            }.getOrNull()?.also { guide -> epgGuideMemoryCache.put(profileId, today, offsetHours, guide) }
-        }
+        val todayGuide = todayEpgGuide(profileId, state.appSettings.epgTimeOffsetHours)
 
         val index = withContext(Dispatchers.Default) { liveOnSatChannelMatcher.buildIndex(matcherCatalog) }
         val resolved = matches.map { ResolvedLiveOnSatMatch(it, emptyMap()) }.toMutableList()
