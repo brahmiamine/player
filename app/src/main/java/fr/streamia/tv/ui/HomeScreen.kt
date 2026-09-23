@@ -826,10 +826,10 @@ private fun ProgrammeCard(
 ) {
     FocusableSurface(
         onClick = onClick,
-        modifier = modifier.width(280.dp).height(300.dp),
+        modifier = modifier.width(220.dp).height(215.dp),
     ) {
         Column(Modifier.fillMaxSize().padding(9.dp)) {
-            Box(Modifier.fillMaxWidth().height(118.dp)) {
+            Box(Modifier.fillMaxWidth().height(92.dp)) {
                 if (!imageUrl.isNullOrBlank()) {
                     MediaArtwork(imageUrl, title, Modifier.fillMaxSize())
                 } else {
@@ -840,7 +840,7 @@ private fun ProgrammeCard(
                             .background(MutedInk.copy(alpha = 0.10f)),
                         contentAlignment = Alignment.Center,
                     ) {
-                        StreamiaIcon(StreamiaIconGlyph.Live, tint = MutedInk.copy(alpha = 0.55f), size = 44.dp)
+                        StreamiaIcon(StreamiaIconGlyph.Live, tint = MutedInk.copy(alpha = 0.55f), size = 32.dp)
                     }
                 }
                 Text(
@@ -900,7 +900,7 @@ private fun ProgrammeCard(
             }
             Spacer(Modifier.weight(1f))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                ChannelLogo(channel.iconUrl, channel.displayName, Modifier.width(80.dp).height(80.dp), imagePadding = 2)
+                ChannelLogo(channel.iconUrl, channel.displayName, Modifier.width(44.dp).height(44.dp), imagePadding = 2)
                 Spacer(Modifier.width(7.dp))
                 Text(channel.displayName, color = MutedInk, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
