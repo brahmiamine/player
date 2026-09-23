@@ -20,6 +20,9 @@ class EpgSyncWorker(context: Context, params: WorkerParameters) : CoroutineWorke
         val repository = XtreamRepository(applicationContext)
         val profile = repository.profile(profileId) ?: return Result.success()
         val credentials = profile.credentialsOrNull() ?: return Result.success()
+        // Cas le plus fréquent (toutes les heures) : EPG encore frais. On sort avant de charger toute
+        // la section Direct depuis SQLite, qui ne servirait à rien.
+        if (repository.isEpgFresh(profileId)) return Result.success()
         val liveEntries = repository.loadSection(profileId, MediaType.Live)
         if (liveEntries.isEmpty()) return Result.success()
 

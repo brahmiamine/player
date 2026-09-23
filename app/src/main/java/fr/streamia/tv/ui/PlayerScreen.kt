@@ -50,7 +50,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.net.toUri
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
@@ -162,14 +161,13 @@ fun PlayerScreen(
     val trackPreferenceStore = remember { PlaybackTrackPreferenceStore(context.applicationContext) }
     val diagnosticsTracker = remember { PlaybackDiagnosticsTracker() }
     val dolbyCapabilities = remember { DolbyCapabilityDetector.detect(context.applicationContext) }
-    val livePickerOpen by PlayerOverlayController.livePickerOpen.collectAsStateWithLifecycle()
     val rootFocus = remember { FocusRequester() }
     val settingsFocus = remember { FocusRequester() }
 
     var guideOpen by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
     // OK/gauche/menu/retour sur le Live ne rouvrent plus un sélecteur superposé : ils demandent un
-    // retour vers le Browser principal (PlayerOverlayController.openLivePicker), qui peut être
+    // retour vers le Browser principal (PlayerOverlayController.requestReturnToBrowser), qui peut être
     // différé le temps que le catalogue restauré au démarrage finisse de s'hydrater
     // (shouldDeferLiveBrowserReturn). Sans ce drapeau, l'écran ne montrait plus aucun retour
     // visuel pendant cette attente (juste le HUD masqué) : à l'utilisateur, l'appui semblait
@@ -525,8 +523,8 @@ fun PlayerScreen(
             runCatching { settingsFocus.requestFocus() }
         }
     }
-    LaunchedEffect(hudVisible, guideOpen, settingsOpen, entry.key, livePickerOpen, returningToBrowser) {
-        if (hudVisible && !guideOpen && !settingsOpen && !livePickerOpen && !returningToBrowser) {
+    LaunchedEffect(hudVisible, guideOpen, settingsOpen, entry.key, returningToBrowser) {
+        if (hudVisible && !guideOpen && !settingsOpen && !returningToBrowser) {
             delay(6_000)
             hudVisible = false
         }
@@ -554,7 +552,7 @@ fun PlayerScreen(
         when {
             settingsOpen -> { settingsOpen = false; rootFocus.requestFocus() }
             guideOpen -> { guideOpen = false; rootFocus.requestFocus() }
-            // Passe par le même chemin que OK/gauche (PlayerOverlayController.openLivePicker) au
+            // Passe par le même chemin que OK/gauche (PlayerOverlayController.requestReturnToBrowser) au
             // lieu d'appeler onBack()/closePlayer() directement : sans ce report, un retour appuyé
             // pendant que le catalogue restauré au démarrage (resumeStartup) est encore en cours de
             // relecture atterrit sur l'accueil au lieu du navigateur Live, car closePlayer() retombe
@@ -562,7 +560,7 @@ fun PlayerScreen(
             // Exception : une chaîne lancée depuis un écran qui sait se restaurer (accueil, matchs
             // du jour) y revient, sur la carte d'origine (liveReturnsToSource) — onBack() laisse
             // alors closePlayer() honorer le ContentReturnContext.
-            sharedLivePlayer && !liveReturnsToSource -> { returningToBrowser = true; PlayerOverlayController.openLivePicker() }
+            sharedLivePlayer && !liveReturnsToSource -> { returningToBrowser = true; PlayerOverlayController.requestReturnToBrowser() }
             else -> onBack()
         }
     }
@@ -574,7 +572,7 @@ fun PlayerScreen(
             .focusRequester(rootFocus)
             .focusable()
             .onPreviewKeyEvent { event ->
-                if (event.type != KeyEventType.KeyDown || guideOpen || settingsOpen || livePickerOpen || returningToBrowser || showNextEpisodePrompt) return@onPreviewKeyEvent false
+                if (event.type != KeyEventType.KeyDown || guideOpen || settingsOpen || returningToBrowser || showNextEpisodePrompt) return@onPreviewKeyEvent false
                 val keyCode = event.nativeKeyEvent.keyCode
                 val digit = keyCode.toTvDigit()
                 if (digit != null && entry.type == MediaType.Live) {
@@ -588,7 +586,7 @@ fun PlayerScreen(
                     PlaybackRemoteAction.ZapNext -> { onZap(1); true }
                     PlaybackRemoteAction.OpenLivePicker -> {
                         returningToBrowser = true
-                        PlayerOverlayController.openLivePicker()
+                        PlayerOverlayController.requestReturnToBrowser()
                         hudVisible = false
                         true
                     }
@@ -684,7 +682,7 @@ fun PlayerScreen(
             }
         }
 
-        if (hudVisible && !guideOpen && !settingsOpen && !livePickerOpen && !returningToBrowser) {
+        if (hudVisible && !guideOpen && !settingsOpen && !returningToBrowser) {
             PlayerInfoBand(
                 entry = entry,
                 categoryName = catalog.categoriesFor(entry.type).firstOrNull { it.id == entry.categoryId }?.name,

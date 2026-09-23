@@ -17,32 +17,20 @@ import fr.streamia.tv.data.resolveStartupProfileId
 import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.player.LivePlaybackSession
 import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 
 /**
- * Point d'entrée conservé pour PlayerScreen. L'ancien sélecteur Live superposé a été supprimé :
- * OK / gauche / menu demandent maintenant simplement un retour vers le Browser Live principal.
+ * OK / gauche / menu sur le lecteur Live demandent un retour vers le Browser Live principal
+ * (catégories + chaînes + aperçu), traité par [StreamiaTvRoot].
  */
 object PlayerOverlayController {
-    private val _livePickerOpen = MutableStateFlow(false)
-    val livePickerOpen = _livePickerOpen.asStateFlow()
-
     private val _returnToBrowser = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val returnToBrowser = _returnToBrowser.asSharedFlow()
 
-    fun openLivePicker() {
-        _livePickerOpen.value = false
+    fun requestReturnToBrowser() {
         _returnToBrowser.tryEmit(Unit)
     }
-
-    fun closeLivePicker() {
-        _livePickerOpen.value = false
-    }
-
-    fun isLivePickerOpen(): Boolean = false
 }
 
 /**

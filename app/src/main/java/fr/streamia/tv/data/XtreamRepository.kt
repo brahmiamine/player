@@ -393,6 +393,14 @@ class XtreamRepository(context: Context) {
      * Synchronise le XMLTV sans bloquer l'UI et sans matérialiser le guide complet en RAM. Le
      * remplacement SQLite est transactionnel : une source cassée laisse l'ancien EPG intact.
      */
+    /** EPG encore dans sa fenêtre de fraîcheur (`autoRefreshHours` du profil) : aucun téléchargement utile. */
+    suspend fun isEpgFresh(profileId: String): Boolean = withContext(Dispatchers.IO) { isEpgFreshOnIo(profileId) }
+
+    private fun isEpgFreshOnIo(profileId: String): Boolean {
+        val maxAgeMillis = (playlistStore.find(profileId)?.autoRefreshHours ?: 6).coerceIn(1, 168) * 3_600_000L
+        return epgCache.metadataOnIo(profileId)?.isFreshAt(System.currentTimeMillis(), maxAgeMillis) == true
+    }
+
     suspend fun refreshEpg(
         profileId: String,
         credentials: ServerCredentials,
@@ -402,11 +410,7 @@ class XtreamRepository(context: Context) {
         if (liveEntries.isEmpty()) return@withContext false
         epgSyncMutexFor(profileId).withLock {
             val profile = playlistStore.find(profileId)
-            val maxAgeMillis = (profile?.autoRefreshHours ?: 6).coerceIn(1, 168) * 3_600_000L
-            val nowMillis = System.currentTimeMillis()
-            if (!force && epgCache.metadataOnIo(profileId)?.isFreshAt(nowMillis, maxAgeMillis) == true) {
-                return@withLock false
-            }
+            if (!force && isEpgFreshOnIo(profileId)) return@withLock false
 
             val preferred = profile?.xmlTvUrl?.trim()?.takeIf(String::isNotBlank)?.let(::normalizeRemoteUrl)
             val provider = XtreamUrlBuilder(credentials).xmlTv()
