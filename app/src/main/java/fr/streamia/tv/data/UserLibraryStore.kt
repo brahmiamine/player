@@ -16,9 +16,17 @@ import org.json.JSONObject
  */
 class UserLibraryStore(context: Context) {
     private val preferences = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
-    private val mutationLock = Any()
+    /**
+     * Instantané déjà parsé, partagé par tout le processus : relire et reparser le JSON complet
+     * (historique compris) à chaque appel coûtait sur le thread principal (reprise d'un film,
+     * ouverture de profil…). Invalidé à chaque écriture.
+     */
+    fun snapshot(profileId: String): UserLibrarySnapshot =
+        snapshots[profileId] ?: synchronized(mutationLock) {
+            snapshots.getOrPut(profileId) { parseSnapshot(profileId) }
+        }
 
-    fun snapshot(profileId: String): UserLibrarySnapshot {
+    private fun parseSnapshot(profileId: String): UserLibrarySnapshot {
         val root = loadRoot(profileId)
         return UserLibrarySnapshot(
             favoriteEntries = root.optJSONArray("favorite_entries").stringSet(),
@@ -153,6 +161,7 @@ class UserLibraryStore(context: Context) {
     fun importRaw(profileId: String, raw: JSONObject) {
         synchronized(mutationLock) {
             preferences.edit().putString(key(profileId), raw.toString()).apply()
+            snapshots.remove(profileId)
         }
     }
 
@@ -165,6 +174,7 @@ class UserLibraryStore(context: Context) {
             val root = loadRoot(profileId)
             val result = block(root)
             preferences.edit().putString(key(profileId), root.toString()).apply()
+            snapshots.remove(profileId)
             result
         }
     }
@@ -237,6 +247,8 @@ class UserLibraryStore(context: Context) {
     }
 
     private companion object {
+        val mutationLock = Any()
+        val snapshots = java.util.concurrent.ConcurrentHashMap<String, UserLibrarySnapshot>()
         const val PREFERENCES_NAME = "streamia-user-library-v1"
         const val MAX_HISTORY = 200
     }

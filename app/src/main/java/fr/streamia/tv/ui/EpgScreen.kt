@@ -322,7 +322,7 @@ private fun ChannelGridRow(
                 ChannelLogo(channel.iconUrl, channel.displayName, Modifier.size(40.dp))
                 Spacer(Modifier.width(9.dp))
                 Column {
-                    Text(channel.number.toString(), color = MutedInk, fontSize = 11.sp)
+                    Text(channel.number.toString(), color = MutedInk, fontSize = 12.sp)
                     Text(
                         channel.displayName,
                         color = Ink,
@@ -388,7 +388,7 @@ private fun ProgramBlock(
                 Text(program.timeRange(), color = if (isLive) FocusBlueBright else MutedInk, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 if (isLive) {
                     Spacer(Modifier.width(6.dp))
-                    Text("EN DIRECT", color = FocusBlueBright, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Text("EN DIRECT", color = FocusBlueBright, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
             }
             Spacer(Modifier.height(4.dp))
@@ -443,7 +443,7 @@ private fun ProgramDetailsPanel(
         }
         if (!selected.program.category.isNullOrBlank()) {
             Spacer(Modifier.height(5.dp))
-            Text(selected.program.category, color = FocusBlueBright, fontSize = 11.sp)
+            Text(selected.program.category, color = FocusBlueBright, fontSize = 12.sp)
         }
       }
     }

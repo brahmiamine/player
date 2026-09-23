@@ -1,11 +1,15 @@
 package fr.streamia.tv.ui
 
+import android.graphics.Bitmap
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.sync.Semaphore
 import android.graphics.BitmapFactory
 import android.content.Context
 import android.util.LruCache
 import android.view.KeyEvent as AndroidKeyEvent
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -68,16 +72,11 @@ import fr.streamia.tv.ui.theme.Night
 import fr.streamia.tv.ui.theme.RadiusTile
 import fr.streamia.tv.ui.theme.RaisedSurface
 import fr.streamia.tv.ui.theme.TypeSectionTitle
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.async
-import kotlinx.coroutines.Deferred
 import okhttp3.Cache
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
 @Composable
@@ -107,8 +106,16 @@ fun FocusableSurface(
     // Le focus doit rester visible depuis l'autre bout du salon : un agrandissement net, une
     // lueur accent (pas seulement un changement de teinte) et une bordure large — jamais un
     // simple aplat de couleur — voir PRODUCT.md § Accessibilité & inclusion.
-    val scale by animateFloatAsState(if (focused) 1.06f else 1f, label = "focus-scale")
-    val elevation by animateDpAsState(if (focused) 26.dp else if (accent) 14.dp else 4.dp, label = "focus-elevation")
+    // Animation courte (appui maintenu = focus qui défile vite) et limitée au scale, appliqué en
+    // graphicsLayer : bon marché. Pas d'ombre au repos ni d'élévation animée — une ombre animée
+    // force son re-rendu à chaque image, et une ombre par ligne dans des listes de centaines de
+    // chaînes suffisait à faire saccader les petits GPU des boîtiers TV.
+    val scale by animateFloatAsState(if (focused) 1.06f else 1f, animationSpec = tween(110), label = "focus-scale")
+    val elevation = when {
+        focused -> 18.dp
+        accent -> 10.dp
+        else -> 0.dp
+    }
     val shape = RoundedCornerShape(RadiusTile)
     val background = when {
         focused -> FocusBlue
@@ -124,7 +131,7 @@ fun FocusableSurface(
     val glowColor = when {
         focused -> AccentPink.copy(alpha = 0.55f)
         accent -> AccentPink.copy(alpha = 0.45f)
-        else -> Color.Black.copy(alpha = 0.35f)
+        else -> Color.Transparent
     }
 
     // Le scale/l'ombre de focus sont appliqués à une Box interne, jamais à `modifier` lui-même :
@@ -176,7 +183,10 @@ fun FocusableSurface(
             modifier = Modifier
                 .then(if (wrapContent) Modifier else Modifier.fillMaxSize())
                 .scale(scale)
-                .shadow(elevation, shape, clip = false, ambientColor = glowColor, spotColor = glowColor)
+                .then(
+                    if (elevation > 0.dp) Modifier.shadow(elevation, shape, clip = false, ambientColor = glowColor, spotColor = glowColor)
+                    else Modifier,
+                )
                 .clip(shape)
                 .then(
                     if (accent) {
@@ -308,6 +318,8 @@ fun ChannelLogo(
         modifier = modifier,
         contentScale = ContentScale.Fit,
         imagePadding = imagePadding,
+        maxDecodePx = LOGO_DECODE_PX,
+        opaque = false,
     )
 }
 
@@ -319,8 +331,16 @@ fun MediaArtwork(url: String?, name: String, modifier: Modifier = Modifier) {
         modifier = modifier,
         contentScale = ContentScale.Crop,
         imagePadding = 0,
+        maxDecodePx = ARTWORK_DECODE_PX,
+        opaque = true,
     )
 }
+
+// Tailles de décodage selon l'usage : un logo affiché autour de 42–60 dp n'a pas besoin d'une
+// bitmap de 640 px (jusqu'à 1,6 Mo chacune), ce qui vidait le cache mémoire en quelques dizaines
+// d'images et forçait des redécodages permanents en défilement.
+private const val LOGO_DECODE_PX = 160
+private const val ARTWORK_DECODE_PX = 480
 
 @Composable
 private fun RemoteArtwork(
@@ -329,12 +349,15 @@ private fun RemoteArtwork(
     modifier: Modifier,
     contentScale: ContentScale,
     imagePadding: Int,
+    maxDecodePx: Int,
+    opaque: Boolean,
 ) {
     val context = LocalContext.current.applicationContext
-    val bitmap by produceState<ImageBitmap?>(initialValue = null, key1 = url) {
-        value = ArtworkLoader.get(url)
+    // produceState est annulé quand l'élément quitte l'écran : un élément dépassé pendant un
+    // défilement rapide abandonne sa place dans la file au lieu de retarder les logos visibles.
+    val bitmap by produceState<ImageBitmap?>(initialValue = ArtworkLoader.get(url, maxDecodePx), key1 = url) {
         if (url.isNullOrBlank() || value != null) return@produceState
-        value = ArtworkLoader.load(context, url)
+        value = ArtworkLoader.load(context, url, maxDecodePx, opaque)
     }
     Box(
         modifier = modifier
@@ -361,28 +384,26 @@ private fun RemoteArtwork(
 }
 
 private object ArtworkLoader {
-    // Dimensionné en octets réels (⅛ du tas max) plutôt qu'en nombre d'entrées : un compte fixe
-    // provoquait un rechargement/redécodage constant (thrash) lors du parcours de gros catalogues.
+    // Dimensionné en octets réels (⅛ du tas max) plutôt qu'en nombre d'entrées.
     private val cache = object : LruCache<String, ImageBitmap>(cacheSizeBytes()) {
         override fun sizeOf(key: String, value: ImageBitmap): Int = value.asAndroidBitmap().byteCount
     }
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val inFlight = ConcurrentHashMap<String, Deferred<ImageBitmap?>>()
+    // Au plus 6 téléchargements/décodages simultanés (au lieu de jusqu'à 64 threads IO vers le même
+    // fournisseur) : les éléments visibles passent avant, les autres attendent ou sont annulés.
+    private val permits = Semaphore(6)
     @Volatile private var client: OkHttpClient? = null
 
-    fun get(url: String?): ImageBitmap? = url?.let(cache::get)
+    private fun cacheKey(url: String, maxPx: Int) = "$maxPx|$url"
 
-    suspend fun load(context: Context, url: String): ImageBitmap? {
-        get(url)?.let { return it }
-        val deferred = inFlight.computeIfAbsent(url) {
-            scope.async { download(client(context), url)?.also { cache.put(url, it) } }
+    fun get(url: String?, maxPx: Int): ImageBitmap? = url?.takeIf(String::isNotBlank)?.let { cache.get(cacheKey(it, maxPx)) }
+
+    suspend fun load(context: Context, url: String, maxPx: Int, opaque: Boolean): ImageBitmap? =
+        permits.withPermit {
+            get(url, maxPx)?.let { return@withPermit it }
+            withContext(Dispatchers.IO) {
+                download(client(context), url, maxPx, opaque)?.also { cache.put(cacheKey(url, maxPx), it) }
+            }
         }
-        return try {
-            deferred.await()
-        } finally {
-            inFlight.remove(url, deferred)
-        }
-    }
 
     @Synchronized
     private fun client(context: Context): OkHttpClient = client ?: OkHttpClient.Builder()
@@ -393,7 +414,7 @@ private object ArtworkLoader {
         .build()
         .also { client = it }
 
-    private fun download(client: OkHttpClient, url: String): ImageBitmap? = runCatching {
+    private fun download(client: OkHttpClient, url: String, maxPx: Int, opaque: Boolean): ImageBitmap? = runCatching {
         val request = Request.Builder().url(url).header("User-Agent", "Streamia-TV/1.5").build()
         client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) return@runCatching null
@@ -401,9 +422,16 @@ private object ArtworkLoader {
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
             var sample = 1
-            while (maxOf(bounds.outWidth, bounds.outHeight) / sample > 640) sample *= 2
+            while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= maxPx) sample *= 2
             BitmapFactory.decodeByteArray(
-                bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample },
+                bytes,
+                0,
+                bytes.size,
+                BitmapFactory.Options().apply {
+                    inSampleSize = sample
+                    // Affiches/vignettes recadrées : pas de transparence utile, moitié de mémoire.
+                    if (opaque) inPreferredConfig = Bitmap.Config.RGB_565
+                },
             )?.asImageBitmap()
         }
     }.getOrNull()

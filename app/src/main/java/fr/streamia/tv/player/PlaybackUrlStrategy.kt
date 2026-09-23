@@ -15,11 +15,17 @@ object PlaybackUrlStrategy {
     ): List<String> {
         val currentScheme = initialUrl.substringBefore("://").lowercase().takeIf { it == "http" || it == "https" }
             ?: return listOf(initialUrl)
-        val schemes = buildList {
-            preference.scheme?.lowercase()?.takeIf { it == "http" || it == "https" }?.let(::add)
-            add(currentScheme)
-            add(if (currentScheme == "http") "https" else "http")
-        }.distinct()
+        // HTTPS reste HTTPS : aucun repli vers HTTP (identifiants en clair dans l'URL). Seule une
+        // URL HTTP peut tenter HTTPS, ce qui n'expose rien de plus.
+        val schemes = if (currentScheme == "https") {
+            listOf("https")
+        } else {
+            buildList {
+                preference.scheme?.lowercase()?.takeIf { it == "http" || it == "https" }?.let(::add)
+                add("http")
+                add("https")
+            }.distinct()
+        }
 
         if (type != MediaType.Live) {
             return schemes.map { scheme -> replaceScheme(initialUrl, scheme) }.distinct()

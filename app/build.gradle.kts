@@ -4,6 +4,7 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.gms.google-services")
     id("com.google.firebase.crashlytics")
+    id("androidx.baselineprofile")
 }
 
 android {
@@ -95,6 +96,25 @@ android {
     }
 }
 
+// Un APK release/optimized signé avec la clé debug ne doit jamais être publié : il serait
+// incompatible avec les mises à jour signées et réinstallable par n'importe qui possédant une clé
+// debug. Sans les variables RELEASE_*, ces builds échouent donc, sauf opt-in local explicite
+// (`-PallowDebugSignedRelease`) pour un essai sur son propre boîtier.
+gradle.taskGraph.whenReady {
+    val signedVariantRequested = allTasks.any { task ->
+        task.project == project && Regex("^(assemble|package|bundle)(Release|Optimized)$").matches(task.name)
+    }
+    // Les quatre valeurs, comme `releaseSigningEnv` : une seule manquante suffit à retomber sur la clé debug.
+    val releaseKeyComplete = listOf("RELEASE_STORE_FILE", "RELEASE_STORE_PASSWORD", "RELEASE_KEY_ALIAS", "RELEASE_KEY_PASSWORD")
+        .all { !System.getenv(it).isNullOrBlank() }
+    if (signedVariantRequested && !releaseKeyComplete && !project.hasProperty("allowDebugSignedRelease")) {
+        throw GradleException(
+            "Clé de signature release absente (RELEASE_STORE_FILE, RELEASE_STORE_PASSWORD, RELEASE_KEY_ALIAS, " +
+                "RELEASE_KEY_PASSWORD). Voir docs/release-signing.md, ou -PallowDebugSignedRelease pour un essai local.",
+        )
+    }
+}
+
 androidComponents {
     // L'app est distribuée en APK direct (pas de Play Store pour découper par appareil) ; les
     // boîtiers/clés Android TV sont quasi exclusivement ARM, donc on n'embarque pas les .so
@@ -123,6 +143,9 @@ dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
 
     implementation("androidx.core:core-ktx:1.17.0")
+    // Installe le baseline profile sur les APK installés hors Play Store (distribution directe).
+    implementation("androidx.profileinstaller:profileinstaller:1.4.1")
+    "baselineProfile"(project(":baselineprofile"))
     implementation("androidx.core:core-splashscreen:1.2.0")
     implementation("androidx.activity:activity-compose:1.12.1")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
@@ -132,10 +155,6 @@ dependencies {
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.animation:animation")
     implementation("androidx.tv:tv-material:1.1.0")
-    // Flou temps réel derrière les panneaux de verre du thème iOS Glass : dégrade proprement en
-    // aplat teinté (sans flou) sous Android 13, plutôt qu'un RenderEffect maison fragile d'une
-    // version de Compose à l'autre. Voir fr.streamia.tv.ui.theme.GlassSurface.
-    implementation("dev.chrisbanes.haze:haze:1.7.2")
     implementation("androidx.media3:media3-exoplayer:$media3Version")
     implementation("androidx.media3:media3-exoplayer-hls:$media3Version")
     implementation("androidx.media3:media3-datasource-okhttp:$media3Version")

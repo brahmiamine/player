@@ -45,10 +45,10 @@ jobs:
       - name: Install Android 36 platform
         run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
 
-      - name: Set up Gradle 8.13
+      - name: Set up Gradle 9.6.0
         uses: gradle/actions/setup-gradle@v6
         with:
-          gradle-version: "8.13"
+          gradle-version: "9.6.0"
 
       - name: Unit tests and lint
         id: unit_tests_lint
@@ -125,8 +125,8 @@ jobs:
         env:
           RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
         run: |
-          # Secret absent (pas encore configuré) : on ne pose pas RELEASE_STORE_FILE, et
-          # app/build.gradle.kts retombe silencieusement sur la clé debug, comme avant.
+          # Secret absent : RELEASE_STORE_FILE n'est pas posé et app/build.gradle.kts fait échouer
+          # assembleOptimized — jamais d'APK public signé avec la clé debug.
           if [ -n "$RELEASE_KEYSTORE_BASE64" ]; then
             echo "$RELEASE_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"
             echo "RELEASE_STORE_FILE=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"

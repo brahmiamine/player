@@ -19,3 +19,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "StreamiaTV"
 include(":app")
+include(":baselineprofile")

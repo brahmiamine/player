@@ -23,6 +23,20 @@ class PlaybackUrlStrategyTest {
     }
 
     @Test
+    fun `https never falls back to http`() {
+        val candidates = PlaybackUrlStrategy.candidates(
+            initialUrl = "https://provider.test/live/user/pass/42.ts",
+            type = MediaType.Live,
+            preference = PlaybackTransportPreference(scheme = "http"),
+        )
+
+        assertEquals(
+            listOf("https://provider.test/live/user/pass/42.ts", "https://provider.test/live/user/pass/42.m3u8"),
+            candidates,
+        )
+    }
+
+    @Test
     fun `vod never changes the media extension`() {
         val candidates = PlaybackUrlStrategy.candidates(
             initialUrl = "http://provider.test/movie/user/pass/9.mkv",

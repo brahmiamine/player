@@ -29,7 +29,8 @@ import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.domain.SeriesDetails
 import fr.streamia.tv.domain.SeriesEpisode
 import fr.streamia.tv.domain.ServerCredentials
-import fr.streamia.tv.domain.adjacentTo
+import fr.streamia.tv.domain.LiveZapIndex
+import fr.streamia.tv.logging.CrashReporter
 import fr.streamia.tv.domain.epgNowContextAt
 import fr.streamia.tv.domain.withTimeOffset
 import fr.streamia.tv.liveonsat.ChannelMatcher
@@ -116,11 +117,18 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     private var epgPrefetchJob: Job? = null
     private var epgChannelJob: Job? = null
     private var epgTickerJob: Job? = null
+    private var zapJob: Job? = null
+    private var secondaryLoadsJob: Job? = null
+    // Clé comparée par identité des instances (catalogue/ensembles), recalculée seulement quand
+    // l'un d'eux change réellement.
+    private var zapIndexCache: Pair<List<Any>, LiveZapIndex>? = null
     // Lu/écrit uniquement depuis le thread principal (appelants Compose) : évite de relancer une
     // requête SQLite déjà en vol pour la même page quand plusieurs recompositions déclenchent le
     // même chargement (ex. sélection rapide de catégories, LaunchedEffect qui se relance).
     private val categoryLoadsInFlight = mutableSetOf<String>()
     val uiState: StateFlow<StreamiaUiState> = _uiState.asStateFlow()
+    private val _playerState = MutableStateFlow(PlayerUiState())
+    val playerState: StateFlow<PlayerUiState> = _playerState.asStateFlow()
 
     init {
         _uiState.value = StreamiaUiState(
@@ -167,11 +175,8 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         // la journée courante en mémoire sans aucun appel réseau, même quand le démarrage reprend
         // directement le dernier flux Live et contourne openProfile()/showCatalog().
         warmEpgGuideCache(profileId)
-        loadLiveOnSatMatches(forceRefresh = false)
-        loadTvProgrammeTonight(forceRefresh = false)
-        loadTvProgrammeNow(forceRefresh = false)
-        loadBeinSportsGuide(forceRefresh = false)
-        loadUkGuide(forceRefresh = false)
+        // Reprise directe dans le lecteur : la vidéo passe d'abord, les guides tiers attendent.
+        scheduleSecondaryLoads(STARTUP_SECONDARY_LOADS_PLAYER_DELAY_MS)
         viewModelScope.launch {
             // Catalogue déjà résolu (favoris/ordre déjà appliqués) persisté lors d'une précédente
             // réconciliation réussie pour ce profil : s'il est encore valide pour l'organisation
@@ -292,11 +297,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 )
                 warmEpgGuideCache(profileId)
                 refreshHomeRecommendations()
-                loadLiveOnSatMatches(forceRefresh = false)
-                loadTvProgrammeTonight(forceRefresh = false)
-        loadTvProgrammeNow(forceRefresh = false)
-        loadBeinSportsGuide(forceRefresh = false)
-        loadUkGuide(forceRefresh = false)
+                scheduleSecondaryLoads(STARTUP_SECONDARY_LOADS_HOME_DELAY_MS)
                 try {
                     mergeCatalog(repository.openProfile(profileId, knownCache = cachedCatalog))
                 } catch (error: Throwable) {
@@ -364,9 +365,9 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 epgGuideMemoryCache.clearProfile(profileId)
                 repository.clearEpgCache(profileId)
                 if (_uiState.value.activeProfileId == profileId) {
+                    _playerState.update { it.copy(epg = EpgNowContext()) }
                     _uiState.update {
                         it.copy(
-                            epg = EpgNowContext(),
                             epgGuide = null,
                             epgAvailableDates = emptyList(),
                             epgSelectedDate = null,
@@ -724,6 +725,11 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
 
     fun toggleSubtitleBackground() {
         updateAppSettings { it.copy(subtitleBackgroundEnabled = !it.subtitleBackgroundEnabled) }
+    }
+
+    fun toggleCrashReports() {
+        updateAppSettings { it.copy(crashReportsEnabled = !it.crashReportsEnabled) }
+        CrashReporter.setCollectionEnabled(_uiState.value.appSettings.crashReportsEnabled)
     }
 
     fun toggleHomeBlock(block: HomeBlock) {
@@ -1225,6 +1231,8 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     }
 
     fun closePlayer(forceBrowser: Boolean = false) {
+        zapJob?.cancel()
+        _playerState.value = PlayerUiState()
         val profileId = _uiState.value.activeProfileId
         val player = _uiState.value.screen as? StreamiaScreen.Player
         _uiState.update {
@@ -1243,7 +1251,6 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                     it.catalogHydrating -> StreamiaScreen.Home
                     else -> StreamiaScreen.Browser
                 },
-                epg = EpgNowContext(),
                 resumePositionMs = 0,
             )
         }
@@ -1277,26 +1284,38 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         val state = _uiState.value
         val current = (state.screen as? StreamiaScreen.Player)?.entry ?: return
         if (current.type != MediaType.Live) return
-        // Le repli sur allLive peut faire sauter le zapping dans une autre catégorie que celle en
-        // cours : si elle est verrouillée et pas encore déverrouillée cette session, elle doit être
-        // exclue comme si elle était masquée — il n'y a pas d'écran de code pendant le zapping.
-        val lockedCategoryIds = if (state.appSettings.parentalControlEnabled && !state.parentalUnlocked) {
-            state.catalog?.categoriesFor(MediaType.Live)
-                .orEmpty()
+        val catalog = state.catalog ?: return
+        // Zap rapide : chaque appui avance depuis la chaîne déjà annoncée (pas depuis celle qui
+        // joue), le bandeau s'affiche tout de suite, et le flux ne démarre qu'une fois les appuis
+        // terminés — enchaîner CH+ ne lance plus un flux réseau (et un EPG) par chaîne traversée.
+        val from = _playerState.value.pendingZapEntry ?: current
+        val next = liveZapIndex(state, catalog).adjacent(from, delta) ?: return
+        _playerState.update { it.copy(pendingZapEntry = next) }
+        zapJob?.cancel()
+        zapJob = viewModelScope.launch {
+            delay(ZAP_SETTLE_MS)
+            _playerState.update { it.copy(pendingZapEntry = null) }
+            if (next.key != current.key) openPlayer(next, returnToSeries = false)
+        }
+    }
+
+    /**
+     * Le repli sur toutes les chaînes peut faire sauter le zapping dans une autre catégorie : une
+     * catégorie verrouillée et pas encore déverrouillée cette session est exclue comme si elle était
+     * masquée — il n'y a pas d'écran de code pendant le zapping.
+     */
+    private fun liveZapIndex(state: StreamiaUiState, catalog: Catalog): LiveZapIndex {
+        val locked = state.appSettings.parentalControlEnabled && !state.parentalUnlocked
+        val key = listOf(catalog, state.library.hiddenEntries, state.library.lockedCategories, locked)
+        zapIndexCache?.takeIf { it.first == key }?.let { return it.second }
+        val lockedCategoryIds = if (locked) {
+            catalog.categoriesFor(MediaType.Live)
                 .filter { it.key in state.library.lockedCategories }
                 .mapTo(mutableSetOf(), MediaCategory::id)
         } else {
             emptySet()
         }
-        val sameCategory = state.catalog?.entriesIn(MediaType.Live, current.categoryId)
-            .orEmpty()
-            .filterNot { it.key in state.library.hiddenEntries }
-        val allLive = state.catalog?.entriesFor(MediaType.Live)
-            .orEmpty()
-            .filterNot { it.key in state.library.hiddenEntries || it.categoryId in lockedCategoryIds }
-        val pool = if (sameCategory.size > 1) sameCategory else allLive
-        val next = pool.adjacentTo(current.key, delta) ?: return
-        openPlayer(next, returnToSeries = false)
+        return LiveZapIndex(catalog, state.library.hiddenEntries, lockedCategoryIds).also { zapIndexCache = key to it }
     }
 
     fun dismissMessage() { _uiState.update { it.copy(message = null) } }
@@ -1311,11 +1330,11 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     private fun openPlayer(entry: MediaEntry, returnToSeries: Boolean, returnToDetails: Boolean = false) {
         val profileId = _uiState.value.activeProfileId
         val resume = if (profileId != null && entry.type != MediaType.Live) repository.resumePosition(profileId, entry.key) else 0L
+        _playerState.update { it.copy(epg = EpgNowContext()) }
         _uiState.update {
             it.copy(
                 screen = StreamiaScreen.Player(entry, returnToSeries, returnToDetails),
                 message = null,
-                epg = EpgNowContext(),
                 resumePositionMs = resume,
                 lastViewedEntry = entry,
             )
@@ -1439,7 +1458,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
 
     private fun updatePlayerEpgIfCurrent(entry: MediaEntry, context: EpgNowContext) {
         val current = (_uiState.value.screen as? StreamiaScreen.Player)?.entry
-        if (current?.key == entry.key) _uiState.update { it.copy(epg = context) }
+        if (current?.key == entry.key) _playerState.update { it.copy(epg = context) }
     }
 
     private fun startEpgTicker(entry: MediaEntry) {
@@ -1679,7 +1698,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             // tomber sur un alias SQLite trop strict. Maintenant que le guide du jour est en RAM,
             // relancer immédiatement la résolution plutôt que d'attendre le ticker de 30 secondes.
             val player = (_uiState.value.screen as? StreamiaScreen.Player)?.entry
-            if (player?.type == MediaType.Live && _uiState.value.epg.current == null) {
+            if (player?.type == MediaType.Live && _playerState.value.epg.current == null) {
                 loadEpg(player)
             }
 
@@ -2471,6 +2490,9 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     }
 
     private fun showLogin() {
+        secondaryLoadsJob?.cancel()
+        zapJob?.cancel()
+        _playerState.value = PlayerUiState()
         epgGuideMemoryCache.clear()
         homeRecommendationJob?.cancel()
         homeRecommendationJob = null
@@ -2533,11 +2555,30 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         warmEpgGuideCache(loaded.profileId)
         ensureSectionLoaded(MediaType.Live)
         refreshHomeRecommendations()
-        loadLiveOnSatMatches(forceRefresh = false)
-        loadTvProgrammeTonight(forceRefresh = false)
-        loadTvProgrammeNow(forceRefresh = false)
-        loadBeinSportsGuide(forceRefresh = false)
-        loadUkGuide(forceRefresh = false)
+        scheduleSecondaryLoads(STARTUP_SECONDARY_LOADS_HOME_DELAY_MS)
+    }
+
+    /**
+     * Guides tiers (scraping + parsing Jsoup) lancés après le premier affichage et l'un après
+     * l'autre plutôt que tous en même temps que le catalogue et la première image vidéo : sur un
+     * boîtier à 4 petits cœurs, ils se disputaient le CPU au moment où l'utilisateur navigue.
+     */
+    private fun scheduleSecondaryLoads(initialDelayMs: Long) {
+        secondaryLoadsJob?.cancel()
+        secondaryLoadsJob = viewModelScope.launch {
+            delay(initialDelayMs)
+            val loads = listOf<() -> Unit>(
+                { loadTvProgrammeNow(forceRefresh = false) },
+                { loadBeinSportsGuide(forceRefresh = false) },
+                { loadUkGuide(forceRefresh = false) },
+                { loadTvProgrammeTonight(forceRefresh = false) },
+                { loadLiveOnSatMatches(forceRefresh = false) },
+            )
+            loads.forEach { load ->
+                load()
+                delay(SECONDARY_LOADS_GAP_MS)
+            }
+        }
     }
 
     private fun showError(error: Throwable) {
@@ -2577,7 +2618,6 @@ data class StreamiaUiState(
     val message: String? = null,
     val mediaDetails: MediaDetails? = null,
     val seriesDetails: SeriesDetails? = null,
-    val epg: EpgNowContext = EpgNowContext(),
     val epgGuide: EpgGuide? = null,
     val epgAvailableDates: List<LocalDate> = emptyList(),
     val epgSelectedDate: LocalDate? = null,
@@ -2616,6 +2656,16 @@ data class StreamiaUiState(
     val lastViewedEntry: MediaEntry? = null,
 )
 
+/**
+ * État du lecteur qui change souvent (EPG courant rafraîchi toutes les 30 s, zap en cours) : dans
+ * son propre flux, lu seulement par l'écran lecteur, pour ne pas invalider la racine de l'app.
+ */
+data class PlayerUiState(
+    val epg: EpgNowContext = EpgNowContext(),
+    /** Chaîne annoncée par un zap rapide en cours, pas encore lancée (voir [StreamiaViewModel.zap]). */
+    val pendingZapEntry: MediaEntry? = null,
+)
+
 sealed interface StreamiaScreen {
     data object Login : StreamiaScreen
     data object Home : StreamiaScreen
@@ -2639,6 +2689,10 @@ sealed interface StreamiaScreen {
 }
 
 private const val EPG_PLAYER_REFRESH_MS = 30_000L
+private const val ZAP_SETTLE_MS = 350L
+private const val STARTUP_SECONDARY_LOADS_HOME_DELAY_MS = 1_200L
+private const val STARTUP_SECONDARY_LOADS_PLAYER_DELAY_MS = 8_000L
+private const val SECONDARY_LOADS_GAP_MS = 600L
 private const val MAX_EPG_DAY_SPAN = 30L
 private const val HOME_RECOMMENDATION_CANDIDATE_LIMIT = 400
 private const val HOME_RECOMMENDATION_RECENT_LIMIT = 240

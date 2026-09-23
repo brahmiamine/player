@@ -19,7 +19,16 @@ import javax.crypto.spec.GCMParameterSpec
 class PlaylistStore(context: Context) {
     private val preferences = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
 
-    fun loadAll(): List<PlaylistProfile> = runCatching {
+    /**
+     * Liste déchiffrée gardée en mémoire pour tout le processus : chaque lecture passait par le
+     * Keystore (appel système lent sur boîtier TV) et un parsing JSON, souvent sur le thread
+     * principal, et `find()` redéchiffrait tout pour un seul profil.
+     */
+    fun loadAll(): List<PlaylistProfile> = cachedProfiles ?: synchronized(cacheLock) {
+        cachedProfiles ?: decryptAll().also { cachedProfiles = it }
+    }
+
+    private fun decryptAll(): List<PlaylistProfile> = runCatching {
         val encryptedPayload = preferences.getString(KEY_PAYLOAD, null) ?: return emptyList()
         val encodedIv = preferences.getString(KEY_IV, null) ?: return emptyList()
         val iv = Base64.decode(encodedIv, Base64.NO_WRAP)
@@ -110,6 +119,7 @@ class PlaylistStore(context: Context) {
     }
 
     private fun saveAll(profiles: List<PlaylistProfile>) {
+        cachedProfiles = profiles.sortedByDescending(PlaylistProfile::updatedAt)
         if (profiles.isEmpty()) {
             preferences.edit().clear().apply()
             return
@@ -168,6 +178,8 @@ class PlaylistStore(context: Context) {
     }
 
     private companion object {
+        val cacheLock = Any()
+        @Volatile var cachedProfiles: List<PlaylistProfile>? = null
         const val PREFERENCES_NAME = "playlist-profiles"
         const val KEY_ALIAS = "streamia.playlists.v1"
         const val KEY_IV = "iv"

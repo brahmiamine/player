@@ -33,7 +33,6 @@ val GlassBorder = Color(0x29FFFFFF)
 val GlassFillFaint = Color(0x0FFFFFFF)
 val GlassFillSoft = Color(0x14FFFFFF)
 val GlassFillMedium = Color(0x1AFFFFFF)
-val GlassScrim = Color(0xCC0B0710) // aplat de repli (sans flou) pour les appareils < Android 13
 
 // Rayons "très arrondis" (iOS 18 / visionOS) — un seul jeu de tailles pour tout l'habillage verre.
 val RadiusCard = 28.dp

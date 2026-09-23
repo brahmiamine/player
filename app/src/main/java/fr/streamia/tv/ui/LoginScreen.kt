@@ -271,7 +271,7 @@ private fun PlaylistManager(
                                     else -> "M3U FICHIER"
                                 },
                                 color = FocusBlueBright,
-                                fontSize = 11.sp,
+                                fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
                             )
                         }

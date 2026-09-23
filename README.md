@@ -38,7 +38,7 @@ Streamia TV est un lecteur Android TV natif, rapide et entièrement pilotable à
 
 ## Construire l'APK
 
-Prérequis : JDK 17, Android SDK 36 et Gradle 8.13.
+Prérequis : JDK 17, Android SDK 36 et Gradle 9.6.0.
 
 ```bash
 gradle testDebugUnitTest lintDebug assembleDebug

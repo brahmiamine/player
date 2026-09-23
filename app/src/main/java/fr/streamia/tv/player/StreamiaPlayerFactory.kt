@@ -23,7 +23,7 @@ object StreamiaPlayerFactory {
     private val httpClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
             .retryOnConnectionFailure(true)
-            .connectTimeout(6, TimeUnit.SECONDS)
+            .connectTimeout(4, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(15, TimeUnit.SECONDS)
             .connectionPool(ConnectionPool(8, 5, TimeUnit.MINUTES))
@@ -50,7 +50,9 @@ object StreamiaPlayerFactory {
         val dataSourceFactory = DefaultDataSource.Factory(context, httpDataSourceFactory)
         val mediaSourceFactory = DefaultMediaSourceFactory(context)
             .setDataSourceFactory(dataSourceFactory)
-            .setLoadErrorHandlingPolicy(DefaultLoadErrorHandlingPolicy(5))
+            // Le Direct a sa propre bascule d'URL (TS/HLS, HTTP→HTTPS) : 5 relances par URL avant d'y
+            // passer laissaient l'écran noir plusieurs dizaines de secondes sur une chaîne morte.
+            .setLoadErrorHandlingPolicy(DefaultLoadErrorHandlingPolicy(if (mediaType == MediaType.Live) 1 else 5))
         val renderersFactory = DefaultRenderersFactory(context)
             .setEnableDecoderFallback(true)
 

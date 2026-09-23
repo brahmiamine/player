@@ -268,13 +268,28 @@ data class Catalog(
      * accurate metadata for hundreds of thousands of provider rows while keeping only the current
      * browser page, favourites/recent entries and the active playback context in memory.
      */
-    private val navigableEntries = entries.filterNot(MediaEntry::isVisualSeparator)
-    private val entriesBySection = navigableEntries.groupBy(MediaEntry::type)
-    private val entriesBySectionAndCategory = entriesBySection.mapValues { (_, sectionEntries) ->
-        sectionEntries.groupBy(MediaEntry::categoryId)
+    private val navigableEntries by lazy(LazyThreadSafetyMode.PUBLICATION) { entries.filterNot(MediaEntry::isVisualSeparator) }
+
+    /**
+     * Index calculés à la demande et par section : charger une page de films ne réindexe plus les
+     * milliers de chaînes Direct. Les sections non touchées par une fusion de page sont reprises
+     * telles quelles du catalogue précédent (voir [inheritSections]).
+     */
+    private class SectionIndex(val entries: List<MediaEntry>) {
+        val byCategory: Map<String, List<MediaEntry>> by lazy(LazyThreadSafetyMode.PUBLICATION) { entries.groupBy(MediaEntry::categoryId) }
+        val byKey: Map<String, MediaEntry> by lazy(LazyThreadSafetyMode.PUBLICATION) { entries.associateBy(MediaEntry::key) }
     }
-    private val categoriesBySection = categories.groupBy(MediaCategory::type)
-    private val entriesByKey = navigableEntries.associateBy(MediaEntry::key)
+    private val sections = java.util.concurrent.ConcurrentHashMap<MediaType, SectionIndex>()
+
+    private fun section(type: MediaType): SectionIndex = sections.getOrPut(type) {
+        SectionIndex(entries.filter { it.type == type && !it.isVisualSeparator() })
+    }
+
+    private fun inheritSections(from: Catalog, except: Set<MediaType>): Catalog = also {
+        from.sections.forEach { (type, index) -> if (type !in except) sections.putIfAbsent(type, index) }
+    }
+
+    private val categoriesBySection by lazy(LazyThreadSafetyMode.PUBLICATION) { categories.groupBy(MediaCategory::type) }
     private val searchIndex by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         navigableEntries.map { entry ->
             IndexedEntry(entry, "${entry.name}\u0000${entry.displayName}\u0000${entry.tvgId.orEmpty()}".lowercase())
@@ -284,15 +299,18 @@ data class Catalog(
 
     fun categoriesFor(type: MediaType): List<MediaCategory> = categoriesBySection[type].orEmpty()
 
-    fun entriesFor(type: MediaType): List<MediaEntry> = entriesBySection[type].orEmpty()
+    fun entriesFor(type: MediaType): List<MediaEntry> = section(type).entries
 
     fun entriesIn(type: MediaType, categoryId: String): List<MediaEntry> =
         if (categoryId == ALL_CATEGORY_ID) entriesFor(type)
-        else entriesBySectionAndCategory[type]?.get(categoryId).orEmpty()
+        else section(type).byCategory[categoryId].orEmpty()
 
-    fun entry(key: String): MediaEntry? = entriesByKey[key]
+    fun entry(key: String): MediaEntry? {
+        val type = MediaType.entries.firstOrNull { key.startsWith("${it.name}:") } ?: return null
+        return section(type).byKey[key]
+    }
 
-    fun count(type: MediaType): Int = totalCounts[type] ?: (entriesBySection[type]?.size ?: 0)
+    fun count(type: MediaType): Int = totalCounts[type] ?: section(type).entries.size
 
     fun countIn(type: MediaType, categoryId: String): Int =
         if (categoryId == ALL_CATEGORY_ID) count(type)
@@ -319,7 +337,7 @@ data class Catalog(
         return copy(
             entries = merged.values.toList(),
             loadedCategoryKeys = loadedCategoryKeys + categoryKey(loadedType, loadedCategoryId),
-        )
+        ).inheritSections(this, except = setOf(loadedType))
     }
 
     /**
@@ -335,6 +353,7 @@ data class Catalog(
         newEntries.forEach { merged[it.key] = it }
         val sectionKeys = categoriesFor(type).map { categoryKey(type, it.id) } + categoryKey(type, ALL_CATEGORY_ID)
         return copy(entries = merged.values.toList(), loadedCategoryKeys = loadedCategoryKeys + sectionKeys)
+            .inheritSections(this, except = setOf(type))
     }
 
     fun search(query: String, type: MediaType? = null, limit: Int = 500): List<MediaEntry> {
@@ -376,4 +395,31 @@ fun List<MediaEntry>.adjacentTo(currentKey: String, delta: Int): MediaEntry? {
     if (isEmpty()) return null
     val currentIndex = indexOfFirst { it.key == currentKey }.takeIf { it >= 0 } ?: 0
     return this[Math.floorMod(currentIndex + delta, size)]
+}
+
+/**
+ * Index de zapping préparé une seule fois par état (catalogue, masquées, verrouillées) : CH+/CH-
+ * deviennent une lecture de position au lieu de refiltrer toute la liste Direct à chaque appui.
+ */
+class LiveZapIndex(catalog: Catalog, hiddenEntries: Set<String>, excludedCategoryIds: Set<String>) {
+    private val all = catalog.entriesFor(MediaType.Live)
+        .filterNot { it.key in hiddenEntries || it.categoryId in excludedCategoryIds }
+    private val byCategory = all.groupBy(MediaEntry::categoryId)
+    private val allPositions = all.positions()
+    private val categoryPositions = HashMap<String, Map<String, Int>>()
+
+    fun adjacent(current: MediaEntry, delta: Int): MediaEntry? {
+        val sameCategory = byCategory[current.categoryId].orEmpty()
+        val (pool, positions) = if (sameCategory.size > 1) {
+            sameCategory to categoryPositions.getOrPut(current.categoryId) { sameCategory.positions() }
+        } else {
+            all to allPositions
+        }
+        if (pool.isEmpty()) return null
+        val index = positions[current.key] ?: 0
+        return pool[Math.floorMod(index + delta, pool.size)]
+    }
+
+    private fun List<MediaEntry>.positions(): Map<String, Int> =
+        withIndex().associate { (index, entry) -> entry.key to index }
 }

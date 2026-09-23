@@ -141,6 +141,8 @@ fun PlayerScreen(
     liveReturnsToSource: Boolean,
     onBack: () -> Unit,
     onZap: (Int) -> Unit,
+    /** Chaîne annoncée par un zap rapide, affichée avant que son flux ne démarre. */
+    pendingZapEntry: MediaEntry? = null,
     onEntrySelected: (MediaEntry) -> Unit,
     onProgress: (MediaEntry, Long, Long) -> Unit,
     onCycleVideoAspect: () -> Unit,
@@ -703,6 +705,25 @@ fun PlayerScreen(
             )
         }
 
+        pendingZapEntry?.let { target ->
+            Row(
+                Modifier
+                    .align(Alignment.TopStart)
+                    .padding(34.dp)
+                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(RadiusTile))
+                    .background(Night.copy(alpha = 0.86f))
+                    .border(BorderStroke(1.dp, GlassBorder), androidx.compose.foundation.shape.RoundedCornerShape(RadiusTile))
+                    .padding(horizontal = 18.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(target.number.toString(), color = FocusBlueBright, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.width(14.dp))
+                ChannelLogo(target.iconUrl, target.displayName, Modifier.size(52.dp))
+                Spacer(Modifier.width(14.dp))
+                Text(target.displayName, color = Ink, fontSize = 22.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+            }
+        }
+
         if (numberBuffer.isNotBlank()) {
             Box(
                 Modifier
@@ -912,7 +933,7 @@ private fun PlayerInfoBand(
                             Text(
                                 "EN CE MOMENT${current.timeRange()?.let { " · $it" }.orEmpty()}",
                                 color = MutedInk,
-                                fontSize = 10.sp,
+                                fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
                                 maxLines = 1,
                             )
@@ -935,7 +956,7 @@ private fun PlayerInfoBand(
                             Text(
                                 "À suivre ${next.timeRange()?.let { "$it · " }.orEmpty()}${next.title}",
                                 color = MutedInk,
-                                fontSize = 11.sp,
+                                fontSize = 12.sp,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
@@ -994,7 +1015,7 @@ private fun PlayerInfoBand(
                 Text(
                     diagnosticsText(diagnostics),
                     color = MutedInk,
-                    fontSize = 11.sp,
+                    fontSize = 12.sp,
                     maxLines = 1,
                 )
             }
@@ -1038,7 +1059,7 @@ private fun LiveProgramTimeline(
     val formatter = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
 
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text(formatter.format(Date(start * 1000L)), color = MutedInk, fontSize = 10.sp)
+        Text(formatter.format(Date(start * 1000L)), color = MutedInk, fontSize = 12.sp)
         Spacer(Modifier.width(8.dp))
         Canvas(Modifier.weight(1f).height(6.dp)) {
             val radius = androidx.compose.ui.geometry.CornerRadius(size.height / 2)
@@ -1050,7 +1071,7 @@ private fun LiveProgramTimeline(
             )
         }
         Spacer(Modifier.width(8.dp))
-        Text(formatter.format(Date(end * 1000L)), color = MutedInk, fontSize = 10.sp)
+        Text(formatter.format(Date(end * 1000L)), color = MutedInk, fontSize = 12.sp)
     }
 }
 

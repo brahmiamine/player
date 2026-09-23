@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
@@ -19,15 +18,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import dev.chrisbanes.haze.HazeState
-import dev.chrisbanes.haze.HazeStyle
-import dev.chrisbanes.haze.HazeTint
-import dev.chrisbanes.haze.hazeEffect
-import dev.chrisbanes.haze.hazeSource
 import fr.streamia.tv.ui.theme.AccentPink
 import fr.streamia.tv.ui.theme.AccentPinkLight
 import fr.streamia.tv.ui.theme.GlassBorder
-import fr.streamia.tv.ui.theme.GlassScrim
 import fr.streamia.tv.ui.theme.Night
 import fr.streamia.tv.ui.theme.RadiusCard
 import fr.streamia.tv.ui.theme.RadiusPill
@@ -41,24 +34,14 @@ import fr.streamia.tv.ui.theme.RadiusPill
  */
 data class GlassBlob(val center: Offset, val radiusFraction: Float, val color: Color)
 
-/**
- * État de flou partagé par tous les panneaux de verre d'un même écran : le fond (dégradés +
- * contenu défilant) est déclaré une seule fois comme source, chaque panneau de verre s'y
- * raccorde. `null` en dehors de [StreamiaApp] (previews) — chaque composant de verre retombe
- * alors sur un aplat teinté simple.
- */
-val LocalGlassHaze = compositionLocalOf<HazeState?> { null }
-
 /** Fond plein écran d'un écran du thème iOS Glass : base quasi noire + dégradés diffus propres à
  * l'écran (voir les jeux de blobs par écran dans chaque fichier écran de ce package). */
 @Composable
 fun GlassBackdrop(blobs: List<GlassBlob>, modifier: Modifier = Modifier) {
-    val hazeState = LocalGlassHaze.current
     Box(
         modifier
             .fillMaxSize()
             .background(Night)
-            .then(if (hazeState != null) Modifier.hazeSource(hazeState) else Modifier)
             .drawBehind {
                 blobs.forEach { blob ->
                     val radius = blob.radiusFraction * size.maxDimension
@@ -78,11 +61,12 @@ fun GlassBackdrop(blobs: List<GlassBlob>, modifier: Modifier = Modifier) {
 }
 
 /**
- * Panneau de verre "structurel" (barre de navigation, panneau latéral, formulaire, HUD…) : flou
- * temps réel de ce qu'il y a derrière sur Android 12+ (repli en aplat teinté sinon, voir
- * [fr.streamia.tv.ui.theme.GlassScrim]). Réservé aux éléments peu nombreux par écran — les lignes
- * répétées d'une grille/liste (chaînes, épisodes…) utilisent [FocusableSurface], moins coûteux,
- * pour ne pas dégrader le défilement de gros catalogues.
+ * Panneau de verre "structurel" (barre de navigation, panneau latéral, formulaire, HUD…).
+ *
+ * Plus de flou temps réel : la seule chose derrière ces panneaux est le fond de dégradés diffus,
+ * déjà flou par nature, si bien que le flou (RenderEffect hors écran à chaque panneau) coûtait
+ * cher au GPU des boîtiers TV pour une différence invisible. Un voile translucide sur ce même fond
+ * donne le même rendu.
  */
 @Composable
 fun GlassSurface(
@@ -90,30 +74,14 @@ fun GlassSurface(
     shape: Shape = RoundedCornerShape(RadiusCard),
     tintColor: Color = Color.White.copy(alpha = 0.09f),
     borderColor: Color = GlassBorder,
-    blurRadius: Dp = 40.dp,
-    elevation: Dp = 18.dp,
+    elevation: Dp = 0.dp,
     content: @Composable BoxScope.() -> Unit,
 ) {
-    val hazeState = LocalGlassHaze.current
     Box(
         modifier
-            .shadow(elevation, shape, clip = false)
+            .then(if (elevation > 0.dp) Modifier.shadow(elevation, shape, clip = false) else Modifier)
             .clip(shape)
-            .then(
-                if (hazeState != null) {
-                    Modifier.hazeEffect(
-                        state = hazeState,
-                        style = HazeStyle(
-                            tint = HazeTint(tintColor),
-                            blurRadius = blurRadius,
-                            noiseFactor = 0f,
-                            fallbackTint = HazeTint(GlassScrim),
-                        ),
-                    )
-                } else {
-                    Modifier.background(GlassScrim)
-                },
-            )
+            .background(tintColor)
             .border(BorderStroke(1.dp, borderColor), shape),
         content = content,
     )
