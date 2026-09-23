@@ -85,7 +85,9 @@ import fr.streamia.tv.ui.theme.RadiusPill
 import fr.streamia.tv.ui.theme.TypeBody
 import fr.streamia.tv.ui.theme.TypeSectionTitle
 import fr.streamia.tv.ui.theme.WarmSignal
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.onEach
@@ -227,27 +229,39 @@ fun BrowserScreen(
             hasHistory = historyForType.isNotEmpty(),
         )
     }
-    val entries = remember(
-        catalog, selectedType, selectedCategoryId, favoriteEntriesForType, historyForType,
-        excludedCategoryIds, library.hiddenEntries, appSettings.liveChannelSortOrder, appSettings.vodSortOrder,
-    ) {
-        when (selectedCategoryId) {
-            FAVORITES_CATEGORY_ID -> favoriteEntriesForType
-            HISTORY_CATEGORY_ID -> historyForType.map { it.second }
-            else -> {
-                val filtered = catalog.entriesIn(selectedType, selectedCategoryId).filterNot {
-                    it.key in library.hiddenEntries || it.categoryId in excludedCategoryIds
-                }
-                // « Favoris »/« Historique » gardent leur propre ordre (ajout / dernière lecture),
-                // qui perdrait son sens sous un tri alphabétique ou par numéro : seule une vraie
-                // catégorie suit la préférence de tri de son type.
-                when (selectedType) {
-                    MediaType.Live -> sortedForLiveDisplay(filtered, appSettings.liveChannelSortOrder)
-                    else -> sortedForVodDisplay(filtered, appSettings.vodSortOrder)
-                }
+    fun computeEntries(): List<MediaEntry> = when (selectedCategoryId) {
+        FAVORITES_CATEGORY_ID -> favoriteEntriesForType
+        HISTORY_CATEGORY_ID -> historyForType.map { it.second }
+        else -> {
+            val filtered = catalog.entriesIn(selectedType, selectedCategoryId).filterNot {
+                it.key in library.hiddenEntries || it.categoryId in excludedCategoryIds
+            }
+            // « Favoris »/« Historique » gardent leur propre ordre (ajout / dernière lecture),
+            // qui perdrait son sens sous un tri alphabétique ou par numéro : seule une vraie
+            // catégorie suit la préférence de tri de son type.
+            when (selectedType) {
+                MediaType.Live -> sortedForLiveDisplay(filtered, appSettings.liveChannelSortOrder)
+                else -> sortedForVodDisplay(filtered, appSettings.vodSortOrder)
             }
         }
     }
+    // Changement de type/catégorie (geste de l'utilisateur) : calcul immédiat, pour que la liste
+    // affichée corresponde toujours à la catégorie choisie. Les autres changements (pages chargées
+    // en arrière-plan, favoris, tri…) recalculent hors du thread principal en gardant la liste
+    // courante affichée d'ici là : trier des milliers de chaînes à chaque page fusionnée faisait
+    // saccader la navigation pendant l'hydratation du catalogue.
+    val location = selectedType to selectedCategoryId
+    var computedEntries by remember(credentials) { mutableStateOf(location to computeEntries()) }
+    if (computedEntries.first != location) computedEntries = location to computeEntries()
+    LaunchedEffect(
+        catalog, favoriteEntriesForType, historyForType, excludedCategoryIds, library.hiddenEntries,
+        appSettings.liveChannelSortOrder, appSettings.vodSortOrder,
+    ) {
+        val target = location
+        val result = withContext(Dispatchers.Default) { computeEntries() }
+        if (computedEntries.first == target) computedEntries = target to result
+    }
+    val entries = computedEntries.second
     val historyByKey = remember(historyForType) { historyForType.associate { it.second.key to it.first } }
 
     var pendingLockedCategory by remember { mutableStateOf<MediaCategory?>(null) }
