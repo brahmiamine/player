@@ -99,6 +99,8 @@ fun FocusableSurface(
     // tuiles). Mis à `true`, elle se cintre à son contenu : indispensable dans un FlowRow, où un
     // `fillMaxSize()` interne forçait sinon chaque « chip » à occuper toute une ligne.
     wrapContent: Boolean = false,
+    // Agrandissement au focus : à réduire pour les lignes pleine largeur, où 6 % déborde de l'écran.
+    focusScale: Float = 1.06f,
     content: @Composable () -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
@@ -110,7 +112,7 @@ fun FocusableSurface(
     // graphicsLayer : bon marché. Pas d'ombre au repos ni d'élévation animée — une ombre animée
     // force son re-rendu à chaque image, et une ombre par ligne dans des listes de centaines de
     // chaînes suffisait à faire saccader les petits GPU des boîtiers TV.
-    val scale by animateFloatAsState(if (focused) 1.06f else 1f, animationSpec = tween(110), label = "focus-scale")
+    val scale by animateFloatAsState(if (focused) focusScale else 1f, animationSpec = tween(110), label = "focus-scale")
     val elevation = when {
         focused -> 18.dp
         accent -> 10.dp

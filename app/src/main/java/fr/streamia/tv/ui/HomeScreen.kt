@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -41,6 +42,7 @@ import fr.streamia.tv.data.isResumable
 import fr.streamia.tv.domain.Catalog
 import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.MediaType
+import fr.streamia.tv.domain.isVisualSeparator
 import fr.streamia.tv.recommendation.RecommendationRow
 import fr.streamia.tv.recommendation.RecommendedMedia
 import fr.streamia.tv.tvprogramme.ResolvedTvProgrammeItem
@@ -166,6 +168,23 @@ fun HomeScreen(
             .toList()
     }
 
+    // Chaînes tunisiennes : catégorie ou chaîne dont le nom commence par « TN » (« |TN| », « TN: »…),
+    // mot entier pour ne pas attraper « TNT ».
+    val tunisiaCards = remember(catalog, library.hiddenEntries, hiddenCategoryIdsByType) {
+        val hiddenCategories = hiddenCategoryIdsByType[MediaType.Live].orEmpty()
+        val tnCategoryIds = catalog.categoriesFor(MediaType.Live)
+            .filter { it.id !in hiddenCategories && TUNISIA_PREFIX.containsMatchIn(it.name) }
+            .map { it.id }
+        val fromCategories = tnCategoryIds.asSequence().flatMap { catalog.entriesIn(MediaType.Live, it) }
+        val byName = catalog.entries.asSequence()
+            .filter { it.type == MediaType.Live && it.categoryId !in hiddenCategories && TUNISIA_PREFIX.containsMatchIn(it.displayName) }
+        (fromCategories + byName)
+            .filterNot { it.isVisualSeparator() || it.key in library.hiddenEntries }
+            .distinctBy { it.key }
+            .map { it to null as Float? }
+            .toList()
+    }
+
     // Une seule horloge pour toutes les rangées « en direct » (au lieu d'une boucle par rangée,
     // chacune invalidant l'accueil de son côté).
     val hasLiveRows = tvProgrammeNow.isNotEmpty() || beinSportsNow.isNotEmpty() || ukGuideNow.isNotEmpty()
@@ -208,6 +227,7 @@ fun HomeScreen(
     val visibleRowKeys = remember(
         resumeCards,
         favoriteCards,
+        tunisiaCards,
         tvProgrammeNow,
         tvProgrammeTonight,
         beinSportsNow,
@@ -219,6 +239,7 @@ fun HomeScreen(
         buildList {
             if (resumeCards.isNotEmpty()) add(HomeRowKey.Resume)
             if (favoriteCards.isNotEmpty()) add(HomeRowKey.Favorites)
+            if (tunisiaCards.isNotEmpty()) add(HomeRowKey.Tunisia)
             if (tvProgrammeNow.isNotEmpty()) add(HomeRowKey.TvProgrammeNow)
             if (tvProgrammeTonight.isNotEmpty()) add(HomeRowKey.TvProgrammeTonight)
             if (beinSportsNow.isNotEmpty()) add(HomeRowKey.BeinSportsNow)
@@ -345,6 +366,25 @@ fun HomeScreen(
                             ?.itemKey,
                         onEntryClick = { entry ->
                             onOpenHomeEntry(entry, HomeRowKey.Favorites, entry.key)
+                        },
+                    )
+                    Spacer(Modifier.height(CardRowSpacing))
+                }
+            }
+        }
+
+        if (tunisiaCards.isNotEmpty()) {
+            item {
+                Column(Modifier.fillMaxWidth()) {
+                    HomeCardRow(
+                        title = "Chaînes TV Tunisie",
+                        entries = tunisiaCards,
+                        firstFocusRequester = null,
+                        restoreItemKey = restoreTarget
+                            ?.takeIf { it.homeRowKey == HomeRowKey.Tunisia }
+                            ?.itemKey,
+                        onEntryClick = { entry ->
+                            onOpenHomeEntry(entry, HomeRowKey.Tunisia, entry.key)
                         },
                     )
                     Spacer(Modifier.height(CardRowSpacing))
@@ -658,7 +698,7 @@ private fun HomeCardRow(
     Column(Modifier.fillMaxWidth()) {
         SectionLabel(title, fontSize = 16.sp)
         Spacer(Modifier.height(10.dp))
-        LazyRow(state = rowState, modifier = Modifier.focusRestorer(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        LazyRow(state = rowState, modifier = Modifier.focusRestorer(), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             itemsIndexed(entries, key = { _, (entry, _) -> entry.key }) { index, (entry, progress) ->
                 val cardModifier = when {
                     entry.key == restoreItemKey -> Modifier.focusRequester(restoreFocus)
@@ -796,7 +836,7 @@ private fun <T> ProgrammeRow(
     Column(Modifier.fillMaxWidth()) {
         SectionLabel(title, fontSize = 16.sp)
         Spacer(Modifier.height(10.dp))
-        LazyRow(state = rowState, modifier = Modifier.focusRestorer(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        LazyRow(state = rowState, modifier = Modifier.focusRestorer(), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             itemsIndexed(items, key = { _, item -> key(item) }) { index, item ->
                 val cardModifier = when {
                     key(item) == restoreItemKey -> Modifier.focusRequester(restoreFocus)
@@ -929,7 +969,7 @@ private fun HomeRecommendationRow(
     Column(Modifier.fillMaxWidth()) {
         SectionLabel(row.title, fontSize = 16.sp)
         Spacer(Modifier.height(10.dp))
-        LazyRow(state = rowState, modifier = Modifier.focusRestorer(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        LazyRow(state = rowState, modifier = Modifier.focusRestorer(), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             itemsIndexed(row.items, key = { _, recommended -> recommended.entry.key }) { index, recommended ->
                 val cardModifier = when {
                     recommended.entry.key == restoreItemKey -> Modifier.focusRequester(restoreFocus)
@@ -1130,3 +1170,5 @@ private val ClockFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:
 
 private fun formatExpiry(epochSeconds: Long): String =
     SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date(epochSeconds * 1000L))
+
+private val TUNISIA_PREFIX = Regex("""^\W*tn\b""", RegexOption.IGNORE_CASE)

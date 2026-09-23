@@ -37,9 +37,11 @@ enum class StreamiaIconGlyph {
 fun StreamiaIcon(
     glyph: StreamiaIconGlyph,
     modifier: Modifier = Modifier,
-    tint: Color = FocusBlueBright,
+    tint: Color? = null,
     size: Dp = 24.dp,
 ) {
+    // Favoris : étoile jaune partout, quel que soit l'écran.
+    val tint = tint ?: if (glyph == StreamiaIconGlyph.Star || glyph == StreamiaIconGlyph.StarOutline) FavoriteYellow else FocusBlueBright
     Canvas(modifier.size(size)) {
         // Trait plus fin (Phosphor "regular" plutôt que "bold") pour rester dans le registre
         // discret de Nocturne — un trait, jamais un aplat.
@@ -287,3 +289,5 @@ private fun DrawScope.drawCheckbox(tint: Color, stroke: Stroke, checked: Boolean
         drawPath(path, tint, style = Stroke(width = stroke.width * 0.85f, cap = StrokeCap.Round, join = StrokeJoin.Round))
     }
 }
+
+val FavoriteYellow = Color(0xFFFFC83D)

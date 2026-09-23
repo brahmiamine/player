@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -139,11 +140,12 @@ fun SearchScreen(
                         }
                     }
                 }
-                LazyColumn(state = resultListState, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                LazyColumn(state = resultListState, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(entries, key = MediaEntry::key) { entry ->
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             FocusableSurface(
                                 onClick = { onOpenEntry(entry) },
+                                focusScale = 1.01f,
                                 modifier = Modifier
                                     .weight(1f)
                                     .height(76.dp)
@@ -153,7 +155,7 @@ fun SearchScreen(
                                     ),
                             ) {
                                 Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    ChannelLogo(entry.iconUrl, entry.displayName, Modifier.size(52.dp))
+                                    ChannelLogo(entry.iconUrl, entry.displayName, Modifier.size(64.dp))
                                     Spacer(Modifier.width(12.dp))
                                     Column(Modifier.weight(1f)) {
                                         Text(entry.displayName, color = Ink, fontSize = TypeBody, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -178,7 +180,7 @@ fun SearchScreen(
                                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                     StreamiaIcon(
                                         if (entry.key in favoriteEntries) StreamiaIconGlyph.Star else StreamiaIconGlyph.StarOutline,
-                                        size = 22.dp,
+                                        size = 30.dp,
                                     )
                                 }
                             }

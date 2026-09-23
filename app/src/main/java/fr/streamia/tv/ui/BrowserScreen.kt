@@ -224,11 +224,12 @@ fun BrowserScreen(
             }
             .toList()
     }
-    val categories = remember(baseCategories, favoriteEntriesForType.size, historyForType.size, selectedType) {
+    val categories = remember(baseCategories, favoriteEntriesForType.size, historyForType.size, selectedType, library.favoriteCategories) {
         buildBrowserCategories(
             type = selectedType,
             providerCategories = baseCategories,
-            favoriteCategoryKeys = library.favoriteCategories,
+            // Seules les catégories du Direct peuvent être mises en favori (remontées en tête).
+            favoriteCategoryKeys = if (selectedType == MediaType.Live) library.favoriteCategories else emptySet(),
             hasFavoriteEntries = favoriteEntriesForType.isNotEmpty(),
             hasHistory = historyForType.isNotEmpty(),
         )
@@ -854,7 +855,7 @@ private fun LiveChannelList(
                             }
                             if (entry.key in favoriteEntries) {
                                 Spacer(Modifier.width(5.dp))
-                                StreamiaIcon(StreamiaIconGlyph.Star, size = 12.dp)
+                                StreamiaIcon(StreamiaIconGlyph.Star, size = 18.dp)
                             }
                         }
                     }
@@ -983,20 +984,24 @@ private fun LivePreview(
                 if (error) {
                     Text("Aperçu indisponible", color = MutedInk, fontSize = TypeBody, modifier = Modifier.align(Alignment.Center))
                 }
-                Column(
+                Row(
                     Modifier
                         .align(Alignment.BottomStart)
                         .fillMaxWidth()
                         .background(Night.copy(alpha = 0.72f))
                         .padding(horizontal = 14.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(entry.displayName, color = Ink, fontSize = TypeBody, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Spacer(Modifier.height(3.dp))
+                    ChannelLogo(entry.iconUrl, entry.displayName, Modifier.size(64.dp))
+                    Spacer(Modifier.width(10.dp))
                     Text(
-                        "CH ${entry.number}${if (favorite) " · ★ Favori" else ""}",
-                        color = FocusBlueBright,
-                        fontSize = 14.sp,
+                        entry.displayName + if (favorite) " ★" else "",
+                        color = Ink,
+                        fontSize = TypeBody,
+                        fontWeight = FontWeight.Bold,
                         maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
             } else {
@@ -1127,7 +1132,7 @@ private fun CategoryRail(
                 val virtual = category.id in setOf(Catalog.ALL_CATEGORY_ID, FAVORITES_CATEGORY_ID, HISTORY_CATEGORY_ID)
                 FocusableSurface(
                     onClick = { onSelected(category) },
-                    onLongClick = if (virtual) null else ({ onToggleFavorite(category) }),
+                    onLongClick = if (virtual || type != MediaType.Live) null else ({ onToggleFavorite(category) }),
                     selected = selectedCategoryId == category.id,
                     idleBackground = if (translucent) Color.Transparent else DeepSurface,
                     modifier = Modifier
@@ -1146,8 +1151,8 @@ private fun CategoryRail(
                         .then(if (category.id == selectedCategoryId) Modifier.focusRequester(selectedFocus) else Modifier),
                 ) {
                     Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                        if (!virtual && category.key in favoriteCategories) {
-                            StreamiaIcon(StreamiaIconGlyph.Star, size = 12.dp)
+                        if (!virtual && type == MediaType.Live && category.key in favoriteCategories) {
+                            StreamiaIcon(StreamiaIconGlyph.Star, size = 18.dp)
                             Spacer(Modifier.width(5.dp))
                         }
                         if (!virtual && category.key in lockedCategories) {
@@ -1310,7 +1315,7 @@ private fun PosterCard(
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 val ratingText = entry.rating?.let { "%.1f".format(it) }
                 if (ratingText != null) {
-                    StreamiaIcon(StreamiaIconGlyph.Star, size = 11.dp)
+                    StreamiaIcon(StreamiaIconGlyph.Star, size = 16.dp)
                     Spacer(Modifier.width(3.dp))
                     Text(ratingText, color = FocusBlueBright, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                 } else {
@@ -1321,7 +1326,7 @@ private fun PosterCard(
                 if (history != null && history.progress > 0.02f) {
                     Text("${history.progressPercent()}%", color = MutedInk, fontSize = 14.sp)
                 } else if (favorite) {
-                    StreamiaIcon(StreamiaIconGlyph.Star, size = 12.dp)
+                    StreamiaIcon(StreamiaIconGlyph.Star, size = 18.dp)
                 }
             }
         }

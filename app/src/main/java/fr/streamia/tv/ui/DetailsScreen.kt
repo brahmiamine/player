@@ -85,7 +85,7 @@ fun MovieDetailsScreen(
                     contentDescription = if (favorite) "Retirer des favoris" else "Ajouter aux favoris",
                 ) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        StreamiaIcon(if (favorite) StreamiaIconGlyph.Star else StreamiaIconGlyph.StarOutline, size = 22.dp)
+                        StreamiaIcon(if (favorite) StreamiaIconGlyph.Star else StreamiaIconGlyph.StarOutline, size = 30.dp)
                     }
                 }
                 FocusableSurface(
