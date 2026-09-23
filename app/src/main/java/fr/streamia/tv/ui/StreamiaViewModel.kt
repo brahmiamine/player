@@ -118,6 +118,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     private var epgChannelJob: Job? = null
     private var epgTickerJob: Job? = null
     private var zapJob: Job? = null
+    private var secondaryLoadsJob: Job? = null
     // Clé comparée par identité des instances (catalogue/ensembles), recalculée seulement quand
     // l'un d'eux change réellement.
     private var zapIndexCache: Pair<List<Any>, LiveZapIndex>? = null
@@ -172,11 +173,8 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         // la journée courante en mémoire sans aucun appel réseau, même quand le démarrage reprend
         // directement le dernier flux Live et contourne openProfile()/showCatalog().
         warmEpgGuideCache(profileId)
-        loadLiveOnSatMatches(forceRefresh = false)
-        loadTvProgrammeTonight(forceRefresh = false)
-        loadTvProgrammeNow(forceRefresh = false)
-        loadBeinSportsGuide(forceRefresh = false)
-        loadUkGuide(forceRefresh = false)
+        // Reprise directe dans le lecteur : la vidéo passe d'abord, les guides tiers attendent.
+        scheduleSecondaryLoads(STARTUP_SECONDARY_LOADS_PLAYER_DELAY_MS)
         viewModelScope.launch {
             // Catalogue déjà résolu (favoris/ordre déjà appliqués) persisté lors d'une précédente
             // réconciliation réussie pour ce profil : s'il est encore valide pour l'organisation
@@ -297,11 +295,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 )
                 warmEpgGuideCache(profileId)
                 refreshHomeRecommendations()
-                loadLiveOnSatMatches(forceRefresh = false)
-                loadTvProgrammeTonight(forceRefresh = false)
-        loadTvProgrammeNow(forceRefresh = false)
-        loadBeinSportsGuide(forceRefresh = false)
-        loadUkGuide(forceRefresh = false)
+                scheduleSecondaryLoads(STARTUP_SECONDARY_LOADS_HOME_DELAY_MS)
                 try {
                     mergeCatalog(repository.openProfile(profileId, knownCache = cachedCatalog))
                 } catch (error: Throwable) {
@@ -2495,6 +2489,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     }
 
     private fun showLogin() {
+        secondaryLoadsJob?.cancel()
         epgGuideMemoryCache.clear()
         homeRecommendationJob?.cancel()
         homeRecommendationJob = null
@@ -2557,11 +2552,30 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         warmEpgGuideCache(loaded.profileId)
         ensureSectionLoaded(MediaType.Live)
         refreshHomeRecommendations()
-        loadLiveOnSatMatches(forceRefresh = false)
-        loadTvProgrammeTonight(forceRefresh = false)
-        loadTvProgrammeNow(forceRefresh = false)
-        loadBeinSportsGuide(forceRefresh = false)
-        loadUkGuide(forceRefresh = false)
+        scheduleSecondaryLoads(STARTUP_SECONDARY_LOADS_HOME_DELAY_MS)
+    }
+
+    /**
+     * Guides tiers (scraping + parsing Jsoup) lancés après le premier affichage et l'un après
+     * l'autre plutôt que tous en même temps que le catalogue et la première image vidéo : sur un
+     * boîtier à 4 petits cœurs, ils se disputaient le CPU au moment où l'utilisateur navigue.
+     */
+    private fun scheduleSecondaryLoads(initialDelayMs: Long) {
+        secondaryLoadsJob?.cancel()
+        secondaryLoadsJob = viewModelScope.launch {
+            delay(initialDelayMs)
+            val loads = listOf<() -> Unit>(
+                { loadTvProgrammeNow(forceRefresh = false) },
+                { loadBeinSportsGuide(forceRefresh = false) },
+                { loadUkGuide(forceRefresh = false) },
+                { loadTvProgrammeTonight(forceRefresh = false) },
+                { loadLiveOnSatMatches(forceRefresh = false) },
+            )
+            loads.forEach { load ->
+                load()
+                delay(SECONDARY_LOADS_GAP_MS)
+            }
+        }
     }
 
     private fun showError(error: Throwable) {
@@ -2666,6 +2680,9 @@ sealed interface StreamiaScreen {
 
 private const val EPG_PLAYER_REFRESH_MS = 30_000L
 private const val ZAP_SETTLE_MS = 350L
+private const val STARTUP_SECONDARY_LOADS_HOME_DELAY_MS = 1_200L
+private const val STARTUP_SECONDARY_LOADS_PLAYER_DELAY_MS = 8_000L
+private const val SECONDARY_LOADS_GAP_MS = 600L
 private const val MAX_EPG_DAY_SPAN = 30L
 private const val HOME_RECOMMENDATION_CANDIDATE_LIMIT = 400
 private const val HOME_RECOMMENDATION_RECENT_LIMIT = 240

@@ -27,6 +27,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -164,29 +165,21 @@ fun HomeScreen(
             .toList()
     }
 
-    var tvProgrammeNowEpochMillis by remember { mutableStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(tvProgrammeNow) {
-        if (tvProgrammeNow.isEmpty()) return@LaunchedEffect
+    // Une seule horloge pour toutes les rangées « en direct » (au lieu d'une boucle par rangée,
+    // chacune invalidant l'accueil de son côté).
+    val hasLiveRows = tvProgrammeNow.isNotEmpty() || beinSportsNow.isNotEmpty() || ukGuideNow.isNotEmpty()
+    var liveRowsNowEpochMillis by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(hasLiveRows) {
+        if (!hasLiveRows) return@LaunchedEffect
         while (true) {
-            tvProgrammeNowEpochMillis = System.currentTimeMillis()
+            liveRowsNowEpochMillis = System.currentTimeMillis()
             delay(TV_PROGRAMME_PROGRESS_REFRESH_MS)
         }
     }
-    var beinNowEpochMillis by remember { mutableStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(beinSportsNow) {
-        if (beinSportsNow.isEmpty()) return@LaunchedEffect
-        while (true) {
-            beinNowEpochMillis = System.currentTimeMillis()
-            delay(TV_PROGRAMME_PROGRESS_REFRESH_MS)
-        }
-    }
-    var ukGuideNowTime by remember { mutableStateOf(LocalTime.now(UK_GUIDE_ZONE)) }
-    LaunchedEffect(ukGuideNow) {
-        if (ukGuideNow.isEmpty()) return@LaunchedEffect
-        while (true) {
-            ukGuideNowTime = LocalTime.now(UK_GUIDE_ZONE)
-            delay(TV_PROGRAMME_PROGRESS_REFRESH_MS)
-        }
+    val tvProgrammeNowEpochMillis = liveRowsNowEpochMillis
+    val beinNowEpochMillis = liveRowsNowEpochMillis
+    val ukGuideNowTime = remember(liveRowsNowEpochMillis) {
+        java.time.Instant.ofEpochMilli(liveRowsNowEpochMillis).atZone(UK_GUIDE_ZONE).toLocalTime()
     }
     LaunchedEffect(Unit) {
         while (true) {
@@ -204,35 +197,9 @@ fun HomeScreen(
     // Une carte précise de la grille à refocaliser (retour depuis une tuile) l'emporte sur le focus
     // par défaut : les rangées ne réclament alors pas le focus. Un retour vers une carte de rangée
     // (origine « Home ») reste prioritaire.
+    // La navigation principale (Direct, Films, Séries…) est en tête de l'accueil et reçoit le focus
+    // initial : le direct est à un appui sur OK, les rangées de contenu défilent en dessous.
     val preferGridFocus = focusTarget != null && !restoringHome
-    val focusOnResume = !preferGridFocus && resumeCards.isNotEmpty()
-    val focusOnFavorites = !preferGridFocus && !focusOnResume && favoriteCards.isNotEmpty()
-    val focusOnTvProgrammeNow =
-        !preferGridFocus && !focusOnResume && !focusOnFavorites && tvProgrammeNow.isNotEmpty()
-    val focusOnTvProgrammeTonight =
-        !preferGridFocus && !focusOnResume && !focusOnFavorites && !focusOnTvProgrammeNow &&
-            tvProgrammeTonight.isNotEmpty()
-    val focusOnTvProgramme = focusOnTvProgrammeNow || focusOnTvProgrammeTonight
-    val focusOnBeinSportsNow =
-        !preferGridFocus && !focusOnResume && !focusOnFavorites && !focusOnTvProgramme &&
-            beinSportsNow.isNotEmpty()
-    val focusOnBeinSportsNext =
-        !preferGridFocus && !focusOnResume && !focusOnFavorites && !focusOnTvProgramme &&
-            !focusOnBeinSportsNow && beinSportsNext.isNotEmpty()
-    val focusOnBeinSports = focusOnBeinSportsNow || focusOnBeinSportsNext
-    val focusOnUkGuideNow =
-        !preferGridFocus && !focusOnResume && !focusOnFavorites && !focusOnTvProgramme && !focusOnBeinSports &&
-            ukGuideNow.isNotEmpty()
-    val focusOnUkGuideNext =
-        !preferGridFocus && !focusOnResume && !focusOnFavorites && !focusOnTvProgramme && !focusOnBeinSports &&
-            !focusOnUkGuideNow && ukGuideNext.isNotEmpty()
-    val focusOnUkGuide = focusOnUkGuideNow || focusOnUkGuideNext
-    val focusOnRecommendations =
-        !preferGridFocus && !focusOnResume && !focusOnFavorites && !focusOnTvProgramme && !focusOnBeinSports &&
-            !focusOnUkGuide && recommendationRows.isNotEmpty()
-    val focusOnGrid =
-        !focusOnResume && !focusOnFavorites && !focusOnTvProgramme && !focusOnBeinSports &&
-            !focusOnUkGuide && !focusOnRecommendations
 
     val homeListState = rememberLazyListState()
     val restoreTarget = restoreContext?.takeIf { it.origin == ContentReturnOrigin.Home }
@@ -263,7 +230,7 @@ fun HomeScreen(
     LaunchedEffect(effectiveRestoreRowKey, visibleRowKeys) {
         val rowIndex = effectiveRestoreRowKey?.let(visibleRowKeys::indexOf) ?: -1
         if (rowIndex >= 0) {
-            homeListState.scrollToItem(rowIndex + 1)
+            homeListState.scrollToItem(rowIndex + 2)
         } else if (restoringHome) {
             // La rangée ou la carte visée a disparu entre-temps (match terminé, catégorie masquée,
             // rangée recalculée) : sans ce repli, l'accueil resterait sans focus et la télécommande
@@ -274,7 +241,7 @@ fun HomeScreen(
 
     // Retour depuis une tuile (TV en direct, Films, Séries, Recherche, Guide TV, Paramètres…) :
     // on fait défiler jusqu'à la grille d'actions puis on repose le focus sur la même carte.
-    val gridListIndex = 1 + visibleRowKeys.size
+    val gridListIndex = 1
     LaunchedEffect(focusTarget, gridListIndex, restoringHome) {
         if (focusTarget == null) return@LaunchedEffect
         if (restoringHome) {
@@ -328,13 +295,33 @@ fun HomeScreen(
             }
         }
 
+        item {
+            MainActionGrid(
+                catalog = catalog,
+                catalogLoading = catalogLoading,
+                busy = busy,
+                firstFocus = if (!preferGridFocus) firstFocus else null,
+                focusTarget = focusTarget,
+                gridFocusRequester = gridFocusRequester,
+                onOpenSection = onOpenSection,
+                onSearch = onSearch,
+                onEpg = onEpg,
+                onSettings = onSettings,
+                onRefresh = onRefresh,
+                onChangePlaylist = onChangePlaylist,
+                onOpenLiveMatches = onOpenLiveMatches,
+                modifier = Modifier.fillMaxWidth().height(MainGridHeight),
+            )
+            Spacer(Modifier.height(CardRowSpacing))
+        }
+
         if (resumeCards.isNotEmpty()) {
             item {
                 Column(Modifier.fillMaxWidth()) {
                     HomeCardRow(
                         title = "Reprendre la lecture",
                         entries = resumeCards,
-                        firstFocusRequester = if (focusOnResume) firstFocus else null,
+                        firstFocusRequester = null,
                         restoreItemKey = restoreTarget
                             ?.takeIf { it.homeRowKey == HomeRowKey.Resume }
                             ?.itemKey,
@@ -351,7 +338,7 @@ fun HomeScreen(
                     HomeCardRow(
                         title = "Favoris",
                         entries = favoriteCards,
-                        firstFocusRequester = if (focusOnFavorites) firstFocus else null,
+                        firstFocusRequester = null,
                         restoreItemKey = restoreTarget
                             ?.takeIf { it.homeRowKey == HomeRowKey.Favorites }
                             ?.itemKey,
@@ -370,7 +357,7 @@ fun HomeScreen(
                     TvProgrammeNowRow(
                         items = tvProgrammeNow,
                         nowEpochMillis = tvProgrammeNowEpochMillis,
-                        firstFocusRequester = if (focusOnTvProgrammeNow) firstFocus else null,
+                        firstFocusRequester = null,
                         restoreItemKey = restoreTarget
                             ?.takeIf { it.homeRowKey == HomeRowKey.TvProgrammeNow }
                             ?.itemKey,
@@ -392,7 +379,7 @@ fun HomeScreen(
                 Column(Modifier.fillMaxWidth()) {
                     TvProgrammeTonightRow(
                         items = tvProgrammeTonight,
-                        firstFocusRequester = if (focusOnTvProgrammeTonight) firstFocus else null,
+                        firstFocusRequester = null,
                         restoreItemKey = restoreTarget
                             ?.takeIf { it.homeRowKey == HomeRowKey.TvProgrammeTonight }
                             ?.itemKey,
@@ -417,7 +404,7 @@ fun HomeScreen(
                         items = beinSportsNow,
                         nowEpochMillis = beinNowEpochMillis,
                         showLive = true,
-                        firstFocusRequester = if (focusOnBeinSportsNow) firstFocus else null,
+                        firstFocusRequester = null,
                         restoreItemKey = restoreTarget
                             ?.takeIf { it.homeRowKey == HomeRowKey.BeinSportsNow }
                             ?.itemKey,
@@ -442,7 +429,7 @@ fun HomeScreen(
                         items = beinSportsNext,
                         nowEpochMillis = beinNowEpochMillis,
                         showLive = false,
-                        firstFocusRequester = if (focusOnBeinSportsNext) firstFocus else null,
+                        firstFocusRequester = null,
                         restoreItemKey = restoreTarget
                             ?.takeIf { it.homeRowKey == HomeRowKey.BeinSportsNext }
                             ?.itemKey,
@@ -467,7 +454,7 @@ fun HomeScreen(
                         items = ukGuideNow,
                         now = ukGuideNowTime,
                         showLive = true,
-                        firstFocusRequester = if (focusOnUkGuideNow) firstFocus else null,
+                        firstFocusRequester = null,
                         restoreItemKey = restoreTarget
                             ?.takeIf { it.homeRowKey == HomeRowKey.UkGuideNow }
                             ?.itemKey,
@@ -492,7 +479,7 @@ fun HomeScreen(
                         items = ukGuideNext,
                         now = ukGuideNowTime,
                         showLive = false,
-                        firstFocusRequester = if (focusOnUkGuideNext) firstFocus else null,
+                        firstFocusRequester = null,
                         restoreItemKey = restoreTarget
                             ?.takeIf { it.homeRowKey == HomeRowKey.UkGuideNext }
                             ?.itemKey,
@@ -513,7 +500,7 @@ fun HomeScreen(
             Column(Modifier.fillMaxWidth()) {
                 HomeRecommendationRow(
                     row = row,
-                    firstFocusRequester = if (focusOnRecommendations && index == 0) firstFocus else null,
+                    firstFocusRequester = null,
                     restoreItemKey = restoreTarget
                         ?.takeIf { it.homeRowKey == HomeRowKey.recommendation(row.kind) }
                         ?.itemKey,
@@ -525,24 +512,6 @@ fun HomeScreen(
             }
         }
 
-        item {
-            MainActionGrid(
-                catalog = catalog,
-                catalogLoading = catalogLoading,
-                busy = busy,
-                firstFocus = if (focusOnGrid && !preferGridFocus) firstFocus else null,
-                focusTarget = focusTarget,
-                gridFocusRequester = gridFocusRequester,
-                onOpenSection = onOpenSection,
-                onSearch = onSearch,
-                onEpg = onEpg,
-                onSettings = onSettings,
-                onRefresh = onRefresh,
-                onChangePlaylist = onChangePlaylist,
-                onOpenLiveMatches = onOpenLiveMatches,
-                modifier = Modifier.fillMaxWidth().height(MainGridHeight),
-            )
-        }
     }
 }
 
@@ -688,7 +657,7 @@ private fun HomeCardRow(
     Column(Modifier.fillMaxWidth()) {
         SectionLabel(title, fontSize = 16.sp)
         Spacer(Modifier.height(10.dp))
-        LazyRow(state = rowState, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        LazyRow(state = rowState, modifier = Modifier.focusRestorer(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             itemsIndexed(entries, key = { _, (entry, _) -> entry.key }) { index, (entry, progress) ->
                 val cardModifier = when {
                     entry.key == restoreItemKey -> Modifier.focusRequester(restoreFocus)
@@ -715,7 +684,7 @@ private fun LiveBadge(modifier: Modifier = Modifier) {
             .background(Danger)
             .padding(horizontal = 7.dp, vertical = 3.dp),
     ) {
-        Text("LIVE", color = Night, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        Text("LIVE", color = Night, fontSize = 12.sp, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -726,121 +695,17 @@ private fun TvProgrammeNowRow(
     firstFocusRequester: FocusRequester?,
     restoreItemKey: String?,
     onOpenProgramme: (ResolvedTvProgrammeNowItem) -> Unit,
-) {
-    val rowState = rememberLazyListState()
-    val restoreFocus = remember { FocusRequester() }
-    LaunchedEffect(restoreItemKey, items) {
-        val targetIndex = items.indexOfFirst { it.fingerprint == restoreItemKey }
-        if (targetIndex >= 0) {
-            rowState.scrollToItem(targetIndex)
-            delay(RESTORE_FOCUS_DELAY_MS)
-            runCatching { restoreFocus.requestFocus() }
-        }
-    }
-
-    Column(Modifier.fillMaxWidth()) {
-        SectionLabel("Programme TV FR en direct", fontSize = 16.sp)
-        Spacer(Modifier.height(10.dp))
-        LazyRow(state = rowState, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            itemsIndexed(items, key = { _, item -> item.fingerprint }) { index, item ->
-                val cardModifier = when {
-                    item.fingerprint == restoreItemKey -> Modifier.focusRequester(restoreFocus)
-                    index == 0 && firstFocusRequester != null -> Modifier.focusRequester(firstFocusRequester)
-                    else -> Modifier
-                }
-                TvProgrammeNowCard(
-                    item = item,
-                    nowEpochMillis = nowEpochMillis,
-                    onClick = { onOpenProgramme(item) },
-                    modifier = cardModifier,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun TvProgrammeNowCard(
-    item: ResolvedTvProgrammeNowItem,
-    nowEpochMillis: Long,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val programme = item.programme
-    val channel = item.channel
-    val progress = programme.progressAt(nowEpochMillis)
-
-    FocusableSurface(
-        onClick = onClick,
-        modifier = modifier.width(280.dp).height(300.dp),
-    ) {
-        Column(Modifier.fillMaxSize().padding(9.dp)) {
-            Box(Modifier.fillMaxWidth().height(125.dp)) {
-                MediaArtwork(
-                    programme.imageUrl,
-                    programme.title,
-                    Modifier.fillMaxSize(),
-                )
-                Text(
-                    programme.timeRangeLabel,
-                    color = Ink,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(7.dp)
-                        .clip(RoundedCornerShape(5.dp))
-                        .background(Night.copy(alpha = 0.9f))
-                        .padding(horizontal = 7.dp, vertical = 4.dp),
-                )
-                LiveBadge(Modifier.align(Alignment.TopEnd).padding(7.dp))
-            }
-            Spacer(Modifier.height(7.dp))
-            Text(
-                programme.title,
-                color = Ink,
-                fontSize = 14.sp,
-                lineHeight = 17.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Spacer(Modifier.height(7.dp))
-            if (progress != null) {
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .height(5.dp)
-                        .clip(RoundedCornerShape(3.dp))
-                        .background(MutedInk.copy(alpha = 0.24f)),
-                ) {
-                    Box(
-                        Modifier
-                            .fillMaxWidth(progress)
-                            .height(5.dp)
-                            .background(FocusBlueBright),
-                    )
-                }
-            }
-            Spacer(Modifier.weight(1f))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                ChannelLogo(
-                    channel.iconUrl,
-                    channel.displayName,
-                    Modifier.width(80.dp).height(80.dp),
-                    imagePadding = 2,
-                )
-                Spacer(Modifier.width(7.dp))
-                Text(
-                    channel.displayName,
-                    color = MutedInk,
-                    fontSize = 11.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
-    }
+) = ProgrammeRow("Programme TV FR en direct", items, { it.fingerprint }, firstFocusRequester, restoreItemKey) { item, modifier ->
+    ProgrammeCard(
+        title = item.programme.title,
+        timeLabel = item.programme.timeRangeLabel,
+        imageUrl = item.programme.imageUrl,
+        badge = ProgrammeBadge.Live,
+        progress = item.programme.progressAt(nowEpochMillis),
+        channel = item.channel,
+        onClick = { onOpenProgramme(item) },
+        modifier = modifier,
+    )
 }
 
 @Composable
@@ -849,99 +714,16 @@ private fun TvProgrammeTonightRow(
     firstFocusRequester: FocusRequester?,
     restoreItemKey: String?,
     onOpenProgramme: (ResolvedTvProgrammeItem) -> Unit,
-) {
-    val rowState = rememberLazyListState()
-    val restoreFocus = remember { FocusRequester() }
-    LaunchedEffect(restoreItemKey, items) {
-        val targetIndex = items.indexOfFirst { it.fingerprint == restoreItemKey }
-        if (targetIndex >= 0) {
-            rowState.scrollToItem(targetIndex)
-            delay(RESTORE_FOCUS_DELAY_MS)
-            runCatching { restoreFocus.requestFocus() }
-        }
-    }
-
-    Column(Modifier.fillMaxWidth()) {
-        SectionLabel("Programme TV FR ce soir", fontSize = 16.sp)
-        Spacer(Modifier.height(10.dp))
-        LazyRow(state = rowState, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            itemsIndexed(items, key = { _, item -> item.fingerprint }) { index, item ->
-                val cardModifier = when {
-                    item.fingerprint == restoreItemKey -> Modifier.focusRequester(restoreFocus)
-                    index == 0 && firstFocusRequester != null -> Modifier.focusRequester(firstFocusRequester)
-                    else -> Modifier
-                }
-                TvProgrammeTonightCard(
-                    item = item,
-                    onClick = { onOpenProgramme(item) },
-                    modifier = cardModifier,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun TvProgrammeTonightCard(
-    item: ResolvedTvProgrammeItem,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val programme = item.programme
-    val channel = item.channel
-    FocusableSurface(
-        onClick = onClick,
-        modifier = modifier.width(280.dp).height(284.dp),
-    ) {
-        Column(Modifier.fillMaxSize().padding(9.dp)) {
-            Box(Modifier.fillMaxWidth().height(125.dp)) {
-                MediaArtwork(
-                    programme.imageUrl,
-                    programme.title,
-                    Modifier.fillMaxSize(),
-                )
-                Text(
-                    programme.time,
-                    color = Ink,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(7.dp)
-                        .clip(RoundedCornerShape(5.dp))
-                        .background(Night.copy(alpha = 0.9f))
-                        .padding(horizontal = 7.dp, vertical = 4.dp),
-                )
-            }
-            Spacer(Modifier.height(7.dp))
-            Text(
-                programme.title,
-                color = Ink,
-                fontSize = 14.sp,
-                lineHeight = 17.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Spacer(Modifier.weight(1f))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                ChannelLogo(
-                    channel.iconUrl,
-                    channel.displayName,
-                    Modifier.width(80.dp).height(80.dp),
-                    imagePadding = 2,
-                )
-                Spacer(Modifier.width(7.dp))
-                Text(
-                    channel.displayName,
-                    color = MutedInk,
-                    fontSize = 11.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
-    }
+) = ProgrammeRow("Programme TV FR ce soir", items, { it.fingerprint }, firstFocusRequester, restoreItemKey) { item, modifier ->
+    ProgrammeCard(
+        title = item.programme.title,
+        timeLabel = item.programme.time,
+        imageUrl = item.programme.imageUrl,
+        badge = ProgrammeBadge.None,
+        channel = item.channel,
+        onClick = { onOpenProgramme(item) },
+        modifier = modifier,
+    )
 }
 
 @Composable
@@ -953,164 +735,18 @@ private fun BeinSportsProgrammeRow(
     firstFocusRequester: FocusRequester?,
     restoreItemKey: String?,
     onOpenProgramme: (ResolvedBeinProgrammeItem) -> Unit,
-) {
-    val rowState = rememberLazyListState()
-    val restoreFocus = remember { FocusRequester() }
-    LaunchedEffect(restoreItemKey, items) {
-        val targetIndex = items.indexOfFirst { it.fingerprint == restoreItemKey }
-        if (targetIndex >= 0) {
-            rowState.scrollToItem(targetIndex)
-            delay(RESTORE_FOCUS_DELAY_MS)
-            runCatching { restoreFocus.requestFocus() }
-        }
-    }
-
-    Column(Modifier.fillMaxWidth()) {
-        SectionLabel(title, fontSize = 16.sp)
-        Spacer(Modifier.height(10.dp))
-        LazyRow(state = rowState, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            itemsIndexed(items, key = { _, item -> item.fingerprint }) { index, item ->
-                val cardModifier = when {
-                    item.fingerprint == restoreItemKey -> Modifier.focusRequester(restoreFocus)
-                    index == 0 && firstFocusRequester != null -> Modifier.focusRequester(firstFocusRequester)
-                    else -> Modifier
-                }
-                BeinSportsProgrammeCard(
-                    item = item,
-                    nowEpochMillis = nowEpochMillis,
-                    showLive = showLive,
-                    onClick = { onOpenProgramme(item) },
-                    modifier = cardModifier,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun BeinSportsProgrammeCard(
-    item: ResolvedBeinProgrammeItem,
-    nowEpochMillis: Long,
-    showLive: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val programme = item.programme
-    val channel = item.channel
-    val progress = if (showLive) programme.progressAt(nowEpochMillis) else null
-
-    FocusableSurface(
-        onClick = onClick,
-        modifier = modifier.width(280.dp).height(300.dp),
-    ) {
-        Column(Modifier.fillMaxSize().padding(9.dp)) {
-            Box(Modifier.fillMaxWidth().height(112.dp)) {
-                if (!programme.imageUrl.isNullOrBlank()) {
-                    MediaArtwork(
-                        programme.imageUrl,
-                        programme.title,
-                        Modifier.fillMaxSize(),
-                    )
-                } else {
-                    Box(
-                        Modifier
-                            .fillMaxSize()
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(MutedInk.copy(alpha = 0.10f)),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        StreamiaIcon(
-                            StreamiaIconGlyph.Live,
-                            tint = MutedInk.copy(alpha = 0.55f),
-                            size = 44.dp,
-                        )
-                    }
-                }
-                Text(
-                    programme.timeRangeLabel,
-                    color = Ink,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(7.dp)
-                        .clip(RoundedCornerShape(5.dp))
-                        .background(Night.copy(alpha = 0.9f))
-                        .padding(horizontal = 7.dp, vertical = 4.dp),
-                )
-                if (showLive) {
-                    LiveBadge(Modifier.align(Alignment.TopEnd).padding(7.dp))
-                } else {
-                    Text(
-                        "À SUIVRE",
-                        color = Night,
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(7.dp)
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(FocusBlueBright)
-                            .padding(horizontal = 7.dp, vertical = 3.dp),
-                    )
-                }
-            }
-            Spacer(Modifier.height(7.dp))
-            Text(
-                programme.title,
-                color = Ink,
-                fontSize = 14.sp,
-                lineHeight = 17.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            programme.category?.takeIf(String::isNotBlank)?.let { category ->
-                Spacer(Modifier.height(3.dp))
-                Text(
-                    category,
-                    color = MutedInk,
-                    fontSize = 10.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            if (progress != null) {
-                Spacer(Modifier.height(7.dp))
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .height(5.dp)
-                        .clip(RoundedCornerShape(3.dp))
-                        .background(MutedInk.copy(alpha = 0.24f)),
-                ) {
-                    Box(
-                        Modifier
-                            .fillMaxWidth(progress)
-                            .height(5.dp)
-                            .background(FocusBlueBright),
-                    )
-                }
-            }
-            Spacer(Modifier.weight(1f))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                ChannelLogo(
-                    channel.iconUrl,
-                    channel.displayName,
-                    Modifier.width(80.dp).height(80.dp),
-                    imagePadding = 2,
-                )
-                Spacer(Modifier.width(7.dp))
-                Text(
-                    channel.displayName,
-                    color = MutedInk,
-                    fontSize = 11.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
-    }
+) = ProgrammeRow(title, items, { it.fingerprint }, firstFocusRequester, restoreItemKey) { item, modifier ->
+    ProgrammeCard(
+        title = item.programme.title,
+        timeLabel = item.programme.timeRangeLabel,
+        imageUrl = item.programme.imageUrl,
+        category = item.programme.category,
+        badge = if (showLive) ProgrammeBadge.Live else ProgrammeBadge.Next,
+        progress = if (showLive) item.programme.progressAt(nowEpochMillis) else null,
+        channel = item.channel,
+        onClick = { onOpenProgramme(item) },
+        modifier = modifier,
+    )
 }
 
 @Composable
@@ -1122,11 +758,33 @@ private fun UkGuideProgrammeRow(
     firstFocusRequester: FocusRequester?,
     restoreItemKey: String?,
     onOpenProgramme: (ResolvedUkProgrammeItem) -> Unit,
+) = ProgrammeRow(title, items, { it.fingerprint }, firstFocusRequester, restoreItemKey) { item, modifier ->
+    ProgrammeCard(
+        title = item.programme.title,
+        timeLabel = item.programme.timeRangeLabel,
+        imageUrl = item.programme.imageUrl,
+        badge = if (showLive) ProgrammeBadge.Live else ProgrammeBadge.Next,
+        progress = if (showLive) item.programme.progressAt(now) else null,
+        channel = item.channel,
+        onClick = { onOpenProgramme(item) },
+        modifier = modifier,
+    )
+}
+
+/** Rangée commune aux guides (FR, beIN, UK) : titre, défilement horizontal, restauration du focus. */
+@Composable
+private fun <T> ProgrammeRow(
+    title: String,
+    items: List<T>,
+    key: (T) -> String,
+    firstFocusRequester: FocusRequester?,
+    restoreItemKey: String?,
+    card: @Composable (T, Modifier) -> Unit,
 ) {
     val rowState = rememberLazyListState()
     val restoreFocus = remember { FocusRequester() }
     LaunchedEffect(restoreItemKey, items) {
-        val targetIndex = items.indexOfFirst { it.fingerprint == restoreItemKey }
+        val targetIndex = items.indexOfFirst { key(it) == restoreItemKey }
         if (targetIndex >= 0) {
             rowState.scrollToItem(targetIndex)
             delay(RESTORE_FOCUS_DELAY_MS)
@@ -1137,49 +795,42 @@ private fun UkGuideProgrammeRow(
     Column(Modifier.fillMaxWidth()) {
         SectionLabel(title, fontSize = 16.sp)
         Spacer(Modifier.height(10.dp))
-        LazyRow(state = rowState, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            itemsIndexed(items, key = { _, item -> item.fingerprint }) { index, item ->
+        LazyRow(state = rowState, modifier = Modifier.focusRestorer(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            itemsIndexed(items, key = { _, item -> key(item) }) { index, item ->
                 val cardModifier = when {
-                    item.fingerprint == restoreItemKey -> Modifier.focusRequester(restoreFocus)
+                    key(item) == restoreItemKey -> Modifier.focusRequester(restoreFocus)
                     index == 0 && firstFocusRequester != null -> Modifier.focusRequester(firstFocusRequester)
                     else -> Modifier
                 }
-                UkGuideProgrammeCard(
-                    item = item,
-                    now = now,
-                    showLive = showLive,
-                    onClick = { onOpenProgramme(item) },
-                    modifier = cardModifier,
-                )
+                card(item, cardModifier)
             }
         }
     }
 }
 
+private enum class ProgrammeBadge { None, Live, Next }
+
+/** Carte commune aux programmes (en direct, ce soir, beIN, UK). */
 @Composable
-private fun UkGuideProgrammeCard(
-    item: ResolvedUkProgrammeItem,
-    now: LocalTime,
-    showLive: Boolean,
+private fun ProgrammeCard(
+    title: String,
+    timeLabel: String,
+    imageUrl: String?,
+    badge: ProgrammeBadge,
+    channel: MediaEntry,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    category: String? = null,
+    progress: Float? = null,
 ) {
-    val programme = item.programme
-    val channel = item.channel
-    val progress = if (showLive) programme.progressAt(now) else null
-
     FocusableSurface(
         onClick = onClick,
         modifier = modifier.width(280.dp).height(300.dp),
     ) {
         Column(Modifier.fillMaxSize().padding(9.dp)) {
-            Box(Modifier.fillMaxWidth().height(112.dp)) {
-                if (!programme.imageUrl.isNullOrBlank()) {
-                    MediaArtwork(
-                        programme.imageUrl,
-                        programme.title,
-                        Modifier.fillMaxSize(),
-                    )
+            Box(Modifier.fillMaxWidth().height(118.dp)) {
+                if (!imageUrl.isNullOrBlank()) {
+                    MediaArtwork(imageUrl, title, Modifier.fillMaxSize())
                 } else {
                     Box(
                         Modifier
@@ -1188,15 +839,11 @@ private fun UkGuideProgrammeCard(
                             .background(MutedInk.copy(alpha = 0.10f)),
                         contentAlignment = Alignment.Center,
                     ) {
-                        StreamiaIcon(
-                            StreamiaIconGlyph.Live,
-                            tint = MutedInk.copy(alpha = 0.55f),
-                            size = 44.dp,
-                        )
+                        StreamiaIcon(StreamiaIconGlyph.Live, tint = MutedInk.copy(alpha = 0.55f), size = 44.dp)
                     }
                 }
                 Text(
-                    programme.timeRangeLabel,
+                    timeLabel,
                     color = Ink,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
@@ -1207,13 +854,12 @@ private fun UkGuideProgrammeCard(
                         .background(Night.copy(alpha = 0.9f))
                         .padding(horizontal = 7.dp, vertical = 4.dp),
                 )
-                if (showLive) {
-                    LiveBadge(Modifier.align(Alignment.TopEnd).padding(7.dp))
-                } else {
-                    Text(
+                when (badge) {
+                    ProgrammeBadge.Live -> LiveBadge(Modifier.align(Alignment.TopEnd).padding(7.dp))
+                    ProgrammeBadge.Next -> Text(
                         "À SUIVRE",
                         color = Night,
-                        fontSize = 9.sp,
+                        fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier
                             .align(Alignment.TopEnd)
@@ -1222,11 +868,12 @@ private fun UkGuideProgrammeCard(
                             .background(FocusBlueBright)
                             .padding(horizontal = 7.dp, vertical = 3.dp),
                     )
+                    ProgrammeBadge.None -> Unit
                 }
             }
             Spacer(Modifier.height(7.dp))
             Text(
-                programme.title,
+                title,
                 color = Ink,
                 fontSize = 14.sp,
                 lineHeight = 17.sp,
@@ -1234,6 +881,10 @@ private fun UkGuideProgrammeCard(
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
+            category?.takeIf(String::isNotBlank)?.let {
+                Spacer(Modifier.height(3.dp))
+                Text(it, color = MutedInk, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
             if (progress != null) {
                 Spacer(Modifier.height(7.dp))
                 Box(
@@ -1243,30 +894,14 @@ private fun UkGuideProgrammeCard(
                         .clip(RoundedCornerShape(3.dp))
                         .background(MutedInk.copy(alpha = 0.24f)),
                 ) {
-                    Box(
-                        Modifier
-                            .fillMaxWidth(progress)
-                            .height(5.dp)
-                            .background(FocusBlueBright),
-                    )
+                    Box(Modifier.fillMaxWidth(progress).height(5.dp).background(FocusBlueBright))
                 }
             }
             Spacer(Modifier.weight(1f))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                ChannelLogo(
-                    channel.iconUrl,
-                    channel.displayName,
-                    Modifier.width(80.dp).height(80.dp),
-                    imagePadding = 2,
-                )
+                ChannelLogo(channel.iconUrl, channel.displayName, Modifier.width(80.dp).height(80.dp), imagePadding = 2)
                 Spacer(Modifier.width(7.dp))
-                Text(
-                    channel.displayName,
-                    color = MutedInk,
-                    fontSize = 11.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                Text(channel.displayName, color = MutedInk, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
     }
@@ -1293,7 +928,7 @@ private fun HomeRecommendationRow(
     Column(Modifier.fillMaxWidth()) {
         SectionLabel(row.title, fontSize = 16.sp)
         Spacer(Modifier.height(10.dp))
-        LazyRow(state = rowState, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        LazyRow(state = rowState, modifier = Modifier.focusRestorer(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             itemsIndexed(row.items, key = { _, recommended -> recommended.entry.key }) { index, recommended ->
                 val cardModifier = when {
                     recommended.entry.key == restoreItemKey -> Modifier.focusRequester(restoreFocus)
@@ -1337,7 +972,7 @@ private fun HomeRecommendationCard(
             Text(
                 recommended.reason ?: entry.type.displayName,
                 color = FocusBlueBright,
-                fontSize = 11.sp,
+                fontSize = 12.sp,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -1378,7 +1013,7 @@ private fun HomeMediaCard(
                 overflow = TextOverflow.Ellipsis,
             )
             Spacer(Modifier.weight(1f))
-            Text(entry.type.displayName, color = FocusBlueBright, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            Text(entry.type.displayName, color = FocusBlueBright, fontSize = 12.sp, fontWeight = FontWeight.Bold)
             if (progress != null) {
                 Spacer(Modifier.height(5.dp))
                 HomeProgressBar(progress)

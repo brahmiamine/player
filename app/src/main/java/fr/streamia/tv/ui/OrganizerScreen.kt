@@ -225,7 +225,7 @@ fun OrganizerScreen(
                             Text(
                                 if (allLocked) "Déverrouiller" else "Verrouiller",
                                 color = Ink,
-                                fontSize = 11.sp,
+                                fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
@@ -272,7 +272,7 @@ fun OrganizerScreen(
                                     Text(
                                         badge + catalog.countIn(type, category.id) + " éléments",
                                         color = if (badge.isEmpty()) MutedInk else FocusBlueBright,
-                                        fontSize = 11.sp,
+                                        fontSize = 12.sp,
                                     )
                                 }
                             }
@@ -327,11 +327,11 @@ fun OrganizerScreen(
                                 modifier = Modifier.weight(1f).height(50.dp),
                             ) {
                                 Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Text(entry.number.toString(), color = MutedInk, fontSize = 11.sp, modifier = Modifier.width(48.dp))
+                                    Text(entry.number.toString(), color = MutedInk, fontSize = 12.sp, modifier = Modifier.width(48.dp))
                                     Column(Modifier.weight(1f)) {
                                         Text(entry.displayName, color = Ink, fontSize = TypeLabel, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                         if (entry.key in hiddenEntries) {
-                                            Text("Masqué", color = FocusBlueBright, fontSize = 10.sp)
+                                            Text("Masqué", color = FocusBlueBright, fontSize = 12.sp)
                                         }
                                     }
                                     StreamiaIcon(
@@ -356,7 +356,7 @@ fun OrganizerScreen(
                         }
                     }
                     Column(Modifier.weight(1f)) {
-                        Text("Destination", color = MutedInk, fontSize = 11.sp)
+                        Text("Destination", color = MutedInk, fontSize = 12.sp)
                         Text(destination?.name ?: "Choisir une catégorie", color = Ink, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     FocusableSurface(

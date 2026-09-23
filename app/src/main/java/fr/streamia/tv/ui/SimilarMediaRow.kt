@@ -63,7 +63,7 @@ private fun SimilarMediaCard(recommended: RecommendedMedia, onClick: () -> Unit)
             )
             recommended.reason?.let { reason ->
                 Spacer(Modifier.height(3.dp))
-                Text(reason, color = FocusBlueBright, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(reason, color = FocusBlueBright, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
     }
