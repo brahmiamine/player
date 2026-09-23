@@ -1,8 +1,10 @@
 package fr.streamia.tv.player
 
 import android.content.Context
+import android.net.Uri
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.common.Tracks
 import androidx.media3.exoplayer.ExoPlayer
@@ -27,15 +29,15 @@ class LivePlaybackSession(context: Context, bufferMode: BufferMode = BufferMode.
             continuePlayback()
             return
         }
-        playUrl(entry.key, XtreamUrlBuilder(credentials).stream(entry))
+        playUrl(entry, XtreamUrlBuilder(credentials).stream(entry))
     }
 
-    fun playUrl(key: String, url: String) {
-        entryKey = key
+    fun playUrl(entry: MediaEntry, url: String) {
+        entryKey = entry.key
         activeUrl = url
         // Pas de stop() : remplacer directement l'élément laisse ExoPlayer réutiliser les décodeurs
         // déjà initialisés au lieu de les libérer puis recréer à chaque zap.
-        player.setMediaItem(MediaItem.fromUri(url))
+        player.setMediaItem(MediaItem.Builder().setUri(url).setMediaMetadata(entry.playbackMetadata()).build())
         player.prepare()
         player.play()
     }
@@ -77,3 +79,15 @@ class LivePlaybackSession(context: Context, bufferMode: BufferMode = BufferMode.
 
     fun release() = player.release()
 }
+
+/**
+ * Titre, numéro et logo transmis à la MediaSession : Android TV les affiche dans la carte « en
+ * cours de lecture » (menu rapide, Assistant, télécommandes Bluetooth).
+ */
+fun MediaEntry.playbackMetadata(): MediaMetadata = MediaMetadata.Builder()
+    .setTitle(displayName)
+    .setDisplayTitle(displayName)
+    .setSubtitle(if (type == MediaType.Live) "Chaîne $number" else null)
+    .setArtworkUri(iconUrl?.takeIf(String::isNotBlank)?.let(Uri::parse))
+    .setDescription(plot)
+    .build()

@@ -909,7 +909,7 @@ private fun LivePreview(
                     activeUrl = streamCandidates[next]
                     error = false
                     buffering = true
-                    entry?.let { livePlaybackSession.playUrl(it.key, activeUrl) }
+                    entry?.let { livePlaybackSession.playUrl(it, activeUrl) }
                     return
                 }
                 error = true
@@ -958,7 +958,7 @@ private fun LivePreview(
                 targetEntryKey = target.key,
             )
         ) {
-            livePlaybackSession.playUrl(target.key, activeUrl)
+            livePlaybackSession.playUrl(target, activeUrl)
         } else {
             activeUrl = livePlaybackSession.activeUrl
             streamCandidates = prioritizeActiveLiveCandidate(streamCandidates, activeUrl)

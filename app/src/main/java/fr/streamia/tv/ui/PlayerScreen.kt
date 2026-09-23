@@ -85,6 +85,7 @@ import fr.streamia.tv.player.PlaybackTrackPreferenceStore
 import fr.streamia.tv.player.PlaybackUrlStrategy
 import fr.streamia.tv.player.StreamTechnicalInfo
 import fr.streamia.tv.player.StreamiaPlayerFactory
+import fr.streamia.tv.player.playbackMetadata
 import fr.streamia.tv.player.codecLabel
 import fr.streamia.tv.player.dolbyPlaybackLabel
 import fr.streamia.tv.player.hdrLabel
@@ -226,7 +227,7 @@ fun PlayerScreen(
         playbackError = null
         buffering = true
         if (sharedLivePlayer) {
-            livePlaybackSession.playUrl(entry.key, url)
+            livePlaybackSession.playUrl(entry, url)
             return
         }
         runCatching {
@@ -234,7 +235,7 @@ fun PlayerScreen(
             // Un MediaItem.SubtitleConfiguration ne peut être attaché qu'à la construction du
             // MediaItem : on le réinjecte ici pour que le sous-titre externe survive à un
             // changement de candidat ou à une reconnexion du watchdog sur ce même flux.
-            val mediaItem = MediaItem.Builder().setUri(url).apply {
+            val mediaItem = MediaItem.Builder().setUri(url).setMediaMetadata(entry.playbackMetadata()).apply {
                 externalSubtitle?.let { setSubtitleConfigurations(listOf(it)) }
             }.build()
             player.setMediaItem(mediaItem)
