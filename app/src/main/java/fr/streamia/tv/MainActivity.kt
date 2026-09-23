@@ -16,6 +16,7 @@ import fr.streamia.tv.ui.StreamiaTvRoot
 import fr.streamia.tv.ui.StreamiaViewModel
 import fr.streamia.tv.ui.StreamiaViewModelFactory
 import fr.streamia.tv.work.EpgSyncScheduler
+import fr.streamia.tv.work.MetadataEnrichmentWorker
 
 class MainActivity : ComponentActivity() {
     private lateinit var viewModel: StreamiaViewModel
@@ -26,6 +27,7 @@ class MainActivity : ComponentActivity() {
 
         CrashReporter.initialize(applicationContext, AppSettingsStore(applicationContext).load().crashReportsEnabled)
         EpgSyncScheduler.schedule(applicationContext)
+        MetadataEnrichmentWorker.schedule(applicationContext)
 
         WindowCompat.setDecorFitsSystemWindows(window, false)
         WindowInsetsControllerCompat(window, window.decorView).apply {

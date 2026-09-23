@@ -168,6 +168,9 @@ dependencies {
     implementation("androidx.media3:media3-datasource-okhttp:$media3Version")
     implementation("androidx.media3:media3-ui:$media3Version")
     implementation("androidx.media3:media3-session:$media3Version")
+    // Décodeur audio logiciel (AC3, E-AC3, DTS, MP2…) : beaucoup de boîtiers et flux IPTV n'ont pas
+    // de décodeur matériel pour ces formats — sans lui, la vidéo joue sans le moindre son.
+    implementation("org.jellyfin.media3:media3-ffmpeg-decoder:1.9.0+1")
 
     implementation(platform("com.google.firebase:firebase-bom:34.18.0"))
     implementation("com.google.firebase:firebase-crashlytics")

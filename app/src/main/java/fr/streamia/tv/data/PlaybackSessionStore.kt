@@ -52,6 +52,13 @@ class PlaybackSessionStore(context: Context) {
         )
     }.getOrNull()
 
+    /** Dernière page de navigation (accueil, section, recherche…) : rouverte au prochain démarrage. */
+    fun saveLastPage(page: String) {
+        if (preferences.getString(KEY_LAST_PAGE, null) != page) preferences.edit().putString(KEY_LAST_PAGE, page).apply()
+    }
+
+    fun loadLastPage(): String? = preferences.getString(KEY_LAST_PAGE, null)
+
     fun clearPlayback() {
         preferences.edit().remove(KEY_SESSION).apply()
     }
@@ -117,6 +124,7 @@ class PlaybackSessionStore(context: Context) {
     private companion object {
         const val PREFERENCES_NAME = "streamia-playback-session-v1"
         const val KEY_SESSION = "last_playback"
+        const val KEY_LAST_PAGE = "last_page"
         const val KEY_ACTIVE_PROFILE = "active_profile"
         const val KEY_AUTO_OPEN_DISABLED = "auto_open_disabled"
     }

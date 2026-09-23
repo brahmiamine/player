@@ -103,6 +103,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     beinSportsNext = state.homeBeinSportsNext.ifDisabled(HomeBlock.BeinSportsNext, state.appSettings),
                     ukGuideNow = state.homeUkGuideNow.ifDisabled(HomeBlock.UkGuideNow, state.appSettings),
                     ukGuideNext = state.homeUkGuideNext.ifDisabled(HomeBlock.UkGuideNext, state.appSettings),
+                    liveMatches = state.liveOnSatMatches,
                     restoreContext = state.contentReturnContext,
                     focusTarget = state.homeFocusTarget,
                     onFocusConsumed = viewModel::consumeHomeFocusTarget,

@@ -62,6 +62,8 @@ data class RecommendationBuildContext(
     val detailsByKey: Map<String, ContentFeatures> = emptyMap(),
     val profile: RecommendationProfileInput = RecommendationProfileInput(),
     val nowMillis: Long,
+    /** Par source de goût (clé) : liens forts saga / MovieLens vers les candidats (clé → bonus). */
+    val boostsBySource: Map<String, Map<String, SimilarityBoost>> = emptyMap(),
 )
 
 /**
@@ -199,6 +201,7 @@ class RecommendationEngine(
             // Chaque élément doit tenir le seuil de qualité, pas seulement le premier : on ne
             // complète pas la rangée avec des contenus à peine liés.
             minimumScore = MIN_SECONDARY_QUALITY,
+            boosts = context.boostsBySource[source.features.entry.key].orEmpty(),
         )
         if (similar.size < MIN_SECONDARY_ITEMS) return null
         return SecondarySlotCandidate(kind, similar.first().score, source.occurredAtMillis) to
@@ -229,6 +232,7 @@ class RecommendationEngine(
         hiddenCategoryIds: Set<String> = emptySet(),
         limit: Int = 12,
         minimumScore: Double = MIN_SIMILARITY,
+        boosts: Map<String, SimilarityBoost> = emptyMap(),
     ): List<RecommendedMedia> = candidates
         .asSequence()
         .filter { it.type == source.entry.type }
@@ -242,6 +246,17 @@ class RecommendationEngine(
             val candidateFeatures = featuresFor(entry, detailsByKey)
             if (likelySameContent(source, candidateFeatures)) return@mapNotNull null
             val result = similarityEngine.compare(source, candidateFeatures)
+            val boost = boosts[entry.key]
+            // Même saga / mêmes spectateurs : lien fort même quand les métadonnées IPTV sont
+            // pauvres ; la ressemblance de contenu ne fait alors que départager.
+            if (boost != null) {
+                val metadata = if (result.substantive) result.score else 0.0
+                return@mapNotNull RecommendedMedia(
+                    entry = entry,
+                    score = (maxOf(boost.score, metadata) + BOOST_METADATA_BONUS * metadata).coerceAtMost(1.0),
+                    reason = if (boost.score >= metadata) boost.reason else result.reason,
+                )
+            }
             if (!result.substantive) return@mapNotNull null
             RecommendedMedia(entry = entry, score = result.score, reason = result.reason)
         }
@@ -261,7 +276,16 @@ class RecommendationEngine(
         val candidateFeatures = featuresFor(entry, context.detailsByKey)
         val closest = sources
             .asSequence()
-            .map { source -> source to similarityEngine.compare(source.features, candidateFeatures) }
+            .map { source ->
+                val result = similarityEngine.compare(source.features, candidateFeatures)
+                // Même saga / mêmes spectateurs que ce contenu regardé : lien fort, comme sur la fiche.
+                val boost = context.boostsBySource[source.features.entry.key]?.get(entry.key)
+                source to if (boost != null && boost.score > result.score) {
+                    SimilarityScore(boost.score, boost.reason, substantive = true)
+                } else {
+                    result
+                }
+            }
             .maxByOrNull { (source, similarity) ->
                 similarity.score * source.weight.coerceIn(0.0, 1.0)
             }
@@ -516,6 +540,7 @@ class RecommendationEngine(
         const val MAX_HOME_AI_ROWS = 2
         const val MIN_SECONDARY_ITEMS = 2
         const val MIN_SECONDARY_QUALITY = 0.18
+        const val BOOST_METADATA_BONUS = 0.1
         const val MIN_SIMILARITY = 0.06
         const val MIN_FRESHNESS_FOR_SECONDARY = 0.65
         const val MIN_POSITIVE_SOURCE_WEIGHT = 0.15

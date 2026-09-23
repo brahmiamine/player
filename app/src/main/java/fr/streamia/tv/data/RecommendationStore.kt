@@ -73,6 +73,91 @@ internal class RecommendationStore(context: Context) :
         )
     }
 
+    /** Table ajoutée après coup : créée à l'ouverture plutôt que par migration de version. */
+    override fun onOpen(db: SQLiteDatabase) {
+        super.onOpen(db)
+        if (db.isReadOnly) return
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS recommendation_sagas (
+                profile_id TEXT NOT NULL,
+                media_type TEXT NOT NULL,
+                media_id INTEGER NOT NULL,
+                groups TEXT NOT NULL,
+                fetched_at INTEGER NOT NULL,
+                PRIMARY KEY (profile_id, media_type, media_id)
+            )
+            """.trimIndent(),
+        )
+    }
+
+    /**
+     * Sagas / franchises Wikidata par contenu. [groups] : « Q216930=Harry Potter » séparés par « | » ;
+     * vide si Wikidata ne connaît aucune saga (mémorisé pour ne pas redemander).
+     */
+    fun saveSagas(profileId: String, sagas: Map<String, List<Pair<String, String>>>) {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            val now = System.currentTimeMillis()
+            sagas.forEach { (key, groups) ->
+                val type = key.substringBefore(':')
+                val id = key.substringAfter(':').toIntOrNull() ?: return@forEach
+                db.insertWithOnConflict(
+                    "recommendation_sagas",
+                    null,
+                    ContentValues().apply {
+                        put("profile_id", profileId)
+                        put("media_type", type)
+                        put("media_id", id)
+                        put("groups", groups.joinToString("|") { (qid, label) -> "$qid=${label.replace("|", " ")}" })
+                        put("fetched_at", now)
+                    },
+                    SQLiteDatabase.CONFLICT_REPLACE,
+                )
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    fun sagas(profileId: String): Map<String, List<Pair<String, String>>> =
+        readableDatabase.rawQuery(
+            "SELECT media_type, media_id, groups FROM recommendation_sagas WHERE profile_id = ? AND groups <> ''",
+            arrayOf(profileId),
+        ).use { cursor ->
+            buildMap {
+                while (cursor.moveToNext()) {
+                    put(
+                        "${cursor.getString(0)}:${cursor.getInt(1)}",
+                        cursor.getString(2).split('|').mapNotNull { part ->
+                            part.split('=', limit = 2).takeIf { it.size == 2 }?.let { it[0] to it[1] }
+                        },
+                    )
+                }
+            }
+        }
+
+    fun sagaCount(profileId: String): Int =
+        readableDatabase.rawQuery("SELECT COUNT(*) FROM recommendation_sagas WHERE profile_id = ?", arrayOf(profileId))
+            .use { if (it.moveToFirst()) it.getInt(0) else 0 }
+
+    /** Contenus enrichis avec un TMDB ID mais jamais interrogés sur Wikidata : clé → TMDB ID. */
+    fun missingSagaLookups(profileId: String, limit: Int): Map<String, String> =
+        readableDatabase.rawQuery(
+            """
+            SELECT f.media_type, f.media_id, f.tmdb_id FROM recommendation_features f
+            LEFT JOIN recommendation_sagas s
+              ON s.profile_id = f.profile_id AND s.media_type = f.media_type AND s.media_id = f.media_id
+            WHERE f.profile_id = ? AND s.media_id IS NULL AND f.tmdb_id GLOB '[1-9]*'
+            LIMIT ?
+            """.trimIndent(),
+            arrayOf(profileId, limit.toString()),
+        ).use { cursor ->
+            buildMap { while (cursor.moveToNext()) put("${cursor.getString(0)}:${cursor.getInt(1)}", cursor.getString(2).trim()) }
+        }
+
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         check(oldVersion == newVersion) {
             "Unsupported recommendation database migration $oldVersion -> $newVersion"
@@ -209,6 +294,15 @@ internal class RecommendationStore(context: Context) :
      * La table contient seulement les fiches déjà consultées : la charger intégralement reste
      * borné par l'usage réel, contrairement au catalogue fournisseur.
      */
+    fun featureCount(profileId: String): Int =
+        readableDatabase.rawQuery("SELECT COUNT(*) FROM recommendation_features WHERE profile_id = ?", arrayOf(profileId))
+            .use { if (it.moveToFirst()) it.getInt(0) else 0 }
+
+    /** Clés « Type:id » déjà enrichies : l'enrichissement en arrière-plan les saute. */
+    fun enrichedKeys(profileId: String): Set<String> =
+        readableDatabase.rawQuery("SELECT media_type, media_id FROM recommendation_features WHERE profile_id = ?", arrayOf(profileId))
+            .use { cursor -> buildSet { while (cursor.moveToNext()) add("${cursor.getString(0)}:${cursor.getInt(1)}") } }
+
     fun features(profileId: String): Map<String, StoredRecommendationFeatures> =
         readableDatabase.rawQuery(
             """

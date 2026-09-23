@@ -16,7 +16,11 @@ import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.domain.SeriesDetails
 import fr.streamia.tv.domain.ServerCredentials
 import fr.streamia.tv.domain.XtreamUrlBuilder
+import fr.streamia.tv.recommendation.ContentCandidateIndex
 import fr.streamia.tv.recommendation.ContentFeatures
+import fr.streamia.tv.recommendation.IndexedContent
+import fr.streamia.tv.recommendation.MovieLensNeighbors
+import fr.streamia.tv.recommendation.SimilarityBoost
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -102,9 +106,121 @@ class XtreamRepository(context: Context) {
     suspend fun homeRecommendationCandidates(profileId: String, type: MediaType, limit: Int): List<MediaEntry> =
         cache.loadHomeRecommendationCandidates(profileId, type, limit)
 
-    /** Candidats rapides centrés sur la catégorie du média affiché dans une fiche détail. */
-    suspend fun similarityCandidates(profileId: String, source: MediaEntry, limit: Int): List<MediaEntry> =
-        cache.loadSimilarityCandidates(profileId, source, limit)
+    /**
+     * Candidats « similaires » : d'abord les plus proches dans TOUT le catalogue enrichi (genre,
+     * intrigue, personnes, saga — voir [ContentCandidateIndex]), puis les voisins de catégorie.
+     * Sert la fiche détail et les rangées « Parce que vous avez regardé » de l'accueil.
+     */
+    suspend fun similarityCandidates(
+        profileId: String,
+        source: MediaEntry,
+        limit: Int,
+        sourceFeatures: ContentFeatures? = null,
+    ): List<MediaEntry> {
+        val neighbours = cache.loadSimilarityCandidates(profileId, source, limit)
+        val index = runCatching { candidateIndex(profileId) }.getOrNull() ?: return neighbours
+        val indexed = indexedSource(source, sourceFeatures)
+        val matchedKeys = withContext(Dispatchers.Default) {
+            // Liens forts (saga, MovieLens) d'abord, puis proximité genre / intrigue / personnes.
+            (index.related(indexed, movieLens.of(indexed.tmdbId)).keys + index.topMatches(indexed, limit = (limit / 2).coerceAtLeast(1)))
+                .distinct()
+                .take(limit)
+        }
+        if (matchedKeys.isEmpty()) return neighbours
+        val matched = cache.loadEntriesByKeys(profileId, LinkedHashSet(matchedKeys))
+        return (matched + neighbours).distinctBy(MediaEntry::key).take(limit)
+    }
+
+    /** Liens forts (même saga Wikidata, voisins MovieLens) à faire remonter dans le classement. */
+    suspend fun similarityBoosts(
+        profileId: String,
+        source: MediaEntry,
+        sourceFeatures: ContentFeatures? = null,
+    ): Map<String, SimilarityBoost> {
+        val index = runCatching { candidateIndex(profileId) }.getOrNull() ?: return emptyMap()
+        val indexed = indexedSource(source, sourceFeatures)
+        return withContext(Dispatchers.Default) { index.related(indexed, movieLens.of(indexed.tmdbId)) }
+    }
+
+    private fun indexedSource(source: MediaEntry, features: ContentFeatures?) = IndexedContent(
+        source.key,
+        source.displayName,
+        features?.plot ?: source.plot,
+        features?.genre,
+        features?.cast,
+        features?.director,
+        tmdbId = features?.tmdbId,
+    )
+
+    private val movieLens = MovieLensNeighbors.fromAssets(context)
+
+    private val candidateIndexLock = Mutex()
+    @Volatile private var candidateIndexState: CandidateIndexState? = null
+    private class CandidateIndexState(val profileId: String, val sourceCount: Int, val index: ContentCandidateIndex)
+
+    /**
+     * Index reconstruit seulement quand l'enrichissement a nettement progressé (+5 %, au moins 200
+     * fiches) : l'enrichissement en arrière-plan ajoute des fiches en continu, reconstruire à chaque
+     * ouverture de fiche coûterait une seconde de CPU sur un petit boîtier.
+     */
+    private suspend fun candidateIndex(profileId: String): ContentCandidateIndex? {
+        val count = withContext(Dispatchers.IO) { recommendationStore.featureCount(profileId) + recommendationStore.sagaCount(profileId) }
+        if (count == 0) return null
+        fun fresh() = candidateIndexState?.takeIf {
+            it.profileId == profileId && count - it.sourceCount < maxOf(INDEX_REBUILD_MIN_DELTA, it.sourceCount / 20)
+        }?.index
+        fresh()?.let { return it }
+        return candidateIndexLock.withLock {
+            fresh() ?: run {
+                val features = withContext(Dispatchers.IO) { recommendationStore.features(profileId) }
+                val sagas = withContext(Dispatchers.IO) { recommendationStore.sagas(profileId) }
+                val entries = (loadSection(profileId, MediaType.Movie) + loadSection(profileId, MediaType.Series))
+                    .associateBy(MediaEntry::key)
+                val index = withContext(Dispatchers.Default) {
+                    ContentCandidateIndex(
+                        features.mapNotNull { (key, stored) ->
+                            val entry = entries[key] ?: return@mapNotNull null
+                            IndexedContent(
+                                key,
+                                entry.displayName,
+                                stored.plot ?: entry.plot,
+                                stored.genre,
+                                stored.cast,
+                                stored.director,
+                                tmdbId = stored.tmdbId,
+                                sagas = sagas[key].orEmpty(),
+                            )
+                        },
+                    )
+                }
+                candidateIndexState = CandidateIndexState(profileId, count, index)
+                index
+            }
+        }
+    }
+
+    private val wikidata = WikidataClient()
+
+    /**
+     * Interroge Wikidata pour un lot de contenus enrichis jamais vérifiés. Renvoie le nombre traité
+     * (0 = plus rien à faire). Les contenus sans saga sont mémorisés vides pour ne pas redemander.
+     */
+    suspend fun fetchSagaBatch(profileId: String, batchSize: Int): Int = withContext(Dispatchers.IO) {
+        val pending = recommendationStore.missingSagaLookups(profileId, batchSize)
+        if (pending.isEmpty()) return@withContext 0
+        val found = pending.entries.groupBy { MediaType.entries.first { t -> t.name == it.key.substringBefore(':') } }
+            .flatMap { (type, rows) ->
+                val byTmdb = wikidata.sagas(type, rows.map { it.value }.distinct())
+                rows.map { it.key to byTmdb[it.value].orEmpty() }
+            }
+            .toMap()
+        recommendationStore.saveSagas(profileId, found)
+        pending.size
+    }
+
+    /** Clés déjà enrichies, pour l'enrichissement en arrière-plan. */
+    suspend fun enrichedRecommendationKeys(profileId: String): Set<String> =
+        withContext(Dispatchers.IO) { recommendationStore.enrichedKeys(profileId) }
 
     /** Retours explicites déjà persistés : « plus comme ça » / « moins comme ça ». */
     suspend fun recommendationFeedback(profileId: String) =
@@ -660,6 +776,7 @@ class XtreamRepository(context: Context) {
         // Grille en horaires d'horloge locale (sans date) : même fraîcheur que les autres rangées
         // "maintenant"/"suivant" de l'accueil pour rester synchronisé avec les changements de créneau.
         private const val UK_GUIDE_CACHE_MAX_AGE_MS = 2 * 60_000L
+private const val INDEX_REBUILD_MIN_DELTA = 200
 
         // Partagé par toutes les instances de XtreamRepository du process : le worker EPG en
         // arrière-plan (EpgSyncWorker) et le ViewModel créent chacun leur propre instance, mais

@@ -55,6 +55,8 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.TrackGroup
+import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
@@ -115,7 +117,15 @@ internal enum class VideoAspect(val label: String, val resizeMode: Int) {
     Zoom("Zoom", AspectRatioFrameLayout.RESIZE_MODE_ZOOM),
 }
 
-internal data class TrackChoice(val label: String, val language: String?)
+internal data class TrackChoice(
+    val label: String,
+    val language: String?,
+    // Piste exacte : sélectionner par langue seule laissait ExoPlayer choisir, pour une même langue,
+    // la piste « forcés » ou une autre variante que celle affichée dans le menu.
+    val group: TrackGroup? = null,
+    val trackIndex: Int = 0,
+    val forced: Boolean = false,
+)
 
 /** Tag de langue "indéterminée" (BCP-47) posé sur tout sous-titre externe chargé manuellement. */
 private const val EXTERNAL_SUBTITLE_LANGUAGE_TAG = "und"
@@ -204,7 +214,8 @@ fun PlayerScreen(
     var subtitleTracks by remember { mutableStateOf(listOf(TrackChoice("Désactivés", null))) }
     var audioIndex by remember { mutableStateOf(0) }
     var subtitleIndex by remember { mutableStateOf(0) }
-    var trackPreferencesApplied by remember(entry.key) { mutableStateOf(false) }
+    var audioPreferencePending by remember(entry.key) { mutableStateOf(true) }
+    var subtitlePreferencePending by remember(entry.key) { mutableStateOf(true) }
     var technicalInfo by remember { mutableStateOf(StreamTechnicalInfo()) }
     var diagnostics by remember { mutableStateOf(PlaybackDiagnostics()) }
     var dolbyVisionDetected by remember { mutableStateOf(false) }
@@ -288,6 +299,27 @@ fun PlayerScreen(
         onDispose { if (!sharedLivePlayer) player.release() }
     }
 
+    fun applyAudio(choice: TrackChoice) {
+        val builder = player.trackSelectionParameters.buildUpon()
+            .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
+            .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
+            .setPreferredAudioLanguage(choice.language)
+        choice.group?.let { builder.setOverrideForType(TrackSelectionOverride(it, choice.trackIndex)) }
+        player.trackSelectionParameters = builder.build()
+    }
+
+    fun applySubtitle(choice: TrackChoice) {
+        val builder = player.trackSelectionParameters.buildUpon().clearOverridesOfType(C.TRACK_TYPE_TEXT)
+        if (choice.language == null && choice.group == null) {
+            builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+        } else {
+            builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+            builder.setPreferredTextLanguage(choice.language)
+            choice.group?.let { builder.setOverrideForType(TrackSelectionOverride(it, choice.trackIndex)) }
+        }
+        player.trackSelectionParameters = builder.build()
+    }
+
     DisposableEffect(player, entry.key) {
         val listener = object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
@@ -332,30 +364,44 @@ fun PlayerScreen(
                 if (sharedLivePlayer) livePlaybackSession.recoverAudio(tracks)
                 audioTracks = listOf(TrackChoice("Auto", null)) + extractChoices(tracks, C.TRACK_TYPE_AUDIO)
                 subtitleTracks = listOf(TrackChoice("Désactivés", null)) + extractChoices(tracks, C.TRACK_TYPE_TEXT)
-                if (!trackPreferencesApplied) {
-                    val saved = trackPreferenceStore.load()
-                    audioIndex = audioTracks.indexOfFirst { it.language == saved.audioLanguage }.coerceAtLeast(0)
-                    subtitleIndex = subtitleTracks.indexOfFirst { it.language == saved.subtitleLanguage }.coerceAtLeast(0)
-                    player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
-                        .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
-                        .setPreferredAudioLanguage(audioTracks[audioIndex].language)
-                        .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, subtitleTracks[subtitleIndex].language == null)
-                        .setPreferredTextLanguage(subtitleTracks[subtitleIndex].language)
-                        .build()
-                    trackPreferencesApplied = true
+                // Les pistes arrivent souvent en plusieurs fois (sous-titres MKV/HLS annoncés après
+                // l'audio et la vidéo) : la préférence enregistrée reste en attente jusqu'à ce qu'une
+                // piste de la bonne langue apparaisse, au lieu d'être tranchée au premier appel.
+                val saved = trackPreferenceStore.load()
+                if (audioPreferencePending) {
+                    val index = audioTracks.indexOfFirst { it.language != null && it.language == saved.audioLanguage }
+                    if (index > 0) {
+                        audioIndex = index
+                        applyAudio(audioTracks[index])
+                        audioPreferencePending = false
+                    }
+                }
+                audioIndex = audioIndex.coerceIn(0, audioTracks.lastIndex.coerceAtLeast(0))
+                val externalIndex = if (externalSubtitlePendingSync) {
+                    subtitleTracks.indexOfFirst { it.language == EXTERNAL_SUBTITLE_LANGUAGE_TAG }
                 } else {
-                    audioIndex = audioIndex.coerceIn(0, audioTracks.lastIndex.coerceAtLeast(0))
-                    val externalIndex = if (externalSubtitlePendingSync) {
-                        subtitleTracks.indexOfFirst { it.language == EXTERNAL_SUBTITLE_LANGUAGE_TAG }
-                    } else {
-                        -1
+                    -1
+                }
+                if (externalIndex >= 0) {
+                    subtitleIndex = externalIndex
+                    externalSubtitlePendingSync = false
+                    subtitlePreferencePending = false
+                } else if (subtitlePreferencePending) {
+                    // Piste complète plutôt que « forcés » (quelques répliques seulement) pour la même langue.
+                    val index = subtitleTracks.indices
+                        .filter { subtitleTracks[it].language != null && subtitleTracks[it].language == saved.subtitleLanguage }
+                        .minByOrNull { if (subtitleTracks[it].forced) 1 else 0 } ?: -1
+                    if (saved.subtitleLanguage == null) {
+                        subtitleIndex = 0
+                        applySubtitle(subtitleTracks[0])
+                        subtitlePreferencePending = false
+                    } else if (index > 0) {
+                        subtitleIndex = index
+                        applySubtitle(subtitleTracks[index])
+                        subtitlePreferencePending = false
                     }
-                    if (externalIndex >= 0) {
-                        subtitleIndex = externalIndex
-                        externalSubtitlePendingSync = false
-                    } else {
-                        subtitleIndex = subtitleIndex.coerceIn(0, subtitleTracks.lastIndex.coerceAtLeast(0))
-                    }
+                } else {
+                    subtitleIndex = subtitleIndex.coerceIn(0, subtitleTracks.lastIndex.coerceAtLeast(0))
                 }
 
                 selectedVideoFormat(tracks)?.let { format ->
@@ -533,23 +579,6 @@ fun PlayerScreen(
         }
     }
 
-    fun applyAudio(choice: TrackChoice) {
-        val builder = player.trackSelectionParameters.buildUpon()
-            .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
-            .setPreferredAudioLanguage(choice.language)
-        player.trackSelectionParameters = builder.build()
-    }
-
-    fun applySubtitle(choice: TrackChoice) {
-        val builder = player.trackSelectionParameters.buildUpon()
-        if (choice.language == null) {
-            builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
-        } else {
-            builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
-            builder.setPreferredTextLanguage(choice.language)
-        }
-        player.trackSelectionParameters = builder.build()
-    }
 
     BackHandler {
         when {
@@ -783,11 +812,13 @@ fun PlayerScreen(
                 onAudioSelected = { selectedIndex ->
                     audioIndex = selectedIndex.coerceIn(audioTracks.indices)
                     applyAudio(audioTracks[audioIndex])
+                    audioPreferencePending = false
                     trackPreferenceStore.saveAudio(audioTracks[audioIndex].language)
                 },
                 onSubtitleSelected = { selectedIndex ->
                     subtitleIndex = selectedIndex.coerceIn(subtitleTracks.indices)
                     applySubtitle(subtitleTracks[subtitleIndex])
+                    subtitlePreferencePending = false
                     trackPreferenceStore.saveSubtitle(subtitleTracks[subtitleIndex].language)
                 },
                 onNextAspect = onCycleVideoAspect,
@@ -1192,17 +1223,20 @@ private fun extractChoices(tracks: Tracks, type: Int): List<TrackChoice> = build
         for (index in 0 until group.length) {
             if (!group.isTrackSupported(index)) continue
             val format = group.getTrackFormat(index)
-            val language = format.language?.takeIf(String::isNotBlank) ?: continue
-            val baseLabel = format.label?.takeIf(String::isNotBlank)
-                ?: Locale.forLanguageTag(language).displayLanguage.takeIf(String::isNotBlank)
-                ?: language
+            // Pistes sans langue gardées (fréquentes en IPTV) : sinon impossible de les choisir.
+            val language = format.language?.takeIf { it.isNotBlank() && it != C.LANGUAGE_UNDETERMINED }
+            val forced = format.selectionFlags and C.SELECTION_FLAG_FORCED != 0
+            val name = format.label?.takeIf(String::isNotBlank)
+                ?: language?.let { Locale.forLanguageTag(it).displayLanguage.takeIf(String::isNotBlank) ?: it }
+                ?: "Piste ${size + 1}"
+            val baseLabel = if (forced) "$name (forcés)" else name
             val label = if (type == C.TRACK_TYPE_AUDIO && isDolbyAtmosFormat(format.sampleMimeType)) {
                 "Dolby Atmos · $baseLabel"
             } else {
                 baseLabel
             }
             val key = "$label:$language"
-            if (seen.add(key)) add(TrackChoice(label, language))
+            if (seen.add(key)) add(TrackChoice(label, language, group.mediaTrackGroup, index, forced))
         }
     }
 }

@@ -55,6 +55,8 @@ object StreamiaPlayerFactory {
             .setLoadErrorHandlingPolicy(DefaultLoadErrorHandlingPolicy(if (mediaType == MediaType.Live) 1 else 5))
         val renderersFactory = DefaultRenderersFactory(context)
             .setEnableDecoderFallback(true)
+            // Décodeurs du boîtier d'abord, FFmpeg seulement pour les formats audio qu'il ne sait pas lire.
+            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
 
         val player = ExoPlayer.Builder(context, renderersFactory)
             .setMediaSourceFactory(mediaSourceFactory)

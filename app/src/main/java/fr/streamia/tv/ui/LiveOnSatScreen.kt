@@ -330,7 +330,7 @@ private fun formatMatchTime(startEpochSeconds: Long): String =
 private fun formatClockTime(epochMillis: Long): String =
     SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(epochMillis))
 
-private fun liveOnSatMatchKey(resolved: ResolvedLiveOnSatMatch): String =
+internal fun liveOnSatMatchKey(resolved: ResolvedLiveOnSatMatch): String =
     with(resolved.match) { "$competition|$participantA|$participantB|$startEpochSeconds" }
 
 /** Assez fréquent pour que « EN DIRECT » et le filtrage des matchs périmés restent justes sur un écran laissé ouvert. */
