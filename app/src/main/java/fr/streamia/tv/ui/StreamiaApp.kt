@@ -125,6 +125,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     credentials = state.credentials!!,
                     livePlaybackSession = livePlaybackSession,
                     liveVideoSurface = liveVideoSurface,
+                    todayEpgGuide = state.todayEpgGuide,
                     library = state.library,
                     appSettings = state.appSettings,
                     loadingCategoryKeys = state.loadingCategoryKeys,

@@ -384,6 +384,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                     _uiState.update {
                         it.copy(
                             epgGuide = null,
+                            todayEpgGuide = null,
                             epgAvailableDates = emptyList(),
                             epgSelectedDate = null,
                         )
@@ -719,6 +720,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         _uiState.update {
             it.copy(
                 epgGuide = null,
+                todayEpgGuide = null,
                 epgAvailableDates = emptyList(),
                 epgSelectedDate = null,
                 epgLoading = false,
@@ -1373,9 +1375,13 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     private suspend fun todayEpgGuide(profileId: String, offsetHours: Int): EpgGuide? =
         epgGuideFor(profileId, LocalDate.now(ZoneId.systemDefault()), offsetHours)
 
-    /** Guide d'une journée : LRU mémoire, sinon relu une fois depuis SQLite puis mis en LRU (jamais de réseau). */
-    private suspend fun epgGuideFor(profileId: String, date: LocalDate, offsetHours: Int): EpgGuide? =
-        epgGuideMemoryCache.get(profileId, date, offsetHours) ?: runCatching {
+    /**
+     * Guide d'une journée : LRU mémoire, sinon relu une fois depuis SQLite puis mis en LRU (jamais de
+     * réseau). Le guide du jour est aussi publié dans [StreamiaUiState.todayEpgGuide] pour la liste
+     * des chaînes Direct.
+     */
+    private suspend fun epgGuideFor(profileId: String, date: LocalDate, offsetHours: Int): EpgGuide? {
+        val guide = epgGuideMemoryCache.get(profileId, date, offsetHours) ?: runCatching {
             val (dayStart, dayEnd) = epgDayBounds(date)
             repository.cachedEpgGuide(
                 profileId = profileId,
@@ -1384,6 +1390,13 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 offsetHours = offsetHours,
             )
         }.getOrNull()?.also { epgGuideMemoryCache.put(profileId, date, offsetHours, it) }
+        if (guide != null && date == LocalDate.now(ZoneId.systemDefault())) {
+            _uiState.update { state ->
+                if (state.activeProfileId == profileId && state.todayEpgGuide !== guide) state.copy(todayEpgGuide = guide) else state
+            }
+        }
+        return guide
+    }
 
     private fun updatePlayerEpgIfCurrent(entry: MediaEntry, context: EpgNowContext) {
         val current = (_uiState.value.screen as? StreamiaScreen.Player)?.entry
@@ -2247,6 +2260,8 @@ data class StreamiaUiState(
     val mediaDetails: MediaDetails? = null,
     val seriesDetails: SeriesDetails? = null,
     val epgGuide: EpgGuide? = null,
+    /** Guide de la journée courante (horaires déjà décalés) : programme en cours de la liste Direct. */
+    val todayEpgGuide: EpgGuide? = null,
     val epgAvailableDates: List<LocalDate> = emptyList(),
     val epgSelectedDate: LocalDate? = null,
     val epgLoading: Boolean = false,

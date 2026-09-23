@@ -66,6 +66,9 @@ import fr.streamia.tv.data.NavigationListPosition
 import fr.streamia.tv.data.UserLibrarySnapshot
 import fr.streamia.tv.domain.Catalog
 import fr.streamia.tv.domain.MediaCategory
+import fr.streamia.tv.domain.EpgGuide
+import fr.streamia.tv.domain.EpgProgram
+import fr.streamia.tv.domain.epgNowContextAt
 import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.domain.ServerCredentials
@@ -115,6 +118,7 @@ fun BrowserScreen(
     credentials: ServerCredentials,
     livePlaybackSession: LivePlaybackSession,
     liveVideoSurface: @Composable (LiveVideoSurfacePlacement) -> Unit,
+    todayEpgGuide: EpgGuide? = null,
     library: UserLibrarySnapshot,
     appSettings: AppSettings,
     loadingCategoryKeys: Set<String> = emptySet(),
@@ -295,6 +299,7 @@ fun BrowserScreen(
         if (isLive) {
             LiveCatalogLayout(
                 catalog = catalog,
+                todayEpgGuide = todayEpgGuide,
                 credentials = credentials,
                 livePlaybackSession = livePlaybackSession,
                 liveVideoSurface = liveVideoSurface,
@@ -524,6 +529,7 @@ private fun HeaderAction(
 @Composable
 private fun LiveCatalogLayout(
     catalog: Catalog,
+    todayEpgGuide: EpgGuide?,
     credentials: ServerCredentials,
     livePlaybackSession: LivePlaybackSession,
     liveVideoSurface: @Composable (LiveVideoSurfacePlacement) -> Unit,
@@ -644,6 +650,7 @@ private fun LiveCatalogLayout(
             val categoryIdForPosition = selectedCategoryId
             LiveChannelList(
                 entries = entries,
+                todayEpgGuide = todayEpgGuide,
                 previewKey = previewEntry?.key,
                 favoriteEntries = favoriteEntries,
                 fullscreenPending = fullscreenTarget != null,
@@ -686,6 +693,7 @@ private fun LiveCatalogLayout(
 @Composable
 private fun LiveChannelList(
     entries: List<MediaEntry>,
+    todayEpgGuide: EpgGuide?,
     previewKey: String?,
     favoriteEntries: Set<String>,
     fullscreenPending: Boolean,
@@ -700,6 +708,16 @@ private fun LiveChannelList(
     onLoadMore: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // Heure de référence du programme en cours, rafraîchie chaque minute (une seule horloge pour
+    // toute la liste, pas une par ligne).
+    var nowEpochSeconds by remember { mutableStateOf(System.currentTimeMillis() / 1000) }
+    LaunchedEffect(todayEpgGuide != null) {
+        if (todayEpgGuide == null) return@LaunchedEffect
+        while (true) {
+            nowEpochSeconds = System.currentTimeMillis() / 1000
+            delay(60_000L - System.currentTimeMillis() % 60_000L)
+        }
+    }
     val lastIndex = entries.lastIndex.coerceAtLeast(0)
     val listState = rememberLazyListState(
         initialFirstVisibleItemIndex = initialListPosition.index.coerceIn(0, lastIndex),
@@ -781,7 +799,7 @@ private fun LiveChannelList(
                         idleBackground = Color.Transparent,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(60.dp)
+                            .height(66.dp)
                             .onPreviewKeyEvent { event ->
                                 if (
                                     event.type == KeyEventType.KeyDown &&
@@ -800,15 +818,40 @@ private fun LiveChannelList(
                             Text(entry.number.toString(), color = MutedInk, fontSize = 13.sp, modifier = Modifier.width(38.dp))
                             ChannelLogo(entry.iconUrl, entry.displayName, Modifier.size(42.dp))
                             Spacer(Modifier.width(8.dp))
-                            Text(
-                                entry.displayName,
-                                color = Ink,
-                                fontSize = 15.sp,
-                                fontWeight = if (previewKey == entry.key) FontWeight.Bold else FontWeight.Medium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f),
-                            )
+                            val nowProgram = remember(todayEpgGuide, entry.key, nowEpochSeconds) {
+                                todayEpgGuide?.forEntry(entry)?.epgNowContextAt(nowEpochSeconds)?.current
+                            }
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    entry.displayName,
+                                    color = Ink,
+                                    fontSize = 15.sp,
+                                    fontWeight = if (previewKey == entry.key) FontWeight.Bold else FontWeight.Medium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                if (nowProgram != null) {
+                                    Text(
+                                        nowProgram.title,
+                                        color = MutedInk,
+                                        fontSize = 12.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    liveProgramProgress(nowProgram, nowEpochSeconds)?.let { progress ->
+                                        Spacer(Modifier.height(3.dp))
+                                        Box(
+                                            Modifier
+                                                .fillMaxWidth()
+                                                .height(3.dp)
+                                                .clip(RoundedCornerShape(2.dp))
+                                                .background(MutedInk.copy(alpha = 0.24f)),
+                                        ) {
+                                            Box(Modifier.fillMaxWidth(progress).height(3.dp).background(FocusBlueBright))
+                                        }
+                                    }
+                                }
+                            }
                             if (entry.key in favoriteEntries) {
                                 Spacer(Modifier.width(5.dp))
                                 StreamiaIcon(StreamiaIconGlyph.Star, size = 12.dp)
@@ -1321,4 +1364,12 @@ internal fun sortedForVodDisplay(entries: List<MediaEntry>, order: VodSortOrder)
     }
     VodSortOrder.RecentlyAdded -> entries.sortedByDescending(MediaEntry::addedAtEpochSeconds)
     VodSortOrder.Rating -> entries.sortedByDescending(MediaEntry::rating)
+}
+
+/** Avancement (0..1) d'un programme à l'instant donné, `null` sans horaires exploitables. */
+internal fun liveProgramProgress(program: EpgProgram, nowEpochSeconds: Long): Float? {
+    val start = program.startEpochSeconds ?: return null
+    val end = program.endEpochSeconds ?: return null
+    if (end <= start) return null
+    return ((nowEpochSeconds - start).toFloat() / (end - start)).coerceIn(0f, 1f)
 }
