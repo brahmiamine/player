@@ -41,4 +41,17 @@ class ParentalPinHashTest {
         assertEquals(60_000L, pinLockoutMillis(6))
         assertEquals(15 * 60_000L, pinLockoutMillis(50))
     }
+
+    @Test
+    fun `pbkdf2 matches the RFC 7914 test vector`() {
+        val derived = pbkdf2HmacSha256("passwd".toByteArray(), "salt".toByteArray(), 1)
+        assertEquals("55ac046e56e3089fec1691c22544b605f94185216dde0465e68b9d57c20dacbc", derived.joinToString("") { "%02x".format(it) })
+    }
+
+    @Test
+    fun `pbkdf2 matches the platform implementation`() {
+        val spec = javax.crypto.spec.PBEKeySpec("1234".toCharArray(), "salt-a".toByteArray(), 1000, 256)
+        val expected = javax.crypto.SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded
+        org.junit.Assert.assertArrayEquals(expected, pbkdf2HmacSha256("1234".toByteArray(), "salt-a".toByteArray(), 1000))
+    }
 }

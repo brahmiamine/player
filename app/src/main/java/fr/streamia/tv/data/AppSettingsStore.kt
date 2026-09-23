@@ -4,8 +4,8 @@ import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
 import java.security.MessageDigest
-import javax.crypto.SecretKeyFactory
-import javax.crypto.spec.PBEKeySpec
+import javax.crypto.Mac
+import javax.crypto.spec.SecretKeySpec
 import java.security.SecureRandom
 
 enum class VideoAspectSetting { Fit, Fill, Zoom }
@@ -279,13 +279,23 @@ internal fun hashPin(pin: String, salt: String): String =
     MessageDigest.getInstance("SHA-256").digest((salt + pin).toByteArray(Charsets.UTF_8)).toHex()
 
 /** PBKDF2 : coûteux volontairement, pour qu'une fuite des préférences ne livre pas le code en 10 000 SHA-256. */
-internal fun slowHashPin(pin: String, salt: String): String {
-    val spec = PBEKeySpec(pin.toCharArray(), salt.toByteArray(Charsets.UTF_8), PIN_PBKDF2_ITERATIONS, 256)
-    return try {
-        SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded.toHex()
-    } finally {
-        spec.clearPassword()
+internal fun slowHashPin(pin: String, salt: String): String =
+    pbkdf2HmacSha256(pin.toByteArray(Charsets.UTF_8), salt.toByteArray(Charsets.UTF_8), PIN_PBKDF2_ITERATIONS).toHex()
+
+/**
+ * PBKDF2-HMAC-SHA256 (RFC 8018, un seul bloc de 32 octets) écrit sur `Mac("HmacSHA256")`, disponible
+ * partout : `SecretKeyFactory("PBKDF2WithHmacSHA256")` n'existe qu'à partir d'Android 8 (API 26),
+ * alors que l'app tourne dès l'API 23.
+ */
+internal fun pbkdf2HmacSha256(password: ByteArray, salt: ByteArray, iterations: Int): ByteArray {
+    val mac = Mac.getInstance("HmacSHA256").apply { init(SecretKeySpec(password, "HmacSHA256")) }
+    var u = mac.doFinal(salt + byteArrayOf(0, 0, 0, 1))
+    val result = u.copyOf()
+    repeat(iterations - 1) {
+        u = mac.doFinal(u)
+        for (i in result.indices) result[i] = (result[i].toInt() xor u[i].toInt()).toByte()
     }
+    return result
 }
 
 /** Aucun délai sous 5 échecs, puis 30 s doublées à chaque échec supplémentaire, plafonné à 15 min. */

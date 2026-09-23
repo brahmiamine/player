@@ -104,7 +104,10 @@ gradle.taskGraph.whenReady {
     val signedVariantRequested = allTasks.any { task ->
         task.project == project && Regex("^(assemble|package|bundle)(Release|Optimized)$").matches(task.name)
     }
-    if (signedVariantRequested && System.getenv("RELEASE_STORE_FILE").isNullOrBlank() && !project.hasProperty("allowDebugSignedRelease")) {
+    // Les quatre valeurs, comme `releaseSigningEnv` : une seule manquante suffit à retomber sur la clé debug.
+    val releaseKeyComplete = listOf("RELEASE_STORE_FILE", "RELEASE_STORE_PASSWORD", "RELEASE_KEY_ALIAS", "RELEASE_KEY_PASSWORD")
+        .all { !System.getenv(it).isNullOrBlank() }
+    if (signedVariantRequested && !releaseKeyComplete && !project.hasProperty("allowDebugSignedRelease")) {
         throw GradleException(
             "Clé de signature release absente (RELEASE_STORE_FILE, RELEASE_STORE_PASSWORD, RELEASE_KEY_ALIAS, " +
                 "RELEASE_KEY_PASSWORD). Voir docs/release-signing.md, ou -PallowDebugSignedRelease pour un essai local.",
