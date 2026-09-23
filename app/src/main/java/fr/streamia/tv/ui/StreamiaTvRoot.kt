@@ -84,12 +84,8 @@ fun StreamiaTvRoot(viewModel: StreamiaViewModel) {
             return@LaunchedEffect
         }
 
-        val session = validSession?.takeIf { it.profileId == targetProfileId }
-        if (session != null) {
-            viewModel.resumeStartup(targetProfileId, session.entry, session.returnToSeries)
-            return@LaunchedEffect
-        }
-
+        // Au démarrage on rouvre la dernière page de navigation, jamais directement le dernier
+        // contenu joué (la reprise directe reste réservée à la carte « Continuer à regarder »).
         viewModel.openProfile(targetProfileId)
         val loaded = viewModel.uiState.first { candidate ->
             val profileReady = candidate.activeProfileId == targetProfileId &&
@@ -102,6 +98,15 @@ fun StreamiaTvRoot(viewModel: StreamiaViewModel) {
         }
 
         if (loaded.activeProfileId != targetProfileId || loaded.catalog == null) return@LaunchedEffect
+        when (val page = sessionStore.loadLastPage()) {
+            "search" -> viewModel.showSearch()
+            "live_matches" -> viewModel.showLiveMatches()
+            "epg" -> viewModel.showEpg()
+            "settings" -> viewModel.showSettings()
+            else -> page?.removePrefix("browser:")?.takeIf { page.startsWith("browser:") }
+                ?.let { type -> MediaType.entries.firstOrNull { it.name == type } }
+                ?.let(viewModel::openSection)
+        }
     }
 
     LaunchedEffect(Unit) {
@@ -116,6 +121,17 @@ fun StreamiaTvRoot(viewModel: StreamiaViewModel) {
                 sessionStore.saveActiveProfile(activeProfileId)
                 previouslyActiveProfileId = activeProfileId
             }
+
+            // Fiches et lecteur ne comptent pas : on garde la page d'où ils ont été ouverts.
+            when (current.screen) {
+                StreamiaScreen.Home -> "home"
+                StreamiaScreen.Browser -> current.browserType?.let { "browser:${it.name}" }
+                StreamiaScreen.Search -> "search"
+                StreamiaScreen.LiveMatches -> "live_matches"
+                StreamiaScreen.Epg -> "epg"
+                StreamiaScreen.Settings -> "settings"
+                else -> null
+            }?.takeIf { activeProfileId != null }?.let(sessionStore::saveLastPage)
 
             val playerScreen = current.screen as? StreamiaScreen.Player
             if (playerScreen != null && activeProfileId != null) {
