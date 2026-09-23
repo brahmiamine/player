@@ -1005,20 +1005,28 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
      * numéro de séquence est encore le plus récent au moment où elle se termine est appliquée ; les
      * relectures intermédiaires, déjà dépassées par un appui plus récent, sont ignorées.
      */
-    fun toggleEntryFavorite(entry: MediaEntry) {
+    /**
+     * Bascule une clé dans un ensemble de la bibliothèque (favori, masqué, verrouillé, vu) : mise à
+     * jour immédiate de l'interface, écriture sérialisée sur IO, puis relecture de la bibliothèque
+     * seulement si aucune bascule plus récente n'a eu lieu entre-temps.
+     */
+    private fun toggleInLibrary(
+        key: String,
+        read: (UserLibrarySnapshot) -> Set<String>,
+        write: (UserLibrarySnapshot, Set<String>) -> UserLibrarySnapshot,
+        persist: (profileId: String) -> Unit,
+    ) {
         val profileId = _uiState.value.activeProfileId ?: return
         _uiState.update { state ->
-            val favorites = state.library.favoriteEntries.toMutableSet().apply {
-                if (!add(entry.key)) remove(entry.key)
-            }
-            state.copy(library = state.library.copy(favoriteEntries = favorites))
+            val updated = read(state.library).toMutableSet().apply { if (!add(key)) remove(key) }
+            state.copy(library = write(state.library, updated))
         }
         val sequence = ++libraryMutationSequence
         viewModelScope.launch {
             libraryMutation.withLock {
                 runCatching {
                     withContext(Dispatchers.IO) {
-                        repository.toggleEntryFavorite(profileId, entry)
+                        persist(profileId)
                         repository.library(profileId)
                     }
                 }.onSuccess { library ->
@@ -1029,100 +1037,24 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         }
     }
 
-    fun toggleEntryHidden(entry: MediaEntry) {
-        val profileId = _uiState.value.activeProfileId ?: return
-        _uiState.update { state ->
-            val hidden = state.library.hiddenEntries.toMutableSet().apply {
-                if (!add(entry.key)) remove(entry.key)
-            }
-            state.copy(library = state.library.copy(hiddenEntries = hidden))
-        }
-        val sequence = ++libraryMutationSequence
-        viewModelScope.launch {
-            libraryMutation.withLock {
-                runCatching {
-                    withContext(Dispatchers.IO) {
-                        repository.toggleEntryHidden(profileId, entry)
-                        repository.library(profileId)
-                    }
-                }.onSuccess { library ->
-                    if (sequence != libraryMutationSequence) return@onSuccess
-                    _uiState.update { state -> if (state.activeProfileId == profileId) state.copy(library = library) else state }
-                }
-            }
-        }
+    fun toggleEntryFavorite(entry: MediaEntry) = toggleInLibrary(entry.key, { it.favoriteEntries }, { lib, set -> lib.copy(favoriteEntries = set) }) { profileId ->
+        repository.toggleEntryFavorite(profileId, entry)
     }
 
-    fun toggleCategoryHidden(category: MediaCategory) {
-        val profileId = _uiState.value.activeProfileId ?: return
-        _uiState.update { state ->
-            val hidden = state.library.hiddenCategories.toMutableSet().apply {
-                if (!add(category.key)) remove(category.key)
-            }
-            state.copy(library = state.library.copy(hiddenCategories = hidden))
-        }
-        val sequence = ++libraryMutationSequence
-        viewModelScope.launch {
-            libraryMutation.withLock {
-                runCatching {
-                    withContext(Dispatchers.IO) {
-                        repository.toggleCategoryHidden(profileId, category)
-                        repository.library(profileId)
-                    }
-                }.onSuccess { library ->
-                    if (sequence != libraryMutationSequence) return@onSuccess
-                    _uiState.update { state -> if (state.activeProfileId == profileId) state.copy(library = library) else state }
-                }
-            }
-        }
+    fun toggleEntryHidden(entry: MediaEntry) = toggleInLibrary(entry.key, { it.hiddenEntries }, { lib, set -> lib.copy(hiddenEntries = set) }) { profileId ->
+        repository.toggleEntryHidden(profileId, entry)
     }
 
-    fun toggleCategoryLocked(category: MediaCategory) {
-        val profileId = _uiState.value.activeProfileId ?: return
-        _uiState.update { state ->
-            val locked = state.library.lockedCategories.toMutableSet().apply {
-                if (!add(category.key)) remove(category.key)
-            }
-            state.copy(library = state.library.copy(lockedCategories = locked))
-        }
-        val sequence = ++libraryMutationSequence
-        viewModelScope.launch {
-            libraryMutation.withLock {
-                runCatching {
-                    withContext(Dispatchers.IO) {
-                        repository.toggleCategoryLocked(profileId, category)
-                        repository.library(profileId)
-                    }
-                }.onSuccess { library ->
-                    if (sequence != libraryMutationSequence) return@onSuccess
-                    _uiState.update { state -> if (state.activeProfileId == profileId) state.copy(library = library) else state }
-                }
-            }
-        }
+    fun toggleCategoryHidden(category: MediaCategory) = toggleInLibrary(category.key, { it.hiddenCategories }, { lib, set -> lib.copy(hiddenCategories = set) }) { profileId ->
+        repository.toggleCategoryHidden(profileId, category)
     }
 
-    fun toggleEntryWatched(entry: MediaEntry) {
-        val profileId = _uiState.value.activeProfileId ?: return
-        _uiState.update { state ->
-            val watched = state.library.watchedEntries.toMutableSet().apply {
-                if (!add(entry.key)) remove(entry.key)
-            }
-            state.copy(library = state.library.copy(watchedEntries = watched))
-        }
-        val sequence = ++libraryMutationSequence
-        viewModelScope.launch {
-            libraryMutation.withLock {
-                runCatching {
-                    withContext(Dispatchers.IO) {
-                        repository.toggleEntryWatched(profileId, entry)
-                        repository.library(profileId)
-                    }
-                }.onSuccess { library ->
-                    if (sequence != libraryMutationSequence) return@onSuccess
-                    _uiState.update { state -> if (state.activeProfileId == profileId) state.copy(library = library) else state }
-                }
-            }
-        }
+    fun toggleCategoryLocked(category: MediaCategory) = toggleInLibrary(category.key, { it.lockedCategories }, { lib, set -> lib.copy(lockedCategories = set) }) { profileId ->
+        repository.toggleCategoryLocked(profileId, category)
+    }
+
+    fun toggleEntryWatched(entry: MediaEntry) = toggleInLibrary(entry.key, { it.watchedEntries }, { lib, set -> lib.copy(watchedEntries = set) }) { profileId ->
+        repository.toggleEntryWatched(profileId, entry)
     }
 
     /** Enregistre un nouveau code parental et active le verrouillage — déverrouille aussi la session en cours puisque c'est l'utilisateur qui vient de le saisir. */
@@ -1143,28 +1075,8 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         return correct
     }
 
-    fun toggleCategoryFavorite(category: MediaCategory) {
-        val profileId = _uiState.value.activeProfileId ?: return
-        _uiState.update { state ->
-            val favorites = state.library.favoriteCategories.toMutableSet().apply {
-                if (!add(category.key)) remove(category.key)
-            }
-            state.copy(library = state.library.copy(favoriteCategories = favorites))
-        }
-        val sequence = ++libraryMutationSequence
-        viewModelScope.launch {
-            libraryMutation.withLock {
-                runCatching {
-                    withContext(Dispatchers.IO) {
-                        repository.toggleCategoryFavorite(profileId, category)
-                        repository.library(profileId)
-                    }
-                }.onSuccess { library ->
-                    if (sequence != libraryMutationSequence) return@onSuccess
-                    _uiState.update { state -> if (state.activeProfileId == profileId) state.copy(library = library) else state }
-                }
-            }
-        }
+    fun toggleCategoryFavorite(category: MediaCategory) = toggleInLibrary(category.key, { it.favoriteCategories }, { lib, set -> lib.copy(favoriteCategories = set) }) { profileId ->
+        repository.toggleCategoryFavorite(profileId, category)
     }
 
     fun recordPlayback(entry: MediaEntry, positionMs: Long, durationMs: Long) {
