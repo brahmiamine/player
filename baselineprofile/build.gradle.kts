@@ -12,6 +12,9 @@ android {
         minSdk = 28
         targetSdk = 36
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // Autorise les mesures sur émulateur : seule la comparaison relative (avec/sans profil) y a
+        // du sens, les valeurs absolues ne représentent pas un boîtier TV réel.
+        testInstrumentationRunnerArguments["androidx.benchmark.suppressErrors"] = "EMULATOR"
     }
 
     compileOptions {
