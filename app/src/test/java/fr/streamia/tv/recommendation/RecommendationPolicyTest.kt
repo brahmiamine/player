@@ -46,24 +46,34 @@ class RecommendationPolicyTest {
     }
 
     @Test
-    fun `secondary slot prefers strong recent event over other valid candidates`() {
-        val selected = chooseSecondarySlot(
-            listOf(
-                SecondarySlotCandidate(SecondarySlotKind.LiveNow, quality = 0.95),
-                SecondarySlotCandidate(SecondarySlotKind.NewForYou, quality = 0.99),
-                SecondarySlotCandidate(SecondarySlotKind.RecentStrongEvent, quality = 0.70),
-            ),
-            minimumQuality = 0.60,
+    fun `secondary slot follows like then watched then added then releases priority`() {
+        val all = listOf(
+            SecondarySlotCandidate(SecondarySlotKind.RecentReleases, quality = 0.99),
+            SecondarySlotCandidate(SecondarySlotKind.RecentlyAdded, quality = 0.95),
+            SecondarySlotCandidate(SecondarySlotKind.BecauseYouWatched, quality = 0.80),
+            SecondarySlotCandidate(SecondarySlotKind.BecauseYouLike, quality = 0.70),
         )
 
-        assertEquals(SecondarySlotKind.RecentStrongEvent, selected?.kind)
+        val priority = listOf(
+            SecondarySlotKind.BecauseYouLike,
+            SecondarySlotKind.BecauseYouWatched,
+            SecondarySlotKind.RecentlyAdded,
+            SecondarySlotKind.RecentReleases,
+        )
+
+        // En retirant successivement le type prioritaire, le suivant doit toujours gagner,
+        // même si sa qualité est plus faible que celle des types moins prioritaires.
+        priority.indices.forEach { index ->
+            val available = all.filter { it.kind in priority.drop(index) }
+            assertEquals(priority[index], chooseSecondarySlot(available, minimumQuality = 0.60)?.kind)
+        }
     }
 
     @Test
     fun `secondary slot stays empty when every candidate is below quality threshold`() {
         assertNull(
             chooseSecondarySlot(
-                listOf(SecondarySlotCandidate(SecondarySlotKind.LiveNow, quality = 0.39)),
+                listOf(SecondarySlotCandidate(SecondarySlotKind.RecentlyAdded, quality = 0.39)),
                 minimumQuality = 0.40,
             ),
         )

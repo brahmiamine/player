@@ -19,13 +19,15 @@ data class LiveOnSatMatch(
 )
 
 /**
- * Un match liveonsat.com avec, pour chaque diffuseur reconnu, la chaîne correspondante du profil
- * courant. Les diffuseurs absents de [matchedChannels] restent dans [LiveOnSatMatch.channels] :
- * l'UI les affiche quand même, simplement non cliquables.
+ * Un match liveonsat.com avec, pour chaque diffuseur reconnu, la ou les chaînes correspondantes du
+ * profil courant — plusieurs quand le diffuseur existe en plusieurs résolutions, ou quand il
+ * désigne un bouquet entier (ex. "beIN Connect MENA") plutôt qu'une chaîne précise. Les diffuseurs
+ * absents de [matchedChannels] restent dans [LiveOnSatMatch.channels] : l'UI les affiche quand
+ * même, simplement non cliquables.
  */
 data class ResolvedLiveOnSatMatch(
     val match: LiveOnSatMatch,
-    val matchedChannels: Map<String, MediaEntry>,
+    val matchedChannels: Map<String, List<MediaEntry>>,
     val epgStartEpochSeconds: Long? = null,
     val epgEndEpochSeconds: Long? = null,
 )

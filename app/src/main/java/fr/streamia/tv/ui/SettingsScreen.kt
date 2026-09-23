@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
 import fr.streamia.tv.data.AppSettings
 import fr.streamia.tv.data.BufferMode
+import fr.streamia.tv.data.HomeBlock
 import fr.streamia.tv.data.LiveChannelSortOrder
 import fr.streamia.tv.data.LiveStreamFormat
 import fr.streamia.tv.data.UpdateCheckResult
@@ -85,6 +86,7 @@ fun SettingsScreen(
     onToggleAutoPlayNextEpisode: () -> Unit,
     onCycleSubtitleSizeScale: () -> Unit,
     onToggleSubtitleBackground: () -> Unit,
+    onToggleHomeBlock: (HomeBlock) -> Unit,
     onSearch: () -> Unit,
     onEpg: () -> Unit,
     onOrganizer: () -> Unit,
@@ -110,6 +112,20 @@ fun SettingsScreen(
     val scope = rememberCoroutineScope()
     var activeModal by remember { mutableStateOf<SettingsModalState?>(null) }
     var backupMessage by remember { mutableStateOf<String?>(null) }
+    var homeBlocksModalOpen by remember { mutableStateOf(false) }
+    val homeBlockRows = remember {
+        listOf(
+            HomeBlock.Resume to "Reprendre la lecture",
+            HomeBlock.Favorites to "Favoris",
+            HomeBlock.Recommendations to "Recommandations",
+            HomeBlock.TvProgrammeNow to "Programme TV FR en direct",
+            HomeBlock.TvProgrammeTonight to "Programme TV FR ce soir",
+            HomeBlock.BeinSportsNow to "beIN Sports en direct",
+            HomeBlock.BeinSportsNext to "beIN Sports suivant",
+            HomeBlock.UkGuideNow to "UK en direct",
+            HomeBlock.UkGuideNext to "UK suivant",
+        )
+    }
 
     fun openChoices(
         title: String,
@@ -376,6 +392,25 @@ fun SettingsScreen(
                 Spacer(Modifier.weight(1f))
             }
 
+            SettingsSectionTitle("Blocs de l'accueil")
+            Row(Modifier.fillMaxWidth().height(88.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                val enabledBlocks = homeBlockRows.count { (block, _) -> block !in settings.disabledHomeBlocks }
+                SettingsTile(
+                    glyph = StreamiaIconGlyph.CheckboxOn,
+                    title = "Blocs de l'accueil",
+                    subtitle = if (enabledBlocks == homeBlockRows.size) {
+                        "Tous activés"
+                    } else {
+                        "$enabledBlocks / ${homeBlockRows.size} activés"
+                    },
+                    onClick = { homeBlocksModalOpen = true },
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.weight(1f))
+                Spacer(Modifier.weight(1f))
+                Spacer(Modifier.weight(1f))
+            }
+
             SettingsSectionTitle("Outils & gestion")
             Row(Modifier.fillMaxWidth().height(88.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 SettingsTile(StreamiaIconGlyph.Search, "Recherche", "Chaînes, films et séries", onSearch, Modifier.weight(1f))
@@ -538,6 +573,15 @@ fun SettingsScreen(
             },
         )
     }
+
+    if (homeBlocksModalOpen) {
+        HomeBlocksModal(
+            blocks = homeBlockRows,
+            disabledBlocks = settings.disabledHomeBlocks,
+            onToggle = onToggleHomeBlock,
+            onDismiss = { homeBlocksModalOpen = false },
+        )
+    }
 }
 
 @Composable
@@ -605,6 +649,74 @@ private fun SettingsChoiceModal(
                 }
                 Spacer(Modifier.height(12.dp))
                 Text("Retour pour annuler", color = MutedInk, fontSize = 12.sp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun HomeBlocksModal(
+    blocks: List<Pair<HomeBlock, String>>,
+    disabledBlocks: Set<HomeBlock>,
+    onToggle: (HomeBlock) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    BackHandler(onBack = onDismiss)
+    val firstFocus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { runCatching { firstFocus.requestFocus() } }
+
+    Box(
+        Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.76f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        GlassSurface(modifier = Modifier.width(640.dp)) {
+            Column(Modifier.padding(26.dp)) {
+                Text("Blocs de l'accueil", color = Ink, fontSize = 24.sp, fontWeight = HeadingWeight)
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Cochez les blocs à afficher sur l'accueil. Décochez pour les masquer.",
+                    color = MutedInk,
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp,
+                )
+                Spacer(Modifier.height(16.dp))
+                Column(
+                    Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    blocks.forEachIndexed { index, (block, label) ->
+                        val enabled = block !in disabledBlocks
+                        FocusableSurface(
+                            onClick = { onToggle(block) },
+                            selected = enabled,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(54.dp)
+                                .then(if (index == 0) Modifier.focusRequester(firstFocus) else Modifier),
+                        ) {
+                            Row(
+                                Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                StreamiaIcon(
+                                    if (enabled) StreamiaIconGlyph.CheckboxOn else StreamiaIconGlyph.CheckboxOff,
+                                    tint = if (enabled) FocusBlueBright else MutedInk,
+                                    size = 22.dp,
+                                )
+                                Spacer(Modifier.width(14.dp))
+                                Text(
+                                    label,
+                                    color = Ink,
+                                    fontSize = 15.sp,
+                                    fontWeight = if (enabled) HeadingWeight else androidx.compose.ui.text.font.FontWeight.Normal,
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                Text("Retour pour fermer", color = MutedInk, fontSize = 12.sp)
             }
         }
     }

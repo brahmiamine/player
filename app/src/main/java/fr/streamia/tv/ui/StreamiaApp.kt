@@ -34,6 +34,8 @@ import fr.streamia.tv.ui.theme.Night
 import fr.streamia.tv.ui.theme.StreamiaTheme
 import fr.streamia.tv.player.LivePlaybackSession
 import fr.streamia.tv.domain.MediaType
+import fr.streamia.tv.data.AppSettings
+import fr.streamia.tv.data.HomeBlock
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.ui.PlayerView
 import dev.chrisbanes.haze.HazeState
@@ -97,13 +99,15 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     parentalControlEnabled = state.appSettings.parentalControlEnabled,
                     parentalUnlocked = state.parentalUnlocked,
                     catalogLoading = state.catalogHydrating,
-                    recommendationRows = state.homeRecommendationRows,
-                    tvProgrammeNow = state.homeTvProgrammeNow,
-                    tvProgrammeTonight = state.homeTvProgrammeTonight,
-                    beinSportsNow = state.homeBeinSportsNow,
-                    beinSportsNext = state.homeBeinSportsNext,
-                    ukGuideNow = state.homeUkGuideNow,
-                    ukGuideNext = state.homeUkGuideNext,
+                    resumeRowEnabled = HomeBlock.Resume !in state.appSettings.disabledHomeBlocks,
+                    favoritesRowEnabled = HomeBlock.Favorites !in state.appSettings.disabledHomeBlocks,
+                    recommendationRows = state.homeRecommendationRows.ifDisabled(HomeBlock.Recommendations, state.appSettings),
+                    tvProgrammeNow = state.homeTvProgrammeNow.ifDisabled(HomeBlock.TvProgrammeNow, state.appSettings),
+                    tvProgrammeTonight = state.homeTvProgrammeTonight.ifDisabled(HomeBlock.TvProgrammeTonight, state.appSettings),
+                    beinSportsNow = state.homeBeinSportsNow.ifDisabled(HomeBlock.BeinSportsNow, state.appSettings),
+                    beinSportsNext = state.homeBeinSportsNext.ifDisabled(HomeBlock.BeinSportsNext, state.appSettings),
+                    ukGuideNow = state.homeUkGuideNow.ifDisabled(HomeBlock.UkGuideNow, state.appSettings),
+                    ukGuideNext = state.homeUkGuideNext.ifDisabled(HomeBlock.UkGuideNext, state.appSettings),
                     restoreContext = state.contentReturnContext,
                     focusTarget = state.homeFocusTarget,
                     onFocusConsumed = viewModel::consumeHomeFocusTarget,
@@ -135,6 +139,10 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     message = state.message,
                     initialType = state.browserType,
                     initialCategoryId = state.browserCategoryId,
+                    restoreEntryKey = state.contentReturnContext
+                        ?.takeIf { it.origin == ContentReturnOrigin.Browser }
+                        ?.itemKey,
+                    onRestoreConsumed = viewModel::consumeBrowserRestore,
                     onEntrySelected = viewModel::openEntry,
                     onToggleEntryFavorite = viewModel::toggleEntryFavorite,
                     onToggleCategoryFavorite = viewModel::toggleCategoryFavorite,
@@ -180,6 +188,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onToggleAutoPlayNextEpisode = viewModel::toggleAutoPlayNextEpisode,
                     onCycleSubtitleSizeScale = viewModel::cycleSubtitleSizeScale,
                     onToggleSubtitleBackground = viewModel::toggleSubtitleBackground,
+                    onToggleHomeBlock = viewModel::toggleHomeBlock,
                     onSearch = viewModel::showSearch,
                     onEpg = viewModel::showEpg,
                     onOrganizer = viewModel::showOrganizer,
@@ -414,3 +423,7 @@ private fun BootScreen() {
         }
     }
 }
+
+/** Bloc de l'accueil désactivable : la liste source disparaît, sans toucher au calcul en amont. */
+private fun <T> List<T>.ifDisabled(block: HomeBlock, settings: AppSettings): List<T> =
+    if (block in settings.disabledHomeBlocks) emptyList() else this

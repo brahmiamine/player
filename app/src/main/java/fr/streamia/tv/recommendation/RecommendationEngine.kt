@@ -2,6 +2,8 @@ package fr.streamia.tv.recommendation
 
 import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.MediaType
+import java.time.Instant
+import java.time.ZoneOffset
 import kotlin.math.abs
 import kotlin.math.pow
 
@@ -9,9 +11,8 @@ enum class RecommendationRowKind {
     Discover,
     ForYou,
     BecauseYouWatched,
-    LiveNow,
-    NewForYou,
-    RecentTaste,
+    RecentlyAdded,
+    RecentReleases,
 }
 
 data class RecommendedMedia(
@@ -60,13 +61,13 @@ data class RecommendationBuildContext(
     val candidates: List<MediaEntry>,
     val detailsByKey: Map<String, ContentFeatures> = emptyMap(),
     val profile: RecommendationProfileInput = RecommendationProfileInput(),
-    val liveNow: List<RecommendedMedia> = emptyList(),
     val nowMillis: Long,
 )
 
 /**
  * Moteur métier pur et déterministe. Il ne sait rien de SQLite, Compose, Media3 ou du modèle ML :
  * le repository lui fournit un pool déjà borné, puis le moteur calcule au maximum deux rangées.
+ * Il ne traite que les Films et Séries : le direct a ses propres rangées TV sur l'accueil.
  */
 class RecommendationEngine(
     private val similarityEngine: ContentSimilarityEngine = MetadataSimilarityEngine(),
@@ -114,6 +115,8 @@ class RecommendationEngine(
                 )
             }
             .sortedWith(compareByDescending<ScoredMedia> { it.score }.thenBy { it.entry.key })
+            // Un même film publié sous deux identifiants (titre + année identiques) n'apparaît qu'une fois.
+            .distinctBy { featuresFor(it.entry, context.detailsByKey).identityKey() ?: it.entry.key }
 
         val primaryItems = ranked.take(PRIMARY_LIMIT).map(ScoredMedia::toRecommended)
         if (primaryItems.isEmpty()) {
@@ -122,95 +125,54 @@ class RecommendationEngine(
 
         val primary = RecommendationRow(
             kind = if (personalized) RecommendationRowKind.ForYou else RecommendationRowKind.Discover,
-            title = if (personalized) "Recommandé pour vous" else "À découvrir",
+            title = if (personalized) "Recommandé pour vous" else "Sélection pour vous",
             items = primaryItems,
         )
 
+        // `ranked` est déjà dédoublonné par identité : exclure les clés du principal suffit.
         val usedKeys = primaryItems.mapTo(mutableSetOf()) { it.entry.key }
-        val secondaryRows = linkedMapOf<SecondarySlotKind, RecommendationRow>()
-        val secondaryCandidates = mutableListOf<SecondarySlotCandidate>()
+        val remainingRanked = ranked.filterNot { it.entry.key in usedKeys }
+        val remaining = remainingRanked.map(ScoredMedia::entry)
 
-        strongestRecentSource(context.profile, context.detailsByKey, context.nowMillis)?.let { source ->
-            val similar = similarTo(
-                source = source.features,
-                candidates = candidates.filterNot { it.key in usedKeys },
-                detailsByKey = context.detailsByKey,
-                hiddenEntries = context.profile.hiddenEntries,
-                hiddenCategoryIds = context.profile.hiddenCategoryIds,
-                limit = SECONDARY_LIMIT,
-            )
-            if (similar.size >= MIN_SECONDARY_ITEMS) {
-                val slotKind = if (source.explicit) {
-                    SecondarySlotKind.RecentStrongEvent
-                } else {
-                    SecondarySlotKind.BecauseYouWatched
-                }
-                // Un feedback "Plus comme ça" ne veut pas dire que l'utilisateur a regardé ce
-                // contenu : le libellé ne doit affirmer un visionnage que pour un signal de lecture.
-                val title = if (source.explicit) {
-                    "Parce que vous aimez ${source.features.entry.displayName}"
-                } else {
-                    "Parce que vous avez regardé ${source.features.entry.displayName}"
-                }
-                secondaryRows[slotKind] = RecommendationRow(
-                    kind = RecommendationRowKind.BecauseYouWatched,
-                    title = title,
-                    items = similar,
-                )
-                secondaryCandidates += SecondarySlotCandidate(
-                    kind = slotKind,
-                    quality = similar.first().score,
-                    occurredAtMillis = source.occurredAtMillis,
-                )
+        // Chaque candidat est construit indépendamment : si « Plus comme ça » ne donne pas assez de
+        // résultats pertinents, la lecture forte prend le relais, puis la fraîcheur du catalogue.
+        val secondary = buildList {
+            latestMoreLikeThisSource(context.profile, context.detailsByKey)?.let { source ->
+                similarRow(source, remaining, context, SecondarySlotKind.BecauseYouLike) {
+                    "Parce que vous aimez $it"
+                }?.let(::add)
             }
-        }
-
-        // Le direct a son propre flux de données/TTL. Le moteur reçoit seulement le snapshot EPG
-        // déjà préparé ; il ne déclenche jamais une actualisation VOD pour rafraîchir le Live.
-        val live = context.liveNow
-            .asSequence()
-            .filterNot {
-                it.entry.key in context.profile.hiddenEntries ||
-                    it.entry.categoryId in context.profile.hiddenCategoryIds
+            strongestRecentPlayback(context.profile, context.detailsByKey, context.nowMillis)?.let { source ->
+                similarRow(source, remaining, context, SecondarySlotKind.BecauseYouWatched) {
+                    "Parce que vous avez regardé $it"
+                }?.let(::add)
             }
-            .distinctBy { it.entry.key }
-            .take(SECONDARY_LIMIT)
-            .toList()
-        if (live.size >= MIN_SECONDARY_ITEMS) {
-            secondaryRows[SecondarySlotKind.LiveNow] = RecommendationRow(
-                kind = RecommendationRowKind.LiveNow,
-                title = "À la TV maintenant",
-                items = live,
-            )
-            secondaryCandidates += SecondarySlotCandidate(
-                kind = SecondarySlotKind.LiveNow,
-                quality = live.take(3).map(RecommendedMedia::score).average(),
-                occurredAtMillis = context.nowMillis,
-            )
+            // « Récemment ajoutés » = date d'ajout fournisseur. `freshness` retombe sous le seuil
+            // quand elle est absente, donc une playlist M3U sans date ne produit jamais cette rangée.
+            remainingRanked
+                .filter { freshness(it.entry, context.nowMillis) >= MIN_FRESHNESS_FOR_SECONDARY }
+                .toSecondaryRow(
+                    kind = SecondarySlotKind.RecentlyAdded,
+                    rowKind = RecommendationRowKind.RecentlyAdded,
+                    title = if (personalized) "Récemment ajoutés pour vous" else "Récemment ajoutés",
+                    occurredAtMillis = context.nowMillis,
+                )
+                ?.let(::add)
+            // « Sorties récentes » = année de sortie. Sans année fiable, le contenu est ignoré.
+            val currentYear = Instant.ofEpochMilli(context.nowMillis).atZone(ZoneOffset.UTC).year
+            remainingRanked
+                .filter { featuresFor(it.entry, context.detailsByKey).releaseYear() in (currentYear - 1)..currentYear }
+                .toSecondaryRow(
+                    kind = SecondarySlotKind.RecentReleases,
+                    rowKind = RecommendationRowKind.RecentReleases,
+                    title = "Sorties récentes",
+                    occurredAtMillis = context.nowMillis,
+                )
+                ?.let(::add)
         }
 
-        val fresh = ranked
-            .asSequence()
-            .filterNot { it.entry.key in usedKeys }
-            .filter { freshness(it.entry, context.nowMillis) >= MIN_FRESHNESS_FOR_SECONDARY }
-            .take(SECONDARY_LIMIT)
-            .map(ScoredMedia::toRecommended)
-            .toList()
-        if (fresh.size >= MIN_SECONDARY_ITEMS) {
-            secondaryRows[SecondarySlotKind.NewForYou] = RecommendationRow(
-                kind = RecommendationRowKind.NewForYou,
-                title = if (personalized) "Nouveautés pour vous" else "Nouveautés",
-                items = fresh,
-            )
-            secondaryCandidates += SecondarySlotCandidate(
-                kind = SecondarySlotKind.NewForYou,
-                quality = fresh.first().score,
-                occurredAtMillis = context.nowMillis,
-            )
-        }
-
-        val selectedSecondary = chooseSecondarySlot(secondaryCandidates, MIN_SECONDARY_QUALITY)
-            ?.let { secondaryRows[it.kind] }
+        val selectedSecondary = chooseSecondarySlot(secondary.map { it.first }, MIN_SECONDARY_QUALITY)
+            ?.let { selected -> secondary.first { it.first.kind == selected.kind }.second }
 
         return RecommendationSnapshot(
             profileId = profileId,
@@ -218,6 +180,45 @@ class RecommendationEngine(
             confidence = confidence,
             rows = listOfNotNull(primary, selectedSecondary).take(MAX_HOME_AI_ROWS),
         )
+    }
+
+    private fun similarRow(
+        source: WeightedSource,
+        candidates: List<MediaEntry>,
+        context: RecommendationBuildContext,
+        kind: SecondarySlotKind,
+        title: (String) -> String,
+    ): Pair<SecondarySlotCandidate, RecommendationRow>? {
+        val similar = similarTo(
+            source = source.features,
+            candidates = candidates,
+            detailsByKey = context.detailsByKey,
+            hiddenEntries = context.profile.hiddenEntries,
+            hiddenCategoryIds = context.profile.hiddenCategoryIds,
+            limit = SECONDARY_LIMIT,
+            // Chaque élément doit tenir le seuil de qualité, pas seulement le premier : on ne
+            // complète pas la rangée avec des contenus à peine liés.
+            minimumScore = MIN_SECONDARY_QUALITY,
+        )
+        if (similar.size < MIN_SECONDARY_ITEMS) return null
+        return SecondarySlotCandidate(kind, similar.first().score, source.occurredAtMillis) to
+            RecommendationRow(
+                kind = RecommendationRowKind.BecauseYouWatched,
+                title = title(source.features.entry.displayName),
+                items = similar,
+            )
+    }
+
+    private fun List<ScoredMedia>.toSecondaryRow(
+        kind: SecondarySlotKind,
+        rowKind: RecommendationRowKind,
+        title: String,
+        occurredAtMillis: Long,
+    ): Pair<SecondarySlotCandidate, RecommendationRow>? {
+        val items = take(SECONDARY_LIMIT).map(ScoredMedia::toRecommended)
+        if (items.size < MIN_SECONDARY_ITEMS) return null
+        return SecondarySlotCandidate(kind, items.first().score, occurredAtMillis) to
+            RecommendationRow(rowKind, title, items)
     }
 
     fun similarTo(
@@ -379,7 +380,6 @@ class RecommendationEngine(
                             POSITIVE_FEEDBACK_HALF_LIFE_MS,
                         ),
                         occurredAtMillis = feedback.occurredAtMillis,
-                        explicit = true,
                     ),
                 )
             }
@@ -406,44 +406,44 @@ class RecommendationEngine(
                     NEGATIVE_FEEDBACK_HALF_LIFE_MS,
                 ),
                 occurredAtMillis = feedback.occurredAtMillis,
-                explicit = true,
             )
         }
         .sortedBy { it.weight }
         .take(MAX_TASTE_SOURCES)
         .toList()
 
-    private fun strongestRecentSource(
+    /** « Plus comme ça » ne veut pas dire « regardé » : ce signal a son propre libellé. */
+    private fun latestMoreLikeThisSource(
+        profile: RecommendationProfileInput,
+        details: Map<String, ContentFeatures>,
+    ): WeightedSource? = profile.feedback.values
+        .asSequence()
+        .filter { it.kind == RecommendationFeedbackKind.MoreLikeThis }
+        .maxByOrNull { it.occurredAtMillis }
+        ?.let {
+            WeightedSource(
+                features = featuresFor(it.entry, details),
+                weight = POSITIVE_FEEDBACK_WEIGHT,
+                occurredAtMillis = it.occurredAtMillis,
+            )
+        }
+
+    /** Dernière lecture assez avancée (poids décroissant avec l'âge) pour valoir une préférence. */
+    private fun strongestRecentPlayback(
         profile: RecommendationProfileInput,
         details: Map<String, ContentFeatures>,
         nowMillis: Long,
-    ): WeightedSource? {
-        val explicit = profile.feedback.values
-            .asSequence()
-            .filter { it.kind == RecommendationFeedbackKind.MoreLikeThis }
-            .maxByOrNull { it.occurredAtMillis }
-            ?.let {
-                WeightedSource(
-                    features = featuresFor(it.entry, details),
-                    weight = POSITIVE_FEEDBACK_WEIGHT,
-                    occurredAtMillis = it.occurredAtMillis,
-                    explicit = true,
-                )
-            }
-        if (explicit != null) return explicit
-
-        return profile.history
-            .asSequence()
-            .map { record ->
-                WeightedSource(
-                    features = featuresFor(record.entry, details),
-                    weight = playbackWeight(record, nowMillis),
-                    occurredAtMillis = record.updatedAtMillis,
-                )
-            }
-            .filter { it.weight >= STRONG_PLAYBACK_SOURCE_WEIGHT }
-            .maxByOrNull { it.occurredAtMillis }
-    }
+    ): WeightedSource? = profile.history
+        .asSequence()
+        .map { record ->
+            WeightedSource(
+                features = featuresFor(record.entry, details),
+                weight = playbackWeight(record, nowMillis),
+                occurredAtMillis = record.updatedAtMillis,
+            )
+        }
+        .filter { it.weight >= STRONG_PLAYBACK_SOURCE_WEIGHT }
+        .maxByOrNull { it.occurredAtMillis }
 
     private fun categoryAffinity(sources: List<WeightedSource>): Map<String, Double> {
         if (sources.isEmpty()) return emptyMap()
@@ -499,7 +499,6 @@ class RecommendationEngine(
         val features: ContentFeatures,
         val weight: Double,
         val occurredAtMillis: Long,
-        val explicit: Boolean = false,
     )
 
     private data class ScoredMedia(

@@ -106,7 +106,7 @@ class MetadataSimilarityEngine(
         add(0.04, castSimilarity, sourceCast.isNotEmpty() && candidateCast.isNotEmpty())
         add(0.05, directorSimilarity, sourceDirector.isNotEmpty() && candidateDirector.isNotEmpty())
         add(0.01, countrySimilarity, sourceCountries.isNotEmpty() && candidateCountries.isNotEmpty())
-        add(0.02, yearSimilarity, extractYear(source) != null && extractYear(candidate) != null)
+        add(0.02, yearSimilarity, source.releaseYear() != null && candidate.releaseYear() != null)
         add(0.01, ratingSimilarity, source.rating != null && candidate.rating != null)
         add(0.01, if (categoryMatch) 1.0 else 0.0, true)
 
@@ -220,15 +220,9 @@ class MetadataSimilarityEngine(
         return (2.0 * intersection / (a.size + b.size)).coerceIn(0.0, 1.0)
     }
 
-    private fun extractYear(features: ContentFeatures): Int? {
-        val explicit = YEAR_REGEX.find(features.releaseDate.orEmpty())?.value?.toIntOrNull()
-        if (explicit != null) return explicit
-        return YEAR_REGEX.find(features.entry.displayName)?.value?.toIntOrNull()
-    }
-
     private fun yearSimilarity(source: ContentFeatures, candidate: ContentFeatures): Double {
-        val sourceYear = extractYear(source) ?: return 0.0
-        val candidateYear = extractYear(candidate) ?: return 0.0
+        val sourceYear = source.releaseYear() ?: return 0.0
+        val candidateYear = candidate.releaseYear() ?: return 0.0
         val distance = abs(sourceYear - candidateYear)
         return when {
             distance == 0 -> 1.0
@@ -253,7 +247,6 @@ class MetadataSimilarityEngine(
 
         val TOKEN_REGEX = Regex("[\\p{L}\\p{N}]+")
         val COMBINING_MARKS = Regex("\\p{M}+")
-        val YEAR_REGEX = Regex("\\b(?:19|20)\\d{2}\\b")
         val YEAR_TOKEN = Regex("(?:19|20)\\d{2}")
 
         val TITLE_NOISE_TOKENS = setOf(
@@ -376,14 +369,27 @@ internal fun likelySameContent(source: ContentFeatures, candidate: ContentFeatur
     val candidateTitle = canonicalIdentityTitle(candidate.entry.displayName)
     if (title.isBlank() || title != candidateTitle) return false
 
-    val sourceYear = Regex("\\b(?:19|20)\\d{2}\\b")
-        .find(source.releaseDate.orEmpty())?.value
-        ?: Regex("\\b(?:19|20)\\d{2}\\b").find(source.entry.displayName)?.value
-    val candidateYear = Regex("\\b(?:19|20)\\d{2}\\b")
-        .find(candidate.releaseDate.orEmpty())?.value
-        ?: Regex("\\b(?:19|20)\\d{2}\\b").find(candidate.entry.displayName)?.value
+    val sourceYear = source.releaseYear()
+    val candidateYear = candidate.releaseYear()
     return sourceYear != null && candidateYear != null && sourceYear == candidateYear
 }
+
+/**
+ * Année de sortie : la date fournisseur d'abord, sinon la dernière année du titre
+ * (« Dune (MULTI) FHD 2021 »). Jamais la date d'ajout au catalogue.
+ */
+internal fun ContentFeatures.releaseYear(): Int? =
+    RELEASE_YEAR_REGEX.find(releaseDate.orEmpty())?.value?.toIntOrNull()
+        ?: RELEASE_YEAR_REGEX.findAll(entry.displayName).lastOrNull()?.value?.toIntOrNull()
+
+/** Titre canonique + année + type : repère un même contenu publié sous plusieurs identifiants. */
+internal fun ContentFeatures.identityKey(): String? {
+    val title = canonicalIdentityTitle(entry.displayName).takeIf(String::isNotBlank) ?: return null
+    val year = releaseYear() ?: return null
+    return "${entry.type}|$title|$year"
+}
+
+private val RELEASE_YEAR_REGEX = Regex("\\b(?:19|20)\\d{2}\\b")
 
 private fun canonicalIdentityTitle(value: String): String {
     val normalized = Normalizer.normalize(value, Normalizer.Form.NFD)

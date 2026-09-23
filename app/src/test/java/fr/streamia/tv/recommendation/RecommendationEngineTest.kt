@@ -11,17 +11,18 @@ class RecommendationEngineTest {
     private val engine = RecommendationEngine()
 
     @Test
-    fun `cold start shows discover instead of pretending to know the user`() {
+    fun `cold start shows a selection then recently added`() {
         val snapshot = engine.buildSnapshot(
             "p1",
             RecommendationBuildContext(
-                candidates = listOf(movie(1, "A", 8.9), movie(2, "B", 7.0)),
+                candidates = (1..20).map { movie(it, "Movie $it", 6.0 + it % 4) },
                 nowMillis = 1_000_000L,
             ),
         )
 
+        assertTrue(snapshot.confidence < 0.3)
         assertEquals(RecommendationRowKind.Discover, snapshot.rows.first().kind)
-        assertEquals("À découvrir", snapshot.rows.first().title)
+        assertEquals(listOf("Sélection pour vous", "Récemment ajoutés"), snapshot.rows.map { it.title })
     }
 
     @Test
@@ -53,7 +54,174 @@ class RecommendationEngineTest {
         )
 
         assertEquals(RecommendationRowKind.ForYou, snapshot.rows.first().kind)
+        assertEquals("Recommandé pour vous", snapshot.rows.first().title)
         assertTrue(snapshot.confidence >= 0.3)
+    }
+
+    @Test
+    fun `more like this wins the secondary slot over a strong playback`() {
+        val heist = movie(900, "Heist", 8.0, "crime", HEIST_PLOT)
+        val space = movie(901, "Interstellar", 8.0, "science", SPACE_PLOT)
+
+        val snapshot = engine.buildSnapshot(
+            "p1",
+            RecommendationBuildContext(
+                candidates = spaceAndHeistMovies(),
+                profile = RecommendationProfileInput(
+                    history = listOf(ViewingRecord(heist, 7_000_000, 7_200_000, 990_000L)),
+                    feedback = mapOf(
+                        space.key to RecommendationFeedback(space, RecommendationFeedbackKind.MoreLikeThis, 900_000L),
+                    ),
+                ),
+                nowMillis = 1_000_000L,
+            ),
+        )
+
+        val secondary = snapshot.rows[1]
+        assertEquals("Parce que vous aimez Interstellar", secondary.title)
+        assertTrue(secondary.items.none { it.entry.key == space.key })
+    }
+
+    @Test
+    fun `strong playback drives the secondary slot when more like this has nothing similar`() {
+        val heist = movie(900, "Heist", 8.0, "crime", HEIST_PLOT)
+        val cooking = movie(902, "Chef", 8.0, "food", "restaurant familial cuisine chef recette gastronomie")
+
+        val snapshot = engine.buildSnapshot(
+            "p1",
+            RecommendationBuildContext(
+                candidates = spaceAndHeistMovies(),
+                profile = RecommendationProfileInput(
+                    history = listOf(ViewingRecord(heist, 7_000_000, 7_200_000, 990_000L)),
+                    feedback = mapOf(
+                        cooking.key to RecommendationFeedback(cooking, RecommendationFeedbackKind.MoreLikeThis, 995_000L),
+                    ),
+                ),
+                nowMillis = 1_000_000L,
+            ),
+        )
+
+        val secondary = snapshot.rows[1]
+        assertEquals("Parce que vous avez regardé Heist", secondary.title)
+        assertTrue(secondary.items.none { it.entry.key == heist.key })
+    }
+
+    @Test
+    fun `a few minutes of playback is not a strong source`() {
+        val heist = movie(900, "Heist", 8.0, "crime", HEIST_PLOT)
+
+        val snapshot = engine.buildSnapshot(
+            "p1",
+            RecommendationBuildContext(
+                candidates = spaceAndHeistMovies(),
+                profile = RecommendationProfileInput(
+                    history = listOf(ViewingRecord(heist, 60_000, 7_200_000, 990_000L)),
+                ),
+                nowMillis = 1_000_000L,
+            ),
+        )
+
+        assertEquals("Récemment ajoutés", snapshot.rows[1].title)
+    }
+
+    @Test
+    fun `personalized profile without similarity source gets recently added for you`() {
+        val favorites = listOf(movie(900, "Fav A", 8.0), movie(901, "Fav B", 8.0))
+
+        val snapshot = engine.buildSnapshot(
+            "p1",
+            RecommendationBuildContext(
+                candidates = (1..20).map { movie(it, "Movie $it", 7.0) },
+                profile = RecommendationProfileInput(
+                    favoriteEntries = favorites.mapTo(mutableSetOf()) { it.key },
+                    knownEntriesByKey = favorites.associateBy { it.key },
+                ),
+                nowMillis = 1_000_000L,
+            ),
+        )
+
+        assertTrue(snapshot.confidence >= 0.3)
+        assertEquals(listOf("Recommandé pour vous", "Récemment ajoutés pour vous"), snapshot.rows.map { it.title })
+    }
+
+    @Test
+    fun `without added date recent releases uses the release year only`() {
+        val now = 1_790_000_000_000L // septembre 2026
+        val recent = (1..10).map { movie(it, "Recent $it (MULTI) FHD ${if (it % 2 == 0) 2026 else 2025}", 7.0, addedAt = null) }
+        val old = (11..30).map { movie(it, "Old $it 2019", 8.0, addedAt = null) }
+
+        val snapshot = engine.buildSnapshot("p1", RecommendationBuildContext(candidates = recent + old, nowMillis = now))
+
+        val secondary = snapshot.rows[1]
+        assertEquals("Sorties récentes", secondary.title)
+        assertTrue(secondary.items.all { it.entry.name.startsWith("Recent") })
+    }
+
+    @Test
+    fun `no freshness data means no misleading secondary row`() {
+        val snapshot = engine.buildSnapshot(
+            "p1",
+            RecommendationBuildContext(
+                candidates = (1..20).map { movie(it, "Movie $it", 7.0, addedAt = null) },
+                nowMillis = 1_790_000_000_000L,
+            ),
+        )
+
+        assertEquals(listOf("Sélection pour vous"), snapshot.rows.map { it.title })
+    }
+
+    @Test
+    fun `engine only recommends movies and series never live tv`() {
+        val live = (1..10).map { MediaEntry(id = it, name = "Live $it", categoryId = "live", iconUrl = null, number = it) }
+
+        val snapshot = engine.buildSnapshot(
+            "p1",
+            RecommendationBuildContext(candidates = live + (1..20).map { movie(it, "Movie $it", 7.0) }, nowMillis = 1_000_000L),
+        )
+
+        assertTrue(snapshot.rows.none { it.title == "À la TV maintenant" })
+        assertTrue(snapshot.rows.flatMap { it.items }.none { it.entry.type == MediaType.Live })
+    }
+
+    @Test
+    fun `hidden, hidden category and rejected content never appear in any row`() {
+        val source = movie(900, "Interstellar", 8.0, "science", SPACE_PLOT)
+        val candidates = spaceAndHeistMovies()
+        val hidden = candidates[0]
+        val rejected = candidates[1]
+
+        val snapshot = engine.buildSnapshot(
+            "p1",
+            RecommendationBuildContext(
+                candidates = candidates,
+                profile = RecommendationProfileInput(
+                    feedback = mapOf(
+                        source.key to RecommendationFeedback(source, RecommendationFeedbackKind.MoreLikeThis, 990_000L),
+                        rejected.key to RecommendationFeedback(rejected, RecommendationFeedbackKind.LessLikeThis, 990_000L),
+                    ),
+                    hiddenEntries = setOf(hidden.key),
+                    hiddenCategoryIds = setOf("crime"),
+                ),
+                nowMillis = 1_000_000L,
+            ),
+        )
+
+        val shown = snapshot.rows.flatMap { it.items }.map { it.entry }
+        assertTrue(shown.isNotEmpty())
+        assertTrue(shown.none { it.key == hidden.key || it.key == rejected.key || it.categoryId == "crime" })
+    }
+
+    @Test
+    fun `same title and year under two ids is shown once`() {
+        val candidates = listOf(
+            movie(1, "Dune (MULTI) FHD 2021", 9.0),
+            movie(2, "Dune 2021", 9.0),
+        ) + (3..20).map { movie(it, "Movie $it", 6.0) }
+
+        val snapshot = engine.buildSnapshot("p1", RecommendationBuildContext(candidates = candidates, nowMillis = 1_000_000L))
+
+        val shown = snapshot.rows.flatMap { it.items }.map { it.entry.id }
+        assertEquals(1, shown.count { it == 1 || it == 2 })
     }
 
     @Test
@@ -76,7 +244,7 @@ class RecommendationEngineTest {
             ),
         )
 
-        assertTrue(snapshot.rows.size <= 2)
+        assertEquals(2, snapshot.rows.size)
         val allKeys = snapshot.rows.flatMap { it.items }.map { it.entry.key }
         assertEquals(allKeys.distinct().size, allKeys.size)
     }
@@ -178,12 +346,19 @@ class RecommendationEngineTest {
         assertEquals(listOf(close.key), result.map { it.entry.key })
     }
 
+    private fun spaceAndHeistMovies() = (1..20).map { id ->
+        movie(id, "Space $id", 7.0 + id % 3, "science", SPACE_PLOT)
+    } + (21..40).map { id ->
+        movie(id, "Heist $id", 7.0 + id % 3, "crime", HEIST_PLOT)
+    }
+
     private fun movie(
         id: Int,
         name: String,
         rating: Double,
         category: String = "movies",
         plot: String? = null,
+        addedAt: Long? = 1_000L + id,
     ) = MediaEntry(
         id = id,
         name = name,
@@ -194,6 +369,11 @@ class RecommendationEngineTest {
         number = id,
         plot = plot,
         rating = rating,
-        addedAtEpochSeconds = 1_000L + id,
+        addedAtEpochSeconds = addedAt,
     )
+
+    private companion object {
+        const val SPACE_PLOT = "astronautes mission espace planète station orbite"
+        const val HEIST_PLOT = "braquage banque voleurs cambriolage coffre police"
+    }
 }

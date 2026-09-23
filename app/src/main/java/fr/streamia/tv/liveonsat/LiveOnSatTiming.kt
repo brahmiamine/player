@@ -18,6 +18,7 @@ fun ResolvedLiveOnSatMatch.withEpgTiming(guide: EpgGuide?): ResolvedLiveOnSatMat
     val sourceStart = match.startEpochSeconds
     val best = matchedChannels.values
         .asSequence()
+        .flatten()
         .distinctBy { it.key }
         .flatMap { channel -> guide.forEntry(channel).asSequence() }
         .mapNotNull { program ->

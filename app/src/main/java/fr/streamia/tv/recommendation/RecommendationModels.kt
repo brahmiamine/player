@@ -24,11 +24,10 @@ data class RecommendationCandidate(
 )
 
 enum class SecondarySlotKind {
-    RecentStrongEvent,
+    BecauseYouLike,
     BecauseYouWatched,
-    LiveNow,
-    NewForYou,
-    RecentTaste,
+    RecentlyAdded,
+    RecentReleases,
 }
 
 data class SecondarySlotCandidate(
@@ -106,11 +105,10 @@ internal fun chooseSecondarySlot(
  */
 private val SecondarySlotKind.priority: Int
     get() = when (this) {
-        SecondarySlotKind.RecentStrongEvent -> 0
+        SecondarySlotKind.BecauseYouLike -> 0
         SecondarySlotKind.BecauseYouWatched -> 1
-        SecondarySlotKind.LiveNow -> 2
-        SecondarySlotKind.NewForYou -> 3
-        SecondarySlotKind.RecentTaste -> 4
+        SecondarySlotKind.RecentlyAdded -> 2
+        SecondarySlotKind.RecentReleases -> 3
     }
 
 private const val EXPLICIT_EVIDENCE_MULTIPLIER = 1.5

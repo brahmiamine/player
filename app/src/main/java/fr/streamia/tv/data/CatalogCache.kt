@@ -129,7 +129,7 @@ class CatalogCache(context: Context) {
         database.loadType(profileId, type)
     }
 
-    /** Pool récent borné, utilisé pour « À découvrir » et « Nouveautés ». */
+    /** Pool récent borné, utilisé pour « Sélection pour vous » et les rangées de fraîcheur. */
     suspend fun loadHomeRecommendationCandidates(
         profileId: String,
         type: MediaType,

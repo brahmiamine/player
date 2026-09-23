@@ -1,6 +1,7 @@
 package fr.streamia.tv.data
 
 import android.content.Context
+import org.json.JSONArray
 import org.json.JSONObject
 import java.security.MessageDigest
 import java.security.SecureRandom
@@ -10,6 +11,20 @@ enum class BufferMode { LowLatency, Auto, Stable }
 enum class LiveStreamFormat { Auto, Ts, Hls }
 enum class LiveChannelSortOrder { Provider, Number, Alphabetical }
 enum class VodSortOrder { Provider, Alphabetical, RecentlyAdded, Rating }
+
+/** Un bloc de l'accueil que l'utilisateur peut activer/désactiver depuis Paramètres. */
+enum class HomeBlock {
+    Resume,
+    Favorites,
+    TvProgrammeNow,
+    TvProgrammeTonight,
+    BeinSportsNow,
+    BeinSportsNext,
+    UkGuideNow,
+    UkGuideNext,
+    /** Regroupe les deux rangées IA (principale + secondaire) : elles varient ensemble. */
+    Recommendations,
+}
 
 data class AppSettings(
     val livePreviewEnabled: Boolean = true,
@@ -26,6 +41,8 @@ data class AppSettings(
     val subtitleBackgroundEnabled: Boolean = true,
     /** Un code est enregistré (voir [AppSettingsStore.setParentalPin]) et le verrouillage est actif. */
     val parentalControlEnabled: Boolean = false,
+    /** Blocs de l'accueil désactivés par l'utilisateur. Vide = tous les blocs actifs (défaut). */
+    val disabledHomeBlocks: Set<HomeBlock> = emptySet(),
 ) {
     val vodSeekStepMs: Long
         get() = vodSeekStepSeconds * 1_000L
@@ -125,6 +142,9 @@ class AppSettingsStore(context: Context) {
         subtitleBackgroundEnabled = preferences.getBoolean(KEY_SUBTITLE_BACKGROUND_ENABLED, true),
         parentalControlEnabled = preferences.getBoolean(KEY_PARENTAL_ENABLED, false) &&
             preferences.getString(KEY_PARENTAL_PIN_HASH, null) != null,
+        disabledHomeBlocks = preferences.getStringSet(KEY_DISABLED_HOME_BLOCKS, null)
+            .orEmpty()
+            .mapNotNullTo(mutableSetOf()) { name -> runCatching { HomeBlock.valueOf(name) }.getOrNull() },
     )
 
     fun save(settings: AppSettings) {
@@ -142,6 +162,7 @@ class AppSettingsStore(context: Context) {
             .putFloat(KEY_SUBTITLE_SIZE_SCALE, settings.subtitleSizeScale)
             .putBoolean(KEY_SUBTITLE_BACKGROUND_ENABLED, settings.subtitleBackgroundEnabled)
             .putBoolean(KEY_PARENTAL_ENABLED, settings.parentalControlEnabled)
+            .putStringSet(KEY_DISABLED_HOME_BLOCKS, settings.disabledHomeBlocks.mapTo(mutableSetOf()) { it.name })
             .apply()
     }
 
@@ -198,6 +219,7 @@ class AppSettingsStore(context: Context) {
         const val KEY_SUBTITLE_SIZE_SCALE = "subtitle_size_scale"
         const val KEY_SUBTITLE_BACKGROUND_ENABLED = "subtitle_background_enabled"
         const val KEY_PARENTAL_ENABLED = "parental_control_enabled"
+        const val KEY_DISABLED_HOME_BLOCKS = "disabled_home_blocks"
         const val KEY_PARENTAL_PIN_SALT = "parental_pin_salt"
         const val KEY_PARENTAL_PIN_HASH = "parental_pin_hash"
     }
@@ -230,6 +252,7 @@ fun AppSettings.toBackupJson(): JSONObject = JSONObject().apply {
     put("autoPlayNextEpisode", autoPlayNextEpisode)
     put("subtitleSizeScale", subtitleSizeScale.toDouble())
     put("subtitleBackgroundEnabled", subtitleBackgroundEnabled)
+    put("disabledHomeBlocks", JSONArray(disabledHomeBlocks.map { it.name }))
 }
 
 fun appSettingsFromBackupJson(json: JSONObject, fallback: AppSettings): AppSettings = AppSettings(
@@ -250,4 +273,9 @@ fun appSettingsFromBackupJson(json: JSONObject, fallback: AppSettings): AppSetti
         .takeIf { it in AppSettings.SUBTITLE_SIZE_SCALES } ?: fallback.subtitleSizeScale,
     subtitleBackgroundEnabled = json.optBoolean("subtitleBackgroundEnabled", fallback.subtitleBackgroundEnabled),
     parentalControlEnabled = fallback.parentalControlEnabled,
+    disabledHomeBlocks = json.optJSONArray("disabledHomeBlocks")?.let { array ->
+        (0 until array.length()).mapNotNullTo(mutableSetOf()) { index ->
+            runCatching { HomeBlock.valueOf(array.getString(index)) }.getOrNull()
+        }
+    } ?: fallback.disabledHomeBlocks,
 )

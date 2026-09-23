@@ -11,6 +11,7 @@ import fr.streamia.tv.beinsports.ResolvedBeinProgrammeItem
 import fr.streamia.tv.data.AppSettings
 import fr.streamia.tv.data.CatalogSource
 import fr.streamia.tv.data.EpgCacheMetadata
+import fr.streamia.tv.data.HomeBlock
 import fr.streamia.tv.data.LoadedCatalog
 import fr.streamia.tv.data.PlaylistProfile
 import fr.streamia.tv.data.UpdateCheckResult
@@ -498,7 +499,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         if (entry.type == MediaType.Movie) openPlayer(entry, returnToSeries = false) else openEntry(entry)
     }
 
-    fun playMovie(movie: MediaEntry) = openPlayer(movie, returnToSeries = false)
+    fun playMovie(movie: MediaEntry) = openPlayer(movie, returnToSeries = false, returnToDetails = true)
 
     fun playEpisode(series: MediaEntry, episode: SeriesEpisode) {
         val playable = MediaEntry(
@@ -595,6 +596,17 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     /** Consommé par l'accueil une fois le focus reposé sur la carte mémorisée. */
     fun consumeHomeFocusTarget() {
         _uiState.update { if (it.homeFocusTarget == null) it else it.copy(homeFocusTarget = null) }
+    }
+
+    /** Consommé par le navigateur une fois le contenu rouvert refocalisé (retour depuis une fiche). */
+    fun consumeBrowserRestore() {
+        _uiState.update {
+            if (it.contentReturnContext?.origin == ContentReturnOrigin.Browser) {
+                it.copy(contentReturnContext = null)
+            } else {
+                it
+            }
+        }
     }
 
     /** Retour depuis un écran de menu : revient à l'écran empilé, sinon à l'accueil. */
@@ -712,6 +724,18 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
 
     fun toggleSubtitleBackground() {
         updateAppSettings { it.copy(subtitleBackgroundEnabled = !it.subtitleBackgroundEnabled) }
+    }
+
+    fun toggleHomeBlock(block: HomeBlock) {
+        updateAppSettings {
+            it.copy(
+                disabledHomeBlocks = if (block in it.disabledHomeBlocks) {
+                    it.disabledHomeBlocks - block
+                } else {
+                    it.disabledHomeBlocks + block
+                },
+            )
+        }
     }
 
     /** Appelé depuis le lecteur (fin de lecture, ou bouton « Lire maintenant » du bandeau). */
@@ -1211,6 +1235,10 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 screen = when {
                     forceBrowser -> StreamiaScreen.Browser
                     player?.returnToSeries == true && it.seriesDetails != null -> StreamiaScreen.Series(it.seriesDetails.series)
+                    // Film lancé depuis sa fiche : Retour rouvre la fiche (le contexte de parcours,
+                    // lui, ne sert qu'à un second Retour, de la fiche vers la liste).
+                    player?.returnToDetails == true && player.entry.type == MediaType.Movie ->
+                        StreamiaScreen.MovieDetails(player.entry)
                     sourceDestination != null -> sourceDestination
                     it.catalogHydrating -> StreamiaScreen.Home
                     else -> StreamiaScreen.Browser
@@ -1280,12 +1308,12 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         }
     }
 
-    private fun openPlayer(entry: MediaEntry, returnToSeries: Boolean) {
+    private fun openPlayer(entry: MediaEntry, returnToSeries: Boolean, returnToDetails: Boolean = false) {
         val profileId = _uiState.value.activeProfileId
         val resume = if (profileId != null && entry.type != MediaType.Live) repository.resumePosition(profileId, entry.key) else 0L
         _uiState.update {
             it.copy(
-                screen = StreamiaScreen.Player(entry, returnToSeries),
+                screen = StreamiaScreen.Player(entry, returnToSeries, returnToDetails),
                 message = null,
                 epg = EpgNowContext(),
                 resumePositionMs = resume,
@@ -2260,14 +2288,18 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         val profileId = state.activeProfileId ?: return
         val catalog = state.catalog
 
-        val liveChannels = if (catalog?.isCategoryLoaded(MediaType.Live, Catalog.ALL_CATEGORY_ID) == true) {
-            catalog.entriesFor(MediaType.Live)
+        // Le matcher a besoin des catégories (bouquet AR pour "beIN Connect MENA"...), pas
+        // seulement des chaînes : on réutilise le catalogue chargé, ou on en reconstitue un minimal
+        // à partir des catégories déjà connues quand la section Direct n'est pas encore matérialisée.
+        val matcherCatalog = if (catalog?.isCategoryLoaded(MediaType.Live, Catalog.ALL_CATEGORY_ID) == true) {
+            catalog
         } else {
-            withContext(Dispatchers.IO) {
+            val liveChannels = withContext(Dispatchers.IO) {
                 runCatching { repository.loadSection(profileId, MediaType.Live) }.getOrDefault(emptyList())
             }
+            Catalog(categories = catalog?.categories.orEmpty(), entries = liveChannels)
         }
-        if (liveChannels.isEmpty()) return
+        if (matcherCatalog.entriesFor(MediaType.Live).isEmpty()) return
 
         val todayGuide = run {
             val today = LocalDate.now(ZoneId.systemDefault())
@@ -2283,7 +2315,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             }.getOrNull()?.also { guide -> epgGuideMemoryCache.put(profileId, today, offsetHours, guide) }
         }
 
-        val index = withContext(Dispatchers.Default) { liveOnSatChannelMatcher.buildIndex(liveChannels) }
+        val index = withContext(Dispatchers.Default) { liveOnSatChannelMatcher.buildIndex(matcherCatalog) }
         val resolved = matches.map { ResolvedLiveOnSatMatch(it, emptyMap()) }.toMutableList()
 
         var offset = 0
@@ -2294,7 +2326,9 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 (offset until end).map { i ->
                     val match = matches[i]
                     val matched = match.channels.mapNotNull { channel ->
-                        liveOnSatChannelMatcher.match(index, channel.name)?.let { entry -> channel.name to entry }
+                        liveOnSatChannelMatcher.matchAll(index, channel.name)
+                            .takeIf(List<MediaEntry>::isNotEmpty)
+                            ?.let { entries -> channel.name to entries }
                     }.toMap()
                     ResolvedLiveOnSatMatch(match, matched).withEpgTiming(todayGuide)
                 }
@@ -2596,7 +2630,12 @@ sealed interface StreamiaScreen {
     data object LiveMatches : StreamiaScreen
     data class MovieDetails(val movie: MediaEntry) : StreamiaScreen
     data class Series(val series: MediaEntry) : StreamiaScreen
-    data class Player(val entry: MediaEntry, val returnToSeries: Boolean = false) : StreamiaScreen
+    data class Player(
+        val entry: MediaEntry,
+        val returnToSeries: Boolean = false,
+        /** Lecture lancée depuis la fiche du film : Retour rouvre la fiche au lieu de la liste. */
+        val returnToDetails: Boolean = false,
+    ) : StreamiaScreen
 }
 
 private const val EPG_PLAYER_REFRESH_MS = 30_000L

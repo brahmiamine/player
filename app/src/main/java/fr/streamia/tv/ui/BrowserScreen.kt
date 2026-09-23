@@ -104,6 +104,9 @@ private const val LOAD_MORE_THRESHOLD = 20
  */
 private val BROWSER_HEADER_HEIGHT = 74.dp
 
+/** Laisse à la grille le temps de se composer après le défilement avant de réclamer le focus. */
+private const val BROWSER_RESTORE_FOCUS_DELAY_MS = 60L
+
 @Composable
 fun BrowserScreen(
     catalog: Catalog,
@@ -119,6 +122,9 @@ fun BrowserScreen(
     message: String?,
     initialType: MediaType? = null,
     initialCategoryId: String? = null,
+    /** Élément à re-sélectionner au retour depuis une fiche (voir [ContentReturnContext]). */
+    restoreEntryKey: String? = null,
+    onRestoreConsumed: () -> Unit = {},
     onEntrySelected: (MediaEntry) -> Unit,
     onToggleEntryFavorite: (MediaEntry) -> Unit,
     onToggleCategoryFavorite: (MediaCategory) -> Unit,
@@ -352,6 +358,8 @@ fun BrowserScreen(
                     lockedCategories = library.lockedCategories,
                     historyCount = historyForType.size,
                     historyByKey = historyByKey,
+                    restoreEntryKey = restoreEntryKey,
+                    onRestoreConsumed = onRestoreConsumed,
                     onCategorySelected = ::selectCategory,
                     onToggleCategoryFavorite = onToggleCategoryFavorite,
                     onEntrySelected = onEntrySelected,
@@ -958,6 +966,8 @@ private fun VodCatalogLayout(
     lockedCategories: Set<String>,
     historyCount: Int,
     historyByKey: Map<String, PlaybackHistoryItem>,
+    restoreEntryKey: String?,
+    onRestoreConsumed: () -> Unit,
     onCategorySelected: (MediaCategory) -> Unit,
     onToggleCategoryFavorite: (MediaCategory) -> Unit,
     onEntrySelected: (MediaEntry) -> Unit,
@@ -998,6 +1008,8 @@ private fun VodCatalogLayout(
             favoriteEntries = favoriteEntries,
             historyByKey = historyByKey,
             loading = loading,
+            restoreEntryKey = restoreEntryKey,
+            onRestoreConsumed = onRestoreConsumed,
             onEntrySelected = onEntrySelected,
             onEntryFocused = onEntryFocused,
             onToggleFavorite = onToggleEntryFavorite,
@@ -1122,6 +1134,8 @@ private fun PosterGrid(
     loading: Boolean,
     favoriteEntries: Set<String>,
     historyByKey: Map<String, PlaybackHistoryItem>,
+    restoreEntryKey: String?,
+    onRestoreConsumed: () -> Unit,
     onEntrySelected: (MediaEntry) -> Unit,
     onEntryFocused: (MediaEntry) -> Unit,
     onToggleFavorite: (MediaEntry) -> Unit,
@@ -1133,6 +1147,22 @@ private fun PosterGrid(
         snapshotFlow { gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1 }
             .distinctUntilChanged()
             .collect { lastVisible -> if (lastVisible >= entries.size - LOAD_MORE_THRESHOLD) onLoadMore() }
+    }
+
+    // Retour depuis une fiche : on refait défiler jusqu'au contenu ouvert et on y repose le focus,
+    // pour ne pas renvoyer l'utilisateur sur une liste qui repart du début.
+    val restoreFocus = remember { FocusRequester() }
+    LaunchedEffect(restoreEntryKey, entries) {
+        if (restoreEntryKey == null || entries.isEmpty()) return@LaunchedEffect
+        val index = entries.indexOfFirst { it.key == restoreEntryKey }
+        if (index < 0) {
+            onRestoreConsumed()
+            return@LaunchedEffect
+        }
+        gridState.scrollToItem(index)
+        delay(BROWSER_RESTORE_FOCUS_DELAY_MS)
+        runCatching { restoreFocus.requestFocus() }
+        onRestoreConsumed()
     }
 
     Column(modifier) {
@@ -1175,6 +1205,7 @@ private fun PosterGrid(
                         onClick = { onEntrySelected(entry) },
                         onFocused = { onEntryFocused(entry) },
                         onLongClick = { onToggleFavorite(entry) },
+                        modifier = if (entry.key == restoreEntryKey) Modifier.focusRequester(restoreFocus) else Modifier,
                     )
                 }
             }
@@ -1190,13 +1221,14 @@ private fun PosterCard(
     onClick: () -> Unit,
     onFocused: () -> Unit,
     onLongClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     FocusableSurface(
         onClick = onClick,
         onFocused = onFocused,
         onLongClick = onLongClick,
         selected = favorite,
-        modifier = Modifier.fillMaxWidth().height(252.dp),
+        modifier = modifier.fillMaxWidth().height(252.dp),
     ) {
         Column(Modifier.fillMaxSize().padding(8.dp)) {
             Box(Modifier.fillMaxWidth().height(175.dp)) {

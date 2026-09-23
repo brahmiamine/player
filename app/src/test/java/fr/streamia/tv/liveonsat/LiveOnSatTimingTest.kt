@@ -44,7 +44,7 @@ class LiveOnSatTimingTest {
                 startEpochSeconds = 10_000,
                 channels = listOf(LiveOnSatChannel("beIN Sports 1 HD", free = false)),
             ),
-            matchedChannels = mapOf("beIN Sports 1 HD" to channel),
+            matchedChannels = mapOf("beIN Sports 1 HD" to listOf(channel)),
         )
         val guide = EpgGuide(
             channels = mapOf(
@@ -90,7 +90,7 @@ class LiveOnSatTimingTest {
                 startEpochSeconds = 10_000,
                 channels = listOf(LiveOnSatChannel("beIN Sports 1 HD", free = false)),
             ),
-            matchedChannels = mapOf("beIN Sports 1 HD" to channel),
+            matchedChannels = mapOf("beIN Sports 1 HD" to listOf(channel)),
         )
         val guide = EpgGuide(
             channels = mapOf(

@@ -96,6 +96,10 @@ fun FocusableSurface(
     // Action principale (équivalent `.btn-accent` du prototype) : pilule dégradé accent avec
     // lueur permanente, plutôt que le remplissage verre neutre des autres tuiles.
     accent: Boolean = false,
+    // Par défaut la surface se déploie sur toute la largeur qui lui est offerte (lignes de listes,
+    // tuiles). Mis à `true`, elle se cintre à son contenu : indispensable dans un FlowRow, où un
+    // `fillMaxSize()` interne forçait sinon chaque « chip » à occuper toute une ligne.
+    wrapContent: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
@@ -170,7 +174,7 @@ fun FocusableSurface(
     ) {
         Box(
             modifier = Modifier
-                .fillMaxSize()
+                .then(if (wrapContent) Modifier else Modifier.fillMaxSize())
                 .scale(scale)
                 .shadow(elevation, shape, clip = false, ambientColor = glowColor, spotColor = glowColor)
                 .clip(shape)

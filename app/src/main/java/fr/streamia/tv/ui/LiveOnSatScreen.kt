@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -231,15 +232,34 @@ private fun LiveOnSatMatchCard(
         }
         if (match.channels.isNotEmpty()) {
             Spacer(Modifier.height(10.dp))
+            // Les chaînes reconnues dans la liste du profil passent en tête : ce sont elles qu'on
+            // peut réellement zapper, les autres restant visibles en lecture seule.
+            val orderedChannels = remember(match.channels, resolved.matchedChannels) {
+                match.channels.sortedBy { resolved.matchedChannels[it.name].isNullOrEmpty() }
+            }
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                match.channels.forEach { channel ->
-                    val entry = resolved.matchedChannels[channel.name]
-                    ChannelChip(
-                        name = channel.name,
-                        entry = entry,
-                        restoreFocusRequester = if (entry?.key == restoreChannelKey) restoreChannelFocus else null,
-                        onOpenChannel = onOpenChannel,
-                    )
+                orderedChannels.forEach { channel ->
+                    val entries = resolved.matchedChannels[channel.name].orEmpty()
+                    if (entries.isEmpty()) {
+                        ChannelChip(
+                            name = channel.name,
+                            entry = null,
+                            restoreFocusRequester = null,
+                            onOpenChannel = onOpenChannel,
+                        )
+                    } else {
+                        // Plusieurs chaînes pour un même diffuseur (résolutions différentes, ou
+                        // bouquet entier pour un diffuseur générique) : un nom distinct par chaîne
+                        // évite d'afficher la même étiquette plusieurs fois côte à côte.
+                        entries.forEach { entry ->
+                            ChannelChip(
+                                name = if (entries.size > 1) entry.displayName else channel.name,
+                                entry = entry,
+                                restoreFocusRequester = if (entry.key == restoreChannelKey) restoreChannelFocus else null,
+                                onOpenChannel = onOpenChannel,
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -255,37 +275,48 @@ private fun ChannelChip(
     onOpenChannel: (MediaEntry) -> Unit,
 ) {
     if (entry != null) {
+        // `wrapContent` : sans lui, la surface se déploierait sur toute la largeur de la ligne
+        // offerte par le FlowRow et chaque chaîne occuperait une rangée entière.
         FocusableSurface(
             onClick = { onOpenChannel(entry) },
-            modifier = Modifier.then(
-                if (restoreFocusRequester != null) Modifier.focusRequester(restoreFocusRequester) else Modifier,
-            ),
+            wrapContent = true,
+            modifier = Modifier
+                .widthIn(max = 320.dp)
+                .then(
+                    if (restoreFocusRequester != null) Modifier.focusRequester(restoreFocusRequester) else Modifier,
+                ),
         ) {
             Row(
-                Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                ChannelLogo(entry.iconUrl, entry.displayName, Modifier.width(40.dp).height(40.dp))
+                ChannelLogo(entry.iconUrl, entry.displayName, Modifier.width(34.dp).height(34.dp))
                 Spacer(Modifier.width(9.dp))
                 Text(
                     name,
                     color = Ink,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }
     } else {
-        Box(
+        Row(
             Modifier
-                .clip(RoundedCornerShape(8.dp))
-                .background(RaisedSurface.copy(alpha = 0.35f)),
+                .widthIn(max = 320.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(RaisedSurface.copy(alpha = 0.28f))
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
                 name,
                 color = MutedInk,
                 fontSize = 12.sp,
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }
