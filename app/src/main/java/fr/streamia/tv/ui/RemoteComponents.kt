@@ -279,13 +279,18 @@ fun SectionLabel(text: String, modifier: Modifier = Modifier, fontSize: androidx
 private fun String.asKickerLabel(): String = uppercase(java.util.Locale.FRENCH)
 
 @Composable
-fun ChannelLogo(url: String?, channelName: String, modifier: Modifier = Modifier) {
+fun ChannelLogo(
+    url: String?,
+    channelName: String,
+    modifier: Modifier = Modifier,
+    imagePadding: Int = 8,
+) {
     RemoteArtwork(
         url = url,
         name = channelName,
         modifier = modifier,
         contentScale = ContentScale.Fit,
-        imagePadding = 8,
+        imagePadding = imagePadding,
     )
 }
 

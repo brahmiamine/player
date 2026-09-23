@@ -710,7 +710,7 @@ private fun TvProgrammeNowCard(
 
     FocusableSurface(
         onClick = onClick,
-        modifier = modifier.width(280.dp).height(250.dp),
+        modifier = modifier.width(280.dp).height(300.dp),
     ) {
         Column(Modifier.fillMaxSize().padding(9.dp)) {
             Box(Modifier.fillMaxWidth().height(125.dp)) {
@@ -765,7 +765,8 @@ private fun TvProgrammeNowCard(
                 ChannelLogo(
                     channel.iconUrl,
                     channel.displayName,
-                    Modifier.width(48.dp).height(48.dp),
+                    Modifier.width(90.dp).height(90.dp),
+                    imagePadding = 1,
                 )
                 Spacer(Modifier.width(7.dp))
                 Text(
@@ -828,7 +829,7 @@ private fun TvProgrammeTonightCard(
     val channel = item.channel
     FocusableSurface(
         onClick = onClick,
-        modifier = modifier.width(280.dp).height(232.dp),
+        modifier = modifier.width(280.dp).height(284.dp),
     ) {
         Column(Modifier.fillMaxSize().padding(9.dp)) {
             Box(Modifier.fillMaxWidth().height(125.dp)) {
@@ -865,7 +866,8 @@ private fun TvProgrammeTonightCard(
                 ChannelLogo(
                     channel.iconUrl,
                     channel.displayName,
-                    Modifier.width(48.dp).height(48.dp),
+                    Modifier.width(90.dp).height(90.dp),
+                    imagePadding = 1,
                 )
                 Spacer(Modifier.width(7.dp))
                 Text(
@@ -937,7 +939,7 @@ private fun BeinSportsProgrammeCard(
 
     FocusableSurface(
         onClick = onClick,
-        modifier = modifier.width(280.dp).height(250.dp),
+        modifier = modifier.width(280.dp).height(300.dp),
     ) {
         Column(Modifier.fillMaxSize().padding(9.dp)) {
             Box(Modifier.fillMaxWidth().height(112.dp)) {
@@ -1033,7 +1035,8 @@ private fun BeinSportsProgrammeCard(
                 ChannelLogo(
                     channel.iconUrl,
                     channel.displayName,
-                    Modifier.width(44.dp).height(44.dp),
+                    Modifier.width(90.dp).height(90.dp),
+                    imagePadding = 1,
                 )
                 Spacer(Modifier.width(7.dp))
                 Text(
@@ -1105,7 +1108,7 @@ private fun UkGuideProgrammeCard(
 
     FocusableSurface(
         onClick = onClick,
-        modifier = modifier.width(280.dp).height(250.dp),
+        modifier = modifier.width(280.dp).height(300.dp),
     ) {
         Column(Modifier.fillMaxSize().padding(9.dp)) {
             Box(Modifier.fillMaxWidth().height(112.dp)) {
@@ -1191,7 +1194,8 @@ private fun UkGuideProgrammeCard(
                 ChannelLogo(
                     channel.iconUrl,
                     channel.displayName,
-                    Modifier.width(44.dp).height(44.dp),
+                    Modifier.width(90.dp).height(90.dp),
+                    imagePadding = 1,
                 )
                 Spacer(Modifier.width(7.dp))
                 Text(
