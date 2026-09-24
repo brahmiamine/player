@@ -10,6 +10,8 @@ import java.security.SecureRandom
 
 enum class VideoAspectSetting { Fit, Fill, Zoom }
 enum class BufferMode { LowLatency, Auto, Stable }
+/** Bascule résolution/fréquence de l'écran selon la vidéo. Films & séries par défaut : au zapping, chaque bascule noircit l'écran 1 à 3 s. */
+enum class DisplayModeSwitch { Off, Vod, All }
 enum class LiveStreamFormat { Auto, Ts, Hls }
 enum class LiveChannelSortOrder { Provider, Number, Alphabetical }
 enum class VodSortOrder { Provider, Alphabetical, RecentlyAdded, Rating }
@@ -60,6 +62,9 @@ data class AppSettings(
     val vodSeekStepSeconds: Int = DEFAULT_VOD_SEEK_STEP_SECONDS,
     val videoAspect: VideoAspectSetting = VideoAspectSetting.Fit,
     val bufferMode: BufferMode = BufferMode.Auto,
+    val displayModeSwitch: DisplayModeSwitch = DisplayModeSwitch.Vod,
+    /** Mode tunnel vidéo (voir StreamiaPlayerFactory) : désactivé par défaut, mal géré par certains boîtiers. */
+    val tunnelingEnabled: Boolean = false,
     val liveStreamFormat: LiveStreamFormat = LiveStreamFormat.Auto,
     val liveChannelSortOrder: LiveChannelSortOrder = LiveChannelSortOrder.Provider,
     val vodSortOrder: VodSortOrder = VodSortOrder.Provider,
@@ -89,6 +94,9 @@ data class AppSettings(
 
     fun nextBufferMode(): BufferMode =
         BufferMode.entries[(bufferMode.ordinal + 1) % BufferMode.entries.size]
+
+    fun nextDisplayModeSwitch(): DisplayModeSwitch =
+        DisplayModeSwitch.entries[(displayModeSwitch.ordinal + 1) % DisplayModeSwitch.entries.size]
 
     fun nextLiveStreamFormat(): LiveStreamFormat =
         LiveStreamFormat.entries[(liveStreamFormat.ordinal + 1) % LiveStreamFormat.entries.size]
@@ -148,6 +156,10 @@ class AppSettingsStore(context: Context) {
                 preferences.getString(KEY_BUFFER_MODE, BufferMode.Auto.name) ?: BufferMode.Auto.name,
             )
         }.getOrDefault(BufferMode.Auto),
+        displayModeSwitch = runCatching {
+            DisplayModeSwitch.valueOf(preferences.getString(KEY_DISPLAY_MODE_SWITCH, null)!!)
+        }.getOrDefault(DisplayModeSwitch.Vod),
+        tunnelingEnabled = preferences.getBoolean(KEY_TUNNELING_ENABLED, false),
         liveStreamFormat = runCatching {
             LiveStreamFormat.valueOf(
                 preferences.getString(KEY_LIVE_STREAM_FORMAT, LiveStreamFormat.Auto.name)
@@ -197,6 +209,8 @@ class AppSettingsStore(context: Context) {
             .putInt(KEY_VOD_SEEK_STEP_SECONDS, settings.vodSeekStepSeconds)
             .putString(KEY_VIDEO_ASPECT, settings.videoAspect.name)
             .putString(KEY_BUFFER_MODE, settings.bufferMode.name)
+            .putString(KEY_DISPLAY_MODE_SWITCH, settings.displayModeSwitch.name)
+            .putBoolean(KEY_TUNNELING_ENABLED, settings.tunnelingEnabled)
             .putString(KEY_LIVE_STREAM_FORMAT, settings.liveStreamFormat.name)
             .putString(KEY_LIVE_CHANNEL_SORT_ORDER, settings.liveChannelSortOrder.name)
             .putString(KEY_VOD_SORT_ORDER, settings.vodSortOrder.name)
@@ -294,6 +308,8 @@ class AppSettingsStore(context: Context) {
         const val KEY_VOD_SEEK_STEP_SECONDS = "vod_seek_step_seconds"
         const val KEY_VIDEO_ASPECT = "video_aspect"
         const val KEY_BUFFER_MODE = "buffer_mode"
+        const val KEY_DISPLAY_MODE_SWITCH = "display_mode_switch"
+        const val KEY_TUNNELING_ENABLED = "tunneling_enabled"
         const val KEY_LIVE_STREAM_FORMAT = "live_stream_format"
         const val KEY_LIVE_CHANNEL_SORT_ORDER = "live_channel_sort_order"
         const val KEY_VOD_SORT_ORDER = "vod_sort_order"
@@ -367,6 +383,8 @@ fun AppSettings.toBackupJson(): JSONObject = JSONObject().apply {
     put("vodSeekStepSeconds", vodSeekStepSeconds)
     put("videoAspect", videoAspect.name)
     put("bufferMode", bufferMode.name)
+    put("displayModeSwitch", displayModeSwitch.name)
+    put("tunnelingEnabled", tunnelingEnabled)
     put("liveStreamFormat", liveStreamFormat.name)
     put("liveChannelSortOrder", liveChannelSortOrder.name)
     put("vodSortOrder", vodSortOrder.name)
@@ -386,6 +404,8 @@ fun appSettingsFromBackupJson(json: JSONObject, fallback: AppSettings): AppSetti
         .takeIf { it in AppSettings.VOD_SEEK_STEPS_SECONDS } ?: fallback.vodSeekStepSeconds,
     videoAspect = runCatching { VideoAspectSetting.valueOf(json.getString("videoAspect")) }.getOrDefault(fallback.videoAspect),
     bufferMode = runCatching { BufferMode.valueOf(json.getString("bufferMode")) }.getOrDefault(fallback.bufferMode),
+    displayModeSwitch = runCatching { DisplayModeSwitch.valueOf(json.getString("displayModeSwitch")) }.getOrDefault(fallback.displayModeSwitch),
+    tunnelingEnabled = json.optBoolean("tunnelingEnabled", fallback.tunnelingEnabled),
     liveStreamFormat = runCatching { LiveStreamFormat.valueOf(json.getString("liveStreamFormat")) }.getOrDefault(fallback.liveStreamFormat),
     liveChannelSortOrder = runCatching { LiveChannelSortOrder.valueOf(json.getString("liveChannelSortOrder")) }.getOrDefault(fallback.liveChannelSortOrder),
     vodSortOrder = runCatching { VodSortOrder.valueOf(json.getString("vodSortOrder")) }.getOrDefault(fallback.vodSortOrder),

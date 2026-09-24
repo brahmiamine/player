@@ -7,6 +7,7 @@ enum class ContentReturnOrigin {
     Home,
     Search,
     LiveMatches,
+    Epg,
 }
 
 /**
@@ -37,6 +38,7 @@ data class ContentReturnContext(
         ContentReturnOrigin.Home -> StreamiaScreen.Home
         ContentReturnOrigin.Search -> StreamiaScreen.Search
         ContentReturnOrigin.LiveMatches -> StreamiaScreen.LiveMatches
+        ContentReturnOrigin.Epg -> StreamiaScreen.Epg
     }
 
     companion object {
@@ -48,6 +50,11 @@ data class ContentReturnContext(
         fun home(rowKey: String, itemKey: String) = ContentReturnContext(
             origin = ContentReturnOrigin.Home,
             homeRowKey = rowKey,
+            itemKey = itemKey,
+        )
+
+        fun epg(itemKey: String) = ContentReturnContext(
+            origin = ContentReturnOrigin.Epg,
             itemKey = itemKey,
         )
 

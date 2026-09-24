@@ -21,6 +21,8 @@ sealed interface UpdateCheckResult {
     /** La release "latest" n'existe pas encore ou ne porte pas de numéro de build. */
     data object NoTaggedRelease : UpdateCheckResult
     data class Error(val message: String) : UpdateCheckResult
+    /** APK téléchargé, en attente de l'autorisation « Installer des applis inconnues ». */
+    data class AwaitingInstallPermission(val release: ReleaseInfo) : UpdateCheckResult
 }
 
 /**

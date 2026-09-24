@@ -1,6 +1,7 @@
 package fr.streamia.tv.ui
 
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -64,6 +65,8 @@ fun LoginScreen(
     onRenameProfile: (String, String) -> Unit,
     onDeleteProfile: (String) -> Unit,
     onDismissMessage: () -> Unit,
+    /** Arrivé ici par « Changer de liste » : Retour rouvre la liste quittée au lieu de fermer l'app. */
+    onReturnToList: (() -> Unit)? = null,
 ) {
     var mode by remember { mutableStateOf(LoginMode.Manager) }
     var editingProfile by remember { mutableStateOf<PlaylistProfile?>(null) }
@@ -89,6 +92,11 @@ fun LoginScreen(
         deleteCandidate = null
         onDismissMessage()
     }
+
+    // Retour dans un formulaire (ajout/modification) : revient au gestionnaire de listes au lieu de
+    // fermer l'application. Depuis le gestionnaire : rouvre la liste quittée, s'il y en a une.
+    BackHandler(enabled = mode != LoginMode.Manager) { showManager() }
+    BackHandler(enabled = mode == LoginMode.Manager && onReturnToList != null) { onReturnToList?.invoke() }
 
     fun showXtream(profile: PlaylistProfile? = null) {
         editingProfile = profile

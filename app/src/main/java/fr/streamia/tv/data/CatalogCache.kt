@@ -101,12 +101,13 @@ class CatalogCache(context: Context) {
         categoryId: String,
         offset: Int,
         limit: Int,
+        order: VodSortOrder = VodSortOrder.Provider,
     ): CatalogPage = withContext(Dispatchers.IO) {
         ensureMigrated(profileId)
         if (limit <= 0) return@withContext CatalogPage(emptyList(), offset.coerceAtLeast(0), false)
         val boundedLimit = limit.coerceAtMost(MAX_PAGE_SIZE)
         val safeOffset = offset.coerceAtLeast(0)
-        val entries = database.loadCategoryPage(profileId, type, categoryId, safeOffset, boundedLimit)
+        val entries = database.loadCategoryPage(profileId, type, categoryId, safeOffset, boundedLimit, order)
         CatalogPage(
             entries = entries,
             nextOffset = safeOffset + entries.size,

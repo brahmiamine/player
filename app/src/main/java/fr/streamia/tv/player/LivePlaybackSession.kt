@@ -17,8 +17,8 @@ import fr.streamia.tv.domain.XtreamUrlBuilder
 fun shouldPrepareLivePlayback(playbackState: Int): Boolean = playbackState == Player.STATE_IDLE
 
 /** Un seul lecteur Live, partagé entre l'aperçu et le plein écran. */
-class LivePlaybackSession(context: Context, bufferMode: BufferMode = BufferMode.Auto) {
-    val player: ExoPlayer = StreamiaPlayerFactory.create(context.applicationContext, MediaType.Live, bufferMode)
+class LivePlaybackSession(context: Context, bufferMode: BufferMode = BufferMode.Auto, tunneling: Boolean = false) {
+    val player: ExoPlayer = StreamiaPlayerFactory.create(context.applicationContext, MediaType.Live, bufferMode, tunneling)
     var entryKey: String? = null
         private set
     var activeUrl: String = ""

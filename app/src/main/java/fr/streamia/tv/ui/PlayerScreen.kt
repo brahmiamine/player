@@ -63,6 +63,12 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaSession
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.media3.exoplayer.mediacodec.MediaCodecRenderer
+import fr.streamia.tv.data.DisplayModeSwitch
+import fr.streamia.tv.player.unsupportedFormatMessage
+import fr.streamia.tv.player.isDecoderError
+import fr.streamia.tv.player.DisplayModeSwitcher
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import fr.streamia.tv.data.AppSettings
@@ -159,17 +165,29 @@ fun PlayerScreen(
     onProgress: (MediaEntry, Long, Long) -> Unit,
     onCycleVideoAspect: () -> Unit,
     onPlayNextEpisode: () -> Unit,
+    /** Film lu jusqu'au bout : retour sur sa fiche au lieu de rester sur l'écran noir de fin. */
+    onMovieFinished: () -> Unit = {},
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val sharedLivePlayer = entry.type == MediaType.Live
-    val player = remember(entry.type, livePlaybackSession, appSettings.bufferMode) {
+    val player = remember(entry.type, livePlaybackSession, appSettings.bufferMode, appSettings.tunnelingEnabled) {
         if (sharedLivePlayer) {
             livePlaybackSession.player
         } else {
-            StreamiaPlayerFactory.create(context.applicationContext, entry.type, appSettings.bufferMode)
+            StreamiaPlayerFactory.create(context.applicationContext, entry.type, appSettings.bufferMode, appSettings.tunnelingEnabled)
         }
     }
     val mediaSession = remember(player) { MediaSession.Builder(context.applicationContext, player).build() }
+    val activity = remember(context) { context.findActivity() }
+    val switchDisplayMode = rememberUpdatedState(
+        when (appSettings.displayModeSwitch) {
+            DisplayModeSwitch.Off -> false
+            DisplayModeSwitch.Vod -> entry.type != MediaType.Live
+            DisplayModeSwitch.All -> true
+        },
+    )
+    // Lecteur quitté : l'écran reprend le mode de l'interface.
+    DisposableEffect(activity) { onDispose { activity?.let(DisplayModeSwitcher::reset) } }
     val transportStore = remember { PlaybackTransportStore(context.applicationContext) }
     val trackPreferenceStore = remember { PlaybackTrackPreferenceStore(context.applicationContext) }
     val diagnosticsTracker = remember { PlaybackDiagnosticsTracker() }
@@ -197,6 +215,9 @@ fun PlayerScreen(
     val showNextEpisodePrompt = playbackEnded && entry.type == MediaType.Series &&
         nextEpisode != null && appSettings.autoPlayNextEpisode
     var nextEpisodeCountdown by remember(playbackEnded) { mutableStateOf(NEXT_EPISODE_COUNTDOWN_SECONDS) }
+    LaunchedEffect(playbackEnded) {
+        if (playbackEnded && entry.type == MediaType.Movie) onMovieFinished()
+    }
     LaunchedEffect(showNextEpisodePrompt) {
         if (!showNextEpisodePrompt) return@LaunchedEffect
         while (nextEpisodeCountdown > 0) {
@@ -358,6 +379,10 @@ fun PlayerScreen(
             override fun onVideoSizeChanged(videoSize: VideoSize) {
                 if (videoSize.width <= 0 || videoSize.height <= 0) return
                 technicalInfo = technicalInfo.copy(width = videoSize.width, height = videoSize.height)
+                // Sortie HDMI adaptée à la vidéo (4K, 24/25/50 Hz) selon le réglage « Adapter l'affichage ».
+                if (switchDisplayMode.value) {
+                    activity?.let { DisplayModeSwitcher.apply(it, videoSize.width, videoSize.height, player.videoFormat?.frameRate ?: -1f) }
+                }
             }
 
             override fun onTracksChanged(tracks: Tracks) {
@@ -423,6 +448,14 @@ fun PlayerScreen(
             }
 
             override fun onPlayerError(error: PlaybackException) {
+                // Format que le boîtier ne sait pas décoder : une autre URL (TS/HLS…) n'y changera rien.
+                if (isDecoderError(error.errorCode)) {
+                    val format = player.videoFormat
+                    val mimeType = (error.cause as? MediaCodecRenderer.DecoderInitializationException)?.mimeType ?: format?.sampleMimeType
+                    playbackError = unsupportedFormatMessage(mimeType, format?.width ?: 0, format?.height ?: 0)
+                    buffering = false
+                    return
+                }
                 val next = candidateIndex + 1
                 if (next < streamCandidates.size) {
                     val previousPosition = player.currentPosition.coerceAtLeast(0L)
@@ -543,19 +576,26 @@ fun PlayerScreen(
             .filter { it.key in lockedCategories }
             .mapTo(mutableSetOf(), MediaCategory::id)
     }
+    // Numéro sans chaîne (inexistant, masqué ou verrouillé) : message plutôt qu'un silence.
+    var missingChannelNumber by remember { mutableStateOf<Int?>(null) }
+    LaunchedEffect(missingChannelNumber) {
+        if (missingChannelNumber == null) return@LaunchedEffect
+        delay(2_000)
+        missingChannelNumber = null
+    }
     LaunchedEffect(numberBuffer) {
         if (numberBuffer.isBlank()) return@LaunchedEffect
         delay(1_250)
         val number = numberBuffer.toIntOrNull()
         numberBuffer = ""
         if (number != null) {
-            catalog.entriesFor(MediaType.Live)
+            val target = catalog.entriesFor(MediaType.Live)
                 .firstOrNull {
                     it.number == number &&
                         it.key !in hiddenEntries &&
                         it.categoryId !in numericJumpLockedCategoryIds
                 }
-                ?.let(onEntrySelected)
+            if (target != null) onEntrySelected(target) else missingChannelNumber = number
         }
     }
 
@@ -766,6 +806,19 @@ fun PlayerScreen(
                     .padding(horizontal = 22.dp, vertical = 14.dp),
             ) {
                 Text(numberBuffer, color = FocusBlueBright, fontSize = 32.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+        missingChannelNumber?.let { number ->
+            Box(
+                Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(34.dp)
+                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(RadiusTile))
+                    .background(Night.copy(alpha = 0.82f))
+                    .border(BorderStroke(1.dp, GlassBorder), androidx.compose.foundation.shape.RoundedCornerShape(RadiusTile))
+                    .padding(horizontal = 22.dp, vertical = 14.dp),
+            ) {
+                Text("Chaîne $number introuvable", color = Ink, fontSize = 20.sp, fontWeight = FontWeight.Bold)
             }
         }
 
@@ -1338,10 +1391,16 @@ private fun documentDisplayName(context: android.content.Context, uri: Uri): Str
     }
 }.getOrNull()
 
-private fun formatDuration(positionMs: Long): String {
+internal fun formatDuration(positionMs: Long): String {
     val totalSeconds = positionMs.coerceAtLeast(0L) / 1000L
     val hours = totalSeconds / 3600L
     val minutes = (totalSeconds % 3600L) / 60L
     val seconds = totalSeconds % 60L
     return if (hours > 0) "%d:%02d:%02d".format(hours, minutes, seconds) else "%02d:%02d".format(minutes, seconds)
+}
+
+private tailrec fun android.content.Context.findActivity(): android.app.Activity? = when (this) {
+    is android.app.Activity -> this
+    is android.content.ContextWrapper -> baseContext.findActivity()
+    else -> null
 }

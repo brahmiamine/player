@@ -38,6 +38,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
+import fr.streamia.tv.data.PlaybackHistoryItem
+import fr.streamia.tv.data.isResumable
+import fr.streamia.tv.domain.MediaType
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.ui.graphics.Color
 import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.SeriesDetails
 import fr.streamia.tv.domain.SeriesEpisode
@@ -64,6 +69,8 @@ fun SeriesScreen(
     watched: Boolean,
     similarMedia: List<RecommendedMedia> = emptyList(),
     otherVersions: List<RecommendedMedia> = emptyList(),
+    /** Historique de lecture des épisodes, du plus récent au plus ancien. */
+    episodeHistory: List<PlaybackHistoryItem> = emptyList(),
     onToggleFavorite: () -> Unit,
     onToggleWatched: () -> Unit,
     onEpisodeSelected: (SeriesEpisode) -> Unit,
@@ -72,14 +79,36 @@ fun SeriesScreen(
     onRetry: () -> Unit,
 ) {
     BackHandler(onBack = onBack)
-    var selectedSeason by remember(series.key, details) { mutableIntStateOf(details?.seasons?.firstOrNull() ?: 1) }
+    // Progression par épisode (clé = id d'épisode : les épisodes lus sont enregistrés sous cet id).
+    val historyByEpisode = remember(episodeHistory) {
+        episodeHistory.filter { it.entry.type == MediaType.Series }.associateBy { it.entry.id }
+    }
+    // Dernier épisode lu de cette série : la fiche s'ouvre sur sa saison et lui donne le focus, au
+    // lieu de repartir de S01E01 à chaque retour de lecture.
+    val lastEpisode = remember(details, episodeHistory) {
+        val byId = details?.episodes?.associateBy { it.id }.orEmpty()
+        episodeHistory.firstNotNullOfOrNull { byId[it.entry.id].takeIf { _ -> it.entry.type == MediaType.Series } }
+    }
+    // Reprendre l'épisode entamé, sinon enchaîner sur le suivant d'un épisode terminé.
+    val continueEpisode = remember(details, lastEpisode, historyByEpisode) {
+        val last = lastEpisode ?: return@remember null
+        if (historyByEpisode[last.id]?.isResumable() == true) last
+        else details?.episodes?.let { all -> all.getOrNull(all.indexOf(last) + 1) }
+    }
+    var selectedSeason by remember(series.key, details) {
+        mutableIntStateOf(continueEpisode?.season ?: lastEpisode?.season ?: details?.seasons?.firstOrNull() ?: 1)
+    }
     val episodes = remember(details, selectedSeason) { details?.episodesIn(selectedSeason).orEmpty() }
-    val firstFocus = remember(selectedSeason) { FocusRequester() }
+    val episodeFocus = remember(selectedSeason) { FocusRequester() }
+    val episodeGridState = rememberLazyGridState()
+    val focusEpisodeId = episodes.firstOrNull { it.id == continueEpisode?.id }?.id ?: episodes.firstOrNull()?.id
 
     LaunchedEffect(selectedSeason, episodes.size) {
-        if (episodes.isNotEmpty()) {
+        val index = episodes.indexOfFirst { it.id == focusEpisodeId }
+        if (index >= 0) {
+            episodeGridState.scrollToItem(index)
             yield()
-            runCatching { firstFocus.requestFocus() }
+            runCatching { episodeFocus.requestFocus() }
         }
     }
 
@@ -88,6 +117,18 @@ fun SeriesScreen(
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 FocusableSurface(onClick = onBack, modifier = Modifier.width(130.dp).height(48.dp)) {
                     Text("← Retour", color = Ink, fontSize = TypeLabel, modifier = Modifier.padding(horizontal = 15.dp))
+                }
+                continueEpisode?.let { episode ->
+                    val code = "S${episode.season.toString().padStart(2, '0')}E${episode.number.toString().padStart(2, '0')}"
+                    FocusableSurface(onClick = { onEpisodeSelected(episode) }, accent = true, modifier = Modifier.height(48.dp)) {
+                        Text(
+                            if (historyByEpisode[episode.id]?.isResumable() == true) "Reprendre $code" else "Lire $code",
+                            color = Ink,
+                            fontSize = TypeLabel,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 15.dp),
+                        )
+                    }
                 }
                 FocusableSurface(
                     onClick = onToggleFavorite,
@@ -116,7 +157,7 @@ fun SeriesScreen(
             Text(series.name, color = Ink, fontSize = TypeHero, lineHeight = TypeHeroLineHeight, fontWeight = HeadingWeight)
             val info = details?.details
             val meta = listOfNotNull(
-                info?.rating?.let { "★ ${"%.1f".format(it)}" } ?: series.rating?.let { "★ ${"%.1f".format(it)}" },
+                (info?.rating ?: series.rating)?.let(::formatRating),
                 info?.releaseDate,
                 info?.genre,
                 details?.seasons?.size?.let { "$it saisons" },
@@ -194,6 +235,7 @@ fun SeriesScreen(
                     }
                     Spacer(Modifier.height(12.dp))
                     LazyVerticalGrid(
+                        state = episodeGridState,
                         columns = GridCells.Adaptive(285.dp),
                         // Marge pour la carte focalisée (agrandie + bordure) : sans elle, son contour était rogné.
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
@@ -206,25 +248,30 @@ fun SeriesScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(128.dp)
-                                    .then(if (episode.id == episodes.first().id) Modifier.focusRequester(firstFocus) else Modifier),
+                                    .then(if (episode.id == focusEpisodeId) Modifier.focusRequester(episodeFocus) else Modifier),
                             ) {
                                 Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    MediaArtwork(
-                                        episode.iconUrl ?: details.details?.posterUrl ?: series.iconUrl,
-                                        episode.title,
-                                        Modifier.width(150.dp).aspectRatio(16f / 9f),
-                                    )
+                                    Box(Modifier.width(150.dp).aspectRatio(16f / 9f)) {
+                                        MediaArtwork(
+                                            episode.iconUrl ?: details.details?.posterUrl ?: series.iconUrl,
+                                            episode.title,
+                                            Modifier.fillMaxSize(),
+                                        )
+                                        // Avancement de l'épisode, comme sur les affiches des films.
+                                        val progress = historyByEpisode[episode.id]?.progress ?: 0f
+                                        if (progress > 0.02f) {
+                                            Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(4.dp).background(Color.Black.copy(alpha = 0.45f))) {
+                                                Box(Modifier.fillMaxHeight().fillMaxWidth(progress).background(FocusBlueBright))
+                                            }
+                                        }
+                                    }
                                     Spacer(Modifier.width(12.dp))
                                     Column(Modifier.weight(1f)) {
                                     Row(Modifier.fillMaxWidth()) {
                                         Text("S${episode.season.toString().padStart(2, '0')}E${episode.number.toString().padStart(2, '0')}", color = FocusBlueBright, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                         Spacer(Modifier.weight(1f))
                                         episode.rating?.let {
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                StreamiaIcon(StreamiaIconGlyph.Star, tint = FocusBlueBright, size = 18.dp)
-                                                Spacer(Modifier.width(3.dp))
-                                                Text("%.1f".format(it), color = FocusBlueBright, fontSize = 12.sp)
-                                            }
+                                            Text(formatRating(it), color = FocusBlueBright, fontSize = 12.sp)
                                         }
                                     }
                                     Spacer(Modifier.height(5.dp))

@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
 import fr.streamia.tv.data.AppSettings
 import fr.streamia.tv.data.BufferMode
+import fr.streamia.tv.data.DisplayModeSwitch
 import fr.streamia.tv.data.HomeBlock
 import fr.streamia.tv.data.JustWatchSection
 import fr.streamia.tv.data.homeBlock
@@ -88,6 +89,8 @@ fun SettingsScreen(
     onCycleVodSeekStep: () -> Unit,
     onCycleVideoAspect: () -> Unit,
     onCycleBufferMode: () -> Unit,
+    onCycleDisplayModeSwitch: () -> Unit = {},
+    onToggleTunneling: () -> Unit = {},
     onCycleLiveStreamFormat: () -> Unit,
     onCycleLiveChannelSortOrder: () -> Unit,
     onCycleVodSortOrder: () -> Unit,
@@ -345,8 +348,36 @@ fun SettingsScreen(
                     },
                     modifier = Modifier.weight(1f),
                 )
-                Spacer(Modifier.weight(1f))
-                Spacer(Modifier.weight(1f))
+                SettingsTile(
+                    glyph = StreamiaIconGlyph.Live,
+                    title = "Adapter l'affichage",
+                    subtitle = displayModeSwitchLabel(settings.displayModeSwitch),
+                    onClick = {
+                        val values = DisplayModeSwitch.entries.toList()
+                        openChoices(
+                            "Adapter l'affichage",
+                            "Bascule l'écran sur la résolution (4K) et la fréquence (24/25/50 Hz) de la vidéo. " +
+                                "Chaque bascule noircit l'écran 1 à 3 s : déconseillé en direct si vous zappez souvent.",
+                            values.map { displayModeSwitchLabel(it) to (it == settings.displayModeSwitch) },
+                        ) { target -> cycleTo(values, settings.displayModeSwitch, target, onCycleDisplayModeSwitch) }
+                    },
+                    modifier = Modifier.weight(1f),
+                )
+                SettingsTile(
+                    glyph = StreamiaIconGlyph.Settings,
+                    title = "Mode tunnel (4K HDR)",
+                    subtitle = if (settings.tunnelingEnabled) "Activé" else "Désactivé",
+                    onClick = {
+                        openChoices(
+                            "Mode tunnel",
+                            "Le boîtier synchronise lui-même image et son : lecture 4K HDR plus fluide sur les TV compatibles. " +
+                                "Désactivez-le en cas d'écran noir ou de son décalé. S'applique à la prochaine lecture.",
+                            listOf("Activé" to settings.tunnelingEnabled, "Désactivé" to !settings.tunnelingEnabled),
+                        ) { index -> if ((index == 0) != settings.tunnelingEnabled) onToggleTunneling() }
+                    },
+                    modifier = Modifier.weight(1f),
+                    selected = settings.tunnelingEnabled,
+                )
             }
 
             SettingsSectionTitle("Catalogue & affichage")
@@ -487,20 +518,8 @@ fun SettingsScreen(
                     enabled = !busy,
                 )
             }
+            // « Changer de liste » : une seule tuile, celle de la liste active (section « Liste & accueil »).
             Row(Modifier.fillMaxWidth().height(88.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                SettingsTile(
-                    StreamiaIconGlyph.Swap,
-                    "Changer de liste",
-                    "Gestionnaire de playlists",
-                    {
-                        openChoices(
-                            "Changer de liste",
-                            "Vous allez quitter la liste actuelle et revenir au gestionnaire de playlists.",
-                            listOf("Annuler" to false, "Continuer" to false),
-                        ) { if (it == 1) onChangePlaylist() }
-                    },
-                    Modifier.weight(1f),
-                )
                 SettingsTile(
                     StreamiaIconGlyph.Lock,
                     "Contrôle parental",
@@ -509,6 +528,7 @@ fun SettingsScreen(
                     Modifier.weight(1f),
                     selected = settings.parentalControlEnabled,
                 )
+                Spacer(Modifier.weight(1f))
                 Spacer(Modifier.weight(1f))
                 Spacer(Modifier.weight(1f))
             }
@@ -896,6 +916,12 @@ private fun liveStreamFormatLabel(value: LiveStreamFormat): String = when (value
     LiveStreamFormat.Hls -> "HLS"
 }
 
+private fun displayModeSwitchLabel(value: DisplayModeSwitch): String = when (value) {
+    DisplayModeSwitch.Off -> "Désactivé"
+    DisplayModeSwitch.Vod -> "Films et séries"
+    DisplayModeSwitch.All -> "Films, séries et direct"
+}
+
 private fun bufferModeLabel(value: BufferMode): String = when (value) {
     BufferMode.LowLatency -> "Faible latence"
     BufferMode.Auto -> "Automatique"
@@ -957,7 +983,7 @@ private fun backupFileName(): String {
 }
 
 private const val INSTALL_HINT =
-    "Téléchargement puis installation automatique. Si Android bloque, autorisez les sources inconnues pour Streamia."
+    "Téléchargement puis installation : confirmez l'installation dans la fenêtre Android qui s'ouvre."
 
 private fun updateProgressLabel(result: UpdateCheckResult?): String =
     if (result is UpdateCheckResult.UpdateAvailable) "Téléchargement…" else "Vérification…"
@@ -967,6 +993,7 @@ private fun updateSubtitle(currentVersion: String, result: UpdateCheckResult?): 
     is UpdateCheckResult.UpToDate -> "À jour · version " + currentVersion
     is UpdateCheckResult.NoTaggedRelease -> "Aucune version publiée"
     is UpdateCheckResult.Error -> result.message
+    is UpdateCheckResult.AwaitingInstallPermission -> "Autorisation d'installation requise"
     null -> "Version actuelle : " + currentVersion
 }
 
@@ -975,6 +1002,7 @@ private fun updateResultTitle(result: UpdateCheckResult): String = when (result)
     is UpdateCheckResult.UpToDate -> "Vous avez la dernière version"
     is UpdateCheckResult.NoTaggedRelease -> "Aucune version publiée"
     is UpdateCheckResult.Error -> "Vérification impossible"
+    is UpdateCheckResult.AwaitingInstallPermission -> "Autorisez Streamia à installer la version " + result.release.version
 }
 
 private fun updateResultSubtitle(result: UpdateCheckResult): String = when (result) {
@@ -982,4 +1010,6 @@ private fun updateResultSubtitle(result: UpdateCheckResult): String = when (resu
     is UpdateCheckResult.UpToDate -> "OK pour fermer."
     is UpdateCheckResult.NoTaggedRelease -> "Aucun build publié depuis main pour l'instant."
     is UpdateCheckResult.Error -> result.message
+    is UpdateCheckResult.AwaitingInstallPermission ->
+        "Activez « Installer des applis inconnues » pour Streamia puis revenez : l'installation reprendra automatiquement."
 }

@@ -83,9 +83,14 @@ class StartupPresentationTest {
     }
 
     @Test
-    fun `live channel opened from the browser or search keeps the live browser return`() {
+    fun `live channel opened from search or the tv guide returns there`() {
+        assertTrue(livePlayerReturnsToSource(ContentReturnOrigin.Search))
+        assertTrue(livePlayerReturnsToSource(ContentReturnOrigin.Epg))
+    }
+
+    @Test
+    fun `live channel opened from the browser keeps the live browser return`() {
         assertFalse(livePlayerReturnsToSource(ContentReturnOrigin.Browser))
-        assertFalse(livePlayerReturnsToSource(ContentReturnOrigin.Search))
     }
 
     @Test

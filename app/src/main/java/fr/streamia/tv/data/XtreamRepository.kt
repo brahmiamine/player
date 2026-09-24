@@ -4,7 +4,6 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
-import androidx.core.content.FileProvider
 import fr.streamia.tv.domain.AccountInfo
 import fr.streamia.tv.domain.Catalog
 import fr.streamia.tv.domain.EpgGuide
@@ -73,19 +72,28 @@ class XtreamRepository(context: Context) {
     suspend fun checkForUpdate(currentBuild: Int): UpdateCheckResult =
         withContext(Dispatchers.IO) { updateChecker.checkForUpdate(currentBuild) }
 
+    private val updateApk get() = File(appContext.cacheDir, "updates/streamia-tv.apk")
+
     /**
-     * Télécharge l'APK de la release puis ouvre l'installateur Android. Si l'installation
-     * d'applications inconnues n'est pas encore autorisée pour Streamia, l'installateur système
-     * propose lui-même d'ouvrir le réglage.
+     * Télécharge l'APK de la release puis lance son installation. Renvoie false quand Streamia n'a
+     * pas encore l'autorisation « Installer des applis inconnues » : le réglage est alors ouvert et
+     * [installDownloadedUpdate] reprend l'installation au retour dans l'app.
      */
-    suspend fun downloadAndInstallUpdate(release: ReleaseInfo) {
-        val apk = File(appContext.cacheDir, "updates/streamia-tv.apk")
-        withContext(Dispatchers.IO) { updateChecker.downloadApk(release, apk) }
-        val uri = FileProvider.getUriForFile(appContext, appContext.packageName + ".updates", apk)
-        val install = Intent(Intent.ACTION_VIEW)
-            .setDataAndType(uri, "application/vnd.android.package-archive")
-            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
-        appContext.startActivity(install)
+    suspend fun downloadAndInstallUpdate(release: ReleaseInfo): Boolean {
+        withContext(Dispatchers.IO) { updateChecker.downloadApk(release, updateApk) }
+        if (!UpdateInstaller.canInstall(appContext)) {
+            UpdateInstaller.openUnknownSourcesSettings(appContext)
+            return false
+        }
+        withContext(Dispatchers.IO) { UpdateInstaller.install(appContext, updateApk) }
+        return true
+    }
+
+    /** Reprise après le réglage : installe l'APK déjà téléchargé si l'autorisation est maintenant accordée. */
+    suspend fun installDownloadedUpdate(): Boolean {
+        if (!UpdateInstaller.canInstall(appContext) || !updateApk.isFile) return false
+        withContext(Dispatchers.IO) { UpdateInstaller.install(appContext, updateApk) }
+        return true
     }
 
     suspend fun cacheSizeBytes(): Long = withContext(Dispatchers.IO) { cache.databaseFileSizeBytes() }
@@ -116,8 +124,9 @@ class XtreamRepository(context: Context) {
         type: MediaType,
         categoryId: String,
         offset: Int,
+        order: VodSortOrder = VodSortOrder.Provider,
         limit: Int = DEFAULT_CATEGORY_PAGE_SIZE,
-    ): CatalogPage = cache.loadCategoryPage(profileId, type, categoryId, offset, limit)
+    ): CatalogPage = cache.loadCategoryPage(profileId, type, categoryId, offset, limit, order)
 
     /**
      * Charge tout un type (ex. Live) en une requête. Réservé aux sections qu'on choisit d'hydrater

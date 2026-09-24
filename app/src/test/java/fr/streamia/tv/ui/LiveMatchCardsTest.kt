@@ -1,6 +1,10 @@
 package fr.streamia.tv.ui
 
+import fr.streamia.tv.data.UserLibrarySnapshot
+import fr.streamia.tv.domain.Catalog
+import fr.streamia.tv.domain.MediaCategory
 import fr.streamia.tv.domain.MediaEntry
+import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.liveonsat.LiveOnSatChannel
 import fr.streamia.tv.liveonsat.LiveOnSatMatch
 import fr.streamia.tv.liveonsat.ResolvedLiveOnSatMatch
@@ -39,5 +43,25 @@ class LiveMatchCardsTest {
         )
         assertEquals(listOf(1, null), liveMatchCards(matches, now, resolvingChannels = true).map { it.channel?.id })
         assertEquals(listOf(1), liveMatchCards(matches, now, resolvingChannels = false).map { it.channel?.id })
+    }
+
+    @Test
+    fun hiddenAndParentallyLockedChannelsAreRemovedFromMatches() {
+        val locked = MediaEntry(id = 1, name = "CH1", categoryId = "adult", iconUrl = null, number = 1)
+        val hidden = channel(2)
+        val visible = channel(3)
+        val catalog = Catalog(
+            categories = listOf(MediaCategory("adult", "Adulte", MediaType.Live), MediaCategory("1", "Sport", MediaType.Live)),
+            entries = listOf(locked, hidden, visible),
+        )
+        val matches = listOf(match(0, mapOf("beIN 1" to listOf(locked, hidden), "Canal+" to listOf(visible))))
+        val library = UserLibrarySnapshot(hiddenEntries = setOf(hidden.key), lockedCategories = setOf("Live:adult"))
+
+        val lockedView = matches.withoutHiddenChannels(catalog, library, parentalLocked = true).single().matchedChannels
+        assertEquals(mapOf("Canal+" to listOf(visible)), lockedView)
+
+        // Code parental saisi : la catégorie verrouillée redevient visible, la chaîne masquée non.
+        val unlockedView = matches.withoutHiddenChannels(catalog, library, parentalLocked = false).single().matchedChannels
+        assertEquals(mapOf("beIN 1" to listOf(locked), "Canal+" to listOf(visible)), unlockedView)
     }
 }

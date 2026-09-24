@@ -19,10 +19,11 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -60,13 +61,28 @@ fun SearchScreen(
 ) {
     BackHandler(onBack = onBack)
     val needle = query.trim().lowercase()
-    val entries by produceState(emptyList<MediaEntry>(), needle, type) {
+    // Les résultats précédents restent affichés pendant la frappe, avec « Recherche… » : un
+    // produceState repartait d'une liste vide et affichait « Aucun résultat » avant la réponse.
+    var entries by remember { mutableStateOf(emptyList<MediaEntry>()) }
+    var searching by remember { mutableStateOf(false) }
+    LaunchedEffect(needle, type) {
         if (needle.isBlank()) {
-            value = emptyList()
-            return@produceState
+            entries = emptyList()
+            searching = false
+            return@LaunchedEffect
         }
+        searching = true
         delay(220)
-        value = search(needle, type)
+        entries = search(needle, type)
+        searching = false
+    }
+    val capped = entries.size >= SEARCH_RESULT_LIMIT
+    val resultLabel = when {
+        needle.isBlank() -> ""
+        searching -> "Recherche…"
+        capped -> "$SEARCH_RESULT_LIMIT+ résultats"
+        entries.size == 1 -> "1 résultat"
+        else -> "${entries.size} résultats"
     }
     val resultListState = rememberLazyListState()
     val restoreFocus = remember { FocusRequester() }
@@ -91,7 +107,7 @@ fun SearchScreen(
                 Spacer(Modifier.width(18.dp))
                 Text("Recherche globale", color = Ink, fontSize = TypeScreenTitle, fontWeight = HeadingWeight)
                 Spacer(Modifier.weight(1f))
-                Text("${entries.size} résultats", color = MutedInk, fontSize = TypeLabel)
+                Text(resultLabel, color = MutedInk, fontSize = TypeLabel)
             }
         }
         Spacer(Modifier.height(18.dp))
@@ -131,9 +147,9 @@ fun SearchScreen(
             }
         } else {
             Column(Modifier.fillMaxSize()) {
-                SectionLabel("Contenus (${entries.size})")
+                SectionLabel(if (capped) "Contenus ($SEARCH_RESULT_LIMIT premiers — précisez la recherche)" else "Contenus (${entries.size})")
                 Spacer(Modifier.height(10.dp))
-                if (entries.isEmpty()) {
+                if (entries.isEmpty() && !searching) {
                     GlassSurface(modifier = Modifier.fillMaxWidth()) {
                         Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
                             Text("Aucun résultat pour « $query ».", color = MutedInk, fontSize = TypeBody)
@@ -200,3 +216,6 @@ private fun SearchFilter(label: String, selected: Boolean, onClick: () -> Unit) 
 }
 
 private const val RESTORE_SEARCH_FOCUS_DELAY_MS = 60L
+
+/** Plafond de [fr.streamia.tv.data.XtreamRepository.search] : au-delà, l'utilisateur est invité à préciser. */
+private const val SEARCH_RESULT_LIMIT = 600

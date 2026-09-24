@@ -20,6 +20,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
+import fr.streamia.tv.player.isDecoderError
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -40,6 +42,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.KeyEventType
@@ -123,6 +126,8 @@ fun BrowserScreen(
     library: UserLibrarySnapshot,
     appSettings: AppSettings,
     loadingCategoryKeys: Set<String> = emptySet(),
+    vodPageKeys: Map<String, List<String>> = emptyMap(),
+    categoryLoadErrors: Set<String> = emptySet(),
     parentalUnlocked: Boolean,
     offline: Boolean,
     busy: Boolean,
@@ -141,6 +146,8 @@ fun BrowserScreen(
     onLocationChanged: (MediaType, String?) -> Unit,
     onEnsureCategoryLoaded: (MediaType, String) -> Unit,
     onLoadMoreInCategory: (MediaType, String) -> Unit,
+    /** Chaîne lancée en plein écran depuis la liste affichée : le zapping parcourt cette liste. */
+    onLiveEntrySelected: (MediaEntry, List<MediaEntry>) -> Unit = { entry, _ -> onEntrySelected(entry) },
     onHome: () -> Unit,
     onSearch: () -> Unit,
     onEpg: () -> Unit,
@@ -240,14 +247,28 @@ fun BrowserScreen(
         FAVORITES_CATEGORY_ID -> favoriteEntriesForType
         HISTORY_CATEGORY_ID -> historyForType.map { it.second }
         else -> {
-            val filtered = catalog.entriesIn(selectedType, selectedCategoryId).filterNot {
+            // Films/Séries paginés : ordre des pages lues en base, déjà triées (voir vodPageKeys).
+            // Rien tant que la première page au tri courant n'est pas là, plutôt qu'un ordre
+            // provisoire qui se réorganiserait sous les yeux de l'utilisateur.
+            val paged = selectedType != MediaType.Live && catalog.isPaged
+            val pageKeys = vodPageKeys[Catalog.categoryKey(selectedType, selectedCategoryId)]
+            val source = when {
+                !paged -> catalog.entriesIn(selectedType, selectedCategoryId)
+                pageKeys == null -> emptyList()
+                else -> pageKeys.mapNotNull(catalog::entry).filter {
+                    // Contenu déplacé ailleurs dans l'organisateur : n'appartient plus à cette catégorie.
+                    selectedCategoryId == Catalog.ALL_CATEGORY_ID || it.categoryId == selectedCategoryId
+                }
+            }
+            val filtered = source.filterNot {
                 it.key in library.hiddenEntries || it.categoryId in excludedCategoryIds
             }
             // « Favoris »/« Historique » gardent leur propre ordre (ajout / dernière lecture),
             // qui perdrait son sens sous un tri alphabétique ou par numéro : seule une vraie
             // catégorie suit la préférence de tri de son type.
-            when (selectedType) {
-                MediaType.Live -> sortedForLiveDisplay(filtered, appSettings.liveChannelSortOrder)
+            when {
+                selectedType == MediaType.Live -> sortedForLiveDisplay(filtered, appSettings.liveChannelSortOrder)
+                paged -> filtered
                 else -> sortedForVodDisplay(filtered, appSettings.vodSortOrder)
             }
         }
@@ -261,7 +282,7 @@ fun BrowserScreen(
     var computedEntries by remember(credentials) { mutableStateOf(location to computeEntries()) }
     if (computedEntries.first != location) computedEntries = location to computeEntries()
     LaunchedEffect(
-        catalog, favoriteEntriesForType, historyForType, excludedCategoryIds, library.hiddenEntries,
+        catalog, favoriteEntriesForType, historyForType, excludedCategoryIds, library.hiddenEntries, vodPageKeys,
         appSettings.liveChannelSortOrder, appSettings.vodSortOrder,
     ) {
         val target = location
@@ -282,7 +303,10 @@ fun BrowserScreen(
             selectedCategoryId = defaultCategoryId(catalog, selectedType)
         }
     }
-    androidx.compose.runtime.LaunchedEffect(selectedType, selectedCategoryId) {
+    val currentCategoryKey = Catalog.categoryKey(selectedType, selectedCategoryId)
+    // Pages absentes au tri courant (tri changé, liste actualisée) : relues sans quitter l'écran.
+    val pagesMissing = selectedType != MediaType.Live && catalog.isPaged && currentCategoryKey !in vodPageKeys
+    androidx.compose.runtime.LaunchedEffect(selectedType, selectedCategoryId, pagesMissing) {
         onLocationChanged(selectedType, selectedCategoryId)
         if (selectedType != MediaType.Live) {
             navigationStore.saveCategory(selectedType, selectedCategoryId)
@@ -326,7 +350,7 @@ fun BrowserScreen(
                     navigationStore.saveListPosition(MediaType.Live, categoryId, position)
                 },
                 onToggleCategoryFavorite = onToggleCategoryFavorite,
-                onEntrySelected = onEntrySelected,
+                onEntrySelected = { onLiveEntrySelected(it, entries) },
                 onToggleEntryFavorite = onToggleEntryFavorite,
                 onLoadMore = { onLoadMoreInCategory(MediaType.Live, selectedCategoryId) },
                 onLivePreviewWatched = onLivePreviewWatched,
@@ -375,7 +399,8 @@ fun BrowserScreen(
                     categories = categories,
                     selectedCategoryId = selectedCategoryId,
                     entries = entries,
-                    loading = Catalog.categoryKey(selectedType, selectedCategoryId) in loadingCategoryKeys,
+                    loading = currentCategoryKey in loadingCategoryKeys || (pagesMissing && currentCategoryKey !in categoryLoadErrors),
+                    loadError = currentCategoryKey in categoryLoadErrors,
                     favoriteCategories = library.favoriteCategories,
                     favoriteEntries = library.favoriteEntries,
                     lockedCategories = library.lockedCategories,
@@ -562,7 +587,7 @@ private fun LiveCatalogLayout(
     }
     var controlsVisible by remember { mutableStateOf(false) }
     var fullscreenTarget by remember { mutableStateOf<MediaEntry?>(null) }
-    var focusCategoryAfterChange by remember { mutableStateOf(false) }
+    var channelsFocused by remember { mutableStateOf(false) }
     var initialChannelFocusPending by remember { mutableStateOf(true) }
     val categoryFocus = remember { FocusRequester() }
     val channelFocus = remember { FocusRequester() }
@@ -589,13 +614,9 @@ private fun LiveCatalogLayout(
         delay(220)
         onEntrySelected(target)
     }
-    LaunchedEffect(selectedCategoryId, focusCategoryAfterChange) {
-        if (focusCategoryAfterChange) {
-            yield()
-            runCatching { categoryFocus.requestFocus() }
-            focusCategoryAfterChange = false
-        }
-    }
+    // Retour depuis la liste des chaînes : remonte d'abord au rail des catégories (convention TV),
+    // un second Retour quitte vers l'accueil.
+    BackHandler(enabled = channelsFocused) { runCatching { categoryFocus.requestFocus() } }
     if (previewEntry != null && catalog.entry(previewEntry!!.key) == null) {
         previewEntry = entries.firstOrNull()
     }
@@ -664,15 +685,9 @@ private fun LiveCatalogLayout(
                 selectedFocusRequester = channelFocus,
                 autoFocus = initialChannelFocusPending,
                 onAutoFocusConsumed = { initialChannelFocusPending = false },
-                onLeft = { channel ->
-                    val exactCategory = categories.firstOrNull { it.id == channel.categoryId }
-                    if (exactCategory != null && exactCategory.id != selectedCategoryId) {
-                        focusCategoryAfterChange = true
-                        onCategorySelected(exactCategory)
-                    } else {
-                        runCatching { categoryFocus.requestFocus() }
-                    }
-                },
+                // Gauche : retour au rail sur la catégorie parcourue, sans basculer vers la catégorie
+                // d'origine de la chaîne (depuis Favoris/Tout/Historique, la liste était perdue).
+                onLeft = { runCatching { categoryFocus.requestFocus() } },
                 onListPositionChanged = { onListPositionChanged(categoryIdForPosition, it) },
                 onConfirm = { channel ->
                     when (
@@ -689,7 +704,7 @@ private fun LiveCatalogLayout(
                 },
                 onToggleFavorite = onToggleEntryFavorite,
                 onLoadMore = onLoadMore,
-                modifier = Modifier.width(340.dp).fillMaxHeight(),
+                modifier = Modifier.width(340.dp).fillMaxHeight().onFocusChanged { channelsFocused = it.hasFocus },
             )
         }
         }
@@ -891,6 +906,7 @@ private fun LivePreview(
     val transportStore = remember { PlaybackTransportStore(context) }
     var buffering by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf(false) }
+    var unsupportedFormat by remember { mutableStateOf(false) }
     var activeUrl by remember { mutableStateOf("") }
     var streamCandidates by remember { mutableStateOf(emptyList<String>()) }
     var candidateIndex by remember { mutableStateOf(0) }
@@ -912,6 +928,13 @@ private fun LivePreview(
 
             override fun onPlayerError(playbackException: PlaybackException) {
                 if (entry?.key != livePlaybackSession.entryKey) return
+                // Format non décodable par le boîtier : inutile d'essayer les autres URL.
+                if (isDecoderError(playbackException.errorCode)) {
+                    unsupportedFormat = true
+                    error = true
+                    buffering = false
+                    return
+                }
                 val next = candidateIndex + 1
                 if (next < streamCandidates.size) {
                     candidateIndex = next
@@ -945,6 +968,7 @@ private fun LivePreview(
         }
         if (previewDelayMs > 0) delay(previewDelayMs.toLong())
         error = false
+        unsupportedFormat = false
         buffering = true
         val baseUrl = XtreamUrlBuilder(credentials).stream(target)
         val storedPreference = transportStore.preferenceFor(baseUrl)
@@ -994,7 +1018,7 @@ private fun LivePreview(
                     Text("Chargement…", color = Ink, fontSize = TypeBody, modifier = Modifier.align(Alignment.Center))
                 }
                 if (error) {
-                    Text("Aperçu indisponible", color = MutedInk, fontSize = TypeBody, modifier = Modifier.align(Alignment.Center))
+                    Text(if (unsupportedFormat) "Format non supporté par ce boîtier" else "Aperçu indisponible", color = MutedInk, fontSize = TypeBody, modifier = Modifier.align(Alignment.Center))
                 }
                 Row(
                     Modifier
@@ -1035,6 +1059,7 @@ private fun VodCatalogLayout(
     selectedCategoryId: String,
     entries: List<MediaEntry>,
     loading: Boolean,
+    loadError: Boolean,
     favoriteCategories: Set<String>,
     favoriteEntries: Set<String>,
     lockedCategories: Set<String>,
@@ -1050,6 +1075,10 @@ private fun VodCatalogLayout(
     onLoadMore: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // Retour depuis la grille : remonte d'abord au rail des catégories, comme en Direct.
+    var gridFocused by remember { mutableStateOf(false) }
+    val railFocus = remember { FocusRequester() }
+    BackHandler(enabled = gridFocused) { runCatching { railFocus.requestFocus() } }
     Row(modifier, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
         CategoryRail(
             type = type,
@@ -1066,6 +1095,7 @@ private fun VodCatalogLayout(
             },
             onSelected = onCategorySelected,
             onToggleFavorite = onToggleCategoryFavorite,
+            selectedFocusRequester = railFocus,
             modifier = Modifier.width(250.dp).fillMaxHeight(),
         )
 
@@ -1084,13 +1114,14 @@ private fun VodCatalogLayout(
             favoriteEntries = favoriteEntries,
             historyByKey = historyByKey,
             loading = loading,
+            loadError = loadError,
             restoreEntryKey = restoreEntryKey,
             onRestoreConsumed = onRestoreConsumed,
             onEntrySelected = onEntrySelected,
             onEntryFocused = onEntryFocused,
             onToggleFavorite = onToggleEntryFavorite,
             onLoadMore = onLoadMore,
-            modifier = Modifier.weight(1f).fillMaxHeight(),
+            modifier = Modifier.weight(1f).fillMaxHeight().onFocusChanged { gridFocused = it.hasFocus },
         ) }
     }
 }
@@ -1119,6 +1150,24 @@ private fun CategoryRail(
     val internalSelectedFocus = remember(selectedCategoryId, type) { FocusRequester() }
     val selectedFocus = selectedFocusRequester ?: internalSelectedFocus
 
+    // Catégorie mise en favori (remontée en tête) ou retirée (revenue à sa place) : la liste la
+    // suit jusqu'à sa nouvelle position et lui garde le focus, au lieu de la laisser hors écran.
+    var movedCategoryKey by remember { mutableStateOf<String?>(null) }
+    val movedFocus = remember { FocusRequester() }
+    androidx.compose.runtime.LaunchedEffect(categories) {
+        val key = movedCategoryKey ?: return@LaunchedEffect
+        val index = categories.indexOfFirst { it.key == key }
+        if (index >= 0) {
+            if (listState.layoutInfo.visibleItemsInfo.none { it.index == index }) {
+                // Deux catégories au-dessus restent visibles pour garder le contexte.
+                listState.scrollToItem((index - 2).coerceAtLeast(0))
+            }
+            yield()
+            runCatching { movedFocus.requestFocus() }
+        }
+        movedCategoryKey = null
+    }
+
     androidx.compose.runtime.LaunchedEffect(type, categories.size, selectedCategoryId, requestInitialFocus) {
         val index = categories.indexOfFirst { it.id == selectedCategoryId }
         if (index >= 0) {
@@ -1146,7 +1195,10 @@ private fun CategoryRail(
                 val virtual = category.id in setOf(Catalog.ALL_CATEGORY_ID, FAVORITES_CATEGORY_ID, HISTORY_CATEGORY_ID)
                 FocusableSurface(
                     onClick = { onSelected(category) },
-                    onLongClick = if (virtual || type != MediaType.Live) null else ({ onToggleFavorite(category) }),
+                    onLongClick = if (virtual || type != MediaType.Live) null else ({
+                        movedCategoryKey = category.key
+                        onToggleFavorite(category)
+                    }),
                     selected = selectedCategoryId == category.id,
                     idleBackground = if (translucent) Color.Transparent else DeepSurface,
                     modifier = Modifier
@@ -1162,7 +1214,8 @@ private fun CategoryRail(
                                 true
                             } else false
                         }
-                        .then(if (category.id == selectedCategoryId) Modifier.focusRequester(selectedFocus) else Modifier),
+                        .then(if (category.id == selectedCategoryId) Modifier.focusRequester(selectedFocus) else Modifier)
+                        .then(if (category.key == movedCategoryKey) Modifier.focusRequester(movedFocus) else Modifier),
                 ) {
                     Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                         if (!virtual && type == MediaType.Live && category.key in favoriteCategories) {
@@ -1208,6 +1261,7 @@ private fun PosterGrid(
     totalCount: Int,
     entries: List<MediaEntry>,
     loading: Boolean,
+    loadError: Boolean,
     favoriteEntries: Set<String>,
     historyByKey: Map<String, PlaybackHistoryItem>,
     restoreEntryKey: String?,
@@ -1258,13 +1312,17 @@ private fun PosterGrid(
                 Modifier.fillMaxSize().clip(RoundedCornerShape(RadiusCard)).background(DeepSurface),
                 contentAlignment = Alignment.Center,
             ) {
-                Text(
-                    // Distinguer « la page arrive » de « la catégorie est vide » : une lecture SQLite
-                    // sur une catégorie jamais ouverte n'est pas un catalogue vide.
-                    if (loading) "Chargement…" else "Aucun contenu dans cette catégorie",
-                    color = MutedInk,
-                    fontSize = TypeBody,
-                )
+                if (loadError) {
+                    PageLoadRetry(onRetry = onLoadMore)
+                } else {
+                    Text(
+                        // Distinguer « la page arrive » de « la catégorie est vide » : une lecture SQLite
+                        // sur une catégorie jamais ouverte n'est pas un catalogue vide.
+                        if (loading) "Chargement…" else "Aucun contenu dans cette catégorie",
+                        color = MutedInk,
+                        fontSize = TypeBody,
+                    )
+                }
             }
         } else {
             LazyVerticalGrid(
@@ -1286,7 +1344,25 @@ private fun PosterGrid(
                         modifier = if (entry.key == restoreEntryKey) Modifier.focusRequester(restoreFocus) else Modifier,
                     )
                 }
+                // Pied de grille : page suivante en cours, ou en échec avec nouvel essai.
+                if (loadError || loading) {
+                    item(span = { GridItemSpan(maxLineSpan) }, key = "page-status") {
+                        Box(Modifier.fillMaxWidth().padding(vertical = 10.dp), contentAlignment = Alignment.Center) {
+                            if (loadError) PageLoadRetry(onRetry = onLoadMore)
+                            else Text("Chargement…", color = MutedInk, fontSize = TypeBody)
+                        }
+                    }
+                }
             }
+        }
+    }
+}
+
+@Composable
+private fun PageLoadRetry(onRetry: () -> Unit) {
+    FocusableSurface(onClick = onRetry, modifier = Modifier.width(420.dp).height(54.dp)) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text("Chargement impossible · OK pour réessayer", color = Ink, fontSize = TypeBody)
         }
     }
 }
@@ -1305,12 +1381,16 @@ private fun PosterCard(
         onClick = onClick,
         onFocused = onFocused,
         onLongClick = onLongClick,
-        selected = favorite,
+        // Pas d'état « sélectionné » pour un favori : il ressemblait au focus. L'étoile suffit.
         modifier = modifier.fillMaxWidth().height(252.dp),
     ) {
         Column(Modifier.fillMaxSize().padding(8.dp)) {
             Box(Modifier.fillMaxWidth().height(175.dp)) {
                 MediaArtwork(entry.iconUrl, entry.displayName, Modifier.fillMaxSize())
+                // Favori : étoile en coin d'affiche, visible même quand la progression occupe le bas.
+                if (favorite) {
+                    StreamiaIcon(StreamiaIconGlyph.Star, size = 20.dp, modifier = Modifier.align(Alignment.TopEnd).padding(5.dp))
+                }
                 if (history != null && history.progress > 0.02f) {
                     Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(4.dp).background(Color.Black.copy(alpha = 0.45f))) {
                         Box(Modifier.fillMaxHeight().fillMaxWidth(history.progress).background(FocusBlueBright))
@@ -1329,10 +1409,9 @@ private fun PosterCard(
             )
             Spacer(Modifier.weight(1f))
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                val ratingText = entry.rating?.let { "%.1f".format(it) }
+                // Note en « x/10 », sans étoile : l'étoile est réservée aux favoris.
+                val ratingText = entry.rating?.let(::formatRating)
                 if (ratingText != null) {
-                    StreamiaIcon(StreamiaIconGlyph.Star, tint = FocusBlueBright, size = 16.dp)
-                    Spacer(Modifier.width(3.dp))
                     Text(ratingText, color = FocusBlueBright, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                 } else {
                     val label = if (entry.type == MediaType.Series && entry.playable) "Épisode" else entry.type.displayName
@@ -1341,8 +1420,6 @@ private fun PosterCard(
                 Spacer(Modifier.weight(1f))
                 if (history != null && history.progress > 0.02f) {
                     Text("${history.progressPercent()}%", color = MutedInk, fontSize = 14.sp)
-                } else if (favorite) {
-                    StreamiaIcon(StreamiaIconGlyph.Star, size = 18.dp)
                 }
             }
         }
@@ -1352,6 +1429,9 @@ private fun PosterCard(
 private fun defaultCategoryId(catalog: Catalog, type: MediaType): String =
     catalog.categoriesFor(type).firstOrNull { catalog.countIn(type, it.id) > 0 }?.id
         ?: Catalog.ALL_CATEGORY_ID
+
+/** Note affichée partout sous la forme « 7.5/10 » (l'étoile désigne les favoris). */
+internal fun formatRating(rating: Double): String = "%.1f/10".format(rating)
 
 private fun PlaybackHistoryItem.progressPercent(): Int = (progress * 100).toInt().coerceIn(0, 100)
 

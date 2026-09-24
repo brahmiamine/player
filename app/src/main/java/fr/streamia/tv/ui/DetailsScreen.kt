@@ -17,6 +17,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -49,12 +53,17 @@ fun MovieDetailsScreen(
     similarMedia: List<RecommendedMedia> = emptyList(),
     otherVersions: List<RecommendedMedia> = emptyList(),
     onPlay: () -> Unit,
+    onPlayFromStart: () -> Unit = onPlay,
     onToggleFavorite: () -> Unit,
     onToggleWatched: () -> Unit,
     onOpenSimilar: (MediaEntry) -> Unit = {},
     onBack: () -> Unit,
 ) {
     BackHandler(onBack = onBack)
+    // Focus d'entrée sur Lire/Reprendre : sans lui, le premier appui tombait sur « ← Retour ».
+    val playFocus = remember { FocusRequester() }
+    // Le bouton est désactivé pendant le chargement de la fiche : focus posé dès qu'il est actif.
+    LaunchedEffect(movie.key, busy) { if (!busy) runCatching { playFocus.requestFocus() } }
     Row(Modifier.fillMaxSize().padding(34.dp)) {
         Column(Modifier.width(330.dp).fillMaxHeight()) {
             FocusableSurface(onClick = onBack, modifier = Modifier.width(130.dp).height(50.dp)) {
@@ -64,7 +73,7 @@ fun MovieDetailsScreen(
             ChannelLogo(details?.posterUrl ?: movie.iconUrl, movie.displayName, Modifier.size(300.dp))
             Spacer(Modifier.height(16.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                FocusableSurface(onClick = onPlay, enabled = !busy, accent = true, modifier = Modifier.weight(1f).height(58.dp)) {
+                FocusableSurface(onClick = onPlay, enabled = !busy, accent = true, modifier = Modifier.weight(1f).height(58.dp).focusRequester(playFocus)) {
                     Row(
                         Modifier.padding(horizontal = 16.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -72,7 +81,7 @@ fun MovieDetailsScreen(
                         StreamiaIcon(StreamiaIconGlyph.Movie, tint = Ink, size = 16.dp)
                         Spacer(Modifier.width(8.dp))
                         Text(
-                            if (resumePositionMs > 0) "Reprendre" else "Lire",
+                            if (resumePositionMs > 0) "Reprendre à ${formatDuration(resumePositionMs)}" else "Lire",
                             color = Ink,
                             fontSize = TypeBody,
                             fontWeight = FontWeight.Bold,
@@ -100,6 +109,14 @@ fun MovieDetailsScreen(
                     }
                 }
             }
+            if (resumePositionMs > 0) {
+                Spacer(Modifier.height(10.dp))
+                FocusableSurface(onClick = onPlayFromStart, enabled = !busy, modifier = Modifier.fillMaxWidth().height(50.dp)) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("Lire depuis le début", color = Ink, fontSize = TypeLabel, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
         }
         Spacer(Modifier.width(34.dp))
         Column(
@@ -110,7 +127,7 @@ fun MovieDetailsScreen(
             if (busy && details == null) Text("Chargement des informations…", color = MutedInk, fontSize = TypeBody)
             val rating = details?.rating ?: movie.rating
             val meta = listOfNotNull(
-                rating?.let { "★ ${"%.1f".format(it)}" },
+                rating?.let(::formatRating),
                 details?.releaseDate,
                 details?.duration,
                 details?.genre,

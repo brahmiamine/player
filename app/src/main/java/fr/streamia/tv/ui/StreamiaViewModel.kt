@@ -17,6 +17,7 @@ import fr.streamia.tv.data.HomePlace
 import fr.streamia.tv.data.HomeWeatherClient
 import fr.streamia.tv.data.PrayerMethod
 import fr.streamia.tv.data.JustWatchSection
+import fr.streamia.tv.data.VodSortOrder
 import fr.streamia.tv.data.homeBlock
 import fr.streamia.tv.data.LoadedCatalog
 import fr.streamia.tv.data.PlaylistProfile
@@ -150,6 +151,10 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     private var zapJob: Job? = null
     /** Chaîne Direct regardée juste avant la chaîne courante, pour « dernière chaîne ». */
     private var previousLiveEntry: MediaEntry? = null
+    /** Liste parcourue dans le Direct au lancement de la chaîne, pour CH+/CH− (voir openLiveFromList). */
+    private var liveZapList: List<MediaEntry>? = null
+    /** Fiches quittées pour un contenu similaire, rouvertes une à une par Retour. */
+    private val detailsTrail = ArrayDeque<MediaEntry>()
     private var lastLiveEntry: MediaEntry? = null
     private var secondaryLoadsJob: Job? = null
     // Clé comparée par identité des instances (catalogue/ensembles), recalculée seulement quand
@@ -449,7 +454,14 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             runCatching { repository.deleteProfile(profileId) }
                 .onSuccess {
                     epgGuideMemoryCache.clearProfile(profileId)
-                    _uiState.update { it.copy(busy = false, profiles = repository.profiles(), message = "Liste supprimée.") }
+                    _uiState.update {
+                        it.copy(
+                            busy = false,
+                            profiles = repository.profiles(),
+                            message = "Liste supprimée.",
+                            returnProfileId = it.returnProfileId?.takeUnless { id -> id == profileId },
+                        )
+                    }
                 }
                 .onFailure(::showError)
         }
@@ -476,12 +488,31 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             // updateChecking reste vrai pendant le téléchargement : le bouton affiche « Téléchargement… ».
             _uiState.update { it.copy(updateCheck = result) }
             if (result is UpdateCheckResult.UpdateAvailable) {
-                runCatching { repository.downloadAndInstallUpdate(result.release) }.onFailure { error ->
-                    val message = "Téléchargement impossible : " + (error.message ?: "erreur inconnue.")
-                    _uiState.update { it.copy(updateCheck = UpdateCheckResult.Error(message)) }
-                }
+                runCatching { repository.downloadAndInstallUpdate(result.release) }
+                    .onSuccess { started ->
+                        // Réglage « sources inconnues » ouvert : l'installation reprendra au retour (onResume).
+                        if (!started) _uiState.update { it.copy(updateCheck = UpdateCheckResult.AwaitingInstallPermission(result.release)) }
+                    }
+                    .onFailure { error ->
+                        val message = "Téléchargement impossible : " + (error.message ?: "erreur inconnue.")
+                        _uiState.update { it.copy(updateCheck = UpdateCheckResult.Error(message)) }
+                    }
             }
             _uiState.update { it.copy(updateChecking = false) }
+        }
+    }
+
+    /** Retour dans l'app (MainActivity.onResume) : reprend une installation bloquée par l'autorisation. */
+    fun resumePendingUpdateInstall() {
+        val pending = _uiState.value.updateCheck as? UpdateCheckResult.AwaitingInstallPermission ?: return
+        viewModelScope.launch {
+            runCatching { repository.installDownloadedUpdate() }
+                .onSuccess { started ->
+                    if (started) _uiState.update { it.copy(updateCheck = UpdateCheckResult.UpdateAvailable(pending.release, BuildConfig.VERSION_NAME)) }
+                }
+                .onFailure { error ->
+                    _uiState.update { it.copy(updateCheck = UpdateCheckResult.Error("Installation impossible : " + (error.message ?: "erreur inconnue."))) }
+                }
         }
     }
 
@@ -508,25 +539,55 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     }
 
     fun openEntry(entry: MediaEntry) {
+        // Contenu similaire / autre version ouvert depuis une fiche : la fiche quittée est empilée,
+        // Retour y reviendra. Depuis tout autre écran, la pile repart de zéro.
+        when (val screen = _uiState.value.screen) {
+            is StreamiaScreen.MovieDetails -> if (screen.movie.key != entry.key) detailsTrail.addLast(screen.movie)
+            is StreamiaScreen.Series -> if (screen.series.key != entry.key) detailsTrail.addLast(screen.series)
+            is StreamiaScreen.Player -> Unit
+            else -> detailsTrail.clear()
+        }
         // Le Browser reste le retour par défaut. Depuis un détail (contenu similaire / retry),
         // conserver le contexte qui a amené l'utilisateur jusque-là au lieu de l'écraser.
-        if (_uiState.value.screen is StreamiaScreen.Browser || _uiState.value.screen is StreamiaScreen.Epg) {
-            _uiState.update { it.copy(contentReturnContext = ContentReturnContext.browser(entry.key)) }
+        when (_uiState.value.screen) {
+            is StreamiaScreen.Browser -> _uiState.update { it.copy(contentReturnContext = ContentReturnContext.browser(entry.key)) }
+            // Guide TV : Retour depuis la chaîne ramène au guide, pas dans TV en direct.
+            is StreamiaScreen.Epg -> {
+                liveZapList = null
+                _uiState.update { it.copy(contentReturnContext = ContentReturnContext.epg(entry.key)) }
+            }
+            else -> Unit
         }
         openEntryInternal(entry)
     }
 
+    /**
+     * Chaîne lancée depuis la liste du Direct : CH+/CH− parcourent ensuite cette même liste
+     * (catégorie, Favoris, Historique, dans l'ordre affiché) plutôt que la catégorie d'origine
+     * de la chaîne dans l'ordre du fournisseur.
+     */
+    fun openLiveFromList(entry: MediaEntry, list: List<MediaEntry>) {
+        liveZapList = list.takeIf { candidates -> candidates.any { it.key == entry.key } }
+        openEntry(entry)
+    }
+
     fun openHomeEntry(entry: MediaEntry, rowKey: String, itemKey: String = entry.key) {
+        liveZapList = null
+        detailsTrail.clear()
         _uiState.update { it.copy(contentReturnContext = ContentReturnContext.home(rowKey, itemKey)) }
         openEntryInternal(entry)
     }
 
     fun openSearchEntry(entry: MediaEntry) {
+        liveZapList = null
+        detailsTrail.clear()
         _uiState.update { it.copy(contentReturnContext = ContentReturnContext.search(entry.key)) }
         openEntryInternal(entry)
     }
 
     fun openLiveMatchChannel(entry: MediaEntry, matchKey: String) {
+        liveZapList = null
+        detailsTrail.clear()
         _uiState.update { it.copy(contentReturnContext = ContentReturnContext.liveMatches(matchKey, entry.key)) }
         openEntryInternal(entry)
     }
@@ -546,6 +607,8 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
      * lisibles directement via [openEntry] ; seul le cas Film nécessite ce raccourci.
      */
     fun resumeHomePlayback(entry: MediaEntry) {
+        liveZapList = null
+        detailsTrail.clear()
         _uiState.update { it.copy(contentReturnContext = ContentReturnContext.home(HomeRowKey.Resume, entry.key)) }
         if (entry.type == MediaType.Movie) openPlayer(entry, returnToSeries = false) else openEntryInternal(entry)
     }
@@ -554,7 +617,8 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         if (entry.type == MediaType.Movie) openPlayer(entry, returnToSeries = false) else openEntry(entry)
     }
 
-    fun playMovie(movie: MediaEntry) = openPlayer(movie, returnToSeries = false, returnToDetails = true)
+    fun playMovie(movie: MediaEntry, fromStart: Boolean = false) =
+        openPlayer(movie, returnToSeries = false, returnToDetails = true, fromStart = fromStart)
 
     fun playEpisode(series: MediaEntry, episode: SeriesEpisode) {
         val playable = MediaEntry(
@@ -685,7 +749,6 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     }
 
     fun showSettings() = navigateToMenu(StreamiaScreen.Settings, HomeFocusTarget.Settings)
-    fun showTools() = navigateToMenu(StreamiaScreen.Tools)
     fun showAbout() = navigateToMenu(StreamiaScreen.About)
 
     suspend fun cacheSizeBytes(): Long = repository.cacheSizeBytes()
@@ -789,6 +852,14 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         updateAppSettings { it.copy(bufferMode = it.nextBufferMode()) }
     }
 
+    fun cycleDisplayModeSwitch() {
+        updateAppSettings { it.copy(displayModeSwitch = it.nextDisplayModeSwitch()) }
+    }
+
+    fun toggleTunneling() {
+        updateAppSettings { it.copy(tunnelingEnabled = !it.tunnelingEnabled) }
+    }
+
     fun cycleLiveStreamFormat() {
         updateAppSettings { it.copy(liveStreamFormat = it.nextLiveStreamFormat()) }
     }
@@ -799,6 +870,8 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
 
     fun cycleVodSortOrder() {
         updateAppSettings { it.copy(vodSortOrder = it.nextVodSortOrder()) }
+        // Pages lues dans l'ancien ordre : le navigateur recharge la première page au nouveau tri.
+        _uiState.update { it.copy(vodPageKeys = emptyMap()) }
     }
 
     fun cycleEpgTimeOffset() {
@@ -904,10 +977,19 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     fun ensureCategoryLoaded(type: MediaType, categoryId: String) {
         val profileId = _uiState.value.activeProfileId ?: return
         val catalog = _uiState.value.catalog ?: return
-        if (catalog.isCategoryLoaded(type, categoryId)) return
+        if (!needsFirstPage(catalog, type, categoryId)) return
         loadCategoryPage(profileId, type, categoryId, offset = 0)
         prefetchNeighborCategories(profileId, type, categoryId)
     }
+
+    /**
+     * Films/Séries paginés : l'ordre affiché est celui des pages lues en base (déjà triées), donc
+     * une catégorie sans pages pour le tri courant doit repartir de la première page — même si
+     * certaines de ses entrées sont déjà en mémoire (favoris, autre tri, autre catégorie).
+     */
+    private fun needsFirstPage(catalog: Catalog, type: MediaType, categoryId: String): Boolean =
+        if (type != MediaType.Live && catalog.isPaged) Catalog.categoryKey(type, categoryId) !in _uiState.value.vodPageKeys
+        else !catalog.isCategoryLoaded(type, categoryId)
 
     /**
      * Charge en arrière-plan les catégories adjacentes à [categoryId] dans le rail (précédente et
@@ -921,7 +1003,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         val index = ordered.indexOfFirst { it.id == categoryId }
         if (index < 0) return
         listOfNotNull(ordered.getOrNull(index - 1), ordered.getOrNull(index + 1)).forEach { neighbor ->
-            if (!catalog.isCategoryLoaded(type, neighbor.id)) {
+            if (needsFirstPage(catalog, type, neighbor.id)) {
                 loadCategoryPage(profileId, type, neighbor.id, offset = 0)
             }
         }
@@ -935,21 +1017,46 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     fun loadMoreInCategory(type: MediaType, categoryId: String) {
         val profileId = _uiState.value.activeProfileId ?: return
         val catalog = _uiState.value.catalog ?: return
-        val loaded = catalog.entriesIn(type, categoryId).size
+        // Paginé : l'offset est le nombre d'entrées déjà lues pour CETTE catégorie et ce tri —
+        // entriesIn() compterait aussi des entrées chargées ailleurs (favoris, autres catégories
+        // dans « Tout ») et ferait sauter des pages.
+        val loaded = if (type != MediaType.Live && catalog.isPaged) {
+            _uiState.value.vodPageKeys[Catalog.categoryKey(type, categoryId)]?.size ?: return ensureCategoryLoaded(type, categoryId)
+        } else {
+            catalog.entriesIn(type, categoryId).size
+        }
         if (loaded > 0 && loaded >= catalog.countIn(type, categoryId)) return
         loadCategoryPage(profileId, type, categoryId, offset = loaded)
     }
 
     private fun loadCategoryPage(profileId: String, type: MediaType, categoryId: String, offset: Int) {
-        val loadKey = "$profileId:${Catalog.categoryKey(type, categoryId)}:$offset"
+        val order = if (type == MediaType.Live) VodSortOrder.Provider else _uiState.value.appSettings.vodSortOrder
+        val categoryKey = Catalog.categoryKey(type, categoryId)
+        val loadKey = "$profileId:$categoryKey:$order:$offset"
         if (!categoryLoadsInFlight.add(loadKey)) return
         setCategoryLoading(type, categoryId, loading = true)
+        _uiState.update { if (categoryKey in it.categoryLoadErrors) it.copy(categoryLoadErrors = it.categoryLoadErrors - categoryKey) else it }
         viewModelScope.launch {
             try {
-                val page = runCatching { repository.loadCategoryPage(profileId, type, categoryId, offset) }.getOrNull() ?: return@launch
+                val page = runCatching { repository.loadCategoryPage(profileId, type, categoryId, offset, order) }.getOrElse {
+                    // Page en échec : signalée à la grille (message + nouvel essai) au lieu d'une fin de liste muette.
+                    _uiState.update { state -> state.copy(categoryLoadErrors = state.categoryLoadErrors + categoryKey) }
+                    return@launch
+                }
                 if (page.entries.isEmpty() && offset > 0) return@launch
                 mergeIntoCatalog(profileId) { base ->
                     base.withMaterializedEntries(page.entries, type, categoryId)
+                }
+                if (type != MediaType.Live) {
+                    _uiState.update { state ->
+                        val known = state.vodPageKeys[categoryKey]
+                        when {
+                            state.activeProfileId != profileId || state.appSettings.vodSortOrder != order -> state
+                            offset == 0 -> state.copy(vodPageKeys = state.vodPageKeys + (categoryKey to page.entries.map(MediaEntry::key)))
+                            known?.size == offset -> state.copy(vodPageKeys = state.vodPageKeys + (categoryKey to (known + page.entries.map(MediaEntry::key)).distinct()))
+                            else -> state
+                        }
+                    }
                 }
             } finally {
                 categoryLoadsInFlight.remove(loadKey)
@@ -1270,7 +1377,18 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         if (profileId != null) refreshLibrarySnapshot(profileId)
     }
 
+    /**
+     * Film lu jusqu'au bout : retour sur sa fiche, quel que soit l'écran d'où il a été lancé
+     * (fiche, accueil « Reprendre », recherche…). Retour depuis la fiche ramène ensuite à cet écran.
+     */
+    fun finishMovie(movie: MediaEntry) {
+        if ((_uiState.value.screen as? StreamiaScreen.Player)?.entry?.key != movie.key) return
+        _playerState.value = PlayerUiState()
+        openEntryInternal(movie)
+    }
+
     fun closeDetails() {
+        if (reopenPreviousDetails()) return
         _uiState.update {
             it.copy(
                 screen = it.contentReturnContext?.destinationScreen() ?: StreamiaScreen.Browser,
@@ -1280,7 +1398,16 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             )
         }
     }
+    /** Fiche ouverte depuis une autre fiche (contenu similaire) : Retour rouvre la précédente. */
+    private fun reopenPreviousDetails(): Boolean {
+        val previous = detailsTrail.removeLastOrNull() ?: return false
+        _uiState.update { it.copy(mediaDetails = null, seriesDetails = null, similarMedia = emptyList(), message = null) }
+        openEntryInternal(previous)
+        return true
+    }
+
     fun closeSeries() {
+        if (reopenPreviousDetails()) return
         _uiState.update {
             it.copy(
                 screen = it.contentReturnContext?.destinationScreen() ?: StreamiaScreen.Browser,
@@ -1300,7 +1427,9 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         // joue), le bandeau s'affiche tout de suite, et le flux ne démarre qu'une fois les appuis
         // terminés — enchaîner CH+ ne lance plus un flux réseau (et un EPG) par chaîne traversée.
         val from = _playerState.value.pendingZapEntry ?: current
-        val next = liveZapIndex(state, catalog).adjacent(from, delta) ?: return
+        val next = liveZapList?.let { list ->
+            list.indexOfFirst { it.key == from.key }.takeIf { it >= 0 }?.let { index -> list[Math.floorMod(index + delta, list.size)] }
+        } ?: liveZapIndex(state, catalog).adjacent(from, delta) ?: return
         _playerState.update { it.copy(pendingZapEntry = next) }
         zapJob?.cancel()
         zapJob = viewModelScope.launch {
@@ -1356,20 +1485,29 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     fun dismissMessage() { _uiState.update { it.copy(message = null) } }
 
     fun logout() {
+        val previousProfileId = _uiState.value.activeProfileId
         viewModelScope.launch {
             repository.logout()
             showLogin()
+            _uiState.update { it.copy(returnProfileId = previousProfileId) }
         }
     }
 
-    private fun openPlayer(entry: MediaEntry, returnToSeries: Boolean, returnToDetails: Boolean = false) {
+    /** Retour depuis le gestionnaire de listes : rouvre la liste quittée par « Changer de liste ». */
+    fun returnToPreviousList() {
+        val profileId = _uiState.value.returnProfileId ?: return
+        if (_uiState.value.profiles.none { it.id == profileId }) return
+        openProfile(profileId)
+    }
+
+    private fun openPlayer(entry: MediaEntry, returnToSeries: Boolean, returnToDetails: Boolean = false, fromStart: Boolean = false) {
         // Toute chaîne ouverte en plein écran compte, qu'on y arrive par zap ou via la liste Direct.
         if (entry.type == MediaType.Live) {
             lastLiveEntry?.takeIf { it.key != entry.key }?.let { previousLiveEntry = it }
             lastLiveEntry = entry
         }
         val profileId = _uiState.value.activeProfileId
-        val resume = if (profileId != null && entry.type != MediaType.Live) repository.resumePosition(profileId, entry.key) else 0L
+        val resume = if (profileId != null && entry.type != MediaType.Live && !fromStart) repository.resumePosition(profileId, entry.key) else 0L
         _playerState.update { it.copy(epg = EpgNowContext()) }
         _uiState.update {
             it.copy(
@@ -2349,6 +2487,8 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                     else -> {
                         committed = true
                         state.copy(
+                            // Catalogue relu (actualisation) : les pages Films/Séries sont relues au tri courant.
+                            vodPageKeys = emptyMap(),
                             booting = false,
                             busy = false,
                             catalogHydrating = false,
@@ -2410,6 +2550,8 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     }
 
     private fun showLogin() {
+        liveZapList = null
+        detailsTrail.clear()
         previousLiveEntry = null
         lastLiveEntry = null
         secondaryLoadsJob?.cancel()
@@ -2568,9 +2710,15 @@ data class StreamiaUiState(
      * catégorie Films/Séries encore jamais parcourue.
      */
     val loadingCategoryKeys: Set<String> = emptySet(),
+    /** Films/Séries paginés : clés des entrées dans l'ordre des pages lues en base (tri appliqué), par catégorie. */
+    val vodPageKeys: Map<String, List<String>> = emptyMap(),
+    /** Catégories dont le dernier chargement de page a échoué (message + nouvel essai dans la grille). */
+    val categoryLoadErrors: Set<String> = emptySet(),
     val searchQuery: String = "",
     val searchType: MediaType? = null,
     val contentReturnContext: ContentReturnContext? = null,
+    /** Liste quittée par « Changer de liste » : Retour dans le gestionnaire la rouvre. */
+    val returnProfileId: String? = null,
     /**
      * Pile des écrans de menu traversés (Accueil, Direct/Films/Séries, Paramètres, Recherche, EPG,
      * Outils…). Elle permet à Retour de revenir à l'écran d'où l'on vient au lieu de l'accueil.
@@ -2596,7 +2744,6 @@ sealed interface StreamiaScreen {
     data object Home : StreamiaScreen
     data object Browser : StreamiaScreen
     data object Settings : StreamiaScreen
-    data object Tools : StreamiaScreen
     data object About : StreamiaScreen
     data object ParentalControl : StreamiaScreen
     data object Search : StreamiaScreen

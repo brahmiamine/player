@@ -30,6 +30,8 @@ internal fun shouldDeferLiveBrowserReturn(state: StreamiaUiState): Boolean {
  * au lieu de retomber silencieusement sur le navigateur.
  */
 internal fun livePlayerReturnsToSource(origin: ContentReturnOrigin?): Boolean = when (origin) {
-    ContentReturnOrigin.Home, ContentReturnOrigin.LiveMatches -> true
-    ContentReturnOrigin.Browser, ContentReturnOrigin.Search, null -> false
+    // Recherche et Guide TV aussi : une chaîne lancée depuis leurs résultats y revient, au lieu
+    // d'atterrir dans TV en direct.
+    ContentReturnOrigin.Home, ContentReturnOrigin.LiveMatches, ContentReturnOrigin.Search, ContentReturnOrigin.Epg -> true
+    ContentReturnOrigin.Browser, null -> false
 }

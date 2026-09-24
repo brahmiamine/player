@@ -319,9 +319,18 @@ internal class CatalogDatabase(context: Context) :
         categoryId: String,
         offset: Int,
         limit: Int,
+        order: VodSortOrder = VodSortOrder.Provider,
     ): List<MediaEntry> {
         if (limit <= 0) return emptyList()
         val all = categoryId == Catalog.ALL_CATEGORY_ID
+        // Tri fait ici plutôt qu'à l'écran : trier seulement les pages déjà chargées donnait un
+        // ordre faux (« Tout » : 500 films sur 180 000) qui se réordonnait à chaque nouvelle page.
+        val orderBy = when (order) {
+            VodSortOrder.Provider -> "number, media_id"
+            VodSortOrder.Alphabetical -> "display_name COLLATE LOCALIZED, media_id"
+            VodSortOrder.RecentlyAdded -> "added_at IS NULL, added_at DESC, media_id"
+            VodSortOrder.Rating -> "rating IS NULL, rating DESC, media_id"
+        }
         val whereCategory = if (all) "" else " AND category_id = ?"
         val args = buildList {
             add(profileId)
@@ -334,7 +343,7 @@ internal class CatalogDatabase(context: Context) :
             """
             SELECT ${ENTRY_COLUMNS.joinToString()} FROM catalog_entries
             WHERE profile_id = ? AND media_type = ? AND navigable = 1$whereCategory
-            ORDER BY number, media_id
+            ORDER BY $orderBy
             LIMIT ? OFFSET ?
             """.trimIndent(),
             args,

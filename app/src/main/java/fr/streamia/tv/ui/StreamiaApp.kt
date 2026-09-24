@@ -38,6 +38,7 @@ import fr.streamia.tv.recommendation.RecommendedMedia
 import fr.streamia.tv.recommendation.RecommendationRowKind
 import fr.streamia.tv.data.AppSettings
 import fr.streamia.tv.data.HomeBlock
+import fr.streamia.tv.data.isResumable
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.ui.PlayerView
 
@@ -64,12 +65,18 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
         }
     }
 
+    val liveOnSatMatches = remember(state.liveOnSatMatches, state.catalog, state.library, state.appSettings.parentalControlEnabled, state.parentalUnlocked) {
+        state.liveOnSatMatches.withoutHiddenChannels(state.catalog, state.library, state.appSettings.parentalControlEnabled && !state.parentalUnlocked)
+    }
+
     StreamiaTheme {
         ResponsiveTvViewport {
             Box(Modifier.fillMaxSize()) {
               GlassBackdrop(glassBlobsFor(state.screen))
               when {
-                shouldShowStartupGate(state) -> BootScreen()
+                // Texte selon ce qui charge réellement : l'ancien « Ouverture de votre dernière
+                // lecture… » s'affichait aussi à l'ouverture d'une liste, sans aucune reprise.
+                shouldShowStartupGate(state) -> BootScreen(if (state.booting) "Démarrage…" else "Chargement de votre liste…")
 
                 state.screen is StreamiaScreen.Login -> LoginScreen(
                     profiles = state.profiles,
@@ -86,6 +93,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onRenameProfile = viewModel::renameProfile,
                     onDeleteProfile = viewModel::deleteProfile,
                     onDismissMessage = viewModel::dismissMessage,
+                    onReturnToList = if (state.returnProfileId != null) viewModel::returnToPreviousList else null,
                 )
 
                 state.screen is StreamiaScreen.Home && state.catalog != null -> HomeScreen(
@@ -110,7 +118,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     beinSportsNext = state.homeBeinSportsNext.ifDisabled(HomeBlock.BeinSportsNext, state.appSettings),
                     ukGuideNow = state.homeUkGuideNow.ifDisabled(HomeBlock.UkGuideNow, state.appSettings),
                     ukGuideNext = state.homeUkGuideNext.ifDisabled(HomeBlock.UkGuideNext, state.appSettings),
-                    liveMatches = state.liveOnSatMatches.ifDisabled(HomeBlock.LiveMatches, state.appSettings),
+                    liveMatches = liveOnSatMatches.ifDisabled(HomeBlock.LiveMatches, state.appSettings),
                     pendingBlocks = state.homePendingBlocks - state.appSettings.disabledHomeBlocks,
                     liveMatchesPending = state.liveOnSatPending && HomeBlock.LiveMatches !in state.appSettings.disabledHomeBlocks,
                     liveMatchesResolving = state.liveOnSatResolving,
@@ -143,6 +151,8 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     library = state.library,
                     appSettings = state.appSettings,
                     loadingCategoryKeys = state.loadingCategoryKeys,
+                    vodPageKeys = state.vodPageKeys,
+                    categoryLoadErrors = state.categoryLoadErrors,
                     parentalUnlocked = state.parentalUnlocked,
                     offline = state.offline,
                     busy = state.busy,
@@ -162,6 +172,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onLocationChanged = viewModel::rememberBrowserLocation,
                     onEnsureCategoryLoaded = viewModel::ensureCategoryLoaded,
                     onLoadMoreInCategory = viewModel::loadMoreInCategory,
+                    onLiveEntrySelected = viewModel::openLiveFromList,
                     onHome = viewModel::showHome,
                     onSearch = {
                         livePlaybackSession.stop(clearSession = true)
@@ -195,6 +206,8 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onCycleVodSeekStep = viewModel::cycleVodSeekStep,
                     onCycleVideoAspect = viewModel::cycleVideoAspect,
                     onCycleBufferMode = viewModel::cycleBufferMode,
+                    onCycleDisplayModeSwitch = viewModel::cycleDisplayModeSwitch,
+                    onToggleTunneling = viewModel::toggleTunneling,
                     onCycleLiveStreamFormat = viewModel::cycleLiveStreamFormat,
                     onCycleLiveChannelSortOrder = viewModel::cycleLiveChannelSortOrder,
                     onCycleVodSortOrder = viewModel::cycleVodSortOrder,
@@ -232,31 +245,6 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onBack = viewModel::backFromMenu,
                 )
 
-                state.screen is StreamiaScreen.Tools -> ToolsScreen(
-                    busy = state.busy,
-                    liveHistoryCount = state.library.history.count { it.entry.type == MediaType.Live },
-                    movieHistoryCount = state.library.history.count { it.entry.type == MediaType.Movie },
-                    seriesHistoryCount = state.library.history.count { it.entry.type == MediaType.Series },
-                    currentVersion = BuildConfig.VERSION_NAME,
-                    updateChecking = state.updateChecking,
-                    updateCheck = state.updateCheck,
-                    onSearch = viewModel::showSearch,
-                    onEpg = viewModel::showEpg,
-                    onOrganizer = viewModel::showOrganizer,
-                    onRefresh = viewModel::refresh,
-                    onClearLiveHistory = { viewModel.clearHistory(MediaType.Live) },
-                    onClearMovieHistory = { viewModel.clearHistory(MediaType.Movie) },
-                    onClearSeriesHistory = { viewModel.clearHistory(MediaType.Series) },
-                    onClearAllHistory = { viewModel.clearHistory() },
-                    onChangePlaylist = viewModel::logout,
-                    onCheckForUpdate = viewModel::checkForUpdate,
-                    onDismissUpdateCheck = viewModel::dismissUpdateCheck,
-                    onExportBackup = viewModel::exportBackup,
-                    onImportBackup = viewModel::importBackup,
-                    onAbout = viewModel::showAbout,
-                    onBack = viewModel::backFromMenu,
-                )
-
                 state.screen is StreamiaScreen.About -> AboutScreen(
                     versionName = BuildConfig.VERSION_NAME,
                     onLoadCacheSize = viewModel::cacheSizeBytes,
@@ -280,7 +268,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                 )
 
                 state.screen is StreamiaScreen.LiveMatches -> LiveOnSatScreen(
-                    matches = state.liveOnSatMatches,
+                    matches = liveOnSatMatches,
                     loading = state.liveOnSatLoading,
                     resolvingChannels = state.liveOnSatResolving,
                     error = state.liveOnSatError,
@@ -332,7 +320,8 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
 
                 state.screen is StreamiaScreen.MovieDetails -> {
                     val movie = (state.screen as StreamiaScreen.MovieDetails).movie
-                    val resume = state.library.history.firstOrNull { it.entry.key == movie.key }?.positionMs ?: 0L
+                    // Film terminé (ou presque) : pas de « Reprendre à 1:52:00 », comme la rangée Reprendre.
+                    val resume = state.library.history.firstOrNull { it.entry.key == movie.key }?.takeIf { it.isResumable() }?.positionMs ?: 0L
                     MovieDetailsScreen(
                         movie = movie,
                         details = state.mediaDetails,
@@ -348,6 +337,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                             if (query.isNotBlank()) value = otherVersionsOf(movie, viewModel.searchCatalog(query, movie.type))
                         }.value,
                         onPlay = { viewModel.playMovie(movie) },
+                        onPlayFromStart = { viewModel.playMovie(movie, fromStart = true) },
                         onToggleFavorite = { viewModel.toggleEntryFavorite(movie) },
                         onToggleWatched = { viewModel.toggleEntryWatched(movie) },
                         onOpenSimilar = viewModel::openEntry,
@@ -365,6 +355,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                         favorite = series.key in state.library.favoriteEntries,
                         watched = series.key in state.library.watchedEntries,
                         similarMedia = state.similarMedia,
+                        episodeHistory = state.library.history,
                         otherVersions = produceState(emptyList<RecommendedMedia>(), series.key) {
                             val query = versionSearchQuery(series)
                             if (query.isNotBlank()) value = otherVersionsOf(series, viewModel.searchCatalog(query, series.type))
@@ -416,10 +407,11 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                         onProgress = viewModel::recordPlayback,
                         onCycleVideoAspect = viewModel::cycleVideoAspect,
                         onPlayNextEpisode = viewModel::playNextEpisode,
+                        onMovieFinished = { viewModel.finishMovie(playerScreen.entry) },
                     )
                 }
 
-                else -> BootScreen()
+                else -> BootScreen("Chargement…")
               }
             }
         }
@@ -427,7 +419,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
 }
 
 @Composable
-private fun BootScreen() {
+private fun BootScreen(label: String) {
     val transition = rememberInfiniteTransition(label = "startup-loader")
     val rotation by transition.animateFloat(
         initialValue = 0f,
@@ -449,7 +441,7 @@ private fun BootScreen() {
                 )
             }
             Spacer(Modifier.height(14.dp))
-            Text("Ouverture de votre dernière lecture…", color = MutedInk, fontSize = 17.sp)
+            Text(label, color = MutedInk, fontSize = 17.sp)
         }
     }
 }

@@ -26,7 +26,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
+import fr.streamia.tv.data.UserLibrarySnapshot
+import fr.streamia.tv.domain.Catalog
 import fr.streamia.tv.domain.MediaEntry
+import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.liveonsat.ResolvedLiveOnSatMatch
 import fr.streamia.tv.liveonsat.isLiveAt
 import fr.streamia.tv.ui.theme.Ink
@@ -66,6 +69,29 @@ internal fun liveMatchCards(
                 .distinctBy { it.key }
                 .map { channel -> LiveMatchCard("${liveOnSatMatchKey(resolved)}#${channel.key}", resolved, channel) }
         }
+
+/**
+ * Retire des matchs les chaînes masquées par l'utilisateur et, contrôle parental actif et pas
+ * déverrouillé, celles des catégories verrouillées : le rapprochement liveonsat parcourt toute la
+ * playlist, et sans ce filtre une chaîne verrouillée se lançait depuis un match sans code.
+ */
+internal fun List<ResolvedLiveOnSatMatch>.withoutHiddenChannels(
+    catalog: Catalog?,
+    library: UserLibrarySnapshot,
+    parentalLocked: Boolean,
+): List<ResolvedLiveOnSatMatch> {
+    val excludedKeys = if (parentalLocked) library.hiddenCategories + library.lockedCategories else library.hiddenCategories
+    val excludedCategoryIds = catalog?.categoriesFor(MediaType.Live).orEmpty()
+        .filter { it.key in excludedKeys }
+        .mapTo(mutableSetOf()) { it.id }
+    if (excludedCategoryIds.isEmpty() && library.hiddenEntries.isEmpty()) return this
+    return map { resolved ->
+        val visible = resolved.matchedChannels
+            .mapValues { (_, channels) -> channels.filterNot { it.key in library.hiddenEntries || it.categoryId in excludedCategoryIds } }
+            .filterValues { it.isNotEmpty() }
+        if (visible == resolved.matchedChannels) resolved else resolved.copy(matchedChannels = visible)
+    }
+}
 
 @Composable
 internal fun LiveMatchesRow(

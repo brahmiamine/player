@@ -297,6 +297,9 @@ data class Catalog(
     }
     private val lazyMetadata = totalCounts.isNotEmpty() || categoryCounts.isNotEmpty() || loadedCategoryKeys.isNotEmpty()
 
+    /** Catalogue adossé à SQLite et chargé page par page (sinon : tout est déjà en mémoire). */
+    val isPaged: Boolean get() = lazyMetadata
+
     fun categoriesFor(type: MediaType): List<MediaCategory> = categoriesBySection[type].orEmpty()
 
     fun entriesFor(type: MediaType): List<MediaEntry> = section(type).entries

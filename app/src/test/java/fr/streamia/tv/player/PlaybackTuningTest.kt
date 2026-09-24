@@ -11,10 +11,10 @@ class PlaybackTuningTest {
     fun `live starts with a small latency-oriented buffer`() {
         val profile = PlaybackTuning.forType(MediaType.Live)
 
-        assertEquals(2_500, profile.minBufferMs)
-        assertEquals(12_000, profile.maxBufferMs)
+        assertEquals(4_000, profile.minBufferMs)
+        assertEquals(20_000, profile.maxBufferMs)
         assertEquals(350, profile.bufferForPlaybackMs)
-        assertEquals(900, profile.bufferForPlaybackAfterRebufferMs)
+        assertEquals(1_500, profile.bufferForPlaybackAfterRebufferMs)
     }
 
     @Test
@@ -37,5 +37,12 @@ class PlaybackTuningTest {
             assertEquals(3_000, profile.bufferForPlaybackAfterRebufferMs)
             assertTrue(profile.maxBufferMs > PlaybackTuning.forType(MediaType.Live).maxBufferMs)
         }
+    }
+
+    @Test
+    fun `buffer memory is a share of the app heap, bounded`() {
+        assertEquals(32 * 1024 * 1024, bufferBytesForHeap(64))
+        assertEquals((512 * 0.35 * 1024 * 1024).toInt(), bufferBytesForHeap(512))
+        assertEquals(200 * 1024 * 1024, bufferBytesForHeap(1024))
     }
 }

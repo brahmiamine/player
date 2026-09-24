@@ -1,5 +1,6 @@
 package fr.streamia.tv.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -68,6 +69,7 @@ import fr.streamia.tv.ui.theme.FocusBlueBright
 import fr.streamia.tv.ui.theme.HeadingWeight
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
+import fr.streamia.tv.ui.theme.TypeBody
 import fr.streamia.tv.ui.theme.Night
 import fr.streamia.tv.ui.theme.RadiusPill
 import kotlinx.coroutines.delay
@@ -330,6 +332,20 @@ fun HomeScreen(
         onFocusConsumed()
     }
 
+    // Retour sur l'accueil : un premier appui prévient, le second (dans les 2,5 s) quitte l'app —
+    // un seul appui fermait l'application sans prévenir.
+    var exitArmed by remember { mutableStateOf(false) }
+    BackHandler(enabled = !exitArmed) { exitArmed = true }
+    LaunchedEffect(exitArmed) {
+        if (exitArmed) {
+            delay(EXIT_CONFIRM_WINDOW_MS)
+            exitArmed = false
+        }
+    }
+    var confirmChangePlaylist by remember { mutableStateOf(false) }
+    val changePlaylistFocus = remember { FocusRequester() }
+
+    Box(Modifier.fillMaxSize()) {
     LazyColumn(
         state = homeListState,
         modifier = Modifier
@@ -377,12 +393,13 @@ fun HomeScreen(
                 firstFocus = if (!preferGridFocus) firstFocus else null,
                 focusTarget = focusTarget,
                 gridFocusRequester = gridFocusRequester,
+                changePlaylistFocusRequester = changePlaylistFocus,
                 onOpenSection = onOpenSection,
                 onSearch = onSearch,
                 onEpg = onEpg,
                 onSettings = onSettings,
                 onRefresh = onRefresh,
-                onChangePlaylist = onChangePlaylist,
+                onChangePlaylist = { confirmChangePlaylist = true },
                 onOpenLiveMatches = onOpenLiveMatches,
                 modifier = Modifier.fillMaxWidth().height(MainGridHeight),
             )
@@ -686,7 +703,39 @@ fun HomeScreen(
         }
 
     }
+    if (exitArmed) {
+        GlassSurface(
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 36.dp),
+            shape = RoundedCornerShape(RadiusPill),
+        ) {
+            Text(
+                "Appuyez de nouveau sur Retour pour quitter",
+                color = Ink,
+                fontSize = TypeBody,
+                modifier = Modifier.padding(horizontal = 26.dp, vertical = 14.dp),
+            )
+        }
+    }
+    if (confirmChangePlaylist) {
+        // Même confirmation que dans Paramètres : la tuile est voisine de « Matchs du jour ».
+        ConfirmDialog(
+            title = "Changer de liste",
+            message = "Vous allez quitter la liste actuelle et revenir au gestionnaire de playlists.",
+            confirmLabel = "Continuer",
+            onConfirm = {
+                confirmChangePlaylist = false
+                onChangePlaylist()
+            },
+            onDismiss = {
+                confirmChangePlaylist = false
+                // Annulé : le focus revient sur la tuile, au lieu de tomber sur une tuile voisine.
+                runCatching { changePlaylistFocus.requestFocus() }
+            },
+        )
+    }
+    }
 }
+
 
 @Composable
 private fun MainActionGrid(
@@ -696,6 +745,7 @@ private fun MainActionGrid(
     firstFocus: FocusRequester?,
     focusTarget: HomeFocusTarget?,
     gridFocusRequester: FocusRequester,
+    changePlaylistFocusRequester: FocusRequester,
     onOpenSection: (MediaType) -> Unit,
     onSettings: () -> Unit,
     onSearch: () -> Unit,
@@ -799,7 +849,9 @@ private fun MainActionGrid(
                 StreamiaIconGlyph.Swap,
                 "Changer de liste",
                 onChangePlaylist,
-                Modifier.weight(1f).gridFocus(gridFocusRequester, focusTarget == HomeFocusTarget.ChangePlaylist),
+                Modifier.weight(1f)
+                    .focusRequester(changePlaylistFocusRequester)
+                    .gridFocus(gridFocusRequester, focusTarget == HomeFocusTarget.ChangePlaylist),
             )
         }
     }
@@ -1158,6 +1210,7 @@ private fun HomeRecommendationCard(
 }
 
 private const val RESTORE_FOCUS_DELAY_MS = 60L
+private const val EXIT_CONFIRM_WINDOW_MS = 2_500L
 
 internal val HomeCardWidth = 172.dp
 // 128dp d'illustration + jusqu'à 2 lignes de titre en 13sp/16sp de lineHeight + le label de type

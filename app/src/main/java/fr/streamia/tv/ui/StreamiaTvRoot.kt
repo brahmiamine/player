@@ -43,8 +43,8 @@ fun StreamiaTvRoot(viewModel: StreamiaViewModel) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val sessionStore = remember { PlaybackSessionStore(context.applicationContext) }
-    val livePlaybackSession = remember(state.appSettings.bufferMode) {
-        LivePlaybackSession(context.applicationContext, state.appSettings.bufferMode)
+    val livePlaybackSession = remember(state.appSettings.bufferMode, state.appSettings.tunnelingEnabled) {
+        LivePlaybackSession(context.applicationContext, state.appSettings.bufferMode, state.appSettings.tunnelingEnabled)
     }
     val lifecycleOwner = LocalLifecycleOwner.current
     var pendingLiveBrowserReturn by remember { mutableStateOf(false) }

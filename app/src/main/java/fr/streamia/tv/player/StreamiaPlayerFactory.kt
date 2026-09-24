@@ -1,5 +1,6 @@
 package fr.streamia.tv.player
 
+import android.app.ActivityManager
 import android.content.Context
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -11,6 +12,7 @@ import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import fr.streamia.tv.data.BufferMode
 import fr.streamia.tv.domain.MediaType
@@ -18,6 +20,16 @@ import fr.streamia.tv.logging.CrashReporter
 import okhttp3.ConnectionPool
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
+
+/** ~35 % de la mémoire Java de l'app (tampon ExoPlayer alloué sur le tas), entre 32 et 200 Mo. */
+internal fun bufferBytesForHeap(heapMb: Int): Int =
+    (heapMb * 0.35 * 1024 * 1024).toLong().coerceIn(32L * 1024 * 1024, 200L * 1024 * 1024).toInt()
+
+private fun targetBufferBytes(context: Context): Int {
+    val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+    // largeHeap déclaré dans le manifeste : c'est largeMemoryClass qui s'applique.
+    return bufferBytesForHeap(activityManager.largeMemoryClass)
+}
 
 object StreamiaPlayerFactory {
     private val httpClient: OkHttpClient by lazy {
@@ -30,7 +42,12 @@ object StreamiaPlayerFactory {
             .build()
     }
 
-    fun create(context: Context, mediaType: MediaType, bufferMode: BufferMode = BufferMode.Auto): ExoPlayer {
+    fun create(
+        context: Context,
+        mediaType: MediaType,
+        bufferMode: BufferMode = BufferMode.Auto,
+        tunneling: Boolean = false,
+    ): ExoPlayer {
         val profile = PlaybackTuning.forType(mediaType, bufferMode)
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
@@ -39,8 +56,17 @@ object StreamiaPlayerFactory {
                 profile.bufferForPlaybackMs,
                 profile.bufferForPlaybackAfterRebufferMs,
             )
-            .setPrioritizeTimeOverSizeThresholds(true)
+            // La durée ne passe plus avant la taille : 90 s d'un film 4K à 50 Mbit/s représentaient
+            // plus de 500 Mo en mémoire (coupures, voire plantage sur un boîtier à 2 Go). Le tampon
+            // s'arrête désormais à une part de la mémoire allouée à l'app.
+            .setTargetBufferBytes(targetBufferBytes(context))
+            .setPrioritizeTimeOverSizeThresholds(false)
             .build()
+        // Mode tunnel : le boîtier synchronise lui-même image et son (4K HDR plus fluide sur les
+        // TV qui le gèrent). Ignoré automatiquement quand le décodeur ou l'audio ne le permettent pas.
+        val trackSelector = DefaultTrackSelector(context).apply {
+            setParameters(buildUponParameters().setTunnelingEnabled(tunneling))
+        }
         val httpDataSourceFactory = OkHttpDataSource.Factory(httpClient)
             .setUserAgent("Streamia-TV/1.5")
         // DefaultMediaSourceFactory reuses this exact factory for every source it builds, including
@@ -59,6 +85,7 @@ object StreamiaPlayerFactory {
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
 
         val player = ExoPlayer.Builder(context, renderersFactory)
+            .setTrackSelector(trackSelector)
             .setMediaSourceFactory(mediaSourceFactory)
             .setLoadControl(loadControl)
             .build()

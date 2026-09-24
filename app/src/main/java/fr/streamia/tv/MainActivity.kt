@@ -45,6 +45,12 @@ class MainActivity : ComponentActivity() {
         setContent { StreamiaTvRoot(viewModel) }
     }
 
+    override fun onResume() {
+        super.onResume()
+        // Retour du réglage « Installer des applis inconnues » : l'installation de la mise à jour reprend.
+        if (::viewModel.isInitialized) viewModel.resumePendingUpdateInstall()
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
