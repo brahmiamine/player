@@ -97,6 +97,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cp app/build/outputs/apk/optimized/app-optimized.apk streamia-tv.apk
+          # Même calcul que versionCode (app/build.gradle.kts) : l'app compare ce numéro au sien.
+          BUILD_NUMBER=$(git rev-list --count HEAD)
+          [ "$BUILD_NUMBER" -lt 16 ] && BUILD_NUMBER=16
 
           # Keep a stable `latest` tag so the direct APK download URL never changes.
           git tag -f latest "$GITHUB_SHA"
@@ -106,12 +109,12 @@ jobs:
             gh release upload latest streamia-tv.apk --clobber
             gh release edit latest \
               --title "Streamia TV - Dernier build" \
-              --notes "APK Android TV généré automatiquement depuis main (${GITHUB_SHA::7}). Téléchargez directement streamia-tv.apk." \
+              --notes "APK Android TV généré automatiquement depuis main (${GITHUB_SHA::7}, build ${BUILD_NUMBER}). Téléchargez directement streamia-tv.apk." \
               --latest
           else
             gh release create latest streamia-tv.apk \
               --title "Streamia TV - Dernier build" \
-              --notes "APK Android TV généré automatiquement depuis main (${GITHUB_SHA::7}). Téléchargez directement streamia-tv.apk." \
+              --notes "APK Android TV généré automatiquement depuis main (${GITHUB_SHA::7}, build ${BUILD_NUMBER}). Téléchargez directement streamia-tv.apk." \
               --latest
           fi
 

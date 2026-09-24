@@ -3,7 +3,6 @@ package fr.streamia.tv.data
 import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.charset.StandardCharsets
-import org.json.JSONArray
 import org.json.JSONObject
 
 data class ReleaseInfo(
@@ -15,36 +14,38 @@ data class ReleaseInfo(
 sealed interface UpdateCheckResult {
     data class UpToDate(val currentVersion: String) : UpdateCheckResult
     data class UpdateAvailable(val release: ReleaseInfo, val currentVersion: String) : UpdateCheckResult
-    /** Aucune version taguée (v1.2.3) publiée pour l'instant — seule la build continue "latest" existe. */
+    /** La release "latest" n'existe pas encore ou ne porte pas de numéro de build. */
     data object NoTaggedRelease : UpdateCheckResult
     data class Error(val message: String) : UpdateCheckResult
 }
 
 /**
- * Interroge l'API publique GitHub (pas d'authentification nécessaire pour un dépôt public) plutôt
- * que `/releases/latest` : la CI republie en continu une release "latest" à chaque push sur main
- * (voir .github/workflows/android.yml), donc l'endpoint "dernière release" renvoie toujours cette
- * build de développement plutôt qu'une vraie version taguée. On liste les releases et on ne garde
- * que celles dont le tag suit `vMAJOR.MINOR.PATCH`, en ignorant brouillons/pré-versions.
+ * La CI republie à chaque push réussi sur main la release "latest", avec "build N" dans ses notes
+ * (N = versionCode = nombre de commits, voir .github/workflows/android.yml). Une mise à jour est
+ * disponible dès que ce N dépasse le versionCode installé : aucun tag ni version à gérer à la main.
  */
 class UpdateChecker(private val repository: String = "brahmiamine/player") {
 
-    fun checkForUpdate(currentVersion: String): UpdateCheckResult {
-        val releases = runCatching { fetchReleases() }
+    fun checkForUpdate(currentBuild: Int): UpdateCheckResult {
+        val release = runCatching { fetchLatestRelease() }
             .getOrElse { error -> return UpdateCheckResult.Error(error.safeMessage()) }
-        val latestTagged = releases
-            .mapNotNull { it.toReleaseInfo() }
-            .maxWithOrNull(Comparator { a, b -> compareSemVer(a.version, b.version) })
             ?: return UpdateCheckResult.NoTaggedRelease
-        return if (compareSemVer(latestTagged.version, currentVersion) > 0) {
-            UpdateCheckResult.UpdateAvailable(latestTagged, currentVersion)
+        val body = release.optString("body")
+        val latestBuild = parseBuildNumber(body) ?: return UpdateCheckResult.NoTaggedRelease
+        val current = "build $currentBuild"
+        return if (latestBuild > currentBuild) {
+            UpdateCheckResult.UpdateAvailable(
+                ReleaseInfo(version = "build $latestBuild", htmlUrl = release.optString("html_url"), notes = body),
+                current,
+            )
         } else {
-            UpdateCheckResult.UpToDate(currentVersion)
+            UpdateCheckResult.UpToDate(current)
         }
     }
 
-    private fun fetchReleases(): List<JSONObject> {
-        val connection = (URL("https://api.github.com/repos/$repository/releases?per_page=20").openConnection() as HttpURLConnection).apply {
+    /** null si la release "latest" n'existe pas (404). */
+    private fun fetchLatestRelease(): JSONObject? {
+        val connection = (URL("https://api.github.com/repos/$repository/releases/tags/latest").openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
             connectTimeout = 10_000
             readTimeout = 15_000
@@ -54,47 +55,19 @@ class UpdateChecker(private val repository: String = "brahmiamine/player") {
         }
         return try {
             val code = connection.responseCode
+            if (code == 404) return null
             if (code !in 200..299) throw IllegalStateException("GitHub a répondu avec le code $code.")
-            val body = connection.inputStream.bufferedReader(StandardCharsets.UTF_8).use { it.readText() }
-            val array = JSONArray(body)
-            buildList { for (i in 0 until array.length()) add(array.getJSONObject(i)) }
+            JSONObject(connection.inputStream.bufferedReader(StandardCharsets.UTF_8).use { it.readText() })
         } finally {
             connection.disconnect()
         }
     }
-
-    private fun JSONObject.toReleaseInfo(): ReleaseInfo? {
-        if (optBoolean("draft", false) || optBoolean("prerelease", false)) return null
-        val tag = optString("tag_name").removePrefix("v")
-        if (!tag.matches(Regex("""\d+\.\d+\.\d+"""))) return null
-        return ReleaseInfo(
-            version = tag,
-            htmlUrl = optString("html_url"),
-            notes = optString("body").ifBlank { optString("name") },
-        )
-    }
 }
+
+internal fun parseBuildNumber(notes: String): Int? =
+    Regex("""build (\d+)""").find(notes)?.groupValues?.get(1)?.toIntOrNull()
 
 private fun Throwable.safeMessage(): String = when (this) {
     is java.net.UnknownHostException -> "Pas de connexion réseau."
     else -> message ?: "Vérification impossible."
-}
-
-/**
- * Compare deux versions `MAJOR.MINOR.PATCH` numériquement (pas lexicographiquement : "1.9.0" doit
- * rester avant "1.10.0"). Renvoie >0 si [a] est plus récente que [b], <0 si plus ancienne, 0 si égales.
- * Un composant manquant ou non numérique compte comme 0, pour rester tolérant à un format inattendu
- * — notamment le suffixe de variante que porte [fr.streamia.tv.BuildConfig.VERSION_NAME] à l'exécution
- * (ex. "1.5.7-optimized" pour la build distribuée, "1.5.7-debug" en debug) : seuls les chiffres en
- * tête de chaque segment comptent, le reste du segment ("7-optimized" → 7) est ignoré.
- */
-internal fun compareSemVer(a: String, b: String): Int {
-    fun parts(version: String) = version.split(".").map { it.takeWhile(Char::isDigit).toIntOrNull() ?: 0 }
-    val partsA = parts(a)
-    val partsB = parts(b)
-    for (i in 0 until maxOf(partsA.size, partsB.size)) {
-        val diff = (partsA.getOrElse(i) { 0 }) - (partsB.getOrElse(i) { 0 })
-        if (diff != 0) return diff
-    }
-    return 0
 }

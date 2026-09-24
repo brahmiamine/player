@@ -846,6 +846,6 @@ private fun updateResultTitle(result: UpdateCheckResult): String = when (result)
 private fun updateResultSubtitle(result: UpdateCheckResult): String = when (result) {
     is UpdateCheckResult.UpdateAvailable -> result.release.notes.ifBlank { "Ouvrez " + result.release.htmlUrl + " pour télécharger." }.take(180)
     is UpdateCheckResult.UpToDate -> "OK pour fermer."
-    is UpdateCheckResult.NoTaggedRelease -> "Le mainteneur n'a pas encore publié de release taguée sur GitHub."
+    is UpdateCheckResult.NoTaggedRelease -> "Aucun build publié depuis main pour l'instant."
     is UpdateCheckResult.Error -> result.message
 }

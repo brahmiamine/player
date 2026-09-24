@@ -456,7 +456,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         if (_uiState.value.updateChecking) return
         _uiState.update { it.copy(updateChecking = true, updateCheck = null) }
         viewModelScope.launch {
-            val result = repository.checkForUpdate(BuildConfig.VERSION_NAME)
+            val result = repository.checkForUpdate(BuildConfig.VERSION_CODE)
             _uiState.update { it.copy(updateChecking = false, updateCheck = result) }
         }
     }

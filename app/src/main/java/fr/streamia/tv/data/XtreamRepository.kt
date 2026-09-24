@@ -62,8 +62,8 @@ class XtreamRepository(context: Context) {
     fun updateAppSettings(transform: (AppSettings) -> AppSettings): AppSettings = appSettingsStore.update(transform)
     fun customizedCatalog(profileId: String, catalog: Catalog): Catalog = libraryStore.applyToCatalog(profileId, catalog)
 
-    suspend fun checkForUpdate(currentVersion: String): UpdateCheckResult =
-        withContext(Dispatchers.IO) { updateChecker.checkForUpdate(currentVersion) }
+    suspend fun checkForUpdate(currentBuild: Int): UpdateCheckResult =
+        withContext(Dispatchers.IO) { updateChecker.checkForUpdate(currentBuild) }
 
     suspend fun cacheSizeBytes(): Long = withContext(Dispatchers.IO) { cache.databaseFileSizeBytes() }
     suspend fun epgCacheSizeBytes(): Long = withContext(Dispatchers.IO) { epgCache.databaseFileSizeBytes() }

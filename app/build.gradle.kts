@@ -46,7 +46,7 @@ android {
             commandLine("git", "rev-list", "--count", "HEAD")
             isIgnoreExitValue = true
         }.standardOutput.asText.get().trim().toIntOrNull()?.coerceAtLeast(16) ?: 16
-        versionName = "1.5.7"
+        versionName = "1.5.8"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
