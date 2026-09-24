@@ -7,6 +7,13 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
+/** Chaînes du profil reconnues pour un match (clés d'entrées par diffuseur) et horaires EPG retenus. */
+internal data class LiveOnSatResolution(
+    val channelKeys: Map<String, List<String>>,
+    val epgStartEpochSeconds: Long?,
+    val epgEndEpochSeconds: Long?,
+)
+
 internal data class CachedLiveOnSatData(
     val fetchedAtEpochMillis: Long,
     val matches: List<LiveOnSatMatch>,
@@ -18,7 +25,8 @@ internal data class CachedLiveOnSatData(
  * ne nécessite aucune requête indexée — seule une lecture/écriture intégrale a lieu.
  */
 internal class LiveOnSatCache(context: Context) {
-    private val file = File(context.applicationContext.filesDir, FILE_NAME)
+    private val dir = context.applicationContext.filesDir
+    private val file = File(dir, FILE_NAME)
 
     fun load(): CachedLiveOnSatData? = runCatching {
         val root = JSONObject(file.readText())
@@ -34,6 +42,53 @@ internal class LiveOnSatCache(context: Context) {
         }
         file.writeText(root.toString())
     }
+
+    /**
+     * Rapprochement chaînes/EPG d'un profil, dans l'ordre des matchs du cache. Valable seulement pour
+     * la même [version] (scrape liveonsat.com + actualisation de la playlist + synchronisation EPG) :
+     * le moindre changement de l'une des trois l'invalide.
+     */
+    fun loadResolution(profileId: String, version: String): List<LiveOnSatResolution>? = runCatching {
+        val root = JSONObject(resolutionFile(profileId).readText())
+        if (root.getString("version") != version) return null
+        val array = root.getJSONArray("matches")
+        (0 until array.length()).map { index ->
+            val json = array.getJSONObject(index)
+            val channels = json.getJSONObject("channels")
+            LiveOnSatResolution(
+                channelKeys = channels.keys().asSequence().associateWith { name ->
+                    channels.getJSONArray(name).let { keys -> (0 until keys.length()).map(keys::getString) }
+                },
+                epgStartEpochSeconds = if (json.has("epgStart")) json.getLong("epgStart") else null,
+                epgEndEpochSeconds = if (json.has("epgEnd")) json.getLong("epgEnd") else null,
+            )
+        }
+    }.getOrNull()
+
+    fun saveResolution(profileId: String, version: String, resolutions: List<LiveOnSatResolution>) {
+        val root = JSONObject().apply {
+            put("version", version)
+            put(
+                "matches",
+                JSONArray(
+                    resolutions.map { resolution ->
+                        JSONObject().apply {
+                            put("channels", JSONObject(resolution.channelKeys.mapValues { JSONArray(it.value) }))
+                            resolution.epgStartEpochSeconds?.let { put("epgStart", it) }
+                            resolution.epgEndEpochSeconds?.let { put("epgEnd", it) }
+                        }
+                    },
+                ),
+            )
+        }
+        resolutionFile(profileId).writeText(root.toString())
+    }
+
+    fun clearResolution(profileId: String) {
+        resolutionFile(profileId).delete()
+    }
+
+    private fun resolutionFile(profileId: String) = File(dir, "liveonsat-resolved-v2-$profileId.json")
 
     private fun LiveOnSatMatch.toJson(): JSONObject = JSONObject().apply {
         put("competition", competition)

@@ -52,4 +52,12 @@ internal class LiveOnSatRepository(context: Context) {
             }
             throw refreshed.exceptionOrNull() ?: IOException("Impossible de récupérer les matchs du jour.")
         }
+
+    suspend fun loadResolution(profileId: String, version: String): List<LiveOnSatResolution>? =
+        withContext(Dispatchers.IO) { cache.loadResolution(profileId, version) }
+
+    suspend fun saveResolution(profileId: String, version: String, resolutions: List<LiveOnSatResolution>) =
+        withContext(Dispatchers.IO) { runCatching { cache.saveResolution(profileId, version, resolutions) } }
+
+    suspend fun clearResolution(profileId: String) = withContext(Dispatchers.IO) { cache.clearResolution(profileId) }
 }

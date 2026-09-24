@@ -34,7 +34,7 @@ import fr.streamia.tv.domain.LiveZapIndex
 import fr.streamia.tv.domain.epgNowContextAt
 import fr.streamia.tv.domain.withTimeOffset
 import fr.streamia.tv.liveonsat.ChannelMatcher
-import fr.streamia.tv.liveonsat.LiveOnSatMatch
+import fr.streamia.tv.data.LiveOnSatFetchResult
 import fr.streamia.tv.liveonsat.ResolvedLiveOnSatMatch
 import fr.streamia.tv.liveonsat.withEpgTiming
 import fr.streamia.tv.tvprogramme.ResolvedTvProgrammeItem
@@ -89,7 +89,8 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     private val liveOnSatChannelMatcher = ChannelMatcher()
     private var liveOnSatLoadSequence = 0L
     private var liveOnSatLoadJob: Job? = null
-    private var liveOnSatLastLoadAtMillis = 0L
+    /** Échéance comptée depuis l'âge réel du cache ; après un échec, nouvel essai plus tôt. */
+    private var liveOnSatNextCheckAtMillis = 0L
     private val tvProgrammeChannelMatcher = TvProgrammeChannelMatcher()
     private val beinSportsChannelMatcher = BeinSportsChannelMatcher()
     private val ukGuideChannelMatcher = UkGuideChannelMatcher()
@@ -696,9 +697,9 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         if (_uiState.value.liveOnSatMatches.isEmpty()) loadLiveOnSatMatches(forceRefresh = false) else refreshLiveOnSatIfStale()
     }
 
-    /** Appelé en boucle par l'accueil et la page Matchs : ne recharge qu'une fois toutes les 2 h. */
+    /** Appelé en boucle par l'accueil et la page Matchs : recharge quand le cache atteint 2 h. */
     fun refreshLiveOnSatIfStale() {
-        if (System.currentTimeMillis() - liveOnSatLastLoadAtMillis < XtreamRepository.LIVE_ONSAT_CACHE_MAX_AGE_MS) return
+        if (System.currentTimeMillis() < liveOnSatNextCheckAtMillis) return
         loadLiveOnSatMatches(forceRefresh = false)
     }
 
@@ -1483,7 +1484,10 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                     liveEntries = liveEntries,
                     force = force,
                 )
-                if (changed) epgGuideMemoryCache.clearProfile(profileId)
+                if (changed) {
+                    epgGuideMemoryCache.clearProfile(profileId)
+                    reresolveLiveOnSat()
+                }
                 if (_uiState.value.activeProfileId != profileId) return@launch
                 val player = (_uiState.value.screen as? StreamiaScreen.Player)?.entry
                 if (player?.type == MediaType.Live) loadEpg(player)
@@ -2018,19 +2022,38 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         if (!forceRefresh && liveOnSatLoadJob?.isActive == true) return
         if (forceRefresh) liveOnSatLoadJob?.cancel()
         val sequence = ++liveOnSatLoadSequence
-        liveOnSatLastLoadAtMillis = System.currentTimeMillis()
+        liveOnSatNextCheckAtMillis = System.currentTimeMillis() + LIVE_ONSAT_RETRY_MS
         _uiState.update { it.copy(liveOnSatLoading = true, liveOnSatError = null) }
         liveOnSatLoadJob = viewModelScope.launch {
             val result = runCatching { repository.loadLiveOnSatMatches(forceRefresh) }
             if (sequence != liveOnSatLoadSequence) return@launch
 
             result.onSuccess { fetch ->
+                // Cache encore valable : prochain rechargement quand il atteint 2 h. Cache expiré
+                // renvoyé quand même (scrape en échec) : nouvel essai dans LIVE_ONSAT_RETRY_MS.
+                val expiresAt = fetch.fetchedAtEpochMillis + XtreamRepository.LIVE_ONSAT_CACHE_MAX_AGE_MS
+                if (expiresAt > System.currentTimeMillis()) liveOnSatNextCheckAtMillis = expiresAt
+                // Chaînes déjà rapprochées pour ce même scrape, cette même playlist et ce même EPG :
+                // réutilisées telles quelles, sinon rapprochement refait puis réenregistré.
+                val profileId = _uiState.value.activeProfileId
+                val version = profileId?.let { id -> runCatching { repository.liveOnSatResolutionVersion(id, fetch) }.getOrNull() }
+                val cachedResolution = if (profileId == null || version == null) null else {
+                    runCatching { repository.cachedLiveOnSatResolution(profileId, version, fetch) }.getOrNull()
+                }?.let { resolved ->
+                    val catalog = _uiState.value.catalog ?: return@let resolved
+                    resolved.map { match ->
+                        match.copy(matchedChannels = match.matchedChannels.mapValues { (_, channels) -> channels.map { catalog.entry(it.key) ?: it } })
+                    }
+                }
+                if (sequence != liveOnSatLoadSequence) return@launch
                 // Phase 1 : afficher immédiatement tous les matchs du jour, sans attendre la
                 // résolution des chaînes ni l'enrichissement EPG (les deux étapes coûteuses).
                 _uiState.update {
                     it.copy(
                         liveOnSatLoading = false,
-                        liveOnSatMatches = fetch.matches.map { match -> ResolvedLiveOnSatMatch(match, emptyMap()) },
+                        liveOnSatMatches = cachedResolution
+                            ?: it.liveOnSatMatchesFor(fetch)
+                            ?: fetch.matches.map { match -> ResolvedLiveOnSatMatch(match, emptyMap()) },
                         liveOnSatFetchedAtEpochMillis = fetch.fetchedAtEpochMillis,
                         liveOnSatError = if (forceRefresh && fetch.fromCache) {
                             "Actualisation impossible, affichage des données précédentes."
@@ -2040,7 +2063,9 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                     )
                 }
                 // Phase 2 : résoudre les chaînes + EPG en arrière-plan, par lots progressifs.
-                resolveLiveOnSatChannels(sequence, fetch.matches)
+                if (cachedResolution == null && profileId != null && version != null) {
+                    resolveLiveOnSatChannels(sequence, profileId, version, fetch)
+                }
             }.onFailure { error ->
                 if (sequence != liveOnSatLoadSequence) return@launch
                 _uiState.update { it.copy(liveOnSatLoading = false, liveOnSatError = error.safeMessage()) }
@@ -2055,10 +2080,11 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
      * après chaque paquet : les matchs s'affichent donc d'abord, puis leurs chaînes reconnues
      * apparaissent progressivement, sans jamais bloquer l'affichage initial.
      */
-    private suspend fun resolveLiveOnSatChannels(sequence: Long, matches: List<LiveOnSatMatch>) {
+    private suspend fun resolveLiveOnSatChannels(sequence: Long, profileId: String, version: String, fetch: LiveOnSatFetchResult) {
+        val matches = fetch.matches
         if (matches.isEmpty()) return
         val state = _uiState.value
-        val profileId = state.activeProfileId ?: return
+        if (state.activeProfileId != profileId) return
         val catalog = state.catalog
 
         // Le matcher a besoin des catégories (bouquet AR pour "beIN Connect MENA"...), pas
@@ -2077,7 +2103,9 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         val todayGuide = todayEpgGuide(profileId, state.appSettings.epgTimeOffsetHours)
 
         val index = withContext(Dispatchers.Default) { liveOnSatChannelMatcher.buildIndex(matcherCatalog) }
-        val resolved = matches.map { ResolvedLiveOnSatMatch(it, emptyMap()) }.toMutableList()
+        // Recalcul des mêmes matchs (playlist ou EPG renouvelés) : l'ancien résultat reste affiché
+        // pour les paquets pas encore refaits, au lieu de faire disparaître les chaînes.
+        val resolved = (state.liveOnSatMatchesFor(fetch) ?: matches.map { ResolvedLiveOnSatMatch(it, emptyMap()) }).toMutableList()
 
         var offset = 0
         while (offset < matches.size) {
@@ -2101,6 +2129,20 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             }
             offset = end
         }
+        // Gardé jusqu'au prochain scrape : les prochaines ouvertures sautent tout ce calcul.
+        repository.saveLiveOnSatResolution(profileId, version, resolved)
+    }
+
+    /** Matchs affichés s'ils proviennent déjà de ce même scrape. */
+    private fun StreamiaUiState.liveOnSatMatchesFor(fetch: LiveOnSatFetchResult): List<ResolvedLiveOnSatMatch>? =
+        liveOnSatMatches.takeIf { liveOnSatFetchedAtEpochMillis == fetch.fetchedAtEpochMillis && it.size == fetch.matches.size }
+
+    /**
+     * Playlist actualisée ou EPG resynchronisé : relit les matchs (cache, sans scrape s'il a moins
+     * de 2 h) pour refaire le rapprochement des chaînes, dont la version enregistrée ne correspond plus.
+     */
+    private fun reresolveLiveOnSat() {
+        if (_uiState.value.liveOnSatMatches.isNotEmpty()) loadLiveOnSatMatches(forceRefresh = false)
     }
 
     private fun epgDayBounds(date: LocalDate): Pair<Long, Long> {
@@ -2217,6 +2259,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 if (committed) {
                     ensureSectionLoaded(MediaType.Live)
                     refreshHomeRecommendations()
+                    if (loaded.source == CatalogSource.Network || loaded.source == CatalogSource.Import) reresolveLiveOnSat()
                 }
                 return
             }
@@ -2428,6 +2471,7 @@ private const val HOME_RECOMMENDATION_TASTE_SOURCE_LIMIT = 4
 private const val HOME_RECOMMENDATION_PER_SOURCE_LIMIT = 80
 private const val HOME_RECOMMENDATION_REBUILD_INTERVAL_MS = 5 * 60_000L
 private const val LIVE_ONSAT_RESOLVE_BATCH = 20
+private const val LIVE_ONSAT_RETRY_MS = 15 * 60_000L
 private const val SIMILAR_CANDIDATE_LIMIT = 300
 private const val SIMILAR_RESULT_LIMIT = 12
 private const val SIMILAR_TARGET_COUNT = 8

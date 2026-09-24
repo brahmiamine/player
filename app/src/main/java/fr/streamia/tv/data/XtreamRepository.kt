@@ -13,6 +13,7 @@ import fr.streamia.tv.domain.EpgProgram
 import fr.streamia.tv.domain.MediaCategory
 import fr.streamia.tv.domain.MediaDetails
 import fr.streamia.tv.domain.MediaEntry
+import fr.streamia.tv.liveonsat.ResolvedLiveOnSatMatch
 import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.domain.SeriesDetails
 import fr.streamia.tv.domain.ServerCredentials
@@ -364,6 +365,49 @@ class XtreamRepository(context: Context) {
     suspend fun loadLiveOnSatMatches(forceRefresh: Boolean = false): LiveOnSatFetchResult =
         liveOnSatRepository.loadMatches(forceRefresh, maxAgeMillis = LIVE_ONSAT_CACHE_MAX_AGE_MS)
 
+    /**
+     * Les trois sources du rapprochement liveonsat : scrape, actualisation de la playlist (chaînes)
+     * et synchronisation EPG (horaires). À calculer avant le rapprochement et à réutiliser pour
+     * l'enregistrer, pour qu'une synchronisation survenue pendant le calcul le fasse refaire.
+     */
+    suspend fun liveOnSatResolutionVersion(profileId: String, fetch: LiveOnSatFetchResult): String {
+        val catalogRefreshedAt = playlistStore.find(profileId)?.lastRefreshAt ?: 0L
+        val epgSyncedAt = epgCache.metadata(profileId)?.syncedAtMillis ?: 0L
+        return "${fetch.fetchedAtEpochMillis}|$catalogRefreshedAt|$epgSyncedAt"
+    }
+
+    /** Rapprochement chaînes/EPG déjà calculé pour cette [version], ou null s'il faut le refaire. */
+    suspend fun cachedLiveOnSatResolution(profileId: String, version: String, fetch: LiveOnSatFetchResult): List<ResolvedLiveOnSatMatch>? {
+        val saved = liveOnSatRepository.loadResolution(profileId, version)
+            ?.takeIf { it.size == fetch.matches.size }
+            ?: return null
+        val keys = saved.flatMapTo(mutableSetOf()) { it.channelKeys.values.flatten() }
+        val entries = entriesByKeys(profileId, keys).associateBy(MediaEntry::key)
+        return fetch.matches.zip(saved) { match, resolution ->
+            ResolvedLiveOnSatMatch(
+                match = match,
+                matchedChannels = resolution.channelKeys
+                    .mapValues { (_, channelKeys) -> channelKeys.mapNotNull(entries::get) }
+                    .filterValues { it.isNotEmpty() },
+                epgStartEpochSeconds = resolution.epgStartEpochSeconds,
+                epgEndEpochSeconds = resolution.epgEndEpochSeconds,
+            )
+        }
+    }
+
+    suspend fun saveLiveOnSatResolution(profileId: String, version: String, resolved: List<ResolvedLiveOnSatMatch>) =
+        liveOnSatRepository.saveResolution(
+            profileId,
+            version,
+            resolved.map {
+                LiveOnSatResolution(
+                    channelKeys = it.matchedChannels.mapValues { (_, channels) -> channels.map(MediaEntry::key) },
+                    epgStartEpochSeconds = it.epgStartEpochSeconds,
+                    epgEndEpochSeconds = it.epgEndEpochSeconds,
+                )
+            },
+        )
+
     /** Programmes TV français du soir scrapés depuis tv-programme.com avec cache local. */
     suspend fun loadTvProgrammeTonight(forceRefresh: Boolean = false): TvProgrammeFetchResult =
         tvProgrammeRepository.loadTonight(forceRefresh, maxAgeMillis = TV_PROGRAMME_CACHE_MAX_AGE_MS)
@@ -562,6 +606,7 @@ class XtreamRepository(context: Context) {
         playlistStore.delete(profileId)
         cache.clear(profileId)
         epgCache.clear(profileId)
+        liveOnSatRepository.clearResolution(profileId)
     }
 
     /** Contrôle léger des identifiants (sans charger le catalogue), utilisé avant l'enregistrement. */
