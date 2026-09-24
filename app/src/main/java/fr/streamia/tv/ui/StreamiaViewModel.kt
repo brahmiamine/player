@@ -17,6 +17,8 @@ import fr.streamia.tv.data.HomePlace
 import fr.streamia.tv.data.HomeWeatherClient
 import fr.streamia.tv.data.PrayerMethod
 import fr.streamia.tv.data.JustWatchSection
+import fr.streamia.tv.data.ReleaseInfo
+import fr.streamia.tv.data.UpdateInstallStart
 import fr.streamia.tv.data.VodSortOrder
 import fr.streamia.tv.data.homeBlock
 import fr.streamia.tv.data.LoadedCatalog
@@ -489,10 +491,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             _uiState.update { it.copy(updateCheck = result) }
             if (result is UpdateCheckResult.UpdateAvailable) {
                 runCatching { repository.downloadAndInstallUpdate(result.release) }
-                    .onSuccess { started ->
-                        // Réglage « sources inconnues » ouvert : l'installation reprendra au retour (onResume).
-                        if (!started) _uiState.update { it.copy(updateCheck = UpdateCheckResult.AwaitingInstallPermission(result.release)) }
-                    }
+                    .onSuccess { start -> onUpdateInstallStart(start, result.release) }
                     .onFailure { error ->
                         val message = "Téléchargement impossible : " + (error.message ?: "erreur inconnue.")
                         _uiState.update { it.copy(updateCheck = UpdateCheckResult.Error(message)) }
@@ -507,13 +506,29 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         val pending = _uiState.value.updateCheck as? UpdateCheckResult.AwaitingInstallPermission ?: return
         viewModelScope.launch {
             runCatching { repository.installDownloadedUpdate() }
-                .onSuccess { started ->
-                    if (started) _uiState.update { it.copy(updateCheck = UpdateCheckResult.UpdateAvailable(pending.release, BuildConfig.VERSION_NAME)) }
-                }
+                .onSuccess { start -> onUpdateInstallStart(start, pending.release) }
                 .onFailure { error ->
                     _uiState.update { it.copy(updateCheck = UpdateCheckResult.Error("Installation impossible : " + (error.message ?: "erreur inconnue."))) }
                 }
         }
+    }
+
+    private fun onUpdateInstallStart(start: UpdateInstallStart, release: ReleaseInfo) {
+        val next = when (start) {
+            UpdateInstallStart.Started -> UpdateCheckResult.UpdateAvailable(release, BuildConfig.VERSION_NAME)
+            // Réglage ouvert : l'installation reprendra au retour dans l'app (onResume).
+            UpdateInstallStart.PermissionRequested -> UpdateCheckResult.AwaitingInstallPermission(release)
+            UpdateInstallStart.PermissionStillMissing -> UpdateCheckResult.Error(
+                "Android refuse encore l'installation pour Streamia. Si l'interrupteur est déjà activé, " +
+                    "vérifiez celui de l'application Streamia portant une mallette (profil professionnel), " +
+                    "ou installez la mise à jour manuellement.",
+            )
+            UpdateInstallStart.BlockedByAdmin -> UpdateCheckResult.Error(
+                "L'installation d'applications est bloquée par l'administrateur de ce profil (profil professionnel). " +
+                    "Installez la mise à jour manuellement, depuis le profil principal.",
+            )
+        }
+        _uiState.update { it.copy(updateCheck = next) }
     }
 
     fun dismissUpdateCheck() { _uiState.update { it.copy(updateCheck = null) } }

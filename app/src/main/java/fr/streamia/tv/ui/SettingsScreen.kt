@@ -629,10 +629,10 @@ fun SettingsScreen(
 
         if (updateCheck != null) {
             Spacer(Modifier.height(10.dp))
-            FocusableSurface(onClick = onDismissUpdateCheck, modifier = Modifier.fillMaxWidth().height(60.dp)) {
+            FocusableSurface(onClick = onDismissUpdateCheck, modifier = Modifier.fillMaxWidth().heightIn(min = 60.dp)) {
                 Column(Modifier.padding(horizontal = 18.dp, vertical = 8.dp)) {
                     Text(updateResultTitle(updateCheck), color = Ink, fontSize = 14.sp, fontWeight = HeadingWeight)
-                    Text(updateResultSubtitle(updateCheck), color = MutedInk, fontSize = 12.sp, maxLines = 2)
+                    Text(updateResultSubtitle(updateCheck), color = MutedInk, fontSize = 12.sp, maxLines = 4)
                 }
             }
         }
@@ -1001,7 +1001,7 @@ private fun updateResultTitle(result: UpdateCheckResult): String = when (result)
     is UpdateCheckResult.UpdateAvailable -> "Nouvelle version disponible : " + result.release.version
     is UpdateCheckResult.UpToDate -> "Vous avez la dernière version"
     is UpdateCheckResult.NoTaggedRelease -> "Aucune version publiée"
-    is UpdateCheckResult.Error -> "Vérification impossible"
+    is UpdateCheckResult.Error -> "Mise à jour impossible"
     is UpdateCheckResult.AwaitingInstallPermission -> "Autorisez Streamia à installer la version " + result.release.version
 }
 

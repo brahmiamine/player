@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.pm.PackageInstaller
 import android.net.Uri
 import android.os.Build
+import android.os.UserManager
 import android.provider.Settings
 import android.widget.Toast
 import java.io.File
@@ -22,6 +23,18 @@ internal object UpdateInstaller {
     /** « Installer des applis inconnues » accordé à Streamia (réglage par app depuis Android 8). */
     fun canInstall(context: Context): Boolean =
         Build.VERSION.SDK_INT < Build.VERSION_CODES.O || context.packageManager.canRequestPackageInstalls()
+
+    /**
+     * Installation d'applis inconnues interdite par l'administrateur du profil — typiquement un
+     * profil professionnel (icône mallette sur l'app). L'interrupteur peut alors paraître activé
+     * sans effet : renvoyer vers le réglage ne ferait que boucler.
+     */
+    fun blockedByAdmin(context: Context): Boolean {
+        val userManager = context.getSystemService(Context.USER_SERVICE) as UserManager
+        return userManager.hasUserRestriction(UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES) ||
+            (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+                userManager.hasUserRestriction(UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES_GLOBALLY))
+    }
 
     fun openUnknownSourcesSettings(context: Context) {
         val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

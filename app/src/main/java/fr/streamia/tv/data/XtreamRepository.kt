@@ -39,6 +39,9 @@ import java.nio.charset.StandardCharsets
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
+/** Issue d'une demande d'installation de mise à jour (voir [XtreamRepository.installDownloadedUpdate]). */
+enum class UpdateInstallStart { Started, PermissionRequested, PermissionStillMissing, BlockedByAdmin }
+
 /** Rangée JustWatch lue sur disque ; [fresh] faux quand elle doit être recalculée. */
 data class CachedJustWatchRow(val entries: List<MediaEntry>, val fresh: Boolean)
 
@@ -79,22 +82,29 @@ class XtreamRepository(context: Context) {
      * pas encore l'autorisation « Installer des applis inconnues » : le réglage est alors ouvert et
      * [installDownloadedUpdate] reprend l'installation au retour dans l'app.
      */
-    suspend fun downloadAndInstallUpdate(release: ReleaseInfo): Boolean {
+    suspend fun downloadAndInstallUpdate(release: ReleaseInfo): UpdateInstallStart {
         withContext(Dispatchers.IO) { updateChecker.downloadApk(release, updateApk) }
-        if (!UpdateInstaller.canInstall(appContext)) {
-            UpdateInstaller.openUnknownSourcesSettings(appContext)
-            return false
-        }
-        withContext(Dispatchers.IO) { UpdateInstaller.install(appContext, updateApk) }
-        return true
+        return installDownloadedUpdate(openSettingsIfNeeded = true)
     }
 
-    /** Reprise après le réglage : installe l'APK déjà téléchargé si l'autorisation est maintenant accordée. */
-    suspend fun installDownloadedUpdate(): Boolean {
-        if (!UpdateInstaller.canInstall(appContext) || !updateApk.isFile) return false
+    /**
+     * Installe l'APK déjà téléchargé. Sans autorisation, le réglage n'est ouvert qu'une fois par
+     * session : si l'autorisation manque encore au retour, l'app l'explique au lieu de renvoyer
+     * indéfiniment vers un interrupteur qui paraît déjà activé.
+     */
+    suspend fun installDownloadedUpdate(openSettingsIfNeeded: Boolean = false): UpdateInstallStart {
+        if (UpdateInstaller.blockedByAdmin(appContext)) return UpdateInstallStart.BlockedByAdmin
+        if (!UpdateInstaller.canInstall(appContext)) {
+            if (!openSettingsIfNeeded || unknownSourcesSettingsOpened) return UpdateInstallStart.PermissionStillMissing
+            unknownSourcesSettingsOpened = true
+            UpdateInstaller.openUnknownSourcesSettings(appContext)
+            return UpdateInstallStart.PermissionRequested
+        }
         withContext(Dispatchers.IO) { UpdateInstaller.install(appContext, updateApk) }
-        return true
+        return UpdateInstallStart.Started
     }
+
+    private var unknownSourcesSettingsOpened = false
 
     suspend fun cacheSizeBytes(): Long = withContext(Dispatchers.IO) { cache.databaseFileSizeBytes() }
     suspend fun epgCacheSizeBytes(): Long = withContext(Dispatchers.IO) { epgCache.databaseFileSizeBytes() }
