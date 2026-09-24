@@ -1,7 +1,6 @@
 package fr.streamia.tv.ui
 
 import fr.streamia.tv.domain.MediaEntry
-import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.recommendation.MetadataSimilarityEngine
 import fr.streamia.tv.recommendation.RecommendedMedia
 
@@ -31,14 +30,14 @@ private fun versionKey(name: String): VersionKey {
 }
 
 /**
- * Même film sous un autre préfixe (langue, résolution…) : titre identique une fois le préfixe
+ * Même film (ou série) sous un autre préfixe (langue, résolution…) : titre identique une fois le préfixe
  * fournisseur retiré ; l'année doit aussi coïncider quand les deux titres en portent une (remakes).
  */
 internal fun otherVersionsOf(movie: MediaEntry, entries: List<MediaEntry>): List<RecommendedMedia> {
     val key = versionKey(movie.displayName)
     if (key.tokens.isEmpty()) return emptyList()
     return entries.asSequence()
-        .filter { it.type == MediaType.Movie && it.key != movie.key }
+        .filter { it.type == movie.type && it.key != movie.key }
         .filter { candidate ->
             val other = versionKey(candidate.displayName)
             other.tokens == key.tokens && (key.year == null || other.year == null || key.year == other.year)

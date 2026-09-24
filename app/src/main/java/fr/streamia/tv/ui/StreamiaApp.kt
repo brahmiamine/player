@@ -327,7 +327,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                         // Recherche en base (tout le catalogue), pas seulement les catégories déjà chargées.
                         otherVersions = produceState(emptyList<RecommendedMedia>(), movie.key) {
                             val query = versionSearchQuery(movie)
-                            if (query.isNotBlank()) value = otherVersionsOf(movie, viewModel.searchCatalog(query, MediaType.Movie))
+                            if (query.isNotBlank()) value = otherVersionsOf(movie, viewModel.searchCatalog(query, movie.type))
                         }.value,
                         onPlay = { viewModel.playMovie(movie) },
                         onToggleFavorite = { viewModel.toggleEntryFavorite(movie) },
@@ -347,6 +347,10 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                         favorite = series.key in state.library.favoriteEntries,
                         watched = series.key in state.library.watchedEntries,
                         similarMedia = state.similarMedia,
+                        otherVersions = produceState(emptyList<RecommendedMedia>(), series.key) {
+                            val query = versionSearchQuery(series)
+                            if (query.isNotBlank()) value = otherVersionsOf(series, viewModel.searchCatalog(query, series.type))
+                        }.value,
                         onToggleFavorite = { viewModel.toggleEntryFavorite(series) },
                         onToggleWatched = { viewModel.toggleEntryWatched(series) },
                         onEpisodeSelected = { episode -> viewModel.playEpisode(series, episode) },

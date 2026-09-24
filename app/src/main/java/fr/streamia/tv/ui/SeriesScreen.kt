@@ -3,6 +3,7 @@ package fr.streamia.tv.ui
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -62,6 +63,7 @@ fun SeriesScreen(
     favorite: Boolean,
     watched: Boolean,
     similarMedia: List<RecommendedMedia> = emptyList(),
+    otherVersions: List<RecommendedMedia> = emptyList(),
     onToggleFavorite: () -> Unit,
     onToggleWatched: () -> Unit,
     onEpisodeSelected: (SeriesEpisode) -> Unit,
@@ -82,9 +84,9 @@ fun SeriesScreen(
     }
 
     Row(Modifier.fillMaxSize().padding(30.dp)) {
-        Column(Modifier.width(365.dp).fillMaxHeight().verticalScroll(rememberScrollState())) {
+        Column(Modifier.width(620.dp).fillMaxHeight().verticalScroll(rememberScrollState())) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                FocusableSurface(onClick = onBack, modifier = Modifier.weight(1f).height(48.dp)) {
+                FocusableSurface(onClick = onBack, modifier = Modifier.width(130.dp).height(48.dp)) {
                     Text("← Retour", color = Ink, fontSize = TypeLabel, modifier = Modifier.padding(horizontal = 15.dp))
                 }
                 FocusableSurface(
@@ -140,6 +142,12 @@ fun SeriesScreen(
                 onOpenSimilar = onOpenSimilar,
                 modifier = Modifier.padding(top = 18.dp),
             )
+            SimilarMediaRow(
+                title = "Autres versions",
+                items = otherVersions,
+                onOpenSimilar = onOpenSimilar,
+                modifier = Modifier.padding(top = 18.dp),
+            )
             Spacer(Modifier.height(28.dp))
         }
         Spacer(Modifier.width(28.dp))
@@ -161,7 +169,7 @@ fun SeriesScreen(
                 Text("Aucun épisode fourni par ce serveur.", color = MutedInk, fontSize = TypeSectionTitle)
             }
             else -> {
-                Column(Modifier.width(185.dp).fillMaxHeight()) {
+                Column(Modifier.width(96.dp).fillMaxHeight()) {
                     SectionLabel("Saisons")
                     Spacer(Modifier.height(11.dp))
                     LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -172,7 +180,7 @@ fun SeriesScreen(
                                 accent = selectedSeason == season,
                                 modifier = Modifier.fillMaxWidth().height(54.dp),
                             ) {
-                                Text("Saison $season", color = Ink, fontSize = TypeLabel, modifier = Modifier.padding(horizontal = 15.dp))
+                                Text("Saison $season", color = Ink, fontSize = TypeLabel, maxLines = 1, modifier = Modifier.padding(horizontal = 10.dp))
                             }
                         }
                     }
@@ -187,6 +195,8 @@ fun SeriesScreen(
                     Spacer(Modifier.height(12.dp))
                     LazyVerticalGrid(
                         columns = GridCells.Adaptive(285.dp),
+                        // Marge pour la carte focalisée (agrandie + bordure) : sans elle, son contour était rogné.
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
