@@ -13,6 +13,6 @@ class FootballScoresSortTest {
         val sorted = sortFootballMatches(
             listOf(match("post-old", "post", 1), match("pre-late", "pre", 9), match("in", "in", 5), match("pre-soon", "pre", 7), match("post-recent", "post", 3)),
         )
-        assertEquals(listOf("in", "pre-soon", "pre-late", "post-recent", "post-old"), sorted.map { it.id })
+        assertEquals(listOf("in", "post-recent", "post-old", "pre-soon", "pre-late"), sorted.map { it.id })
     }
 }

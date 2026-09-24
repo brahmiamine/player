@@ -182,23 +182,6 @@ fun HomeScreen(
             .toList()
     }
 
-    // Chaînes tunisiennes : catégorie ou chaîne dont le nom commence par « TN » (« |TN| », « TN: »…),
-    // mot entier pour ne pas attraper « TNT ».
-    val tunisiaCards = remember(catalog, library.hiddenEntries, hiddenCategoryIdsByType) {
-        val hiddenCategories = hiddenCategoryIdsByType[MediaType.Live].orEmpty()
-        val tnCategoryIds = catalog.categoriesFor(MediaType.Live)
-            .filter { it.id !in hiddenCategories && TUNISIA_PREFIX.containsMatchIn(it.name) }
-            .map { it.id }
-        val fromCategories = tnCategoryIds.asSequence().flatMap { catalog.entriesIn(MediaType.Live, it) }
-        val byName = catalog.entries.asSequence()
-            .filter { it.type == MediaType.Live && it.categoryId !in hiddenCategories && TUNISIA_PREFIX.containsMatchIn(it.displayName) }
-        (fromCategories + byName)
-            .filterNot { it.isVisualSeparator() || it.key in library.hiddenEntries }
-            .distinctBy { it.key }
-            .map { it to null as Float? }
-            .toList()
-    }
-
     // Une seule horloge pour toutes les rangées « en direct » (au lieu d'une boucle par rangée,
     // chacune invalidant l'accueil de son côté).
     val hasLiveRows = liveMatches.isNotEmpty() || tvProgrammeNow.isNotEmpty() || beinSportsNow.isNotEmpty() || ukGuideNow.isNotEmpty()
@@ -246,7 +229,6 @@ fun HomeScreen(
         favoriteCards,
         liveMatchCards,
         recentChannelCards,
-        tunisiaCards,
         tvProgrammeNow,
         tvProgrammeTonight,
         beinSportsNow,
@@ -260,7 +242,6 @@ fun HomeScreen(
             if (favoriteCards.isNotEmpty()) add(HomeRowKey.Favorites)
             if (liveMatchCards.isNotEmpty()) add(HomeRowKey.LiveMatches)
             if (recentChannelCards.isNotEmpty()) add(HomeRowKey.RecentChannels)
-            if (tunisiaCards.isNotEmpty()) add(HomeRowKey.Tunisia)
             if (tvProgrammeNow.isNotEmpty()) add(HomeRowKey.TvProgrammeNow)
             if (tvProgrammeTonight.isNotEmpty()) add(HomeRowKey.TvProgrammeTonight)
             if (beinSportsNow.isNotEmpty()) add(HomeRowKey.BeinSportsNow)
@@ -416,25 +397,6 @@ fun HomeScreen(
                             ?.itemKey,
                         onEntryClick = { entry ->
                             onOpenHomeEntry(entry, HomeRowKey.RecentChannels, entry.key)
-                        },
-                    )
-                    Spacer(Modifier.height(CardRowSpacing))
-                }
-            }
-        }
-
-        if (tunisiaCards.isNotEmpty()) {
-            item {
-                Column(Modifier.fillMaxWidth()) {
-                    HomeCardRow(
-                        title = "Chaînes TV Tunisie",
-                        entries = tunisiaCards,
-                        firstFocusRequester = null,
-                        restoreItemKey = restoreTarget
-                            ?.takeIf { it.homeRowKey == HomeRowKey.Tunisia }
-                            ?.itemKey,
-                        onEntryClick = { entry ->
-                            onOpenHomeEntry(entry, HomeRowKey.Tunisia, entry.key)
                         },
                     )
                     Spacer(Modifier.height(CardRowSpacing))
@@ -1225,4 +1187,3 @@ private val ClockFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:
 private fun formatExpiry(epochSeconds: Long): String =
     SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date(epochSeconds * 1000L))
 
-private val TUNISIA_PREFIX = Regex("""^\W*tn\b""", RegexOption.IGNORE_CASE)

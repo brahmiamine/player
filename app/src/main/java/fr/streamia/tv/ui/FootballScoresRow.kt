@@ -70,10 +70,10 @@ internal data class FootballMatch(
     val kickoff: Instant,
 )
 
-/** En direct d'abord, puis terminés (plus récent en premier). */
+/** En direct, puis terminés (plus récent en premier), puis à venir (plus proche en premier). */
 internal fun sortFootballMatches(matches: List<FootballMatch>): List<FootballMatch> =
     matches.sortedWith(
-        compareBy<FootballMatch> { when (it.state) { "in" -> 0; "pre" -> 1; else -> 2 } }
+        compareBy<FootballMatch> { when (it.state) { "in" -> 0; "post" -> 1; else -> 2 } }
             .thenBy { if (it.state == "post") -it.kickoff.epochSecond else it.kickoff.epochSecond },
     )
 
@@ -156,15 +156,10 @@ private fun withBadges(matches: List<FootballMatch>): List<FootballMatch> {
     return matches.map { it.copy(homeLogo = badge(it.home), awayLogo = badge(it.away)) }
 }
 
-// En direct + terminés des dernières 24 h (hier et aujourd'hui) : juste après minuit, avant le premier
-// coup d'envoi du jour, la rangée garde ainsi les résultats de la veille au lieu de disparaître.
+// Matches du jour uniquement (en direct, terminés, à venir).
 private suspend fun fetchTodayMatches(): List<FootballMatch> = withContext(Dispatchers.IO) {
-    val today = LocalDate.now(ZoneId.systemDefault())
-    val since = Instant.now().minusSeconds(24 * 3600)
-    listOf(today.minusDays(1), today)
-        .flatMap { day -> runCatching { fetchBbcMatches(day.toString()) }.getOrDefault(emptyList()) }
+    fetchBbcMatches(LocalDate.now(ZoneId.systemDefault()).toString())
         .distinctBy { it.id }
-        .filter { it.state == "in" || (it.state == "post" && it.kickoff.isAfter(since)) }
         .let(::sortFootballMatches)
         .let(::withBadges)
 }

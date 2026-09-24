@@ -69,7 +69,6 @@ internal object HomeRowKey {
     const val Favorites = "favorites"
     const val LiveMatches = "live-matches"
     const val RecentChannels = "recent-channels"
-    const val Tunisia = "tunisia-live"
     const val TvProgrammeNow = "tv-programme-fr-live"
     const val TvProgrammeTonight = "tv-programme-fr-tonight"
     const val BeinSportsNow = "bein-sports-live"
