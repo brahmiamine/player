@@ -2,6 +2,7 @@ package fr.streamia.tv.data
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.json.JSONObject
 import org.junit.Test
 
 class UpdateCheckerTest {
@@ -13,5 +14,15 @@ class UpdateCheckerTest {
     @Test
     fun `old notes without build number give null`() {
         assertNull(parseBuildNumber("APK Android TV généré automatiquement depuis main (abc1234)."))
+    }
+
+    @Test
+    fun `picks the apk asset download url`() {
+        val release = JSONObject(
+            """{"assets":[{"name":"notes.txt","browser_download_url":"https://x/notes.txt"},""" +
+                """{"name":"streamia-tv.apk","browser_download_url":"https://x/streamia-tv.apk"}]}""",
+        )
+        assertEquals("https://x/streamia-tv.apk", apkUrl(release))
+        assertNull(apkUrl(JSONObject("{}")))
     }
 }

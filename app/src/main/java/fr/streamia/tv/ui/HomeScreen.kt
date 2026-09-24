@@ -366,6 +366,7 @@ fun HomeScreen(
                         restoreItemKey = restoreTarget
                             ?.takeIf { it.homeRowKey == HomeRowKey.Favorites }
                             ?.itemKey,
+                        compact = true,
                         onEntryClick = { entry ->
                             onOpenHomeEntry(entry, HomeRowKey.Favorites, entry.key)
                         },
@@ -395,6 +396,7 @@ fun HomeScreen(
                         restoreItemKey = restoreTarget
                             ?.takeIf { it.homeRowKey == HomeRowKey.RecentChannels }
                             ?.itemKey,
+                        compact = true,
                         onEntryClick = { entry ->
                             onOpenHomeEntry(entry, HomeRowKey.RecentChannels, entry.key)
                         },
@@ -699,6 +701,7 @@ private fun HomeCardRow(
     firstFocusRequester: FocusRequester?,
     restoreItemKey: String?,
     onEntryClick: (MediaEntry) -> Unit,
+    compact: Boolean = false,
 ) {
     val rowState = rememberLazyListState()
     val restoreFocus = remember { FocusRequester() }
@@ -726,6 +729,7 @@ private fun HomeCardRow(
                     progress = progress,
                     onClick = { onEntryClick(entry) },
                     modifier = cardModifier,
+                    compact = compact,
                 )
             }
         }
@@ -1045,6 +1049,9 @@ private val HomeCardWidth = 172.dp
 // + une éventuelle barre de progression : 224dp laisse une marge confortable dans le pire cas
 // (titre sur 2 lignes ET progression affichée) plutôt que de risquer un rognage en bas de carte.
 private val HomeCardHeight = 224.dp
+// Favoris / dernières chaînes : surtout des logos, un titre sur une ligne suffit.
+private val HomeCompactCardWidth = 136.dp
+private val HomeCompactCardHeight = 150.dp
 
 @Composable
 private fun HomeMediaCard(
@@ -1052,21 +1059,26 @@ private fun HomeMediaCard(
     progress: Float?,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    compact: Boolean = false,
 ) {
     FocusableSurface(
         onClick = onClick,
-        modifier = modifier.width(HomeCardWidth).height(HomeCardHeight),
+        modifier = if (compact) {
+            modifier.width(HomeCompactCardWidth).height(HomeCompactCardHeight)
+        } else {
+            modifier.width(HomeCardWidth).height(HomeCardHeight)
+        },
     ) {
-        Column(Modifier.fillMaxSize().padding(9.dp)) {
-            MediaArtwork(entry.iconUrl, entry.displayName, Modifier.fillMaxWidth().height(128.dp))
-            Spacer(Modifier.height(7.dp))
+        Column(Modifier.fillMaxSize().padding(if (compact) 7.dp else 9.dp)) {
+            MediaArtwork(entry.iconUrl, entry.displayName, Modifier.fillMaxWidth().height(if (compact) 80.dp else 128.dp))
+            Spacer(Modifier.height(if (compact) 5.dp else 7.dp))
             Text(
                 entry.displayName,
                 color = Ink,
                 fontSize = 13.sp,
                 lineHeight = 16.sp,
                 fontWeight = FontWeight.SemiBold,
-                maxLines = 2,
+                maxLines = if (compact) 1 else 2,
                 overflow = TextOverflow.Ellipsis,
             )
             Spacer(Modifier.weight(1f))

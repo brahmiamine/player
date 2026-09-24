@@ -1,5 +1,7 @@
 package fr.streamia.tv.data
 
+import java.io.File
+import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.charset.StandardCharsets
@@ -9,6 +11,8 @@ data class ReleaseInfo(
     val version: String,
     val htmlUrl: String,
     val notes: String,
+    /** APK publié dans la release (streamia-tv.apk), null si absent. */
+    val apkUrl: String? = null,
 )
 
 sealed interface UpdateCheckResult {
@@ -35,11 +39,38 @@ class UpdateChecker(private val repository: String = "brahmiamine/player") {
         val current = "build $currentBuild"
         return if (latestBuild > currentBuild) {
             UpdateCheckResult.UpdateAvailable(
-                ReleaseInfo(version = "build $latestBuild", htmlUrl = release.optString("html_url"), notes = body),
+                ReleaseInfo(
+                    version = "build $latestBuild",
+                    htmlUrl = release.optString("html_url"),
+                    notes = body,
+                    apkUrl = apkUrl(release),
+                ),
                 current,
             )
         } else {
             UpdateCheckResult.UpToDate(current)
+        }
+    }
+
+    /** Télécharge l'APK de [release] dans [target] (fichier temporaire puis renommage). */
+    fun downloadApk(release: ReleaseInfo, target: File) {
+        val url = release.apkUrl ?: throw IOException("Aucun APK dans la release " + release.version + ".")
+        // browser_download_url redirige vers le stockage GitHub (https → https : suivi automatiquement).
+        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+            connectTimeout = 15_000
+            readTimeout = 60_000
+            useCaches = false
+            setRequestProperty("User-Agent", "Streamia-TV-UpdateChecker")
+        }
+        try {
+            val code = connection.responseCode
+            if (code !in 200..299) throw IOException("GitHub a répondu avec le code $code.")
+            target.parentFile?.mkdirs()
+            val partial = File(target.path + ".part")
+            connection.inputStream.use { input -> partial.outputStream().use { input.copyTo(it) } }
+            if (partial.length() == 0L || !partial.renameTo(target)) throw IOException("APK téléchargé invalide.")
+        } finally {
+            connection.disconnect()
         }
     }
 
@@ -62,6 +93,15 @@ class UpdateChecker(private val repository: String = "brahmiamine/player") {
             connection.disconnect()
         }
     }
+}
+
+internal fun apkUrl(release: JSONObject): String? {
+    val assets = release.optJSONArray("assets") ?: return null
+    return (0 until assets.length()).asSequence()
+        .map { assets.getJSONObject(it) }
+        .firstOrNull { it.optString("name").endsWith(".apk", ignoreCase = true) }
+        ?.optString("browser_download_url")
+        ?.takeIf(String::isNotBlank)
 }
 
 internal fun parseBuildNumber(notes: String): Int? =

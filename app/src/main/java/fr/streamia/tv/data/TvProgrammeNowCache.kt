@@ -8,7 +8,6 @@ import java.io.File
 
 internal data class CachedTvProgrammeNowData(
     val fetchedAtEpochMillis: Long,
-    val localDate: String,
     val programmes: List<TvProgrammeNowItem>,
 )
 
@@ -20,19 +19,16 @@ internal class TvProgrammeNowCache(context: Context) {
         val array = root.getJSONArray("programmes")
         CachedTvProgrammeNowData(
             fetchedAtEpochMillis = root.getLong("fetchedAtEpochMillis"),
-            localDate = root.getString("localDate"),
             programmes = (0 until array.length()).map { index -> array.getJSONObject(index).toProgramme() },
         )
     }.getOrNull()
 
     fun save(
         programmes: List<TvProgrammeNowItem>,
-        localDate: String,
         fetchedAtEpochMillis: Long = System.currentTimeMillis(),
     ) {
         val root = JSONObject().apply {
             put("fetchedAtEpochMillis", fetchedAtEpochMillis)
-            put("localDate", localDate)
             put("programmes", JSONArray(programmes.map { it.toJson() }))
         }
         file.writeText(root.toString())
@@ -55,6 +51,6 @@ internal class TvProgrammeNowCache(context: Context) {
     )
 
     private companion object {
-        const val FILE_NAME = "tv-programme-now-cache-v2.json"
+        const val FILE_NAME = "tv-programme-now-cache-v3.json"
     }
 }

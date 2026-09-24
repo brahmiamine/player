@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
+import androidx.core.content.FileProvider
 import fr.streamia.tv.domain.AccountInfo
 import fr.streamia.tv.domain.Catalog
 import fr.streamia.tv.domain.EpgGuide
@@ -65,6 +66,21 @@ class XtreamRepository(context: Context) {
 
     suspend fun checkForUpdate(currentBuild: Int): UpdateCheckResult =
         withContext(Dispatchers.IO) { updateChecker.checkForUpdate(currentBuild) }
+
+    /**
+     * Télécharge l'APK de la release puis ouvre l'installateur Android. Si l'installation
+     * d'applications inconnues n'est pas encore autorisée pour Streamia, l'installateur système
+     * propose lui-même d'ouvrir le réglage.
+     */
+    suspend fun downloadAndInstallUpdate(release: ReleaseInfo) {
+        val apk = File(appContext.cacheDir, "updates/streamia-tv.apk")
+        withContext(Dispatchers.IO) { updateChecker.downloadApk(release, apk) }
+        val uri = FileProvider.getUriForFile(appContext, appContext.packageName + ".updates", apk)
+        val install = Intent(Intent.ACTION_VIEW)
+            .setDataAndType(uri, "application/vnd.android.package-archive")
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        appContext.startActivity(install)
+    }
 
     suspend fun cacheSizeBytes(): Long = withContext(Dispatchers.IO) { cache.databaseFileSizeBytes() }
     suspend fun epgCacheSizeBytes(): Long = withContext(Dispatchers.IO) { epgCache.databaseFileSizeBytes() }
@@ -864,8 +880,9 @@ class XtreamRepository(context: Context) {
         // limitent les requêtes vers tv-programme.com tout en renouvelant les données dans la soirée.
         private const val TV_PROGRAMME_CACHE_MAX_AGE_MS = 2 * 60 * 60_000L
 
-        // Les programmes "en ce moment" évoluent en continu : cache très court pour rester juste.
-        private const val TV_PROGRAMME_NOW_CACHE_MAX_AGE_MS = 2 * 60_000L
+        // Le cache garde toute la grille (programme en cours recalculé localement) : pas besoin de
+        // re-scraper souvent, et tv-programme.com bloque (403) les requêtes trop fréquentes.
+        private const val TV_PROGRAMME_NOW_CACHE_MAX_AGE_MS = 30 * 60_000L
 
         // La grille beIN est utilisée pour le "maintenant" et le "suivant" : garder la même
         // fraîcheur que le programme TV en direct pour basculer rapidement lors d'un changement.

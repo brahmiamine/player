@@ -457,7 +457,15 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         _uiState.update { it.copy(updateChecking = true, updateCheck = null) }
         viewModelScope.launch {
             val result = repository.checkForUpdate(BuildConfig.VERSION_CODE)
-            _uiState.update { it.copy(updateChecking = false, updateCheck = result) }
+            // updateChecking reste vrai pendant le téléchargement : le bouton affiche « Téléchargement… ».
+            _uiState.update { it.copy(updateCheck = result) }
+            if (result is UpdateCheckResult.UpdateAvailable) {
+                runCatching { repository.downloadAndInstallUpdate(result.release) }.onFailure { error ->
+                    val message = "Téléchargement impossible : " + (error.message ?: "erreur inconnue.")
+                    _uiState.update { it.copy(updateCheck = UpdateCheckResult.Error(message)) }
+                }
+            }
+            _uiState.update { it.copy(updateChecking = false) }
         }
     }
 

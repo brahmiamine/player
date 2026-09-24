@@ -17,33 +17,41 @@ object TvProgrammeNowParser {
     fun parse(
         html: String,
         nowEpochMillis: Long = System.currentTimeMillis(),
+    ): List<TvProgrammeNowItem> = onAir(parseSchedule(html, nowEpochMillis), nowEpochMillis)
+
+    /**
+     * Tous les créneaux pas encore terminés de chaque chaîne (pas seulement celui en cours) : mis en
+     * cache, ils permettent de recalculer « en ce moment » localement pendant des heures sans
+     * re-télécharger la page (le site renvoie 403 quand on l'interroge trop souvent).
+     */
+    fun parseSchedule(
+        html: String,
+        nowEpochMillis: Long = System.currentTimeMillis(),
     ): List<TvProgrammeNowItem> {
         val document = Jsoup.parse(html, ORIGIN)
         val seenChannels = mutableSetOf<String>()
 
-        return document.select("tr.tvp-grille-row")
-            .asSequence()
-            .mapNotNull { row ->
-                val channelName = channelName(row) ?: return@mapNotNull null
-                val channelKey = channelName.lowercase(Locale.ROOT)
-                if (!seenChannels.add(channelKey)) return@mapNotNull null
-
-                val current = row.select("article.tvp-grille-item")
-                    .asSequence()
-                    .mapNotNull(::parseProgramme)
-                    .firstOrNull { it.isOnAirAt(nowEpochMillis) }
-                    ?: return@mapNotNull null
-
-                TvProgrammeNowItem(
-                    channelName = channelName,
-                    startEpochMillis = current.startEpochMillis,
-                    endEpochMillis = current.endEpochMillis,
-                    title = current.title,
-                    imageUrl = current.imageUrl,
-                )
-            }
-            .toList()
+        return document.select("tr.tvp-grille-row").flatMap { row ->
+            val channelName = channelName(row) ?: return@flatMap emptyList()
+            if (!seenChannels.add(channelName.lowercase(Locale.ROOT))) return@flatMap emptyList()
+            row.select("article.tvp-grille-item")
+                .mapNotNull(::parseProgramme)
+                .filter { it.endEpochMillis > nowEpochMillis }
+                .map { slot ->
+                    TvProgrammeNowItem(
+                        channelName = channelName,
+                        startEpochMillis = slot.startEpochMillis,
+                        endEpochMillis = slot.endEpochMillis,
+                        title = slot.title,
+                        imageUrl = slot.imageUrl,
+                    )
+                }
+        }
     }
+
+    /** Programme en cours de chaque chaîne, dans l'ordre de la grille. */
+    fun onAir(schedule: List<TvProgrammeNowItem>, nowEpochMillis: Long): List<TvProgrammeNowItem> =
+        schedule.filter { it.isOnAirAt(nowEpochMillis) }.distinctBy { it.channelName.lowercase(Locale.ROOT) }
 
     private fun channelName(row: Element): String? {
         val link = row.selectFirst("a.tvp-grille-channel-link") ?: return null
@@ -109,10 +117,7 @@ object TvProgrammeNowParser {
         val endEpochMillis: Long,
         val title: String,
         val imageUrl: String?,
-    ) {
-        fun isOnAirAt(nowEpochMillis: Long): Boolean =
-            nowEpochMillis >= startEpochMillis && nowEpochMillis < endEpochMillis
-    }
+    )
 
     private const val ORIGIN = "https://tv-programme.com"
     private val CHANNEL_ARIA_LABEL = Regex("""(?i)^Voir la cha[iî]ne (.+)$""")

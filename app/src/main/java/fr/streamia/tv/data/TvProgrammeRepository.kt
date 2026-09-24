@@ -1,6 +1,9 @@
 package fr.streamia.tv.data
 
 import android.content.Context
+import fr.streamia.tv.tvprogramme.FallbackGuide
+import fr.streamia.tv.tvprogramme.ProgrammeTelevisionOrgParser
+import fr.streamia.tv.tvprogramme.ProgrammeTvNetParser
 import fr.streamia.tv.tvprogramme.TvProgrammeItem
 import fr.streamia.tv.tvprogramme.TvProgrammeParser
 import kotlinx.coroutines.Dispatchers
@@ -33,11 +36,7 @@ internal class TvProgrammeRepository(context: Context) {
                 )
             }
 
-            val refreshed = runCatching { TvProgrammeParser.parse(client.fetchTonightHtml()) }
-                .mapCatching { programmes ->
-                    programmes.takeIf { it.isNotEmpty() }
-                        ?: throw IOException("Aucun programme TV n'a été trouvé dans la page.")
-                }
+            val refreshed = fetchTonight()
 
             refreshed.getOrNull()?.let { programmes ->
                 val fetchedAt = System.currentTimeMillis()
@@ -55,4 +54,23 @@ internal class TvProgrammeRepository(context: Context) {
 
             throw refreshed.exceptionOrNull() ?: IOException("Impossible de récupérer le programme TV de ce soir.")
         }
+
+    /** Premier site qui donne des programmes : tv-programme.com puis les secours. */
+    private fun fetchTonight(): Result<List<TvProgrammeItem>> {
+        var failure: Throwable? = null
+        SOURCES.forEach { (url, parse) ->
+            runCatching { parse(client.fetch(url)) }
+                .onSuccess { if (it.isNotEmpty()) return Result.success(it) }
+                .onFailure { failure = it }
+        }
+        return Result.failure(failure ?: IOException("Aucun programme TV n'a été trouvé."))
+    }
+
+    private companion object {
+        val SOURCES: List<Pair<String, (String) -> List<TvProgrammeItem>>> = listOf(
+            TvProgrammeClient.TONIGHT_URL to TvProgrammeParser::parse,
+            ProgrammeTvNetParser.TONIGHT_URL to { html -> FallbackGuide.tonight(ProgrammeTvNetParser.slots(html)) },
+            ProgrammeTelevisionOrgParser.TONIGHT_URL to { html -> FallbackGuide.tonight(ProgrammeTelevisionOrgParser.slots(html)) },
+        )
+    }
 }

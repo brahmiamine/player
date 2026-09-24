@@ -5,16 +5,10 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.charset.StandardCharsets
 
-/** Télécharge le HTML de la page publique "Programme TV ce soir". */
+/** Télécharge le HTML des pages publiques de programme TV (tv-programme.com et sites de secours). */
 internal class TvProgrammeClient {
     @Throws(IOException::class)
-    fun fetchTonightHtml(): String = fetch(TONIGHT_URL)
-
-    @Throws(IOException::class)
-    fun fetchNowHtml(): String = fetch(NOW_URL)
-
-    @Throws(IOException::class)
-    private fun fetch(url: String): String {
+    fun fetch(url: String): String {
         val connection = (URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
             connectTimeout = 15_000
@@ -26,14 +20,14 @@ internal class TvProgrammeClient {
         }
         try {
             val code = connection.responseCode
-            if (code !in 200..299) throw IOException("tv-programme.com a répondu avec le code $code.")
+            if (code !in 200..299) throw IOException(URL(url).host + " a répondu avec le code $code.")
             return connection.inputStream.use { input -> input.reader(StandardCharsets.UTF_8).readText() }
         } finally {
             connection.disconnect()
         }
     }
 
-    private companion object {
+    companion object {
         const val TONIGHT_URL = "https://tv-programme.com/"
         const val NOW_URL = "https://tv-programme.com/en-ce-moment"
         const val USER_AGENT =

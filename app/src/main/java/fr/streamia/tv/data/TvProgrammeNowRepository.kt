@@ -1,13 +1,14 @@
 package fr.streamia.tv.data
 
 import android.content.Context
+import fr.streamia.tv.tvprogramme.FallbackGuide
+import fr.streamia.tv.tvprogramme.ProgrammeTelevisionOrgParser
+import fr.streamia.tv.tvprogramme.ProgrammeTvNetParser
 import fr.streamia.tv.tvprogramme.TvProgrammeNowItem
 import fr.streamia.tv.tvprogramme.TvProgrammeNowParser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.IOException
-import java.time.LocalDate
-import java.time.ZoneId
 
 data class TvProgrammeNowFetchResult(
     val programmes: List<TvProgrammeNowItem>,
@@ -18,46 +19,59 @@ data class TvProgrammeNowFetchResult(
 internal class TvProgrammeNowRepository(context: Context) {
     private val client = TvProgrammeClient()
     private val cache = TvProgrammeNowCache(context)
+    @Volatile private var lastFailureAtEpochMillis = 0L
 
+    /**
+     * Le cache contient toute la grille : « en ce moment » est recalculé localement à chaque appel,
+     * et le site n'est re-téléchargé que quand le cache a plus de [maxAgeMillis] ou ne couvre plus
+     * l'heure actuelle. Après un échec (403 anti-scraping, réseau), on attend [FAILURE_BACKOFF_MS]
+     * avant de réessayer au lieu d'insister toutes les 2 minutes.
+     */
     suspend fun loadNow(forceRefresh: Boolean, maxAgeMillis: Long): TvProgrammeNowFetchResult =
         withContext(Dispatchers.IO) {
-            val today = LocalDate.now(PARIS_ZONE).toString()
-            val cached = cache.load()?.takeIf { it.localDate == today }
-            val fresh = cached != null && System.currentTimeMillis() - cached.fetchedAtEpochMillis < maxAgeMillis
+            val now = System.currentTimeMillis()
+            val cached = cache.load()
+            val cachedNow = cached?.let { TvProgrammeNowParser.onAir(it.programmes, now) }.orEmpty()
+            val fromCache = cached?.let { TvProgrammeNowFetchResult(cachedNow, it.fetchedAtEpochMillis, fromCache = true) }
+            val fresh = fromCache != null && cachedNow.isNotEmpty() && now - fromCache.fetchedAtEpochMillis < maxAgeMillis
 
-            if (!forceRefresh && fresh && cached != null) {
-                return@withContext TvProgrammeNowFetchResult(
-                    programmes = cached.programmes,
-                    fetchedAtEpochMillis = cached.fetchedAtEpochMillis,
-                    fromCache = true,
-                )
+            if (!forceRefresh && fresh) return@withContext fromCache!!
+            if (!forceRefresh && now - lastFailureAtEpochMillis < FAILURE_BACKOFF_MS) {
+                return@withContext fromCache?.takeIf { cachedNow.isNotEmpty() }
+                    ?: throw IOException("Programme TV en direct indisponible, nouvel essai plus tard.")
             }
 
-            val refreshed = runCatching { TvProgrammeNowParser.parse(client.fetchNowHtml()) }
-                .mapCatching { programmes ->
-                    programmes.takeIf { it.isNotEmpty() }
-                        ?: throw IOException("Aucun programme TV en direct n'a été trouvé dans la page.")
-                }
+            val refreshed = fetchSchedule(now)
 
-            refreshed.getOrNull()?.let { programmes ->
-                val fetchedAt = System.currentTimeMillis()
-                cache.save(programmes, today, fetchedAt)
-                return@withContext TvProgrammeNowFetchResult(programmes, fetchedAt, fromCache = false)
+            refreshed.getOrNull()?.let { schedule ->
+                cache.save(schedule, now)
+                return@withContext TvProgrammeNowFetchResult(TvProgrammeNowParser.onAir(schedule, now), now, fromCache = false)
             }
 
-            if (cached != null) {
-                return@withContext TvProgrammeNowFetchResult(
-                    programmes = cached.programmes,
-                    fetchedAtEpochMillis = cached.fetchedAtEpochMillis,
-                    fromCache = true,
-                )
-            }
+            lastFailureAtEpochMillis = now
+            fromCache?.takeIf { cachedNow.isNotEmpty() }?.let { return@withContext it }
 
             throw refreshed.exceptionOrNull()
                 ?: IOException("Impossible de récupérer les programmes TV français en direct.")
         }
 
+    /** Premier site qui donne au moins un programme en cours : tv-programme.com puis les secours. */
+    private fun fetchSchedule(now: Long): Result<List<TvProgrammeNowItem>> {
+        var failure: Throwable? = null
+        SOURCES.forEach { (url, parse) ->
+            runCatching { parse(client.fetch(url), now) }
+                .onSuccess { if (TvProgrammeNowParser.onAir(it, now).isNotEmpty()) return Result.success(it) }
+                .onFailure { failure = it }
+        }
+        return Result.failure(failure ?: IOException("Aucun programme TV en direct n'a été trouvé."))
+    }
+
     private companion object {
-        val PARIS_ZONE: ZoneId = ZoneId.of("Europe/Paris")
+        const val FAILURE_BACKOFF_MS = 10 * 60_000L
+        val SOURCES: List<Pair<String, (String, Long) -> List<TvProgrammeNowItem>>> = listOf(
+            TvProgrammeClient.NOW_URL to TvProgrammeNowParser::parseSchedule,
+            ProgrammeTvNetParser.NOW_URL to { html, now -> FallbackGuide.schedule(ProgrammeTvNetParser.slots(html), now) },
+            ProgrammeTelevisionOrgParser.NOW_URL to { html, now -> FallbackGuide.schedule(ProgrammeTelevisionOrgParser.slots(html), now) },
+        )
     }
 }

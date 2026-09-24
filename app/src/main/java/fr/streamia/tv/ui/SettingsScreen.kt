@@ -535,7 +535,7 @@ fun SettingsScreen(
             Row(Modifier.fillMaxWidth().height(88.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 SettingsTile(
                     StreamiaIconGlyph.Refresh,
-                    if (updateChecking) "Vérification…" else "Mises à jour",
+                    if (updateChecking) updateProgressLabel(updateCheck) else "Mises à jour",
                     updateSubtitle(currentVersion, updateCheck),
                     onCheckForUpdate,
                     Modifier.weight(1f),
@@ -828,6 +828,12 @@ private fun backupFileName(): String {
     return "streamia-sauvegarde-" + stamp + ".json"
 }
 
+private const val INSTALL_HINT =
+    "Téléchargement puis installation automatique. Si Android bloque, autorisez les sources inconnues pour Streamia."
+
+private fun updateProgressLabel(result: UpdateCheckResult?): String =
+    if (result is UpdateCheckResult.UpdateAvailable) "Téléchargement…" else "Vérification…"
+
 private fun updateSubtitle(currentVersion: String, result: UpdateCheckResult?): String = when (result) {
     is UpdateCheckResult.UpdateAvailable -> "Nouvelle version " + result.release.version + " disponible"
     is UpdateCheckResult.UpToDate -> "À jour · version " + currentVersion
@@ -844,7 +850,7 @@ private fun updateResultTitle(result: UpdateCheckResult): String = when (result)
 }
 
 private fun updateResultSubtitle(result: UpdateCheckResult): String = when (result) {
-    is UpdateCheckResult.UpdateAvailable -> result.release.notes.ifBlank { "Ouvrez " + result.release.htmlUrl + " pour télécharger." }.take(180)
+    is UpdateCheckResult.UpdateAvailable -> INSTALL_HINT
     is UpdateCheckResult.UpToDate -> "OK pour fermer."
     is UpdateCheckResult.NoTaggedRelease -> "Aucun build publié depuis main pour l'instant."
     is UpdateCheckResult.Error -> result.message

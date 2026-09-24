@@ -127,4 +127,28 @@ class TvProgrammeNowParserTest {
         val result = TvProgrammeNowParser.parse(html, nowEpochMillis = 1_700_009_999_000L)
         assertEquals(0, result.size)
     }
+
+    @Test
+    fun scheduleLetsCurrentProgrammeBeRecomputedLaterWithoutRefetch() {
+        val html = """
+            <table><tbody>
+              <tr class="tvp-grille-row">
+                <th><a class="tvp-grille-channel-link" aria-label="Voir la chaîne TF1"></a></th>
+                <td>
+                  <article class="tvp-grille-item" data-starttime="1700000000" data-endtime="1700002400"><h2 class="tvp-grille-sr-only">TFou</h2></article>
+                  <article class="tvp-grille-item" data-starttime="1700002400" data-endtime="1700003300"><h2 class="tvp-grille-sr-only">Le journal</h2></article>
+                  <article class="tvp-grille-item" data-starttime="1700003300" data-endtime="1700005400"><h2 class="tvp-grille-sr-only">Le magazine</h2></article>
+                </td>
+              </tr>
+            </tbody></table>
+        """.trimIndent()
+
+        val schedule = TvProgrammeNowParser.parseSchedule(html, nowEpochMillis = 1_700_002_820_000L)
+        // Le créneau déjà terminé est écarté, les suivants sont gardés pour plus tard.
+        assertEquals(listOf("Le journal", "Le magazine"), schedule.map { it.title })
+
+        assertEquals("Le journal", TvProgrammeNowParser.onAir(schedule, 1_700_002_820_000L).single().title)
+        assertEquals("Le magazine", TvProgrammeNowParser.onAir(schedule, 1_700_004_000_000L).single().title)
+        assertEquals(0, TvProgrammeNowParser.onAir(schedule, 1_700_009_999_000L).size)
+    }
 }
