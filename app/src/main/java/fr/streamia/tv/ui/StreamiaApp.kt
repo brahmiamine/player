@@ -89,7 +89,9 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
 
                 state.screen is StreamiaScreen.Home && state.catalog != null -> HomeScreen(
                     catalog = state.catalog!!,
-                    profileName = state.profiles.firstOrNull { it.id == state.activeProfileId }?.name,
+                    weatherPlace = state.weatherPlace,
+                    weather = state.weather,
+                    prayerMethod = state.appSettings.prayerMethod,
                     offline = state.offline,
                     busy = state.busy,
                     library = state.library,
@@ -124,6 +126,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onRefreshBeinSportsGuide = viewModel::refreshBeinSportsGuide,
                     onRefreshUkGuide = viewModel::refreshUkGuide,
                     onRefreshLiveMatches = viewModel::refreshLiveOnSatIfStale,
+                    onRefreshWeather = viewModel::refreshWeatherIfStale,
                 )
 
                 state.screen is StreamiaScreen.Browser && state.catalog != null && state.credentials != null -> BrowserScreen(
@@ -172,6 +175,9 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
 
                 state.screen is StreamiaScreen.Settings -> SettingsScreen(
                     settings = state.appSettings,
+                    playlistName = state.profiles.firstOrNull { it.id == state.activeProfileId }?.name,
+                    accountExpiresAtEpochSeconds = state.catalog?.account?.expiresAtEpochSeconds,
+                    detectedPlaceName = state.weatherPlace?.name,
                     busy = state.busy,
                     liveHistoryCount = state.library.history.count { it.entry.type == MediaType.Live },
                     movieHistoryCount = state.library.history.count { it.entry.type == MediaType.Movie },
@@ -207,6 +213,9 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onImportBackup = viewModel::importBackup,
                     onAbout = viewModel::showAbout,
                     onParentalControl = viewModel::showParentalControl,
+                    onSearchCities = viewModel::searchCities,
+                    onSetHomePlace = viewModel::setHomePlace,
+                    onSetPrayerMethod = viewModel::setPrayerMethod,
                     onBack = viewModel::backFromMenu,
                 )
 

@@ -31,7 +31,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -41,7 +44,12 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.tv.material3.Text
 import fr.streamia.tv.beinsports.ResolvedBeinProgrammeItem
+import fr.streamia.tv.data.CurrentWeather
 import fr.streamia.tv.data.HomeBlock
+import fr.streamia.tv.data.HomePlace
+import fr.streamia.tv.data.PrayerMethod
+import fr.streamia.tv.data.prayerTimes
+import fr.streamia.tv.data.weatherEmoji
 import fr.streamia.tv.data.UserLibrarySnapshot
 import fr.streamia.tv.data.isResumable
 import fr.streamia.tv.domain.Catalog
@@ -81,7 +89,9 @@ private const val TV_PROGRAMME_DATA_REFRESH_MS = 2 * 60_000L
 @Composable
 fun HomeScreen(
     catalog: Catalog,
-    profileName: String?,
+    weatherPlace: HomePlace?,
+    weather: CurrentWeather?,
+    prayerMethod: PrayerMethod,
     offline: Boolean,
     busy: Boolean,
     library: UserLibrarySnapshot,
@@ -117,6 +127,7 @@ fun HomeScreen(
     onRefreshBeinSportsGuide: () -> Unit,
     onRefreshUkGuide: () -> Unit,
     onRefreshLiveMatches: () -> Unit,
+    onRefreshWeather: () -> Unit,
 ) {
     val firstFocus = remember { FocusRequester() }
     val gridFocusRequester = remember { FocusRequester() }
@@ -217,6 +228,7 @@ fun HomeScreen(
     LaunchedEffect(lifecycle) {
         var resumed = false
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            onRefreshWeather()
             if (resumed) {
                 onRefreshTvProgrammeNow()
                 onRefreshBeinSportsGuide()
@@ -230,6 +242,7 @@ fun HomeScreen(
                 onRefreshBeinSportsGuide()
                 onRefreshUkGuide()
                 onRefreshLiveMatches()
+                onRefreshWeather()
             }
         }
     }
@@ -322,19 +335,15 @@ fun HomeScreen(
                         LocalClockText()
                         Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
                             Column(horizontalAlignment = Alignment.End) {
-                                profileName?.takeIf(String::isNotBlank)?.let {
-                                    Text(it, color = Ink, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                                WeatherAndPrayers(weatherPlace, weather, prayerMethod)
+                                // Nom de la liste et expiration : dans Paramètres. Ne reste ici que l'état anormal.
+                                if (offline || catalogLoading) {
+                                    Text(
+                                        if (offline) "Mode cache" else "Chargement du catalogue…",
+                                        color = if (offline) FocusBlueBright else MutedInk,
+                                        fontSize = 12.sp,
+                                    )
                                 }
-                                val expiry = catalog.account?.expiresAtEpochSeconds?.let(::formatExpiry)
-                                Text(
-                                    buildString {
-                                        append(if (offline) "Mode cache" else "Liste connectée")
-                                        if (catalogLoading) append(" · chargement du catalogue…")
-                                        if (expiry != null) append(" · expire le $expiry")
-                                    },
-                                    color = if (offline) FocusBlueBright else MutedInk,
-                                    fontSize = 13.sp,
-                                )
                             }
                         }
                     }
@@ -1279,6 +1288,43 @@ private fun LocalClockText(modifier: Modifier = Modifier) {
 
 private val ClockFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm:ss")
 
-private fun formatExpiry(epochSeconds: Long): String =
-    SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date(epochSeconds * 1000L))
+/** Météo de la ville puis les 5 prières du jour ; la prochaine ressort en gras (pas seulement en couleur). */
+@Composable
+private fun WeatherAndPrayers(place: HomePlace?, weather: CurrentWeather?, method: PrayerMethod) {
+    place ?: return
+    var now by remember { mutableStateOf(Date()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(30_000L)
+            now = Date()
+        }
+    }
+    val prayers = remember(place, method, now) { prayerTimes(place, method, now) }
+    val next = prayers.firstOrNull { (_, time) -> time.after(now) }?.first
+    Text(
+        buildString {
+            weather?.let { append(weatherEmoji(it.weatherCode)).append(' ').append(it.temperatureC).append("°  ") }
+            append(place.name.substringBefore(','))
+        },
+        color = Ink,
+        fontSize = 17.sp,
+        fontWeight = FontWeight.SemiBold,
+        maxLines = 1,
+    )
+    Spacer(Modifier.height(6.dp))
+    Text(
+        buildAnnotatedString {
+            prayers.forEachIndexed { index, (name, time) ->
+                if (index > 0) append(" · ")
+                val style = if (name == next) SpanStyle(color = Ink, fontWeight = FontWeight.Bold) else SpanStyle(color = MutedInk)
+                withStyle(style) { append(name + " " + PrayerTimeFormatter.format(time)) }
+            }
+        },
+        fontSize = 13.sp,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
+}
+
+private val PrayerTimeFormatter = SimpleDateFormat("HH:mm", Locale.getDefault())
 

@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -37,8 +38,10 @@ import androidx.tv.material3.Text
 import fr.streamia.tv.data.AppSettings
 import fr.streamia.tv.data.BufferMode
 import fr.streamia.tv.data.HomeBlock
+import fr.streamia.tv.data.HomePlace
 import fr.streamia.tv.data.LiveChannelSortOrder
 import fr.streamia.tv.data.LiveStreamFormat
+import fr.streamia.tv.data.PrayerMethod
 import fr.streamia.tv.data.UpdateCheckResult
 import fr.streamia.tv.data.VideoAspectSetting
 import fr.streamia.tv.data.VodSortOrder
@@ -67,6 +70,10 @@ private data class SettingsModalState(
 @Composable
 fun SettingsScreen(
     settings: AppSettings,
+    playlistName: String?,
+    accountExpiresAtEpochSeconds: Long?,
+    /** Ville effectivement utilisée par l'accueil (détectée si aucune n'est réglée). */
+    detectedPlaceName: String?,
     busy: Boolean,
     liveHistoryCount: Int,
     movieHistoryCount: Int,
@@ -102,6 +109,9 @@ fun SettingsScreen(
     onImportBackup: suspend (String) -> String,
     onAbout: () -> Unit,
     onParentalControl: () -> Unit,
+    onSearchCities: suspend (String) -> List<HomePlace>,
+    onSetHomePlace: (HomePlace?) -> Unit,
+    onSetPrayerMethod: (PrayerMethod) -> Unit,
     onBack: () -> Unit,
 ) {
     BackHandler(onBack = onBack)
@@ -113,6 +123,7 @@ fun SettingsScreen(
     var activeModal by remember { mutableStateOf<SettingsModalState?>(null) }
     var backupMessage by remember { mutableStateOf<String?>(null) }
     var homeBlocksModalOpen by remember { mutableStateOf(false) }
+    var citySearchOpen by remember { mutableStateOf(false) }
     val homeBlockRows = remember {
         listOf(
             HomeBlock.Resume to "Reprendre la lecture",
@@ -187,6 +198,52 @@ fun SettingsScreen(
             Modifier.weight(1f).verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            SettingsSectionTitle("Liste & accueil")
+            Row(Modifier.fillMaxWidth().height(88.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                SettingsTile(
+                    StreamiaIconGlyph.Swap,
+                    playlistName?.takeIf(String::isNotBlank) ?: "Liste active",
+                    accountExpiresAtEpochSeconds?.let { "Expire le " + formatExpiry(it) } ?: "Aucune date d'expiration",
+                    {
+                        openChoices(
+                            "Changer de liste",
+                            "Vous allez quitter la liste actuelle et revenir au gestionnaire de playlists.",
+                            listOf("Annuler" to false, "Continuer" to false),
+                        ) { if (it == 1) onChangePlaylist() }
+                    },
+                    Modifier.focusRequester(firstFocus).weight(1f),
+                )
+                SettingsTile(
+                    StreamiaIconGlyph.Guide,
+                    "Ville (météo & prières)",
+                    settings.homePlace?.name ?: ("Automatique" + detectedPlaceName?.let { " · $it" }.orEmpty()),
+                    {
+                        openChoices(
+                            "Ville",
+                            "Utilisée pour la météo et les heures de prière de l'accueil. " +
+                                "La détection automatique se base sur la connexion (peut se tromper avec un VPN).",
+                            listOf("Détection automatique" to (settings.homePlace == null), "Rechercher une ville…" to false),
+                        ) { if (it == 0) onSetHomePlace(null) else citySearchOpen = true }
+                    },
+                    Modifier.weight(1f),
+                )
+                SettingsTile(
+                    StreamiaIconGlyph.Settings,
+                    "Calcul des prières",
+                    prayerMethodLabel(settings.prayerMethod),
+                    {
+                        val values = PrayerMethod.entries.toList()
+                        openChoices(
+                            "Calcul des prières",
+                            "Choisissez la méthode suivie par votre mosquée ou votre pays.",
+                            values.map { prayerMethodLabel(it) to (it == settings.prayerMethod) },
+                        ) { onSetPrayerMethod(values[it]) }
+                    },
+                    Modifier.weight(1f),
+                )
+                Spacer(Modifier.weight(1f))
+            }
+
             SettingsSectionTitle("Lecture & direct")
             Row(Modifier.fillMaxWidth().height(88.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 SettingsTile(
@@ -206,7 +263,7 @@ fun SettingsScreen(
                             if (targetEnabled != settings.livePreviewEnabled) onToggleLivePreview()
                         }
                     },
-                    modifier = Modifier.focusRequester(firstFocus).weight(1f),
+                    modifier = Modifier.weight(1f),
                     selected = settings.livePreviewEnabled,
                 )
                 SettingsTile(
@@ -574,6 +631,17 @@ fun SettingsScreen(
         )
     }
 
+    if (citySearchOpen) {
+        CitySearchModal(
+            onSearch = onSearchCities,
+            onPick = { place ->
+                onSetHomePlace(place)
+                citySearchOpen = false
+            },
+            onDismiss = { citySearchOpen = false },
+        )
+    }
+
     if (homeBlocksModalOpen) {
         HomeBlocksModal(
             blocks = homeBlockRows,
@@ -583,6 +651,81 @@ fun SettingsScreen(
         )
     }
 }
+
+@Composable
+private fun CitySearchModal(
+    onSearch: suspend (String) -> List<HomePlace>,
+    onPick: (HomePlace) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    BackHandler(onBack = onDismiss)
+    val fieldFocus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { runCatching { fieldFocus.requestFocus() } }
+    val scope = rememberCoroutineScope()
+    var query by remember { mutableStateOf("") }
+    var searching by remember { mutableStateOf(false) }
+    var results by remember { mutableStateOf<List<HomePlace>?>(null) }
+
+    Box(
+        Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.76f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        GlassSurface(modifier = Modifier.width(580.dp)) {
+            Column(Modifier.padding(26.dp)) {
+                Text("Choisir une ville", color = Ink, fontSize = 24.sp, fontWeight = HeadingWeight)
+                Spacer(Modifier.height(16.dp))
+                TvTextField(query, { query = it }, "Nom de la ville", Modifier.fillMaxWidth().focusRequester(fieldFocus))
+                Spacer(Modifier.height(10.dp))
+                FocusableSurface(
+                    onClick = {
+                        scope.launch {
+                            searching = true
+                            results = onSearch(query)
+                            searching = false
+                        }
+                    },
+                    enabled = query.isNotBlank() && !searching,
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                ) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(if (searching) "Recherche…" else "Rechercher", color = Ink, fontSize = 15.sp, fontWeight = HeadingWeight)
+                    }
+                }
+                results?.let { places ->
+                    Spacer(Modifier.height(12.dp))
+                    if (places.isEmpty()) Text("Aucune ville trouvée.", color = MutedInk, fontSize = 13.sp)
+                    Column(
+                        Modifier.fillMaxWidth().heightIn(max = 240.dp).verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        places.forEach { place ->
+                            FocusableSurface(onClick = { onPick(place) }, modifier = Modifier.fillMaxWidth().height(52.dp)) {
+                                Box(Modifier.fillMaxSize().padding(horizontal = 16.dp), contentAlignment = Alignment.CenterStart) {
+                                    Text(place.name, color = Ink, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                Text("Retour pour annuler", color = MutedInk, fontSize = 12.sp)
+            }
+        }
+    }
+}
+
+private fun prayerMethodLabel(method: PrayerMethod): String = when (method) {
+    PrayerMethod.MuslimWorldLeague -> "Ligue islamique mondiale"
+    PrayerMethod.France -> "France (UOIF, 12°)"
+    PrayerMethod.Tunisia -> "Tunisie (18°)"
+    PrayerMethod.Egypt -> "Égypte"
+    PrayerMethod.UmmAlQura -> "Umm al-Qura (La Mecque)"
+    PrayerMethod.Karachi -> "Karachi"
+    PrayerMethod.NorthAmerica -> "Amérique du Nord (ISNA)"
+}
+
+private fun formatExpiry(epochSeconds: Long): String =
+    SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date(epochSeconds * 1000L))
 
 @Composable
 private fun SettingsSectionTitle(title: String) {

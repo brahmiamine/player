@@ -187,6 +187,9 @@ dependencies {
     // balises non refermées) : voir fr.streamia.tv.liveonsat.LiveOnSatParser.
     implementation("org.jsoup:jsoup:1.18.3")
 
+    // Heures de prière calculées hors ligne à partir des coordonnées (MIT, sans dépendance).
+    implementation("com.batoulapps.adhan:adhan:1.2.1")
+
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 

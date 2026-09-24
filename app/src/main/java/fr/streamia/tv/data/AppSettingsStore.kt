@@ -13,6 +13,7 @@ enum class BufferMode { LowLatency, Auto, Stable }
 enum class LiveStreamFormat { Auto, Ts, Hls }
 enum class LiveChannelSortOrder { Provider, Number, Alphabetical }
 enum class VodSortOrder { Provider, Alphabetical, RecentlyAdded, Rating }
+enum class PrayerMethod { MuslimWorldLeague, France, Tunisia, Egypt, UmmAlQura, Karachi, NorthAmerica }
 
 /** Un bloc de l'accueil que l'utilisateur peut activer/désactiver depuis Paramètres. */
 enum class HomeBlock {
@@ -45,6 +46,9 @@ data class AppSettings(
     val parentalControlEnabled: Boolean = false,
     /** Blocs de l'accueil désactivés par l'utilisateur. Vide = tous les blocs actifs (défaut). */
     val disabledHomeBlocks: Set<HomeBlock> = emptySet(),
+    /** Ville de la météo et des prières de l'accueil ; null = détectée d'après la connexion. */
+    val homePlace: HomePlace? = null,
+    val prayerMethod: PrayerMethod = PrayerMethod.MuslimWorldLeague,
 ) {
     val vodSeekStepMs: Long
         get() = vodSeekStepSeconds * 1_000L
@@ -147,6 +151,16 @@ class AppSettingsStore(context: Context) {
         disabledHomeBlocks = preferences.getStringSet(KEY_DISABLED_HOME_BLOCKS, null)
             .orEmpty()
             .mapNotNullTo(mutableSetOf()) { name -> runCatching { HomeBlock.valueOf(name) }.getOrNull() },
+        homePlace = runCatching {
+            HomePlace(
+                preferences.getString(KEY_HOME_PLACE_NAME, null)!!,
+                preferences.getString(KEY_HOME_PLACE_LATITUDE, null)!!.toDouble(),
+                preferences.getString(KEY_HOME_PLACE_LONGITUDE, null)!!.toDouble(),
+            )
+        }.getOrNull(),
+        prayerMethod = runCatching {
+            PrayerMethod.valueOf(preferences.getString(KEY_PRAYER_METHOD, null)!!)
+        }.getOrDefault(PrayerMethod.MuslimWorldLeague),
     )
 
     fun save(settings: AppSettings) {
@@ -165,6 +179,10 @@ class AppSettingsStore(context: Context) {
             .putBoolean(KEY_SUBTITLE_BACKGROUND_ENABLED, settings.subtitleBackgroundEnabled)
             .putBoolean(KEY_PARENTAL_ENABLED, settings.parentalControlEnabled)
             .putStringSet(KEY_DISABLED_HOME_BLOCKS, settings.disabledHomeBlocks.mapTo(mutableSetOf()) { it.name })
+            .putString(KEY_HOME_PLACE_NAME, settings.homePlace?.name)
+            .putString(KEY_HOME_PLACE_LATITUDE, settings.homePlace?.latitude?.toString())
+            .putString(KEY_HOME_PLACE_LONGITUDE, settings.homePlace?.longitude?.toString())
+            .putString(KEY_PRAYER_METHOD, settings.prayerMethod.name)
             .apply()
     }
 
@@ -257,6 +275,10 @@ class AppSettingsStore(context: Context) {
         const val KEY_SUBTITLE_BACKGROUND_ENABLED = "subtitle_background_enabled"
         const val KEY_PARENTAL_ENABLED = "parental_control_enabled"
         const val KEY_DISABLED_HOME_BLOCKS = "disabled_home_blocks"
+        const val KEY_HOME_PLACE_NAME = "home_place_name"
+        const val KEY_HOME_PLACE_LATITUDE = "home_place_latitude"
+        const val KEY_HOME_PLACE_LONGITUDE = "home_place_longitude"
+        const val KEY_PRAYER_METHOD = "prayer_method"
         const val KEY_PARENTAL_PIN_SALT = "parental_pin_salt"
         const val KEY_PARENTAL_PIN_HASH = "parental_pin_hash"
         const val KEY_PARENTAL_PIN_ALGORITHM = "parental_pin_algorithm"
@@ -324,6 +346,7 @@ fun AppSettings.toBackupJson(): JSONObject = JSONObject().apply {
     put("subtitleSizeScale", subtitleSizeScale.toDouble())
     put("subtitleBackgroundEnabled", subtitleBackgroundEnabled)
     put("disabledHomeBlocks", JSONArray(disabledHomeBlocks.map { it.name }))
+    put("prayerMethod", prayerMethod.name)
 }
 
 fun appSettingsFromBackupJson(json: JSONObject, fallback: AppSettings): AppSettings = AppSettings(
@@ -349,4 +372,7 @@ fun appSettingsFromBackupJson(json: JSONObject, fallback: AppSettings): AppSetti
             runCatching { HomeBlock.valueOf(array.getString(index)) }.getOrNull()
         }
     } ?: fallback.disabledHomeBlocks,
+    // La ville reste propre à l'appareil : une sauvegarde peut venir d'une TV installée ailleurs.
+    homePlace = fallback.homePlace,
+    prayerMethod = runCatching { PrayerMethod.valueOf(json.getString("prayerMethod")) }.getOrDefault(fallback.prayerMethod),
 )

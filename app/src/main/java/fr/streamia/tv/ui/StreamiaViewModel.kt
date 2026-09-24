@@ -11,7 +11,11 @@ import fr.streamia.tv.beinsports.ResolvedBeinProgrammeItem
 import fr.streamia.tv.data.AppSettings
 import fr.streamia.tv.data.CatalogSource
 import fr.streamia.tv.data.EpgCacheMetadata
+import fr.streamia.tv.data.CurrentWeather
 import fr.streamia.tv.data.HomeBlock
+import fr.streamia.tv.data.HomePlace
+import fr.streamia.tv.data.HomeWeatherClient
+import fr.streamia.tv.data.PrayerMethod
 import fr.streamia.tv.data.JustWatchSection
 import fr.streamia.tv.data.LoadedCatalog
 import fr.streamia.tv.data.PlaylistProfile
@@ -131,6 +135,9 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         val next = ukGuideChannelMatcher.resolve(fetch.rows.next, catalog).filter { visible(it.channel) }
         ({ state -> state.copy(homeUkGuideNow = current, homeUkGuideNext = next) })
     }
+    private val weatherClient = HomeWeatherClient()
+    private var weatherNextCheckAtMillis = 0L
+    private var weatherJob: Job? = null
     private val homeGuides = listOf(tvProgrammeNowGuide, tvProgrammeTonightGuide, beinSportsGuide, ukGuide)
     private var epgSyncJob: Job? = null
     private var epgSyncProfileId: String? = null
@@ -715,6 +722,42 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     fun refreshBeinSportsGuide() = beinSportsGuide.load(forceRefresh = false)
 
     fun refreshUkGuide() = ukGuide.load(forceRefresh = false)
+
+    /** Météo de l'en-tête : au plus une requête toutes les 30 min (5 min après un échec). */
+    fun refreshWeatherIfStale() {
+        if (System.currentTimeMillis() < weatherNextCheckAtMillis || weatherJob?.isActive == true) return
+        weatherJob = viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val place = _uiState.value.appSettings.homePlace
+                        ?: _uiState.value.weatherPlace
+                        ?: weatherClient.locateByIp()
+                        ?: error("Localisation impossible.")
+                    place to weatherClient.currentWeather(place)
+                }
+            }
+            result.onSuccess { (place, weather) ->
+                _uiState.update { it.copy(weatherPlace = place, weather = weather) }
+            }
+            weatherNextCheckAtMillis = System.currentTimeMillis() + if (result.isSuccess) 30 * 60_000L else 5 * 60_000L
+        }
+    }
+
+    suspend fun searchCities(query: String): List<HomePlace> =
+        withContext(Dispatchers.IO) { runCatching { weatherClient.searchCities(query) }.getOrDefault(emptyList()) }
+
+    /** null = revenir à la détection d'après la connexion. */
+    fun setHomePlace(place: HomePlace?) {
+        updateAppSettings { it.copy(homePlace = place) }
+        weatherJob?.cancel()
+        weatherNextCheckAtMillis = 0L
+        _uiState.update { it.copy(weatherPlace = place, weather = null) }
+        refreshWeatherIfStale()
+    }
+
+    fun setPrayerMethod(method: PrayerMethod) {
+        updateAppSettings { it.copy(prayerMethod = method) }
+    }
 
     fun toggleLivePreview() {
         updateAppSettings { it.copy(livePreviewEnabled = !it.livePreviewEnabled) }
@@ -2438,6 +2481,9 @@ data class StreamiaUiState(
     val homeBeinSportsNext: List<ResolvedBeinProgrammeItem> = emptyList(),
     val homeUkGuideNow: List<ResolvedUkProgrammeItem> = emptyList(),
     val homeUkGuideNext: List<ResolvedUkProgrammeItem> = emptyList(),
+    /** Ville effective de l'en-tête (réglée, ou détectée d'après la connexion). */
+    val weatherPlace: HomePlace? = null,
+    val weather: CurrentWeather? = null,
     val similarMedia: List<RecommendedMedia> = emptyList(),
     val liveOnSatMatches: List<ResolvedLiveOnSatMatch> = emptyList(),
     val liveOnSatLoading: Boolean = false,
