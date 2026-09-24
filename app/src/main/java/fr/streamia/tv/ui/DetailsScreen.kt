@@ -47,6 +47,7 @@ fun MovieDetailsScreen(
     watched: Boolean,
     resumePositionMs: Long,
     similarMedia: List<RecommendedMedia> = emptyList(),
+    otherVersions: List<RecommendedMedia> = emptyList(),
     onPlay: () -> Unit,
     onToggleFavorite: () -> Unit,
     onToggleWatched: () -> Unit,
@@ -143,6 +144,12 @@ fun MovieDetailsScreen(
             SimilarMediaRow(
                 title = "Films similaires",
                 items = similarMedia,
+                onOpenSimilar = onOpenSimilar,
+                modifier = Modifier.padding(top = 18.dp),
+            )
+            SimilarMediaRow(
+                title = "Autres versions",
+                items = otherVersions,
                 onOpenSimilar = onOpenSimilar,
                 modifier = Modifier.padding(top = 18.dp),
             )

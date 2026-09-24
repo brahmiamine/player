@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.dp
 import fr.streamia.tv.ui.theme.FocusBlueBright
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.movableContentOf
 import androidx.compose.ui.Alignment
@@ -33,6 +34,7 @@ import fr.streamia.tv.ui.theme.Night
 import fr.streamia.tv.ui.theme.StreamiaTheme
 import fr.streamia.tv.player.LivePlaybackSession
 import fr.streamia.tv.domain.MediaType
+import fr.streamia.tv.recommendation.RecommendedMedia
 import fr.streamia.tv.data.AppSettings
 import fr.streamia.tv.data.HomeBlock
 import androidx.compose.ui.viewinterop.AndroidView
@@ -145,6 +147,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onToggleCategoryFavorite = viewModel::toggleCategoryFavorite,
                     onVerifyParentalPin = viewModel::verifyParentalPin,
                     onRememberContent = viewModel::rememberLastContent,
+                    onLivePreviewWatched = { entry -> viewModel.recordPlayback(entry, 0L, 0L) },
                     onLocationChanged = viewModel::rememberBrowserLocation,
                     onEnsureCategoryLoaded = viewModel::ensureCategoryLoaded,
                     onLoadMoreInCategory = viewModel::loadMoreInCategory,
@@ -321,6 +324,11 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                         watched = movie.key in state.library.watchedEntries,
                         resumePositionMs = resume,
                         similarMedia = state.similarMedia,
+                        // Recherche en base (tout le catalogue), pas seulement les catégories déjà chargées.
+                        otherVersions = produceState(emptyList<RecommendedMedia>(), movie.key) {
+                            val query = versionSearchQuery(movie)
+                            if (query.isNotBlank()) value = otherVersionsOf(movie, viewModel.searchCatalog(query, MediaType.Movie))
+                        }.value,
                         onPlay = { viewModel.playMovie(movie) },
                         onToggleFavorite = { viewModel.toggleEntryFavorite(movie) },
                         onToggleWatched = { viewModel.toggleEntryWatched(movie) },

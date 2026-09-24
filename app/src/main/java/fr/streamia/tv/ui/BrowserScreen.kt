@@ -137,6 +137,7 @@ fun BrowserScreen(
     onToggleCategoryFavorite: (MediaCategory) -> Unit,
     onVerifyParentalPin: (String) -> Boolean,
     onRememberContent: (MediaEntry) -> Unit,
+    onLivePreviewWatched: (MediaEntry) -> Unit = {},
     onLocationChanged: (MediaType, String?) -> Unit,
     onEnsureCategoryLoaded: (MediaType, String) -> Unit,
     onLoadMoreInCategory: (MediaType, String) -> Unit,
@@ -328,6 +329,7 @@ fun BrowserScreen(
                 onEntrySelected = onEntrySelected,
                 onToggleEntryFavorite = onToggleEntryFavorite,
                 onLoadMore = { onLoadMoreInCategory(MediaType.Live, selectedCategoryId) },
+                onLivePreviewWatched = onLivePreviewWatched,
                 modifier = Modifier.fillMaxSize(),
             )
         }
@@ -552,6 +554,7 @@ private fun LiveCatalogLayout(
     onEntrySelected: (MediaEntry) -> Unit,
     onToggleEntryFavorite: (MediaEntry) -> Unit,
     onLoadMore: () -> Unit,
+    onLivePreviewWatched: (MediaEntry) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var previewEntry by remember(catalog, initialPreviewKey) {
@@ -607,6 +610,7 @@ private fun LiveCatalogLayout(
             enabled = appSettings.livePreviewEnabled,
             previewDelayMs = appSettings.livePreviewDelayMs,
             liveStreamFormat = appSettings.liveStreamFormat,
+            onWatched = onLivePreviewWatched,
             // Bord à bord, y compris sous le bandeau du haut (qui flotte par-dessus, translucide) :
             // seuls les panneaux catégories/chaînes ci-dessous en tiennent compte, via leur propre
             // padding, pour ne pas se faire recouvrir par ce bandeau.
@@ -866,6 +870,8 @@ private fun LiveChannelList(
     }
 }
 
+private const val LIVE_PREVIEW_WATCHED_MS = 20_000L
+
 @androidx.annotation.OptIn(markerClass = [UnstableApi::class])
 @Composable
 private fun LivePreview(
@@ -877,6 +883,7 @@ private fun LivePreview(
     enabled: Boolean,
     previewDelayMs: Int,
     liveStreamFormat: LiveStreamFormat,
+    onWatched: (MediaEntry) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val player = livePlaybackSession.player
@@ -968,6 +975,10 @@ private fun LivePreview(
             buffering = player.playbackState != Player.STATE_READY
             livePlaybackSession.continuePlayback()
         }
+        // Chaîne restée à l'écran en aperçu : comptée comme regardée (« Dernières chaînes » de
+        // l'accueil). Le délai évite d'enregistrer chaque chaîne survolée en zappant.
+        delay(LIVE_PREVIEW_WATCHED_MS)
+        onWatched(target)
     }
 
     LaunchedEffect(entry?.key, buffering) {
