@@ -11,11 +11,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -57,6 +54,10 @@ internal fun BoxScope.PlayerSettings(
     onPickExternalSubtitleFile: (() -> Unit)? = null,
     onLoadExternalSubtitleUrl: ((String) -> Unit)? = null,
 ) {
+    // Audio / sous-titres : choix dans une fenêtre à cases à cocher (sélection unique), au lieu
+    // d'une liste déroulante dans le panneau. Le focus revient sur la ligne à la fermeture.
+    var picker by remember { mutableStateOf<TrackPicker?>(null) }
+    val subtitleFocus = remember { FocusRequester() }
     Column(
         Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(430.dp)
             .padding(vertical = 40.dp, horizontal = 24.dp)
@@ -75,8 +76,8 @@ internal fun BoxScope.PlayerSettings(
             }
         }
         Spacer(Modifier.height(8.dp))
-        TrackDropdown("Piste audio", audioTracks, audioIndex, onAudioSelected, Modifier.focusRequester(firstFocus))
-        TrackDropdown("Sous-titres", subtitleTracks, subtitleIndex, onSubtitleSelected)
+        TrackRow("Piste audio", audioTracks.getOrNull(audioIndex)?.label ?: "Auto", { picker = TrackPicker.Audio }, Modifier.focusRequester(firstFocus))
+        TrackRow("Sous-titres", subtitleTracks.getOrNull(subtitleIndex)?.label ?: "Désactivés", { picker = TrackPicker.Subtitle }, Modifier.focusRequester(subtitleFocus))
         SettingButton("Format vidéo", aspect.label, onNextAspect)
         val dolbyText = listOfNotNull(dolbyVisionLabel, dolbyAtmosLabel).joinToString(" · ")
         Text(if (dolbyText.isBlank()) "Dolby : aucun format Dolby sélectionné" else dolbyText,
@@ -91,9 +92,29 @@ internal fun BoxScope.PlayerSettings(
                 onLoadUrl = onLoadExternalSubtitleUrl,
             )
         }
-        Text("OK ouvre la liste des langues. Haut/Bas sélectionne une option.", color = MutedInk, fontSize = 13.sp, lineHeight = 19.sp)
+        Text("OK sur une ligne pour choisir la langue.", color = MutedInk, fontSize = 13.sp, lineHeight = 19.sp)
+    }
+    picker?.let { current ->
+        val audio = current == TrackPicker.Audio
+        val rowFocus = if (audio) firstFocus else subtitleFocus
+        fun close() {
+            picker = null
+            runCatching { rowFocus.requestFocus() }
+        }
+        ChoiceDialog(
+            title = if (audio) "Piste audio" else "Sous-titres",
+            options = (if (audio) audioTracks else subtitleTracks).map(TrackChoice::label),
+            selectedIndex = if (audio) audioIndex else subtitleIndex,
+            onSelect = { index ->
+                if (audio) onAudioSelected(index) else onSubtitleSelected(index)
+                close()
+            },
+            onDismiss = ::close,
+        )
     }
 }
+
+private enum class TrackPicker { Audio, Subtitle }
 
 @Composable
 private fun ExternalSubtitleSection(
@@ -160,61 +181,17 @@ private fun ExternalSubtitleSection(
     }
 }
 
+/** Ligne du panneau : titre, valeur en cours, chevron — OK ouvre la fenêtre de choix. */
 @Composable
-private fun TrackDropdown(
-    title: String,
-    choices: List<TrackChoice>,
-    selectedIndex: Int,
-    onSelected: (Int) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    var expanded by remember { mutableStateOf(false) }
-    Column(modifier.fillMaxWidth()) {
-        FocusableSurface(onClick = { expanded = !expanded }, modifier = Modifier.fillMaxWidth().height(74.dp)) {
-            Column(Modifier.padding(horizontal = 16.dp)) {
+private fun TrackRow(title: String, value: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    FocusableSurface(onClick = onClick, modifier = modifier.fillMaxWidth().height(74.dp)) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
                 Text(title, color = MutedInk, fontSize = 12.sp)
                 Spacer(Modifier.height(4.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        choices.getOrNull(selectedIndex)?.label ?: "Auto",
-                        color = FocusBlueBright,
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false),
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    StreamiaIcon(if (expanded) StreamiaIconGlyph.ChevronUp else StreamiaIconGlyph.ChevronDown, size = 16.dp)
-                }
+                Text(value, color = FocusBlueBright, fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-        }
-        if (expanded) {
-            LazyColumn(
-                Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 210.dp)
-                    .clip(RoundedCornerShape(RadiusCard))
-                    .background(Night.copy(alpha = 0.9f))
-                    .border(BorderStroke(1.dp, GlassBorder), RoundedCornerShape(RadiusCard)),
-            ) {
-                itemsIndexed(choices) { index, choice ->
-                    FocusableSurface(
-                        onClick = { onSelected(index); expanded = false },
-                        selected = index == selectedIndex,
-                        modifier = Modifier.fillMaxWidth().height(48.dp),
-                    ) {
-                        Text(
-                            choice.label,
-                            color = if (index == selectedIndex) FocusBlueBright else Ink,
-                            fontSize = 14.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.padding(horizontal = 16.dp),
-                        )
-                    }
-                }
-            }
+            StreamiaIcon(StreamiaIconGlyph.ChevronDown, size = 16.dp)
         }
     }
 }

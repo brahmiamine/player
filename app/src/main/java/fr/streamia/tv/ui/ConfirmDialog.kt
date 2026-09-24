@@ -12,6 +12,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.text.style.TextOverflow
+import fr.streamia.tv.ui.theme.FocusBlueBright
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
@@ -66,7 +72,11 @@ fun ConfirmDialog(
     }
 }
 
-/** Choix d'une option dans une liste (focus sur l'option en cours). Retour ferme sans changer. */
+/**
+ * Choix unique dans une liste, à cases à cocher : une seule case cochée (l'option en cours), OK
+ * coche et ferme. Longue liste (pistes audio/sous-titres) : défilement, ouverte sur l'option en
+ * cours. Retour ferme sans rien changer.
+ */
 @Composable
 fun ChoiceDialog(
     title: String,
@@ -76,25 +86,49 @@ fun ChoiceDialog(
     onDismiss: () -> Unit,
 ) {
     BackHandler(onBack = onDismiss)
+    val initialIndex = selectedIndex.coerceIn(0, (options.size - 1).coerceAtLeast(0))
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialIndex)
     val selectedFocus = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { selectedFocus.requestFocus() } }
     Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.76f)), contentAlignment = Alignment.Center) {
-        GlassSurface(modifier = Modifier.width(520.dp)) {
-            Column(Modifier.padding(26.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        GlassSurface(modifier = Modifier.width(560.dp)) {
+            Column(Modifier.padding(26.dp)) {
                 Text(title, color = Ink, fontSize = TypeSectionTitle, fontWeight = HeadingWeight)
-                options.forEachIndexed { index, label ->
-                    FocusableSurface(
-                        onClick = { onSelect(index) },
-                        selected = index == selectedIndex,
-                        modifier = Modifier.fillMaxWidth().height(54.dp)
-                            .then(if (index == selectedIndex) Modifier.focusRequester(selectedFocus) else Modifier),
-                    ) {
-                        Row(Modifier.fillMaxSize().padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text(label, color = Ink, fontSize = TypeBody, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                            if (index == selectedIndex) Text("Actuel", color = MutedInk, fontSize = TypeLabel)
+                Spacer(Modifier.height(16.dp))
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.heightIn(max = 470.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    itemsIndexed(options) { index, label ->
+                        val checked = index == selectedIndex
+                        FocusableSurface(
+                            onClick = { onSelect(index) },
+                            selected = checked,
+                            modifier = Modifier.fillMaxWidth().height(56.dp)
+                                .then(if (index == initialIndex) Modifier.focusRequester(selectedFocus) else Modifier),
+                        ) {
+                            Row(Modifier.fillMaxSize().padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+                                StreamiaIcon(
+                                    if (checked) StreamiaIconGlyph.CheckboxOn else StreamiaIconGlyph.CheckboxOff,
+                                    tint = if (checked) FocusBlueBright else MutedInk,
+                                    size = 22.dp,
+                                )
+                                Spacer(Modifier.width(14.dp))
+                                Text(
+                                    label,
+                                    color = Ink,
+                                    fontSize = TypeBody,
+                                    fontWeight = if (checked) FontWeight.Bold else FontWeight.Medium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
                         }
                     }
                 }
+                Spacer(Modifier.height(12.dp))
+                Text("OK pour choisir · Retour pour annuler", color = MutedInk, fontSize = TypeLabel)
             }
         }
     }
