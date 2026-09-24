@@ -35,6 +35,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.tv.material3.Text
 import fr.streamia.tv.beinsports.ResolvedBeinProgrammeItem
 import fr.streamia.tv.data.UserLibrarySnapshot
@@ -108,6 +111,7 @@ fun HomeScreen(
     onRefreshTvProgrammeNow: () -> Unit,
     onRefreshBeinSportsGuide: () -> Unit,
     onRefreshUkGuide: () -> Unit,
+    onRefreshLiveMatches: () -> Unit,
 ) {
     val firstFocus = remember { FocusRequester() }
     val gridFocusRequester = remember { FocusRequester() }
@@ -201,12 +205,27 @@ fun HomeScreen(
     val ukGuideNowTime = remember(liveRowsNowEpochMillis) {
         java.time.Instant.ofEpochMilli(liveRowsNowEpochMillis).atZone(UK_GUIDE_ZONE).toLocalTime()
     }
-    LaunchedEffect(Unit) {
-        while (true) {
-            delay(TV_PROGRAMME_DATA_REFRESH_MS)
-            onRefreshTvProgrammeNow()
-            onRefreshBeinSportsGuide()
-            onRefreshUkGuide()
+    // Seulement app visible : en arrière-plan (bouton Home), aucune requête vers les sites tiers.
+    // Au retour, rafraîchissement immédiat ; au premier affichage, les chargements de démarrage
+    // (scheduleSecondaryLoads) s'en chargent déjà.
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(lifecycle) {
+        var resumed = false
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            if (resumed) {
+                onRefreshTvProgrammeNow()
+                onRefreshBeinSportsGuide()
+                onRefreshUkGuide()
+                onRefreshLiveMatches()
+            }
+            resumed = true
+            while (true) {
+                delay(TV_PROGRAMME_DATA_REFRESH_MS)
+                onRefreshTvProgrammeNow()
+                onRefreshBeinSportsGuide()
+                onRefreshUkGuide()
+                onRefreshLiveMatches()
+            }
         }
     }
 

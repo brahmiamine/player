@@ -31,7 +31,6 @@ import fr.streamia.tv.domain.SeriesDetails
 import fr.streamia.tv.domain.SeriesEpisode
 import fr.streamia.tv.domain.ServerCredentials
 import fr.streamia.tv.domain.LiveZapIndex
-import fr.streamia.tv.logging.CrashReporter
 import fr.streamia.tv.domain.epgNowContextAt
 import fr.streamia.tv.domain.withTimeOffset
 import fr.streamia.tv.liveonsat.ChannelMatcher
@@ -90,6 +89,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     private val liveOnSatChannelMatcher = ChannelMatcher()
     private var liveOnSatLoadSequence = 0L
     private var liveOnSatLoadJob: Job? = null
+    private var liveOnSatLastLoadAtMillis = 0L
     private val tvProgrammeChannelMatcher = TvProgrammeChannelMatcher()
     private val beinSportsChannelMatcher = BeinSportsChannelMatcher()
     private val ukGuideChannelMatcher = UkGuideChannelMatcher()
@@ -692,6 +692,13 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
 
     fun showLiveMatches() {
         navigateToMenu(StreamiaScreen.LiveMatches, HomeFocusTarget.LiveMatches)
+        // Déjà chargés au démarrage : affichage direct depuis l'état, sans relire ni rescraper.
+        if (_uiState.value.liveOnSatMatches.isEmpty()) loadLiveOnSatMatches(forceRefresh = false) else refreshLiveOnSatIfStale()
+    }
+
+    /** Appelé en boucle par l'accueil et la page Matchs : ne recharge qu'une fois toutes les 2 h. */
+    fun refreshLiveOnSatIfStale() {
+        if (System.currentTimeMillis() - liveOnSatLastLoadAtMillis < XtreamRepository.LIVE_ONSAT_CACHE_MAX_AGE_MS) return
         loadLiveOnSatMatches(forceRefresh = false)
     }
 
@@ -763,10 +770,6 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         updateAppSettings { it.copy(subtitleBackgroundEnabled = !it.subtitleBackgroundEnabled) }
     }
 
-    fun toggleCrashReports() {
-        updateAppSettings { it.copy(crashReportsEnabled = !it.crashReportsEnabled) }
-        CrashReporter.setCollectionEnabled(_uiState.value.appSettings.crashReportsEnabled)
-    }
 
     fun toggleHomeBlock(block: HomeBlock) {
         updateAppSettings {
@@ -2015,6 +2018,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         if (!forceRefresh && liveOnSatLoadJob?.isActive == true) return
         if (forceRefresh) liveOnSatLoadJob?.cancel()
         val sequence = ++liveOnSatLoadSequence
+        liveOnSatLastLoadAtMillis = System.currentTimeMillis()
         _uiState.update { it.copy(liveOnSatLoading = true, liveOnSatError = null) }
         liveOnSatLoadJob = viewModelScope.launch {
             val result = runCatching { repository.loadLiveOnSatMatches(forceRefresh) }

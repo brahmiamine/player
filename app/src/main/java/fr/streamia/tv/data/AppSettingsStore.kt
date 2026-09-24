@@ -41,8 +41,6 @@ data class AppSettings(
     val autoPlayNextEpisode: Boolean = true,
     val subtitleSizeScale: Float = 1.0f,
     val subtitleBackgroundEnabled: Boolean = true,
-    /** Consentement à l'envoi des rapports de plantage anonymisés (Crashlytics). */
-    val crashReportsEnabled: Boolean = true,
     /** Un code est enregistré (voir [AppSettingsStore.setParentalPin]) et le verrouillage est actif. */
     val parentalControlEnabled: Boolean = false,
     /** Blocs de l'accueil désactivés par l'utilisateur. Vide = tous les blocs actifs (défaut). */
@@ -144,7 +142,6 @@ class AppSettingsStore(context: Context) {
         subtitleSizeScale = preferences.getFloat(KEY_SUBTITLE_SIZE_SCALE, 1.0f)
             .takeIf { it in AppSettings.SUBTITLE_SIZE_SCALES } ?: 1.0f,
         subtitleBackgroundEnabled = preferences.getBoolean(KEY_SUBTITLE_BACKGROUND_ENABLED, true),
-        crashReportsEnabled = preferences.getBoolean(KEY_CRASH_REPORTS_ENABLED, true),
         parentalControlEnabled = preferences.getBoolean(KEY_PARENTAL_ENABLED, false) &&
             preferences.getString(KEY_PARENTAL_PIN_HASH, null) != null,
         disabledHomeBlocks = preferences.getStringSet(KEY_DISABLED_HOME_BLOCKS, null)
@@ -166,7 +163,6 @@ class AppSettingsStore(context: Context) {
             .putBoolean(KEY_AUTO_PLAY_NEXT_EPISODE, settings.autoPlayNextEpisode)
             .putFloat(KEY_SUBTITLE_SIZE_SCALE, settings.subtitleSizeScale)
             .putBoolean(KEY_SUBTITLE_BACKGROUND_ENABLED, settings.subtitleBackgroundEnabled)
-            .putBoolean(KEY_CRASH_REPORTS_ENABLED, settings.crashReportsEnabled)
             .putBoolean(KEY_PARENTAL_ENABLED, settings.parentalControlEnabled)
             .putStringSet(KEY_DISABLED_HOME_BLOCKS, settings.disabledHomeBlocks.mapTo(mutableSetOf()) { it.name })
             .apply()
@@ -259,7 +255,6 @@ class AppSettingsStore(context: Context) {
         const val KEY_AUTO_PLAY_NEXT_EPISODE = "auto_play_next_episode"
         const val KEY_SUBTITLE_SIZE_SCALE = "subtitle_size_scale"
         const val KEY_SUBTITLE_BACKGROUND_ENABLED = "subtitle_background_enabled"
-        const val KEY_CRASH_REPORTS_ENABLED = "crash_reports_enabled"
         const val KEY_PARENTAL_ENABLED = "parental_control_enabled"
         const val KEY_DISABLED_HOME_BLOCKS = "disabled_home_blocks"
         const val KEY_PARENTAL_PIN_SALT = "parental_pin_salt"

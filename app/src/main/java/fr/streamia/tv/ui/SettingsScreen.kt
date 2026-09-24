@@ -86,7 +86,6 @@ fun SettingsScreen(
     onToggleAutoPlayNextEpisode: () -> Unit,
     onCycleSubtitleSizeScale: () -> Unit,
     onToggleSubtitleBackground: () -> Unit,
-    onToggleCrashReports: () -> Unit,
     onToggleHomeBlock: (HomeBlock) -> Unit,
     onSearch: () -> Unit,
     onEpg: () -> Unit,
@@ -389,26 +388,7 @@ fun SettingsScreen(
                     modifier = Modifier.weight(1f),
                     selected = settings.subtitleBackgroundEnabled,
                 )
-                SettingsTile(
-                    glyph = StreamiaIconGlyph.Settings,
-                    title = "Rapports de plantage",
-                    subtitle = if (settings.crashReportsEnabled) "Envoyés (anonymisés)" else "Désactivés",
-                    onClick = {
-                        openChoices(
-                            "Rapports de plantage",
-                            "Envoie à Firebase Crashlytics des rapports anonymisés (modèle d'appareil, erreur, sans identifiants ni adresses de flux) pour corriger les problèmes.",
-                            listOf(
-                                "Envoyer" to settings.crashReportsEnabled,
-                                "Ne pas envoyer" to !settings.crashReportsEnabled,
-                            ),
-                        ) { index ->
-                            val targetEnabled = index == 0
-                            if (targetEnabled != settings.crashReportsEnabled) onToggleCrashReports()
-                        }
-                    },
-                    modifier = Modifier.weight(1f),
-                    selected = settings.crashReportsEnabled,
-                )
+                Spacer(Modifier.weight(1f))
                 Spacer(Modifier.weight(1f))
             }
 

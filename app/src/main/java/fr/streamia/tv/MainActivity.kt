@@ -9,7 +9,6 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.ViewModelProvider
-import fr.streamia.tv.data.AppSettingsStore
 import fr.streamia.tv.data.XtreamRepository
 import fr.streamia.tv.logging.CrashReporter
 import fr.streamia.tv.ui.StreamiaTvRoot
@@ -25,7 +24,7 @@ class MainActivity : ComponentActivity() {
         installSplashScreen()
         super.onCreate(savedInstanceState)
 
-        CrashReporter.initialize(applicationContext, AppSettingsStore(applicationContext).load().crashReportsEnabled)
+        CrashReporter.initialize(applicationContext)
         EpgSyncScheduler.schedule(applicationContext)
         MetadataEnrichmentWorker.schedule(applicationContext)
 

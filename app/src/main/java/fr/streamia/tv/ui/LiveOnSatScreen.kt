@@ -33,6 +33,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.tv.material3.Text
 import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.liveonsat.ResolvedLiveOnSatMatch
@@ -73,14 +76,20 @@ fun LiveOnSatScreen(
     restoreChannelKey: String? = null,
     onOpenChannel: (MediaEntry, String) -> Unit,
     onRefresh: () -> Unit,
+    onRefreshIfStale: () -> Unit,
     onBack: () -> Unit,
 ) {
     BackHandler(onBack = onBack)
     var nowEpochSeconds by remember { mutableStateOf(System.currentTimeMillis() / 1000) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            delay(CLOCK_REFRESH_MS)
-            nowEpochSeconds = System.currentTimeMillis() / 1000
+    // App visible seulement ; le cache n'est rechargé que s'il a plus de 2 h (voir refreshLiveOnSatIfStale).
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(lifecycle) {
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (true) {
+                nowEpochSeconds = System.currentTimeMillis() / 1000
+                onRefreshIfStale()
+                delay(CLOCK_REFRESH_MS)
+            }
         }
     }
     val visibleMatches = remember(matches, nowEpochSeconds) {

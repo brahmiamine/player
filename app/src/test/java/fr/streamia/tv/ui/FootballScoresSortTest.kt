@@ -15,4 +15,13 @@ class FootballScoresSortTest {
         )
         assertEquals(listOf("in", "post-recent", "post-old", "pre-soon", "pre-late"), sorted.map { it.id })
     }
+
+    @Test
+    fun refreshEveryMinuteOnlyAroundLiveMatches() {
+        val now = Instant.ofEpochSecond(10_000)
+        assertEquals(60_000L, footballRefreshDelayMs(listOf(match("a", "in", 9_000)), now))
+        assertEquals(60_000L, footballRefreshDelayMs(listOf(match("a", "pre", 10_600)), now))
+        assertEquals(900_000L, footballRefreshDelayMs(listOf(match("a", "pre", 20_000), match("b", "post", 1)), now))
+        assertEquals(900_000L, footballRefreshDelayMs(emptyList(), now))
+    }
 }

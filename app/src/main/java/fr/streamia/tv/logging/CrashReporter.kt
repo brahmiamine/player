@@ -17,13 +17,12 @@ object CrashReporter {
         runCatching { FirebaseCrashlytics.getInstance() }.getOrNull()
 
     /**
-     * La collecte est désactivée dans le manifeste (`firebase_crashlytics_collection_enabled`) et
-     * n'est activée ici que si l'utilisateur ne l'a pas refusée dans les Paramètres.
+     * Collecte toujours active. L'appel explicite écrase aussi un ancien refus persisté par
+     * Crashlytics du temps où l'option existait dans les Paramètres.
      */
-    fun initialize(context: Context, enabled: Boolean) {
+    fun initialize(context: Context) {
         val crashlytics = instance() ?: return
-        crashlytics.setCrashlyticsCollectionEnabled(enabled)
-        if (!enabled) return
+        crashlytics.setCrashlyticsCollectionEnabled(true)
         crashlytics.setCustomKey("app_version", BuildConfig.VERSION_NAME)
         crashlytics.setCustomKey("app_version_code", BuildConfig.VERSION_CODE)
         crashlytics.setCustomKey("build_type", BuildConfig.BUILD_TYPE)
@@ -39,10 +38,6 @@ object CrashReporter {
                 prefs.edit().putBoolean(VERIFY_KEY, true).apply()
             }
         }
-    }
-
-    fun setCollectionEnabled(enabled: Boolean) {
-        instance()?.setCrashlyticsCollectionEnabled(enabled)
     }
 
     fun log(event: String, fields: Map<String, Any?> = emptyMap()) {

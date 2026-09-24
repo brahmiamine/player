@@ -25,6 +25,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.tv.material3.Text
 import fr.streamia.tv.ui.theme.FocusBlueBright
 import fr.streamia.tv.ui.theme.Ink
@@ -53,7 +56,9 @@ private val COMPETITION_LOGOS = mapOf(
     "Champions League" to 2, "Europa League" to 2310, "Europa Conference League" to 20296, "Conference League" to 20296,
     "UEFA Nations League" to 2395, "World Cup" to 4, "European Championship" to 74,
 ).mapValues { "https://a.espncdn.com/i/leaguelogos/soccer/500/${it.value}.png" }
-private const val FOOTBALL_REFRESH_MS = 60_000L
+private const val FOOTBALL_LIVE_REFRESH_MS = 60_000L
+private const val FOOTBALL_IDLE_REFRESH_MS = 15 * 60_000L
+private const val FOOTBALL_KICKOFF_SOON_MS = 15 * 60_000L
 
 internal data class FootballMatch(
     val id: String,
@@ -132,6 +137,14 @@ private fun fetchBbcMatches(day: String): List<FootballMatch> {
     return matches
 }
 
+/** Chaque minute si un match est en cours ou commence bientôt, sinon toutes les 15 min. */
+internal fun footballRefreshDelayMs(matches: List<FootballMatch>, now: Instant): Long =
+    if (matches.any { it.state == "in" || (it.state == "pre" && it.kickoff.toEpochMilli() - now.toEpochMilli() < FOOTBALL_KICKOFF_SOON_MS) }) {
+        FOOTBALL_LIVE_REFRESH_MS
+    } else {
+        FOOTBALL_IDLE_REFRESH_MS
+    }
+
 /** Écussons TheSportsDB par nom d'équipe, gardés pour toute la session ("" = introuvable). */
 private val badgeCache = java.util.concurrent.ConcurrentHashMap<String, String>()
 // ponytail: clé publique « 3 » limitée à ~30 requêtes/min — on plafonne les recherches par rafraîchissement,
@@ -164,13 +177,31 @@ private suspend fun fetchTodayMatches(): List<FootballMatch> = withContext(Dispa
         .let(::withBadges)
 }
 
+/**
+ * Dernier chargement (horodatage, matchs), partagé entre les recompositions : la rangée est détruite
+ * quand elle sort de l'écran, et son retour ne doit pas relancer une requête BBC si les données sont
+ * encore valables (1 min pendant un match, 15 min sinon).
+ */
+@Volatile private var footballCache: Pair<Long, List<FootballMatch>>? = null
+
 @Composable
 internal fun FootballScoresRow(modifier: Modifier = Modifier) {
-    var matches by remember { mutableStateOf(emptyList<FootballMatch>()) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            runCatching { fetchTodayMatches() }.onSuccess { matches = it }
-            delay(FOOTBALL_REFRESH_MS)
+    var matches by remember { mutableStateOf(footballCache?.second.orEmpty()) }
+    // Seulement app visible : aucune requête en arrière-plan, rafraîchissement immédiat au retour.
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(lifecycle) {
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (true) {
+                val now = System.currentTimeMillis()
+                // Un échec compte aussi comme un chargement (données précédentes gardées) : pas de
+                // nouvel essai avant le prochain créneau, au lieu d'insister en boucle.
+                val loaded = footballCache
+                    ?.takeIf { (at, cached) -> now - at < footballRefreshDelayMs(cached, Instant.ofEpochMilli(now)) }
+                    ?: (now to (runCatching { fetchTodayMatches() }.getOrNull() ?: footballCache?.second.orEmpty()))
+                        .also { footballCache = it }
+                matches = loaded.second
+                delay(loaded.first + footballRefreshDelayMs(loaded.second, Instant.ofEpochMilli(now)) - now)
+            }
         }
     }
     if (matches.isEmpty()) return

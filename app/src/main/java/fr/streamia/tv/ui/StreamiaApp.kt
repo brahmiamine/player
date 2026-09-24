@@ -121,6 +121,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onRefreshTvProgrammeNow = viewModel::refreshTvProgrammeNow,
                     onRefreshBeinSportsGuide = viewModel::refreshBeinSportsGuide,
                     onRefreshUkGuide = viewModel::refreshUkGuide,
+                    onRefreshLiveMatches = viewModel::refreshLiveOnSatIfStale,
                 )
 
                 state.screen is StreamiaScreen.Browser && state.catalog != null && state.credentials != null -> BrowserScreen(
@@ -188,7 +189,6 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onToggleAutoPlayNextEpisode = viewModel::toggleAutoPlayNextEpisode,
                     onCycleSubtitleSizeScale = viewModel::cycleSubtitleSizeScale,
                     onToggleSubtitleBackground = viewModel::toggleSubtitleBackground,
-                    onToggleCrashReports = viewModel::toggleCrashReports,
                     onToggleHomeBlock = viewModel::toggleHomeBlock,
                     onSearch = viewModel::showSearch,
                     onEpg = viewModel::showEpg,
@@ -276,6 +276,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                         ?.itemKey,
                     onOpenChannel = viewModel::openLiveMatchChannel,
                     onRefresh = viewModel::refreshLiveOnSatMatches,
+                    onRefreshIfStale = viewModel::refreshLiveOnSatIfStale,
                     onBack = viewModel::backFromMenu,
                 )
 

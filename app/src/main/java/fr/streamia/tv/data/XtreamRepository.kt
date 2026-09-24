@@ -870,11 +870,10 @@ class XtreamRepository(context: Context) {
     companion object {
         const val DEFAULT_CATEGORY_PAGE_SIZE = 500
 
-        // Rescrapé à chaque ouverture de l'app (voir StreamiaViewModel.loadLiveOnSatMatches). Cette
-        // fenêtre évite seulement qu'une réouverture rapprochée (retour de veille, changement
-        // d'appli) ne relance un scrape à quelques secondes d'intervalle — liveonsat.com n'a pas
-        // d'API et ne doit pas être sollicité plus souvent que nécessaire.
-        private const val LIVE_ONSAT_CACHE_MAX_AGE_MS = 15 * 60_000L
+        // Chargé au démarrage de l'app puis relu depuis ce cache disque (page Matchs, accueil) :
+        // un nouveau scrape au plus toutes les 2 h, ou sur le bouton Actualiser. liveonsat.com n'a
+        // pas d'API et ne doit pas être sollicité plus souvent que nécessaire.
+        const val LIVE_ONSAT_CACHE_MAX_AGE_MS = 2 * 60 * 60_000L
 
         // Le programme du soir change beaucoup moins souvent que les matchs live. Deux heures
         // limitent les requêtes vers tv-programme.com tout en renouvelant les données dans la soirée.
@@ -884,13 +883,13 @@ class XtreamRepository(context: Context) {
         // re-scraper souvent, et tv-programme.com bloque (403) les requêtes trop fréquentes.
         private const val TV_PROGRAMME_NOW_CACHE_MAX_AGE_MS = 30 * 60_000L
 
-        // La grille beIN est utilisée pour le "maintenant" et le "suivant" : garder la même
-        // fraîcheur que le programme TV en direct pour basculer rapidement lors d'un changement.
-        private const val BEIN_SPORTS_GUIDE_CACHE_MAX_AGE_MS = 2 * 60_000L
+        // La grille couvre 24 h et "maintenant"/"suivant" est recalculé localement depuis le cache
+        // (boucle de 2 min de l'accueil) : re-télécharger plus souvent ne changerait rien.
+        private const val BEIN_SPORTS_GUIDE_CACHE_MAX_AGE_MS = 30 * 60_000L
 
-        // Grille en horaires d'horloge locale (sans date) : même fraîcheur que les autres rangées
-        // "maintenant"/"suivant" de l'accueil pour rester synchronisé avec les changements de créneau.
-        private const val UK_GUIDE_CACHE_MAX_AGE_MS = 2 * 60_000L
+        // Grille complète en cache, créneau courant recalculé localement : ~16 requêtes par
+        // téléchargement, donc pas plus d'une fois par demi-heure vers tvguideuk.com.
+        private const val UK_GUIDE_CACHE_MAX_AGE_MS = 30 * 60_000L
 private const val INDEX_REBUILD_MIN_DELTA = 200
 
         // Partagé par toutes les instances de XtreamRepository du process : le worker EPG en
