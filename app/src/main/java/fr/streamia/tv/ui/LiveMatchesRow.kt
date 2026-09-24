@@ -12,10 +12,15 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -27,22 +32,34 @@ import fr.streamia.tv.liveonsat.isLiveAt
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
 
-/** Une carte = un match en direct × une chaîne de la liste qui le diffuse (reconnue par le matcher). */
+/**
+ * Une carte = un match en direct × une chaîne de la liste qui le diffuse (reconnue par le matcher).
+ * [channel] null : chaînes encore en cours de rapprochement, la carte montre un squelette à la place.
+ */
 internal data class LiveMatchCard(
     val key: String,
     val match: ResolvedLiveOnSatMatch,
-    val channel: MediaEntry,
+    val channel: MediaEntry?,
 )
 
 /**
  * Matchs en direct de « Matchs du jour » dont au moins un diffuseur a été associé à une chaîne de la
  * liste. Une seule chaîne par diffuseur (la première : HD/FHD d'une même chaîne feraient doublon).
+ * Pendant le rapprochement ([resolvingChannels]), un match sans chaîne encore trouvée garde une carte
+ * avec la chaîne en squelette : les rencontres s'affichent d'abord, leurs chaînes dès qu'elles sont prêtes.
  */
-internal fun liveMatchCards(matches: List<ResolvedLiveOnSatMatch>, nowEpochSeconds: Long): List<LiveMatchCard> =
+internal fun liveMatchCards(
+    matches: List<ResolvedLiveOnSatMatch>,
+    nowEpochSeconds: Long,
+    resolvingChannels: Boolean = false,
+): List<LiveMatchCard> =
     matches
         .filter { it.isLiveAt(nowEpochSeconds) }
         .sortedBy { it.match.startEpochSeconds }
         .flatMap { resolved ->
+            if (resolvingChannels && resolved.matchedChannels.isEmpty()) {
+                return@flatMap listOf(LiveMatchCard("${liveOnSatMatchKey(resolved)}#pending", resolved, null))
+            }
             resolved.match.channels.mapNotNull { broadcaster ->
                 resolved.matchedChannels[broadcaster.name]?.firstOrNull()
             }
@@ -53,18 +70,25 @@ internal fun liveMatchCards(matches: List<ResolvedLiveOnSatMatch>, nowEpochSecon
 @Composable
 internal fun LiveMatchesRow(
     cards: List<LiveMatchCard>,
+    restoreItemKey: String?,
     onOpen: (LiveMatchCard) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val rowState = rememberLazyListState()
+    val restoreFocus = remember { FocusRequester() }
+    val restoreIndex = rememberRowFocusRestore(rowState, restoreItemKey, cards.map(LiveMatchCard::key), restoreFocus)
     Column(modifier.fillMaxWidth()) {
         SectionLabel("Matchs en direct", fontSize = 16.sp)
         Spacer(Modifier.height(10.dp))
         LazyRow(
+            state = rowState,
+            modifier = Modifier.focusRestorer(),
             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            items(cards, key = LiveMatchCard::key) { card ->
-                FocusableSurface(onClick = { onOpen(card) }, modifier = Modifier.width(260.dp).height(170.dp)) {
+            itemsIndexed(cards, key = { _, card -> card.key }) { index, card ->
+                val cardModifier = if (index == restoreIndex) Modifier.focusRequester(restoreFocus) else Modifier
+                FocusableSurface(onClick = { onOpen(card) }, modifier = cardModifier.width(260.dp).height(170.dp)) {
                     LiveMatchCardContent(card)
                 }
             }
@@ -85,10 +109,15 @@ private fun LiveMatchCardContent(card: LiveMatchCard) {
         Spacer(Modifier.height(6.dp))
         TeamRow(match.participantB, match.participantBLogoUrl)
         Spacer(Modifier.weight(1f))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            ChannelLogo(card.channel.iconUrl, card.channel.displayName, Modifier.size(36.dp), imagePadding = 2)
-            Spacer(Modifier.width(8.dp))
-            Text(card.channel.displayName, color = MutedInk, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        val channel = card.channel
+        if (channel == null) {
+            ChannelLineSkeleton(logo = 36.dp)
+        } else {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                ChannelLogo(channel.iconUrl, channel.displayName, Modifier.size(36.dp), imagePadding = 2)
+                Spacer(Modifier.width(8.dp))
+                Text(channel.displayName, color = MutedInk, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
         }
     }
 }

@@ -22,11 +22,23 @@ internal class TvProgrammeRepository(context: Context) {
     private val client = TvProgrammeClient()
     private val cache = TvProgrammeCache(context)
 
+    /** Cache assez récent pour que [loadTonight] ne contacte aucun site. */
+    suspend fun hasFreshCache(maxAgeMillis: Long): Boolean = withContext(Dispatchers.IO) {
+        isFresh(todayCache(), maxAgeMillis)
+    }
+
+    private fun todayCache() = cache.load()?.takeIf { it.localDate == today() }
+
+    private fun today() = LocalDate.now(ZoneId.of("Europe/Paris")).toString()
+
+    private fun isFresh(cached: CachedTvProgrammeData?, maxAgeMillis: Long) =
+        cached != null && System.currentTimeMillis() - cached.fetchedAtEpochMillis < maxAgeMillis
+
     suspend fun loadTonight(forceRefresh: Boolean, maxAgeMillis: Long): TvProgrammeFetchResult =
         withContext(Dispatchers.IO) {
-            val today = LocalDate.now(ZoneId.of("Europe/Paris")).toString()
-            val cached = cache.load()?.takeIf { it.localDate == today }
-            val fresh = cached != null && System.currentTimeMillis() - cached.fetchedAtEpochMillis < maxAgeMillis
+            val today = today()
+            val cached = todayCache()
+            val fresh = isFresh(cached, maxAgeMillis)
 
             if (!forceRefresh && fresh && cached != null) {
                 return@withContext TvProgrammeFetchResult(

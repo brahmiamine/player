@@ -157,7 +157,7 @@ private fun TeamLineSkeleton(logo: Dp) = Row(verticalAlignment = Alignment.Cente
 }
 
 @Composable
-private fun ChannelLineSkeleton(logo: Dp) = Row(verticalAlignment = Alignment.CenterVertically) {
+internal fun ChannelLineSkeleton(logo: Dp) = Row(verticalAlignment = Alignment.CenterVertically) {
     SkeletonBlock(Modifier.size(logo), RoundedCornerShape(9.dp))
     Spacer(Modifier.width(8.dp))
     SkeletonBlock(Modifier.width(90.dp).height(12.dp))

@@ -26,6 +26,18 @@ class LiveMatchCardsTest {
             ),
             now,
         )
-        assertEquals(listOf(1), cards.map { it.channel.id })
+        assertEquals(listOf(1), cards.map { it.channel?.id })
+    }
+
+    @Test
+    fun unresolvedLiveMatchesShowPendingChannelWhileResolving() {
+        val now = 10_000L
+        val matches = listOf(
+            match(now - 600, mapOf("beIN 1" to listOf(channel(1)))),
+            match(now - 300, emptyMap()), // pas encore rapproché → carte avec chaîne en squelette
+            match(now + 3_600, emptyMap()), // à venir → exclu
+        )
+        assertEquals(listOf(1, null), liveMatchCards(matches, now, resolvingChannels = true).map { it.channel?.id })
+        assertEquals(listOf(1), liveMatchCards(matches, now, resolvingChannels = false).map { it.channel?.id })
     }
 }

@@ -38,6 +38,8 @@ import androidx.tv.material3.Text
 import fr.streamia.tv.data.AppSettings
 import fr.streamia.tv.data.BufferMode
 import fr.streamia.tv.data.HomeBlock
+import fr.streamia.tv.data.JustWatchSection
+import fr.streamia.tv.data.homeBlock
 import fr.streamia.tv.data.HomePlace
 import fr.streamia.tv.data.LiveChannelSortOrder
 import fr.streamia.tv.data.LiveStreamFormat
@@ -128,14 +130,17 @@ fun SettingsScreen(
         listOf(
             HomeBlock.Resume to "Reprendre la lecture",
             HomeBlock.Favorites to "Favoris",
-            HomeBlock.Recommendations to "Recommandations",
+            HomeBlock.RecentChannels to "Dernières chaînes regardées",
+            HomeBlock.FootballScores to "Scores football",
+            HomeBlock.LiveMatches to "Matchs en direct",
             HomeBlock.TvProgrammeNow to "Programme TV FR en direct",
             HomeBlock.TvProgrammeTonight to "Programme TV FR ce soir",
             HomeBlock.BeinSportsNow to "beIN Sports en direct",
             HomeBlock.BeinSportsNext to "beIN Sports suivant",
             HomeBlock.UkGuideNow to "UK en direct",
             HomeBlock.UkGuideNext to "UK suivant",
-        )
+            HomeBlock.Recommendations to "Recommandations",
+        ) + JustWatchSection.entries.map { it.homeBlock to "${it.title} (JustWatch)" }
     }
 
     fun openChoices(

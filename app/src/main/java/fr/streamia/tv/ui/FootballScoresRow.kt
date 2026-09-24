@@ -21,6 +21,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -35,7 +36,9 @@ import fr.streamia.tv.ui.theme.MutedInk
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import java.time.Instant
@@ -162,6 +165,10 @@ private fun lookupBadge(team: String): String? {
     return badge.ifBlank { null }
 }
 
+/** Écussons déjà connus seulement : aucune requête, la rangée s'affiche sans attendre TheSportsDB. */
+private fun withKnownBadges(matches: List<FootballMatch>): List<FootballMatch> =
+    matches.map { it.copy(homeLogo = badgeCache[it.home]?.ifBlank { null }, awayLogo = badgeCache[it.away]?.ifBlank { null }) }
+
 private fun withBadges(matches: List<FootballMatch>): List<FootballMatch> {
     var budget = MAX_BADGE_LOOKUPS_PER_REFRESH
     fun badge(team: String): String? =
@@ -169,12 +176,56 @@ private fun withBadges(matches: List<FootballMatch>): List<FootballMatch> {
     return matches.map { it.copy(homeLogo = badge(it.home), awayLogo = badge(it.away)) }
 }
 
-// Matches du jour uniquement (en direct, terminés, à venir).
+// Matches du jour uniquement (en direct, terminés, à venir), sans écussons.
 private suspend fun fetchTodayMatches(): List<FootballMatch> = withContext(Dispatchers.IO) {
     fetchBbcMatches(LocalDate.now(ZoneId.systemDefault()).toString())
         .distinctBy { it.id }
         .let(::sortFootballMatches)
-        .let(::withBadges)
+}
+
+// Matchs du jour + écussons gardés sur disque : une relance de l'app affiche aussitôt les derniers
+// scores (actualisés juste après s'ils ont expiré) et ne recherche plus les écussons déjà trouvés.
+private const val FOOTBALL_CACHE_FILE = "football-scores.json"
+
+private fun FootballMatch.toJson(): JSONObject = JSONObject()
+    .put("id", id).put("competition", competition).put("competitionLogo", competitionLogo)
+    .put("home", home).put("homeLogo", homeLogo).put("homeScore", homeScore)
+    .put("away", away).put("awayLogo", awayLogo).put("awayScore", awayScore)
+    .put("state", state).put("status", status).put("kickoff", kickoff.toEpochMilli())
+
+private fun JSONObject.toFootballMatch() = FootballMatch(
+    id = getString("id"),
+    competition = optString("competition"),
+    competitionLogo = optString("competitionLogo").ifBlank { null },
+    home = optString("home"),
+    homeLogo = optString("homeLogo").ifBlank { null },
+    homeScore = optString("homeScore"),
+    away = optString("away"),
+    awayLogo = optString("awayLogo").ifBlank { null },
+    awayScore = optString("awayScore"),
+    state = getString("state"),
+    status = optString("status"),
+    kickoff = Instant.ofEpochMilli(getLong("kickoff")),
+)
+
+/** Recharge les écussons connus, et les matchs s'ils datent d'aujourd'hui (sinon null). */
+internal fun loadFootballDiskCache(file: File): Pair<Long, List<FootballMatch>>? = runCatching {
+    val root = JSONObject(file.readText())
+    root.optJSONObject("badges")?.let { badges -> badges.keys().forEach { badgeCache.putIfAbsent(it, badges.getString(it)) } }
+    val fetchedAt = root.getLong("fetchedAt")
+    if (Instant.ofEpochMilli(fetchedAt).atZone(ZoneId.systemDefault()).toLocalDate() != LocalDate.now()) return@runCatching null
+    val array = root.getJSONArray("matches")
+    fetchedAt to (0 until array.length()).map { array.getJSONObject(it).toFootballMatch() }
+}.getOrNull()
+
+internal fun saveFootballDiskCache(file: File, fetchedAt: Long, matches: List<FootballMatch>) = runCatching {
+    file.writeText(
+        JSONObject()
+            .put("fetchedAt", fetchedAt)
+            .put("matches", JSONArray(matches.map { it.toJson() }))
+            .put("badges", JSONObject(badgeCache.toMap()))
+            .toString(),
+    )
 }
 
 /**
@@ -191,7 +242,14 @@ internal fun FootballScoresRow(modifier: Modifier = Modifier) {
     var firstLoadDone by remember { mutableStateOf(footballCache != null) }
     // Seulement app visible : aucune requête en arrière-plan, rafraîchissement immédiat au retour.
     val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val cacheFile = File(LocalContext.current.filesDir, FOOTBALL_CACHE_FILE)
     LaunchedEffect(lifecycle) {
+        // Premier affichage depuis le lancement : derniers scores du jour lus sur disque, sans réseau.
+        if (footballCache == null) footballCache = withContext(Dispatchers.IO) { loadFootballDiskCache(cacheFile) }
+        footballCache?.let { (_, cached) ->
+            matches = cached
+            firstLoadDone = true
+        }
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             while (true) {
                 val now = System.currentTimeMillis()
@@ -199,8 +257,15 @@ internal fun FootballScoresRow(modifier: Modifier = Modifier) {
                 // nouvel essai avant le prochain créneau, au lieu d'insister en boucle.
                 val loaded = footballCache
                     ?.takeIf { (at, cached) -> now - at < footballRefreshDelayMs(cached, Instant.ofEpochMilli(now)) }
-                    ?: (now to (runCatching { fetchTodayMatches() }.getOrNull() ?: footballCache?.second.orEmpty()))
-                        .also { footballCache = it }
+                    ?: runCatching { fetchTodayMatches() }.getOrNull()?.let { fetched ->
+                        // Scores affichés tout de suite, écussons manquants cherchés ensuite.
+                        matches = withKnownBadges(fetched)
+                        firstLoadDone = true
+                        val withLogos = withContext(Dispatchers.IO) { withBadges(fetched) }
+                        withContext(Dispatchers.IO) { saveFootballDiskCache(cacheFile, now, withLogos) }
+                        (now to withLogos).also { footballCache = it }
+                    }
+                    ?: (now to footballCache?.second.orEmpty()).also { footballCache = it }
                 matches = loaded.second
                 firstLoadDone = true
                 delay(loaded.first + footballRefreshDelayMs(loaded.second, Instant.ofEpochMilli(now)) - now)

@@ -19,6 +19,9 @@ enum class PrayerMethod { MuslimWorldLeague, France, Tunisia, Egypt, UmmAlQura, 
 enum class HomeBlock {
     Resume,
     Favorites,
+    RecentChannels,
+    FootballScores,
+    LiveMatches,
     TvProgrammeNow,
     TvProgrammeTonight,
     BeinSportsNow,
@@ -27,7 +30,29 @@ enum class HomeBlock {
     UkGuideNext,
     /** Regroupe les deux rangées IA (principale + secondaire) : elles varient ensemble. */
     Recommendations,
+    JustWatchTopMoviesWeek,
+    JustWatchTopSeriesWeek,
+    JustWatchPopularMovies,
+    JustWatchPopularSeries,
+    JustWatchNewMovies,
+    JustWatchNewSeries,
+    ;
+
+    companion object {
+        /** Désactivés tant que l'utilisateur ne les coche pas (guide UK : ~60 requêtes par chargement). */
+        val DEFAULT_DISABLED: Set<HomeBlock> = setOf(UkGuideNow, UkGuideNext)
+    }
 }
+
+val JustWatchSection.homeBlock: HomeBlock
+    get() = when (this) {
+        JustWatchSection.TopMoviesWeek -> HomeBlock.JustWatchTopMoviesWeek
+        JustWatchSection.TopSeriesWeek -> HomeBlock.JustWatchTopSeriesWeek
+        JustWatchSection.PopularMovies -> HomeBlock.JustWatchPopularMovies
+        JustWatchSection.PopularSeries -> HomeBlock.JustWatchPopularSeries
+        JustWatchSection.NewMovies -> HomeBlock.JustWatchNewMovies
+        JustWatchSection.NewSeries -> HomeBlock.JustWatchNewSeries
+    }
 
 data class AppSettings(
     val livePreviewEnabled: Boolean = true,
@@ -45,7 +70,7 @@ data class AppSettings(
     /** Un code est enregistré (voir [AppSettingsStore.setParentalPin]) et le verrouillage est actif. */
     val parentalControlEnabled: Boolean = false,
     /** Blocs de l'accueil désactivés par l'utilisateur. Vide = tous les blocs actifs (défaut). */
-    val disabledHomeBlocks: Set<HomeBlock> = emptySet(),
+    val disabledHomeBlocks: Set<HomeBlock> = HomeBlock.DEFAULT_DISABLED,
     /** Ville de la météo et des prières de l'accueil ; null = détectée d'après la connexion. */
     val homePlace: HomePlace? = null,
     val prayerMethod: PrayerMethod = PrayerMethod.MuslimWorldLeague,
@@ -149,8 +174,10 @@ class AppSettingsStore(context: Context) {
         parentalControlEnabled = preferences.getBoolean(KEY_PARENTAL_ENABLED, false) &&
             preferences.getString(KEY_PARENTAL_PIN_HASH, null) != null,
         disabledHomeBlocks = preferences.getStringSet(KEY_DISABLED_HOME_BLOCKS, null)
-            .orEmpty()
-            .mapNotNullTo(mutableSetOf()) { name -> runCatching { HomeBlock.valueOf(name) }.getOrNull() },
+            ?.mapNotNullTo(mutableSetOf()) { name -> runCatching { HomeBlock.valueOf(name) }.getOrNull() }
+            // Réglages enregistrés avant l'arrivée des blocs désactivés par défaut : appliqués une fois.
+            ?.let { stored -> if (preferences.getBoolean(KEY_HOME_BLOCK_DEFAULTS_APPLIED, false)) stored else stored + HomeBlock.DEFAULT_DISABLED }
+            ?: HomeBlock.DEFAULT_DISABLED,
         homePlace = runCatching {
             HomePlace(
                 preferences.getString(KEY_HOME_PLACE_NAME, null)!!,
@@ -179,6 +206,7 @@ class AppSettingsStore(context: Context) {
             .putBoolean(KEY_SUBTITLE_BACKGROUND_ENABLED, settings.subtitleBackgroundEnabled)
             .putBoolean(KEY_PARENTAL_ENABLED, settings.parentalControlEnabled)
             .putStringSet(KEY_DISABLED_HOME_BLOCKS, settings.disabledHomeBlocks.mapTo(mutableSetOf()) { it.name })
+            .putBoolean(KEY_HOME_BLOCK_DEFAULTS_APPLIED, true)
             .putString(KEY_HOME_PLACE_NAME, settings.homePlace?.name)
             .putString(KEY_HOME_PLACE_LATITUDE, settings.homePlace?.latitude?.toString())
             .putString(KEY_HOME_PLACE_LONGITUDE, settings.homePlace?.longitude?.toString())
@@ -275,6 +303,7 @@ class AppSettingsStore(context: Context) {
         const val KEY_SUBTITLE_BACKGROUND_ENABLED = "subtitle_background_enabled"
         const val KEY_PARENTAL_ENABLED = "parental_control_enabled"
         const val KEY_DISABLED_HOME_BLOCKS = "disabled_home_blocks"
+        const val KEY_HOME_BLOCK_DEFAULTS_APPLIED = "home_block_defaults_applied"
         const val KEY_HOME_PLACE_NAME = "home_place_name"
         const val KEY_HOME_PLACE_LATITUDE = "home_place_latitude"
         const val KEY_HOME_PLACE_LONGITUDE = "home_place_longitude"

@@ -20,6 +20,12 @@ internal class BeinSportsGuideRepository(context: Context) {
     private val client = BeinSportsClient()
     private val cache = BeinSportsGuideCache(context)
 
+    /** Cache assez récent pour que [loadGuide] ne contacte aucun site. */
+    suspend fun hasFreshCache(maxAgeMillis: Long): Boolean = withContext(Dispatchers.IO) {
+        val age = cache.load()?.let { System.currentTimeMillis() - it.fetchedAtEpochMillis } ?: return@withContext false
+        age in 0 until minOf(maxAgeMillis, FALLBACK_MAX_AGE_MS)
+    }
+
     suspend fun loadGuide(
         forceRefresh: Boolean,
         maxAgeMillis: Long,

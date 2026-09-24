@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -29,6 +30,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.SpanStyle
@@ -57,10 +59,10 @@ import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.domain.isVisualSeparator
 import fr.streamia.tv.recommendation.RecommendationRow
+import fr.streamia.tv.ukguide.ResolvedUkProgrammeItem
 import fr.streamia.tv.recommendation.RecommendedMedia
 import fr.streamia.tv.tvprogramme.ResolvedTvProgrammeItem
 import fr.streamia.tv.tvprogramme.ResolvedTvProgrammeNowItem
-import fr.streamia.tv.ukguide.ResolvedUkProgrammeItem
 import fr.streamia.tv.ui.theme.Danger
 import fr.streamia.tv.ui.theme.FocusBlueBright
 import fr.streamia.tv.ui.theme.HeadingWeight
@@ -100,6 +102,8 @@ fun HomeScreen(
     catalogLoading: Boolean = false,
     resumeRowEnabled: Boolean = true,
     favoritesRowEnabled: Boolean = true,
+    footballScoresEnabled: Boolean = true,
+    recentChannelsEnabled: Boolean = true,
     recommendationRows: List<RecommendationRow> = emptyList(),
     tvProgrammeNow: List<ResolvedTvProgrammeNowItem> = emptyList(),
     tvProgrammeTonight: List<ResolvedTvProgrammeItem> = emptyList(),
@@ -111,9 +115,11 @@ fun HomeScreen(
     /** Blocs pas encore chargés une première fois : rangée squelette à la place du contenu. */
     pendingBlocks: Set<HomeBlock> = emptySet(),
     liveMatchesPending: Boolean = false,
+    liveMatchesResolving: Boolean = false,
     restoreContext: ContentReturnContext? = null,
     focusTarget: HomeFocusTarget? = null,
     onFocusConsumed: () -> Unit = {},
+    onRestoreConsumed: () -> Unit = {},
     onOpenSection: (MediaType) -> Unit,
     onSettings: () -> Unit,
     onSearch: () -> Unit,
@@ -132,7 +138,8 @@ fun HomeScreen(
     val firstFocus = remember { FocusRequester() }
     val gridFocusRequester = remember { FocusRequester() }
     val restoringHome = restoreContext?.origin == ContentReturnOrigin.Home
-    LaunchedEffect(restoringHome, focusTarget) {
+    // À l'arrivée seulement : la cible de retour, une fois consommée, ne doit pas renvoyer le focus à la grille.
+    LaunchedEffect(Unit) {
         if (!restoringHome && focusTarget == null) runCatching { firstFocus.requestFocus() }
     }
 
@@ -190,7 +197,8 @@ fun HomeScreen(
     }
 
     // 10 dernières chaînes regardées : l'historique est déjà trié du plus récent au plus ancien.
-    val recentChannelCards = remember(catalog, library.history, library.hiddenEntries, hiddenCategoryIdsByType) {
+    val recentChannelCards = remember(catalog, library.history, library.hiddenEntries, hiddenCategoryIdsByType, recentChannelsEnabled) {
+        if (!recentChannelsEnabled) return@remember emptyList()
         library.history.asSequence()
             .filter {
                 it.entry.type == MediaType.Live &&
@@ -213,8 +221,8 @@ fun HomeScreen(
             delay(TV_PROGRAMME_PROGRESS_REFRESH_MS)
         }
     }
-    val liveMatchCards = remember(liveMatches, liveRowsNowEpochMillis) {
-        liveMatchCards(liveMatches, liveRowsNowEpochMillis / 1000)
+    val liveMatchCards = remember(liveMatches, liveRowsNowEpochMillis, liveMatchesResolving) {
+        liveMatchCards(liveMatches, liveRowsNowEpochMillis / 1000, liveMatchesResolving)
     }
     val tvProgrammeNowEpochMillis = liveRowsNowEpochMillis
     val beinNowEpochMillis = liveRowsNowEpochMillis
@@ -273,18 +281,24 @@ fun HomeScreen(
         ukGuideNow,
         ukGuideNext,
         recommendationRows,
+        footballScoresEnabled,
+        liveMatchesPending,
+        pendingBlocks,
     ) {
         buildList {
             if (resumeCards.isNotEmpty()) add(HomeRowKey.Resume)
             if (favoriteCards.isNotEmpty()) add(HomeRowKey.Favorites)
-            if (liveMatchCards.isNotEmpty()) add(HomeRowKey.LiveMatches)
             if (recentChannelCards.isNotEmpty()) add(HomeRowKey.RecentChannels)
-            if (tvProgrammeNow.isNotEmpty()) add(HomeRowKey.TvProgrammeNow)
-            if (tvProgrammeTonight.isNotEmpty()) add(HomeRowKey.TvProgrammeTonight)
-            if (beinSportsNow.isNotEmpty()) add(HomeRowKey.BeinSportsNow)
-            if (beinSportsNext.isNotEmpty()) add(HomeRowKey.BeinSportsNext)
-            if (ukGuideNow.isNotEmpty()) add(HomeRowKey.UkGuideNow)
-            if (ukGuideNext.isNotEmpty()) add(HomeRowKey.UkGuideNext)
+            // Même éléments que la LazyColumn, squelettes compris (sinon l'index de défilement se décale).
+            if (footballScoresEnabled) add("football-scores")
+            if (liveMatchCards.isNotEmpty() || liveMatchesPending) add(HomeRowKey.LiveMatches)
+            if (tvProgrammeNow.isNotEmpty() || HomeBlock.TvProgrammeNow in pendingBlocks) add(HomeRowKey.TvProgrammeNow)
+            if (tvProgrammeTonight.isNotEmpty() || HomeBlock.TvProgrammeTonight in pendingBlocks) add(HomeRowKey.TvProgrammeTonight)
+            if (beinSportsNow.isNotEmpty() || HomeBlock.BeinSportsNow in pendingBlocks) add(HomeRowKey.BeinSportsNow)
+            if (beinSportsNext.isNotEmpty() || HomeBlock.BeinSportsNext in pendingBlocks) add(HomeRowKey.BeinSportsNext)
+            if (ukGuideNow.isNotEmpty() || HomeBlock.UkGuideNow in pendingBlocks) add(HomeRowKey.UkGuideNow)
+            if (ukGuideNext.isNotEmpty() || HomeBlock.UkGuideNext in pendingBlocks) add(HomeRowKey.UkGuideNext)
+            if (recommendationRows.isEmpty() && HomeBlock.Recommendations in pendingBlocks) repeat(2) { add("recommendations-skeleton") }
             recommendationRows.forEach { row -> add(HomeRowKey.recommendation(row.kind)) }
         }
     }
@@ -319,6 +333,9 @@ fun HomeScreen(
     LazyColumn(
         state = homeListState,
         modifier = Modifier
+            // Carte (ou repli) refocalisée : la cible est consommée, sinon chaque actualisation de
+            // rangée referait défiler l'accueil et un retour de Paramètres viserait encore la carte.
+            .onFocusChanged { if (it.hasFocus && restoringHome) onRestoreConsumed() }
             .fillMaxSize()
             .padding(horizontal = 46.dp, vertical = 30.dp),
     ) {
@@ -409,23 +426,6 @@ fun HomeScreen(
             }
         }
 
-        if (liveMatchCards.isNotEmpty()) {
-            item {
-                LiveMatchesRow(
-                    cards = liveMatchCards,
-                    onOpen = { card -> onOpenHomeEntry(card.channel, HomeRowKey.LiveMatches, card.key) },
-                    modifier = Modifier.padding(bottom = CardRowSpacing),
-                )
-            }
-        } else if (liveMatchesPending) {
-            item {
-                Column(Modifier.fillMaxWidth()) {
-                    SkeletonRow("Matchs en direct") { LiveMatchCardSkeleton() }
-                    Spacer(Modifier.height(CardRowSpacing))
-                }
-            }
-        }
-
         if (recentChannelCards.isNotEmpty()) {
             item {
                 Column(Modifier.fillMaxWidth()) {
@@ -446,8 +446,30 @@ fun HomeScreen(
             }
         }
 
-        item(key = "football-scores") {
-            FootballScoresRow(Modifier.padding(bottom = CardRowSpacing))
+        if (footballScoresEnabled) {
+            item(key = "football-scores") {
+                FootballScoresRow(Modifier.padding(bottom = CardRowSpacing))
+            }
+        }
+
+        if (liveMatchCards.isNotEmpty()) {
+            item {
+                LiveMatchesRow(
+                    cards = liveMatchCards,
+                    restoreItemKey = restoreTarget
+                        ?.takeIf { it.homeRowKey == HomeRowKey.LiveMatches }
+                        ?.itemKey,
+                    onOpen = { card -> card.channel?.let { onOpenHomeEntry(it, HomeRowKey.LiveMatches, card.key) } },
+                    modifier = Modifier.padding(bottom = CardRowSpacing),
+                )
+            }
+        } else if (liveMatchesPending) {
+            item {
+                Column(Modifier.fillMaxWidth()) {
+                    SkeletonRow("Matchs en direct") { LiveMatchCardSkeleton() }
+                    Spacer(Modifier.height(CardRowSpacing))
+                }
+            }
         }
 
         if (tvProgrammeNow.isNotEmpty()) {
@@ -797,14 +819,7 @@ private fun HomeCardRow(
 ) {
     val rowState = rememberLazyListState()
     val restoreFocus = remember { FocusRequester() }
-    LaunchedEffect(restoreItemKey, entries) {
-        val targetIndex = entries.indexOfFirst { (entry, _) -> entry.key == restoreItemKey }
-        if (targetIndex >= 0) {
-            rowState.scrollToItem(targetIndex)
-            delay(RESTORE_FOCUS_DELAY_MS)
-            runCatching { restoreFocus.requestFocus() }
-        }
-    }
+    val restoreIndex = rememberRowFocusRestore(rowState, restoreItemKey, entries.map { (entry, _) -> entry.key }, restoreFocus)
 
     Column(Modifier.fillMaxWidth()) {
         SectionLabel(title, fontSize = 16.sp)
@@ -812,7 +827,7 @@ private fun HomeCardRow(
         LazyRow(state = rowState, modifier = Modifier.focusRestorer(), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             itemsIndexed(entries, key = { _, (entry, _) -> entry.key }) { index, (entry, progress) ->
                 val cardModifier = when {
-                    entry.key == restoreItemKey -> Modifier.focusRequester(restoreFocus)
+                    index == restoreIndex -> Modifier.focusRequester(restoreFocus)
                     index == 0 && firstFocusRequester != null -> Modifier.focusRequester(firstFocusRequester)
                     else -> Modifier
                 }
@@ -924,6 +939,28 @@ private fun UkGuideProgrammeRow(
     )
 }
 
+/**
+ * Retour sur l'accueil vers une carte de cette rangée : la fait défiler à l'écran puis lui rend le
+ * focus. Carte disparue entre-temps (match terminé, rangée recalculée) : la première carte le reçoit,
+ * pour que la télécommande ne reste jamais sans focus. Renvoie l'index de la carte à refocaliser, ou -1.
+ */
+@Composable
+internal fun rememberRowFocusRestore(
+    rowState: LazyListState,
+    restoreItemKey: String?,
+    keys: List<String>,
+    focus: FocusRequester,
+): Int {
+    val index = if (restoreItemKey == null || keys.isEmpty()) -1 else keys.indexOf(restoreItemKey).coerceAtLeast(0)
+    LaunchedEffect(restoreItemKey, index) {
+        if (index < 0) return@LaunchedEffect
+        rowState.scrollToItem(index)
+        delay(RESTORE_FOCUS_DELAY_MS)
+        runCatching { focus.requestFocus() }
+    }
+    return index
+}
+
 /** Rangée commune aux guides (FR, beIN, UK) : titre, défilement horizontal, restauration du focus. */
 @Composable
 private fun <T> ProgrammeRow(
@@ -936,14 +973,7 @@ private fun <T> ProgrammeRow(
 ) {
     val rowState = rememberLazyListState()
     val restoreFocus = remember { FocusRequester() }
-    LaunchedEffect(restoreItemKey, items) {
-        val targetIndex = items.indexOfFirst { key(it) == restoreItemKey }
-        if (targetIndex >= 0) {
-            rowState.scrollToItem(targetIndex)
-            delay(RESTORE_FOCUS_DELAY_MS)
-            runCatching { restoreFocus.requestFocus() }
-        }
-    }
+    val restoreIndex = rememberRowFocusRestore(rowState, restoreItemKey, items.map(key), restoreFocus)
 
     Column(Modifier.fillMaxWidth()) {
         SectionLabel(title, fontSize = 16.sp)
@@ -951,7 +981,7 @@ private fun <T> ProgrammeRow(
         LazyRow(state = rowState, modifier = Modifier.focusRestorer(), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             itemsIndexed(items, key = { _, item -> key(item) }) { index, item ->
                 val cardModifier = when {
-                    key(item) == restoreItemKey -> Modifier.focusRequester(restoreFocus)
+                    index == restoreIndex -> Modifier.focusRequester(restoreFocus)
                     index == 0 && firstFocusRequester != null -> Modifier.focusRequester(firstFocusRequester)
                     else -> Modifier
                 }
@@ -1069,14 +1099,7 @@ private fun HomeRecommendationRow(
 ) {
     val rowState = rememberLazyListState()
     val restoreFocus = remember { FocusRequester() }
-    LaunchedEffect(restoreItemKey, row.items) {
-        val targetIndex = row.items.indexOfFirst { it.entry.key == restoreItemKey }
-        if (targetIndex >= 0) {
-            rowState.scrollToItem(targetIndex)
-            delay(RESTORE_FOCUS_DELAY_MS)
-            runCatching { restoreFocus.requestFocus() }
-        }
-    }
+    val restoreIndex = rememberRowFocusRestore(rowState, restoreItemKey, row.items.map { it.entry.key }, restoreFocus)
 
     Column(Modifier.fillMaxWidth()) {
         SectionLabel(row.title, fontSize = 16.sp)
@@ -1084,7 +1107,7 @@ private fun HomeRecommendationRow(
         LazyRow(state = rowState, modifier = Modifier.focusRestorer(), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             itemsIndexed(row.items, key = { _, recommended -> recommended.entry.key }) { index, recommended ->
                 val cardModifier = when {
-                    recommended.entry.key == restoreItemKey -> Modifier.focusRequester(restoreFocus)
+                    index == restoreIndex -> Modifier.focusRequester(restoreFocus)
                     index == 0 && firstFocusRequester != null -> Modifier.focusRequester(firstFocusRequester)
                     else -> Modifier
                 }

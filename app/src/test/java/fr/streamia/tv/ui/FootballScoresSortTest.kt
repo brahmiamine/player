@@ -1,7 +1,9 @@
 package fr.streamia.tv.ui
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
+import java.io.File
 import java.time.Instant
 
 class FootballScoresSortTest {
@@ -23,5 +25,19 @@ class FootballScoresSortTest {
         assertEquals(60_000L, footballRefreshDelayMs(listOf(match("a", "pre", 10_600)), now))
         assertEquals(900_000L, footballRefreshDelayMs(listOf(match("a", "pre", 20_000), match("b", "post", 1)), now))
         assertEquals(900_000L, footballRefreshDelayMs(emptyList(), now))
+    }
+
+    @Test
+    fun diskCacheKeepsTodayMatchesOnly() {
+        val file = File.createTempFile("football", ".json").apply { deleteOnExit() }
+        val today = System.currentTimeMillis()
+        val matches = listOf(
+            FootballMatch("1", "Premier League", "logo", "Arsenal", null, "2", "Chelsea", "badge", "1", "in", "67'", Instant.ofEpochSecond(1_000)),
+        )
+        saveFootballDiskCache(file, today, matches)
+        assertEquals(today to matches, loadFootballDiskCache(file))
+
+        saveFootballDiskCache(file, today - 2 * 24 * 60 * 60_000L, matches)
+        assertNull(loadFootballDiskCache(file))
     }
 }

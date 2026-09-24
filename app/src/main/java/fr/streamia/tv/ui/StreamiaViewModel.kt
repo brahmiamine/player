@@ -17,6 +17,7 @@ import fr.streamia.tv.data.HomePlace
 import fr.streamia.tv.data.HomeWeatherClient
 import fr.streamia.tv.data.PrayerMethod
 import fr.streamia.tv.data.JustWatchSection
+import fr.streamia.tv.data.homeBlock
 import fr.streamia.tv.data.LoadedCatalog
 import fr.streamia.tv.data.PlaylistProfile
 import fr.streamia.tv.data.UpdateCheckResult
@@ -89,6 +90,8 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     private val recommendationEngine = RecommendationEngine()
     private var homeRecommendationBuildSequence = 0L
     private var homeRecommendationJob: Job? = null
+    private var justWatchJob: Job? = null
+    private var justWatchRowsProfileId: String? = null
     private var homeRecommendationLastBuiltProfileId: String? = null
     private var homeRecommendationLastBuiltAtMillis = 0L
     private val liveOnSatChannelMatcher = ChannelMatcher()
@@ -161,12 +164,12 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     val playerState: StateFlow<PlayerUiState> = _playerState.asStateFlow()
 
     init {
-        _uiState.value = StreamiaUiState(
+        resetUiState(StreamiaUiState(
             booting = true,
             screen = StreamiaScreen.Login,
             profiles = repository.profiles(),
             appSettings = repository.appSettings(),
-        )
+        ))
     }
 
     fun finishStartup() {
@@ -186,7 +189,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         }
         val library = repository.library(profileId)
         val startupCatalog = Catalog(emptyList(), listOf(entry))
-        _uiState.value = StreamiaUiState(
+        resetUiState(StreamiaUiState(
             booting = false,
             busy = false,
             catalogHydrating = true,
@@ -199,14 +202,14 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             library = library,
             appSettings = repository.appSettings(),
             resumePositionMs = library.history.firstOrNull { it.entry.key == entry.key }?.positionMs ?: 0L,
-        )
+        ))
         // Après une fermeture complète Android recrée le ViewModel, donc le petit cache RAM EPG
         // repart vide. La base SQLite, elle, est persistante : la relire immédiatement ici remet
         // la journée courante en mémoire sans aucun appel réseau, même quand le démarrage reprend
         // directement le dernier flux Live et contourne openProfile()/showCatalog().
         warmEpgGuideCache(profileId)
         // Reprise directe dans le lecteur : la vidéo passe d'abord, les guides tiers attendent.
-        scheduleSecondaryLoads(STARTUP_SECONDARY_LOADS_PLAYER_DELAY_MS)
+        scheduleSecondaryLoads(fromPlayer = true)
         viewModelScope.launch {
             // Catalogue déjà résolu (favoris/ordre déjà appliqués) persisté lors d'une précédente
             // réconciliation réussie pour ce profil : s'il est encore valide pour l'organisation
@@ -318,7 +321,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             val credentials = profile?.credentialsOrNull()
             val cachedCatalog = if (credentials != null) repository.cachedCatalog(profileId) else null
             if (credentials != null && cachedCatalog != null) {
-                _uiState.value = StreamiaUiState(
+                resetUiState(StreamiaUiState(
                     booting = false,
                     busy = false,
                     screen = StreamiaScreen.Home,
@@ -329,10 +332,10 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                     profiles = repository.profiles(),
                     library = repository.library(profileId),
                     appSettings = repository.appSettings(),
-                )
+                ))
                 warmEpgGuideCache(profileId)
                 refreshHomeRecommendations()
-                scheduleSecondaryLoads(STARTUP_SECONDARY_LOADS_HOME_DELAY_MS)
+                scheduleSecondaryLoads()
                 try {
                     val loaded = repository.openProfile(profileId, knownCache = cachedCatalog)
                     mergeCatalog(loaded)
@@ -647,6 +650,13 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         _uiState.update { if (it.homeFocusTarget == null) it else it.copy(homeFocusTarget = null) }
     }
 
+    /** Consommé par l'accueil une fois la carte d'origine refocalisée (retour depuis un contenu). */
+    fun consumeHomeRestore() {
+        _uiState.update {
+            if (it.contentReturnContext?.origin == ContentReturnOrigin.Home) it.copy(contentReturnContext = null) else it
+        }
+    }
+
     /** Consommé par le navigateur une fois le contenu rouvert refocalisé (retour depuis une fiche). */
     fun consumeBrowserRestore() {
         _uiState.update {
@@ -829,6 +839,11 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                     it.disabledHomeBlocks + block
                 },
             )
+        }
+        // Bloc réactivé : ses données n'ont pas été chargées pendant qu'il était masqué.
+        if (block !in _uiState.value.appSettings.disabledHomeBlocks) {
+            homeGuides.forEach { it.load(forceRefresh = false) }
+            if (block == HomeBlock.Recommendations || JustWatchSection.entries.any { it.homeBlock == block }) refreshHomeRecommendations(force = true)
         }
     }
 
@@ -1764,6 +1779,8 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             .filter { it.type != MediaType.Live && it.key in excludedCategoryKeys }
             .mapTo(mutableSetOf()) { it.id }
 
+        loadJustWatchRows(profileId, library.hiddenEntries, excludedCategoryIds)
+
         val sequence = ++homeRecommendationBuildSequence
         homeRecommendationJob?.cancel()
 
@@ -1839,35 +1856,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 boostsBySource = boostsBySource,
             )
             val snapshot = recommendationEngine.buildSnapshot(profileId, context)
-            // Sections JustWatch en parallèle : chacune fait plusieurs appels réseau et recherches.
-            val justWatchRows = JustWatchSection.entries.map { section ->
-                async {
-                    val entries = runCatching { repository.justWatch(profileId, section, JUSTWATCH_ROW_LIMIT * 2) }
-                        .getOrDefault(emptyList())
-                        .filterNot { it.key in library.hiddenEntries || it.categoryId in excludedCategoryIds }
-                        .take(JUSTWATCH_ROW_LIMIT)
-                    // Un Top 10 n'a que 10 titres : quelques-uns suffisent à former une rangée.
-                    val minimum = when (section) {
-                        JustWatchSection.TopMoviesWeek, JustWatchSection.TopSeriesWeek -> 1
-                        else -> JUSTWATCH_ROW_MIN
-                    }
-                    entries.takeIf { it.size >= minimum }?.let { items ->
-                        RecommendationRow(
-                            when (section) {
-                                JustWatchSection.TopMoviesWeek -> RecommendationRowKind.JustWatchTopMoviesWeek
-                                JustWatchSection.TopSeriesWeek -> RecommendationRowKind.JustWatchTopSeriesWeek
-                                JustWatchSection.PopularMovies -> RecommendationRowKind.JustWatchPopularMovies
-                                JustWatchSection.PopularSeries -> RecommendationRowKind.JustWatchPopularSeries
-                                JustWatchSection.NewMovies -> RecommendationRowKind.JustWatchNewMovies
-                                JustWatchSection.NewSeries -> RecommendationRowKind.JustWatchNewSeries
-                            },
-                            section.title,
-                            items.map { RecommendedMedia(it, score = 0.0) },
-                        )
-                    }
-                }
-            }.awaitAll().filterNotNull()
-            val rows = snapshot.rows + justWatchRows
+            val rows = snapshot.rows
 
             if (sequence != homeRecommendationBuildSequence || _uiState.value.activeProfileId != profileId) return@launch
             homeRecommendationLastBuiltProfileId = profileId
@@ -1875,6 +1864,60 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             _uiState.update { current ->
                 if (current.activeProfileId == profileId) current.copy(homeRecommendationRows = rows) else current
             }
+        }
+    }
+
+    /**
+     * Rangées JustWatch, indépendantes des recommandations IA (plus besoin d'attendre leur calcul).
+     * Celles gardées sur disque s'affichent tout de suite ; les expirées sont recalculées (réseau +
+     * rapprochement avec la playlist) en parallèle, l'ancienne rangée restant affichée en attendant.
+     */
+    private fun loadJustWatchRows(profileId: String, hiddenEntries: Set<String>, excludedCategoryIds: Set<String>) {
+        justWatchJob?.cancel()
+        // Autre liste : ses rangées ne doivent pas rester affichées sous les contenus de la nouvelle.
+        if (justWatchRowsProfileId != profileId) _uiState.update { it.copy(homeJustWatchRows = emptyList()) }
+        justWatchRowsProfileId = profileId
+        val disabledBlocks = _uiState.value.appSettings.disabledHomeBlocks
+        justWatchJob = viewModelScope.launch(Dispatchers.Default) {
+            JustWatchSection.entries.filter { it.homeBlock !in disabledBlocks }.forEach { section ->
+                launch {
+                    fun publish(entries: List<MediaEntry>) = publishJustWatchRow(profileId, section, entries, hiddenEntries, excludedCategoryIds)
+                    val cached = runCatching { repository.cachedJustWatch(profileId, section) }.getOrNull()
+                    cached?.let { publish(it.entries) }
+                    if (cached?.fresh == true) return@launch
+                    // Échec réseau : la rangée gardée sur disque reste affichée.
+                    runCatching { repository.justWatch(profileId, section, JUSTWATCH_ROW_LIMIT * 2) }.onSuccess(::publish)
+                }
+            }
+        }
+    }
+
+    private fun publishJustWatchRow(
+        profileId: String,
+        section: JustWatchSection,
+        entries: List<MediaEntry>,
+        hiddenEntries: Set<String>,
+        excludedCategoryIds: Set<String>,
+    ) {
+        val items = entries.filterNot { it.key in hiddenEntries || it.categoryId in excludedCategoryIds }.take(JUSTWATCH_ROW_LIMIT)
+        // Un Top 10 n'a que 10 titres : quelques-uns suffisent à former une rangée.
+        val minimum = when (section) {
+            JustWatchSection.TopMoviesWeek, JustWatchSection.TopSeriesWeek -> 1
+            else -> JUSTWATCH_ROW_MIN
+        }
+        val kind = when (section) {
+            JustWatchSection.TopMoviesWeek -> RecommendationRowKind.JustWatchTopMoviesWeek
+            JustWatchSection.TopSeriesWeek -> RecommendationRowKind.JustWatchTopSeriesWeek
+            JustWatchSection.PopularMovies -> RecommendationRowKind.JustWatchPopularMovies
+            JustWatchSection.PopularSeries -> RecommendationRowKind.JustWatchPopularSeries
+            JustWatchSection.NewMovies -> RecommendationRowKind.JustWatchNewMovies
+            JustWatchSection.NewSeries -> RecommendationRowKind.JustWatchNewSeries
+        }
+        val row = items.takeIf { it.size >= minimum }?.let { RecommendationRow(kind, section.title, it.map { entry -> RecommendedMedia(entry, score = 0.0) }) }
+        _uiState.update { current ->
+            if (current.activeProfileId != profileId) return@update current
+            // Ordre JustWatch fixe (ordre de RecommendationRowKind), quel que soit l'ordre d'arrivée.
+            current.copy(homeJustWatchRows = (current.homeJustWatchRows.filterNot { it.kind == kind } + listOfNotNull(row)).sortedBy { it.kind.ordinal })
         }
     }
 
@@ -2021,13 +2064,17 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         private var raw: Raw? = null
 
         fun load(forceRefresh: Boolean) {
-            val profileId = _uiState.value.activeProfileId ?: return
+            if (_uiState.value.activeProfileId == null) return
+            // Bloc désactivé dans Paramètres : aucun scrape (rechargé à sa réactivation, voir toggleHomeBlock).
+            if (blocks.all { it in _uiState.value.appSettings.disabledHomeBlocks }) return
             if (!forceRefresh && loadJob?.isActive == true) return
             if (forceRefresh) loadJob?.cancel()
             val sequence = ++loadSequence
             loadJob = viewModelScope.launch {
                 runCatching { fetch(forceRefresh) }.onSuccess { fetched ->
-                    if (sequence != loadSequence || _uiState.value.activeProfileId != profileId) return@onSuccess
+                    // Scrape commun à toutes les listes : gardé même si la liste a changé entre-temps,
+                    // resolve() le rapproche des chaînes de la liste active.
+                    if (sequence != loadSequence) return@onSuccess
                     raw = fetched
                     resolve()
                 }.onFailure { error ->
@@ -2066,12 +2113,13 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             }
         }
 
+        /**
+         * Changement de liste : seul le rapprochement en cours (chaînes de l'ancienne liste) est
+         * abandonné. Le scrape, commun à toutes les listes, est gardé : la nouvelle liste l'affiche
+         * dès son catalogue chargé, sans relire le cache ni rescraper.
+         */
         fun reset() {
-            loadJob?.cancel()
-            loadJob = null
-            loadSequence += 1
             resolveSequence += 1
-            raw = null
         }
     }
 
@@ -2352,6 +2400,15 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         }
     }
 
+    /**
+     * Nouvel état complet (ouverture d'une liste, déconnexion) : garde ce qui ne dépend d'aucune
+     * liste — la météo de l'en-tête, sinon absente jusqu'à la prochaine requête (30 min).
+     */
+    private fun resetUiState(state: StreamiaUiState) {
+        val previous = _uiState.value
+        _uiState.value = state.copy(weather = previous.weather, weatherPlace = previous.weatherPlace)
+    }
+
     private fun showLogin() {
         previousLiveEntry = null
         lastLiveEntry = null
@@ -2361,6 +2418,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         epgGuideMemoryCache.clear()
         homeRecommendationJob?.cancel()
         homeRecommendationJob = null
+        justWatchJob?.cancel()
         homeRecommendationBuildSequence += 1
         homeRecommendationLastBuiltProfileId = null
         homeRecommendationLastBuiltAtMillis = 0L
@@ -2372,17 +2430,17 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         epgSyncProfileId = null
         epgChannelJob?.cancel()
         epgTickerJob?.cancel()
-        _uiState.value = StreamiaUiState(
+        resetUiState(StreamiaUiState(
             booting = false,
             screen = StreamiaScreen.Login,
             profiles = repository.profiles(),
             appSettings = repository.appSettings(),
-        )
+        ))
     }
 
     private suspend fun showCatalog(loaded: LoadedCatalog) {
         val presentation = repository.prepareCatalogPresentation(loaded.profileId, loaded.catalog)
-        _uiState.value = StreamiaUiState(
+        resetUiState(StreamiaUiState(
             booting = false,
             busy = false,
             screen = StreamiaScreen.Home,
@@ -2395,30 +2453,37 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             appSettings = repository.appSettings(),
             offline = loaded.source == CatalogSource.Cache,
             message = loaded.importSummary,
-        )
+        ))
         warmEpgGuideCache(loaded.profileId)
         ensureSectionLoaded(MediaType.Live)
         refreshHomeRecommendations()
-        scheduleSecondaryLoads(STARTUP_SECONDARY_LOADS_HOME_DELAY_MS)
+        scheduleSecondaryLoads()
     }
 
     /**
      * Guides tiers (scraping + parsing Jsoup) lancés après le premier affichage et l'un après
      * l'autre plutôt que tous en même temps que le catalogue et la première image vidéo : sur un
      * boîtier à 4 petits cœurs, ils se disputaient le CPU au moment où l'utilisateur navigue.
+     * Sur l'accueil, un guide dont le cache disque est encore frais n'a rien à scraper : il est
+     * chargé tout de suite (lecture de fichier), sans squelette pendant le délai.
      */
-    private fun scheduleSecondaryLoads(initialDelayMs: Long) {
+    private fun scheduleSecondaryLoads(fromPlayer: Boolean = false) {
         secondaryLoadsJob?.cancel()
         secondaryLoadsJob = viewModelScope.launch {
-            delay(initialDelayMs)
-            val loads = listOf<() -> Unit>(
-                { tvProgrammeNowGuide.load(forceRefresh = false) },
-                { beinSportsGuide.load(forceRefresh = false) },
-                { ukGuide.load(forceRefresh = false) },
-                { tvProgrammeTonightGuide.load(forceRefresh = false) },
-                { loadLiveOnSatMatches(forceRefresh = false) },
+            val loads = listOf<Pair<suspend () -> Boolean, () -> Unit>>(
+                repository::hasFreshTvProgrammeNowCache to { tvProgrammeNowGuide.load(forceRefresh = false) },
+                repository::hasFreshBeinSportsGuideCache to { beinSportsGuide.load(forceRefresh = false) },
+                repository::hasFreshUkGuideCache to { ukGuide.load(forceRefresh = false) },
+                repository::hasFreshTvProgrammeTonightCache to { tvProgrammeTonightGuide.load(forceRefresh = false) },
+                repository::hasFreshLiveOnSatCache to { loadLiveOnSatMatches(forceRefresh = false) },
             )
-            loads.forEach { load ->
+            // Reprise directe dans le lecteur : la vidéo passe d'abord, même les lectures de cache attendent.
+            val (cached, scraped) = loads.partition { (hasFreshCache, _) ->
+                !fromPlayer && runCatching { hasFreshCache() }.getOrDefault(false)
+            }
+            cached.forEach { (_, load) -> load() }
+            delay(if (fromPlayer) STARTUP_SECONDARY_LOADS_PLAYER_DELAY_MS else STARTUP_SECONDARY_LOADS_HOME_DELAY_MS)
+            scraped.forEach { (_, load) ->
                 load()
                 delay(SECONDARY_LOADS_GAP_MS)
             }
@@ -2469,11 +2534,16 @@ data class StreamiaUiState(
     val epgSelectedDate: LocalDate? = null,
     val epgLoading: Boolean = false,
     val homeRecommendationRows: List<RecommendationRow> = emptyList(),
+    /** Rangées JustWatch, chargées à part (cache disque puis actualisation) : voir loadJustWatchRows. */
+    val homeJustWatchRows: List<RecommendationRow> = emptyList(),
     /** Blocs de l'accueil dont le premier chargement n'est pas fini (squelette affiché). */
-    val homePendingBlocks: Set<HomeBlock> = HomeBlock.entries.toSet() - HomeBlock.Resume - HomeBlock.Favorites,
+    val homePendingBlocks: Set<HomeBlock> = setOf(
+        HomeBlock.TvProgrammeNow, HomeBlock.TvProgrammeTonight, HomeBlock.BeinSportsNow, HomeBlock.BeinSportsNext,
+        HomeBlock.UkGuideNow, HomeBlock.UkGuideNext, HomeBlock.Recommendations,
+    ),
     /** Premier chargement des matchs liveonsat pas encore fini (squelette « Matchs en direct »). */
     val liveOnSatPending: Boolean = true,
-    /** Rapprochement des chaînes liveonsat en cours (page Matchs : chaînes fantômes). */
+    /** Rapprochement des chaînes liveonsat en cours (page Matchs et accueil : chaînes fantômes). */
     val liveOnSatResolving: Boolean = false,
     val homeTvProgrammeNow: List<ResolvedTvProgrammeNowItem> = emptyList(),
     val homeTvProgrammeTonight: List<ResolvedTvProgrammeItem> = emptyList(),

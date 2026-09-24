@@ -35,6 +35,7 @@ import fr.streamia.tv.ui.theme.StreamiaTheme
 import fr.streamia.tv.player.LivePlaybackSession
 import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.recommendation.RecommendedMedia
+import fr.streamia.tv.recommendation.RecommendationRowKind
 import fr.streamia.tv.data.AppSettings
 import fr.streamia.tv.data.HomeBlock
 import androidx.compose.ui.viewinterop.AndroidView
@@ -100,19 +101,23 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     catalogLoading = state.catalogHydrating,
                     resumeRowEnabled = HomeBlock.Resume !in state.appSettings.disabledHomeBlocks,
                     favoritesRowEnabled = HomeBlock.Favorites !in state.appSettings.disabledHomeBlocks,
-                    recommendationRows = state.homeRecommendationRows.ifDisabled(HomeBlock.Recommendations, state.appSettings),
+                    footballScoresEnabled = HomeBlock.FootballScores !in state.appSettings.disabledHomeBlocks,
+                    recentChannelsEnabled = HomeBlock.RecentChannels !in state.appSettings.disabledHomeBlocks,
+                    recommendationRows = (state.homeRecommendationRows + state.homeJustWatchRows).filter { it.kind.homeBlock !in state.appSettings.disabledHomeBlocks },
                     tvProgrammeNow = state.homeTvProgrammeNow.ifDisabled(HomeBlock.TvProgrammeNow, state.appSettings),
                     tvProgrammeTonight = state.homeTvProgrammeTonight.ifDisabled(HomeBlock.TvProgrammeTonight, state.appSettings),
                     beinSportsNow = state.homeBeinSportsNow.ifDisabled(HomeBlock.BeinSportsNow, state.appSettings),
                     beinSportsNext = state.homeBeinSportsNext.ifDisabled(HomeBlock.BeinSportsNext, state.appSettings),
                     ukGuideNow = state.homeUkGuideNow.ifDisabled(HomeBlock.UkGuideNow, state.appSettings),
                     ukGuideNext = state.homeUkGuideNext.ifDisabled(HomeBlock.UkGuideNext, state.appSettings),
-                    liveMatches = state.liveOnSatMatches,
+                    liveMatches = state.liveOnSatMatches.ifDisabled(HomeBlock.LiveMatches, state.appSettings),
                     pendingBlocks = state.homePendingBlocks - state.appSettings.disabledHomeBlocks,
-                    liveMatchesPending = state.liveOnSatPending,
+                    liveMatchesPending = state.liveOnSatPending && HomeBlock.LiveMatches !in state.appSettings.disabledHomeBlocks,
+                    liveMatchesResolving = state.liveOnSatResolving,
                     restoreContext = state.contentReturnContext,
                     focusTarget = state.homeFocusTarget,
                     onFocusConsumed = viewModel::consumeHomeFocusTarget,
+                    onRestoreConsumed = viewModel::consumeHomeRestore,
                     onOpenSection = viewModel::openSection,
                     onSettings = viewModel::showSettings,
                     onSearch = viewModel::showSearch,
@@ -452,3 +457,15 @@ private fun BootScreen() {
 /** Bloc de l'accueil désactivable : la liste source disparaît, sans toucher au calcul en amont. */
 private fun <T> List<T>.ifDisabled(block: HomeBlock, settings: AppSettings): List<T> =
     if (block in settings.disabledHomeBlocks) emptyList() else this
+
+/** Chaque rangée JustWatch a son propre réglage ; les deux rangées IA partagent « Recommandations ». */
+private val RecommendationRowKind.homeBlock: HomeBlock
+    get() = when (this) {
+        RecommendationRowKind.JustWatchTopMoviesWeek -> HomeBlock.JustWatchTopMoviesWeek
+        RecommendationRowKind.JustWatchTopSeriesWeek -> HomeBlock.JustWatchTopSeriesWeek
+        RecommendationRowKind.JustWatchPopularMovies -> HomeBlock.JustWatchPopularMovies
+        RecommendationRowKind.JustWatchPopularSeries -> HomeBlock.JustWatchPopularSeries
+        RecommendationRowKind.JustWatchNewMovies -> HomeBlock.JustWatchNewMovies
+        RecommendationRowKind.JustWatchNewSeries -> HomeBlock.JustWatchNewSeries
+        else -> HomeBlock.Recommendations
+    }

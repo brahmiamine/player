@@ -27,13 +27,23 @@ internal class TvProgrammeNowRepository(context: Context) {
      * l'heure actuelle. Après un échec (403 anti-scraping, réseau), on attend [FAILURE_BACKOFF_MS]
      * avant de réessayer au lieu d'insister toutes les 2 minutes.
      */
+    /** Cache assez récent (et couvrant l'heure actuelle) pour que [loadNow] ne contacte aucun site. */
+    suspend fun hasFreshCache(maxAgeMillis: Long): Boolean = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
+        isFresh(cache.load(), now, maxAgeMillis)
+    }
+
+    private fun isFresh(cached: CachedTvProgrammeNowData?, now: Long, maxAgeMillis: Long) =
+        cached != null && now - cached.fetchedAtEpochMillis < maxAgeMillis &&
+            TvProgrammeNowParser.onAir(cached.programmes, now).isNotEmpty()
+
     suspend fun loadNow(forceRefresh: Boolean, maxAgeMillis: Long): TvProgrammeNowFetchResult =
         withContext(Dispatchers.IO) {
             val now = System.currentTimeMillis()
             val cached = cache.load()
             val cachedNow = cached?.let { TvProgrammeNowParser.onAir(it.programmes, now) }.orEmpty()
             val fromCache = cached?.let { TvProgrammeNowFetchResult(cachedNow, it.fetchedAtEpochMillis, fromCache = true) }
-            val fresh = fromCache != null && cachedNow.isNotEmpty() && now - fromCache.fetchedAtEpochMillis < maxAgeMillis
+            val fresh = isFresh(cached, now, maxAgeMillis)
 
             if (!forceRefresh && fresh) return@withContext fromCache!!
             if (!forceRefresh && now - lastFailureAtEpochMillis < FAILURE_BACKOFF_MS) {

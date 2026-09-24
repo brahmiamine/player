@@ -27,6 +27,12 @@ internal class LiveOnSatRepository(context: Context) {
     private val client = LiveOnSatClient()
     private val cache = LiveOnSatCache(context)
 
+    /** Cache assez récent pour que [loadMatches] ne contacte pas liveonsat.com. */
+    suspend fun hasFreshCache(maxAgeMillis: Long): Boolean = withContext(Dispatchers.IO) {
+        val cached = cache.load() ?: return@withContext false
+        System.currentTimeMillis() - cached.fetchedAtEpochMillis < maxAgeMillis
+    }
+
     /**
      * Réutilise le cache tant qu'il est plus récent que [maxAgeMillis], sauf si [forceRefresh].
      * Un nouveau scrape qui échoue retombe sur le cache existant plutôt que de faire échouer
