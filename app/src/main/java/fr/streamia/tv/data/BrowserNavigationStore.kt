@@ -30,6 +30,14 @@ class BrowserNavigationStore(context: Context, credentials: ServerCredentials) {
         return LiveNavigationSelection(categoryId, entryKey)
     }
 
+    /** Tri choisi pour cette catégorie depuis son bouton « Trier » ; null = tri par défaut de Paramètres. */
+    fun categorySort(type: MediaType, categoryId: String): VodSortOrder? =
+        preferences.getString(key(type, "sort:$categoryId"), null)?.let { runCatching { VodSortOrder.valueOf(it) }.getOrNull() }
+
+    fun saveCategorySort(type: MediaType, categoryId: String, order: VodSortOrder) {
+        preferences.edit().putString(key(type, "sort:$categoryId"), order.name).apply()
+    }
+
     fun saveCategory(type: MediaType, categoryId: String) {
         preferences.edit().putString(key(type, "category"), categoryId).apply()
     }

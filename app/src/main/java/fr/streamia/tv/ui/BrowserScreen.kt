@@ -144,8 +144,8 @@ fun BrowserScreen(
     onRememberContent: (MediaEntry) -> Unit,
     onLivePreviewWatched: (MediaEntry) -> Unit = {},
     onLocationChanged: (MediaType, String?) -> Unit,
-    onEnsureCategoryLoaded: (MediaType, String) -> Unit,
-    onLoadMoreInCategory: (MediaType, String) -> Unit,
+    onEnsureCategoryLoaded: (MediaType, String, VodSortOrder) -> Unit,
+    onLoadMoreInCategory: (MediaType, String, VodSortOrder) -> Unit,
     /** Chaîne lancée en plein écran depuis la liste affichée : le zapping parcourt cette liste. */
     onLiveEntrySelected: (MediaEntry, List<MediaEntry>) -> Unit = { entry, _ -> onEntrySelected(entry) },
     onHome: () -> Unit,
@@ -192,6 +192,15 @@ fun BrowserScreen(
             } else {
                 initialCategoryId ?: navigationStore.category(defaultType) ?: defaultCategoryId(catalog, defaultType)
             },
+        )
+    }
+
+    // Tri de la catégorie affichée : celui choisi via son bouton « Trier » (mémorisé par
+    // catégorie), sinon celui de Paramètres. Le Direct garde son propre tri des chaînes.
+    var categorySortOrder by remember(credentials, selectedType, selectedCategoryId, appSettings.vodSortOrder) {
+        mutableStateOf(
+            if (selectedType == MediaType.Live) VodSortOrder.Provider
+            else navigationStore.categorySort(selectedType, selectedCategoryId) ?: appSettings.vodSortOrder,
         )
     }
 
@@ -251,7 +260,7 @@ fun BrowserScreen(
             // Rien tant que la première page au tri courant n'est pas là, plutôt qu'un ordre
             // provisoire qui se réorganiserait sous les yeux de l'utilisateur.
             val paged = selectedType != MediaType.Live && catalog.isPaged
-            val pageKeys = vodPageKeys[Catalog.categoryKey(selectedType, selectedCategoryId)]
+            val pageKeys = vodPageKeys[vodPageKey(selectedType, selectedCategoryId, categorySortOrder)]
             val source = when {
                 !paged -> catalog.entriesIn(selectedType, selectedCategoryId)
                 pageKeys == null -> emptyList()
@@ -269,7 +278,7 @@ fun BrowserScreen(
             when {
                 selectedType == MediaType.Live -> sortedForLiveDisplay(filtered, appSettings.liveChannelSortOrder)
                 paged -> filtered
-                else -> sortedForVodDisplay(filtered, appSettings.vodSortOrder)
+                else -> sortedForVodDisplay(filtered, categorySortOrder)
             }
         }
     }
@@ -282,7 +291,7 @@ fun BrowserScreen(
     var computedEntries by remember(credentials) { mutableStateOf(location to computeEntries()) }
     if (computedEntries.first != location) computedEntries = location to computeEntries()
     LaunchedEffect(
-        catalog, favoriteEntriesForType, historyForType, excludedCategoryIds, library.hiddenEntries, vodPageKeys,
+        catalog, favoriteEntriesForType, historyForType, excludedCategoryIds, library.hiddenEntries, vodPageKeys, categorySortOrder,
         appSettings.liveChannelSortOrder, appSettings.vodSortOrder,
     ) {
         val target = location
@@ -305,14 +314,15 @@ fun BrowserScreen(
     }
     val currentCategoryKey = Catalog.categoryKey(selectedType, selectedCategoryId)
     // Pages absentes au tri courant (tri changé, liste actualisée) : relues sans quitter l'écran.
-    val pagesMissing = selectedType != MediaType.Live && catalog.isPaged && currentCategoryKey !in vodPageKeys
+    val pagesMissing = selectedType != MediaType.Live && catalog.isPaged &&
+        vodPageKey(selectedType, selectedCategoryId, categorySortOrder) !in vodPageKeys
     androidx.compose.runtime.LaunchedEffect(selectedType, selectedCategoryId, pagesMissing) {
         onLocationChanged(selectedType, selectedCategoryId)
         if (selectedType != MediaType.Live) {
             navigationStore.saveCategory(selectedType, selectedCategoryId)
         }
         if (selectedCategoryId != FAVORITES_CATEGORY_ID && selectedCategoryId != HISTORY_CATEGORY_ID) {
-            onEnsureCategoryLoaded(selectedType, selectedCategoryId)
+            onEnsureCategoryLoaded(selectedType, selectedCategoryId, categorySortOrder)
         }
     }
 
@@ -352,7 +362,7 @@ fun BrowserScreen(
                 onToggleCategoryFavorite = onToggleCategoryFavorite,
                 onEntrySelected = { onLiveEntrySelected(it, entries) },
                 onToggleEntryFavorite = onToggleEntryFavorite,
-                onLoadMore = { onLoadMoreInCategory(MediaType.Live, selectedCategoryId) },
+                onLoadMore = { onLoadMoreInCategory(MediaType.Live, selectedCategoryId, VodSortOrder.Provider) },
                 onLivePreviewWatched = onLivePreviewWatched,
                 modifier = Modifier.fillMaxSize(),
             )
@@ -413,7 +423,13 @@ fun BrowserScreen(
                     onEntrySelected = onEntrySelected,
                     onEntryFocused = { navigationStore.saveEntry(selectedType, it.key) },
                     onToggleEntryFavorite = onToggleEntryFavorite,
-                    onLoadMore = { onLoadMoreInCategory(selectedType, selectedCategoryId) },
+                    onLoadMore = { onLoadMoreInCategory(selectedType, selectedCategoryId, categorySortOrder) },
+                    // Favoris/Historique ont leur propre ordre (ajout, dernière lecture) : pas de tri.
+                    sortOrder = categorySortOrder.takeUnless { selectedCategoryId == FAVORITES_CATEGORY_ID || selectedCategoryId == HISTORY_CATEGORY_ID },
+                    onSortSelected = { order ->
+                        navigationStore.saveCategorySort(selectedType, selectedCategoryId, order)
+                        categorySortOrder = order
+                    },
                     modifier = Modifier.fillMaxSize().padding(start = 18.dp, end = 18.dp, bottom = 18.dp),
                 )
             }
@@ -1073,6 +1089,8 @@ private fun VodCatalogLayout(
     onEntryFocused: (MediaEntry) -> Unit,
     onToggleEntryFavorite: (MediaEntry) -> Unit,
     onLoadMore: () -> Unit,
+    sortOrder: VodSortOrder?,
+    onSortSelected: (VodSortOrder) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     // Retour depuis la grille : remonte d'abord au rail des catégories, comme en Direct.
@@ -1121,6 +1139,8 @@ private fun VodCatalogLayout(
             onEntryFocused = onEntryFocused,
             onToggleFavorite = onToggleEntryFavorite,
             onLoadMore = onLoadMore,
+            sortOrder = sortOrder,
+            onSortSelected = onSortSelected,
             modifier = Modifier.weight(1f).fillMaxHeight().onFocusChanged { gridFocused = it.hasFocus },
         ) }
     }
@@ -1270,9 +1290,14 @@ private fun PosterGrid(
     onEntryFocused: (MediaEntry) -> Unit,
     onToggleFavorite: (MediaEntry) -> Unit,
     onLoadMore: () -> Unit,
+    sortOrder: VodSortOrder? = null,
+    onSortSelected: (VodSortOrder) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
-    val gridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
+    // Nouveau tri : la grille repart du début de la liste triée.
+    val gridState = remember(sortOrder) { androidx.compose.foundation.lazy.grid.LazyGridState() }
+    var sortDialogOpen by remember { mutableStateOf(false) }
+    val sortButtonFocus = remember { FocusRequester() }
     LaunchedEffect(gridState, entries.size) {
         snapshotFlow { gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1 }
             .distinctUntilChanged()
@@ -1305,6 +1330,38 @@ private fun PosterGrid(
             Text("$totalCount ${type.pluralName}", color = MutedInk, fontSize = 14.sp)
             Spacer(Modifier.weight(1f))
             Text("OK ouvrir · OK long ajouter/retirer favori", color = MutedInk, fontSize = 14.sp)
+            if (sortOrder != null) {
+                Spacer(Modifier.width(14.dp))
+                FocusableSurface(onClick = { sortDialogOpen = true }, modifier = Modifier.width(290.dp).height(44.dp).focusRequester(sortButtonFocus)) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(
+                            "Trier : " + vodSortLabel(sortOrder),
+                            color = Ink,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+        }
+        if (sortDialogOpen && sortOrder != null) {
+            val orders = VodSortOrder.entries
+            ChoiceDialog(
+                title = "Trier « " + categoryName.ifBlank { type.displayName } + " »",
+                options = orders.map(::vodSortLabel),
+                selectedIndex = orders.indexOf(sortOrder),
+                onSelect = { index ->
+                    sortDialogOpen = false
+                    onSortSelected(orders[index])
+                    runCatching { sortButtonFocus.requestFocus() }
+                },
+                onDismiss = {
+                    sortDialogOpen = false
+                    runCatching { sortButtonFocus.requestFocus() }
+                },
+            )
         }
 
         if (entries.isEmpty()) {
@@ -1430,8 +1487,8 @@ private fun defaultCategoryId(catalog: Catalog, type: MediaType): String =
     catalog.categoriesFor(type).firstOrNull { catalog.countIn(type, it.id) > 0 }?.id
         ?: Catalog.ALL_CATEGORY_ID
 
-/** Note affichée partout sous la forme « 7.5/10 » (l'étoile désigne les favoris). */
-internal fun formatRating(rating: Double): String = "%.1f/10".format(rating)
+/** Note affichée partout sous la forme « 7.5/10 » (l'étoile désigne les favoris) ; null si hors échelle. */
+internal fun formatRating(rating: Double): String? = rating.takeIf { it in 0.0..10.0 }?.let { "%.1f/10".format(it) }
 
 private fun PlaybackHistoryItem.progressPercent(): Int = (progress * 100).toInt().coerceIn(0, 100)
 
@@ -1464,7 +1521,7 @@ internal fun sortedForVodDisplay(entries: List<MediaEntry>, order: VodSortOrder)
         entries.sortedWith(Comparator { a, b -> collator.compare(a.displayName, b.displayName) })
     }
     VodSortOrder.RecentlyAdded -> entries.sortedByDescending(MediaEntry::addedAtEpochSeconds)
-    VodSortOrder.Rating -> entries.sortedByDescending(MediaEntry::rating)
+    VodSortOrder.Rating -> entries.sortedByDescending { entry -> entry.rating?.takeIf { it in 0.0..10.0 } }
 }
 
 /** Avancement (0..1) d'un programme à l'instant donné, `null` sans horaires exploitables. */

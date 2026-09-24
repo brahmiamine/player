@@ -329,7 +329,8 @@ internal class CatalogDatabase(context: Context) :
             VodSortOrder.Provider -> "number, media_id"
             VodSortOrder.Alphabetical -> "display_name COLLATE LOCALIZED, media_id"
             VodSortOrder.RecentlyAdded -> "added_at IS NULL, added_at DESC, media_id"
-            VodSortOrder.Rating -> "rating IS NULL, rating DESC, media_id"
+            // Notes hors échelle envoyées par certains fournisseurs (7125/10…) : en fin de liste.
+            VodSortOrder.Rating -> "(rating IS NULL OR rating < 0 OR rating > 10), rating DESC, media_id"
         }
         val whereCategory = if (all) "" else " AND category_id = ?"
         val args = buildList {

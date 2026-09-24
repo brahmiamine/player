@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -57,6 +58,40 @@ fun ConfirmDialog(
                     FocusableSurface(onClick = onConfirm, accent = true, modifier = Modifier.width(200.dp).height(52.dp)) {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Text(confirmLabel, color = Ink, fontSize = TypeLabel, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Choix d'une option dans une liste (focus sur l'option en cours). Retour ferme sans changer. */
+@Composable
+fun ChoiceDialog(
+    title: String,
+    options: List<String>,
+    selectedIndex: Int,
+    onSelect: (Int) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    BackHandler(onBack = onDismiss)
+    val selectedFocus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { runCatching { selectedFocus.requestFocus() } }
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.76f)), contentAlignment = Alignment.Center) {
+        GlassSurface(modifier = Modifier.width(520.dp)) {
+            Column(Modifier.padding(26.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(title, color = Ink, fontSize = TypeSectionTitle, fontWeight = HeadingWeight)
+                options.forEachIndexed { index, label ->
+                    FocusableSurface(
+                        onClick = { onSelect(index) },
+                        selected = index == selectedIndex,
+                        modifier = Modifier.fillMaxWidth().height(54.dp)
+                            .then(if (index == selectedIndex) Modifier.focusRequester(selectedFocus) else Modifier),
+                    ) {
+                        Row(Modifier.fillMaxSize().padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(label, color = Ink, fontSize = TypeBody, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                            if (index == selectedIndex) Text("Actuel", color = MutedInk, fontSize = TypeLabel)
                         }
                     }
                 }

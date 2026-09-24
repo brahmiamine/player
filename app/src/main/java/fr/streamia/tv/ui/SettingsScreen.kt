@@ -934,7 +934,7 @@ private fun liveSortLabel(value: LiveChannelSortOrder): String = when (value) {
     LiveChannelSortOrder.Alphabetical -> "Alphabétique"
 }
 
-private fun vodSortLabel(value: VodSortOrder): String = when (value) {
+internal fun vodSortLabel(value: VodSortOrder): String = when (value) {
     VodSortOrder.Provider -> "Ordre du fournisseur"
     VodSortOrder.Alphabetical -> "Alphabétique"
     VodSortOrder.RecentlyAdded -> "Récemment ajoutés"

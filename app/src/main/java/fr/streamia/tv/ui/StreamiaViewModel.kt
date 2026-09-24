@@ -869,9 +869,8 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     }
 
     fun cycleVodSortOrder() {
+        // Les pages sont indexées par tri (vodPageKey) : le navigateur lit simplement celles du nouveau.
         updateAppSettings { it.copy(vodSortOrder = it.nextVodSortOrder()) }
-        // Pages lues dans l'ancien ordre : le navigateur recharge la première page au nouveau tri.
-        _uiState.update { it.copy(vodPageKeys = emptyMap()) }
     }
 
     fun cycleEpgTimeOffset() {
@@ -974,21 +973,25 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
      * [XtreamRepository.loadCategoryPage] : elle charge simplement les premières entrées du type
      * sans filtrer par category_id.
      */
-    fun ensureCategoryLoaded(type: MediaType, categoryId: String) {
+    fun ensureCategoryLoaded(type: MediaType, categoryId: String, order: VodSortOrder = defaultVodOrder(type)) {
         val profileId = _uiState.value.activeProfileId ?: return
         val catalog = _uiState.value.catalog ?: return
-        if (!needsFirstPage(catalog, type, categoryId)) return
-        loadCategoryPage(profileId, type, categoryId, offset = 0)
+        if (!needsFirstPage(catalog, type, categoryId, order)) return
+        loadCategoryPage(profileId, type, categoryId, offset = 0, order = order)
         prefetchNeighborCategories(profileId, type, categoryId)
     }
+
+    /** Tri des Films/Séries sans choix propre à la catégorie : celui de Paramètres. */
+    private fun defaultVodOrder(type: MediaType): VodSortOrder =
+        if (type == MediaType.Live) VodSortOrder.Provider else _uiState.value.appSettings.vodSortOrder
 
     /**
      * Films/Séries paginés : l'ordre affiché est celui des pages lues en base (déjà triées), donc
      * une catégorie sans pages pour le tri courant doit repartir de la première page — même si
      * certaines de ses entrées sont déjà en mémoire (favoris, autre tri, autre catégorie).
      */
-    private fun needsFirstPage(catalog: Catalog, type: MediaType, categoryId: String): Boolean =
-        if (type != MediaType.Live && catalog.isPaged) Catalog.categoryKey(type, categoryId) !in _uiState.value.vodPageKeys
+    private fun needsFirstPage(catalog: Catalog, type: MediaType, categoryId: String, order: VodSortOrder): Boolean =
+        if (type != MediaType.Live && catalog.isPaged) vodPageKey(type, categoryId, order) !in _uiState.value.vodPageKeys
         else !catalog.isCategoryLoaded(type, categoryId)
 
     /**
@@ -1003,8 +1006,9 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         val index = ordered.indexOfFirst { it.id == categoryId }
         if (index < 0) return
         listOfNotNull(ordered.getOrNull(index - 1), ordered.getOrNull(index + 1)).forEach { neighbor ->
-            if (needsFirstPage(catalog, type, neighbor.id)) {
-                loadCategoryPage(profileId, type, neighbor.id, offset = 0)
+            // Voisines préchargées au tri par défaut (une voisine triée autrement relira sa page).
+            if (needsFirstPage(catalog, type, neighbor.id, defaultVodOrder(type))) {
+                loadCategoryPage(profileId, type, neighbor.id, offset = 0, order = defaultVodOrder(type))
             }
         }
     }
@@ -1014,24 +1018,24 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
      * approche de sa fin. L'offset se déduit du nombre d'entrées déjà matérialisées pour cette
      * catégorie : les pages s'enchaînent sans trou tant qu'aucun appel ne saute une page.
      */
-    fun loadMoreInCategory(type: MediaType, categoryId: String) {
+    fun loadMoreInCategory(type: MediaType, categoryId: String, order: VodSortOrder = defaultVodOrder(type)) {
         val profileId = _uiState.value.activeProfileId ?: return
         val catalog = _uiState.value.catalog ?: return
         // Paginé : l'offset est le nombre d'entrées déjà lues pour CETTE catégorie et ce tri —
         // entriesIn() compterait aussi des entrées chargées ailleurs (favoris, autres catégories
         // dans « Tout ») et ferait sauter des pages.
         val loaded = if (type != MediaType.Live && catalog.isPaged) {
-            _uiState.value.vodPageKeys[Catalog.categoryKey(type, categoryId)]?.size ?: return ensureCategoryLoaded(type, categoryId)
+            _uiState.value.vodPageKeys[vodPageKey(type, categoryId, order)]?.size ?: return ensureCategoryLoaded(type, categoryId, order)
         } else {
             catalog.entriesIn(type, categoryId).size
         }
         if (loaded > 0 && loaded >= catalog.countIn(type, categoryId)) return
-        loadCategoryPage(profileId, type, categoryId, offset = loaded)
+        loadCategoryPage(profileId, type, categoryId, offset = loaded, order = order)
     }
 
-    private fun loadCategoryPage(profileId: String, type: MediaType, categoryId: String, offset: Int) {
-        val order = if (type == MediaType.Live) VodSortOrder.Provider else _uiState.value.appSettings.vodSortOrder
+    private fun loadCategoryPage(profileId: String, type: MediaType, categoryId: String, offset: Int, order: VodSortOrder) {
         val categoryKey = Catalog.categoryKey(type, categoryId)
+        val pageKey = vodPageKey(type, categoryId, order)
         val loadKey = "$profileId:$categoryKey:$order:$offset"
         if (!categoryLoadsInFlight.add(loadKey)) return
         setCategoryLoading(type, categoryId, loading = true)
@@ -1049,11 +1053,11 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 }
                 if (type != MediaType.Live) {
                     _uiState.update { state ->
-                        val known = state.vodPageKeys[categoryKey]
+                        val known = state.vodPageKeys[pageKey]
                         when {
-                            state.activeProfileId != profileId || state.appSettings.vodSortOrder != order -> state
-                            offset == 0 -> state.copy(vodPageKeys = state.vodPageKeys + (categoryKey to page.entries.map(MediaEntry::key)))
-                            known?.size == offset -> state.copy(vodPageKeys = state.vodPageKeys + (categoryKey to (known + page.entries.map(MediaEntry::key)).distinct()))
+                            state.activeProfileId != profileId -> state
+                            offset == 0 -> state.copy(vodPageKeys = state.vodPageKeys + (pageKey to page.entries.map(MediaEntry::key)))
+                            known?.size == offset -> state.copy(vodPageKeys = state.vodPageKeys + (pageKey to (known + page.entries.map(MediaEntry::key)).distinct()))
                             else -> state
                         }
                     }
@@ -2710,7 +2714,7 @@ data class StreamiaUiState(
      * catégorie Films/Séries encore jamais parcourue.
      */
     val loadingCategoryKeys: Set<String> = emptySet(),
-    /** Films/Séries paginés : clés des entrées dans l'ordre des pages lues en base (tri appliqué), par catégorie. */
+    /** Films/Séries paginés : clés des entrées dans l'ordre des pages lues en base, par catégorie et par tri (voir vodPageKey). */
     val vodPageKeys: Map<String, List<String>> = emptyMap(),
     /** Catégories dont le dernier chargement de page a échoué (message + nouvel essai dans la grille). */
     val categoryLoadErrors: Set<String> = emptySet(),
@@ -2787,3 +2791,7 @@ class StreamiaViewModelFactory(private val repository: XtreamRepository) : ViewM
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T = StreamiaViewModel(repository) as T
 }
+
+/** Clé des pages Films/Séries d'une catégorie pour un tri donné : changer de tri n'écrase pas l'autre ordre. */
+internal fun vodPageKey(type: MediaType, categoryId: String, order: VodSortOrder): String =
+    Catalog.categoryKey(type, categoryId) + "|" + order.name

@@ -270,8 +270,8 @@ fun SeriesScreen(
                                     Row(Modifier.fillMaxWidth()) {
                                         Text("S${episode.season.toString().padStart(2, '0')}E${episode.number.toString().padStart(2, '0')}", color = FocusBlueBright, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                         Spacer(Modifier.weight(1f))
-                                        episode.rating?.let {
-                                            Text(formatRating(it), color = FocusBlueBright, fontSize = 12.sp)
+                                        episode.rating?.let(::formatRating)?.let {
+                                            Text(it, color = FocusBlueBright, fontSize = 12.sp)
                                         }
                                     }
                                     Spacer(Modifier.height(5.dp))
