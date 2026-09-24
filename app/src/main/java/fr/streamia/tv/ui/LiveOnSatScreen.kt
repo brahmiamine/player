@@ -4,6 +4,11 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.graphics.graphicsLayer
+import fr.streamia.tv.ui.theme.DeepSurface
+import fr.streamia.tv.ui.theme.RadiusTile
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
@@ -70,6 +75,7 @@ import java.util.Locale
 fun LiveOnSatScreen(
     matches: List<ResolvedLiveOnSatMatch>,
     loading: Boolean,
+    resolvingChannels: Boolean,
     error: String?,
     fetchedAtEpochMillis: Long?,
     restoreMatchKey: String? = null,
@@ -153,9 +159,7 @@ fun LiveOnSatScreen(
         Spacer(Modifier.height(16.dp))
 
         when {
-            loading && matches.isEmpty() -> Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Text("Chargement des matchs…", color = MutedInk, fontSize = TypeSectionTitle)
-            }
+            loading && matches.isEmpty() -> MatchListSkeleton(Modifier.weight(1f).fillMaxWidth())
             error != null && matches.isEmpty() -> Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 FocusableSurface(onClick = onRefresh, modifier = Modifier.width(440.dp).height(110.dp)) {
                     Column(Modifier.padding(horizontal = 22.dp)) {
@@ -172,6 +176,14 @@ fun LiveOnSatScreen(
                 if (error != null) {
                     Text(error, color = Danger, fontSize = TypeLabel, modifier = Modifier.padding(bottom = 10.dp))
                 }
+                if (resolvingChannels) {
+                    Text(
+                        "Recherche des chaînes dans votre liste…",
+                        color = FocusBlueBright,
+                        fontSize = TypeLabel,
+                        modifier = Modifier.padding(bottom = 10.dp),
+                    )
+                }
                 LazyColumn(state = matchListState, modifier = Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     items(
                         visibleMatches,
@@ -182,6 +194,8 @@ fun LiveOnSatScreen(
                             nowEpochSeconds = nowEpochSeconds,
                             restoreChannelKey = restoreChannelKey.takeIf { liveOnSatMatchKey(resolved) == restoreMatchKey },
                             restoreChannelFocus = restoreChannelFocus,
+                            // Pas encore rapproché : chaînes fantômes à la place des diffuseurs bruts.
+                            channelsPending = resolvingChannels && resolved.matchedChannels.isEmpty(),
                             onOpenChannel = { entry -> onOpenChannel(entry, liveOnSatMatchKey(resolved)) },
                         )
                     }
@@ -197,6 +211,7 @@ private fun LiveOnSatMatchCard(
     nowEpochSeconds: Long,
     restoreChannelKey: String?,
     restoreChannelFocus: FocusRequester,
+    channelsPending: Boolean,
     onOpenChannel: (MediaEntry) -> Unit,
 ) {
     val match = resolved.match
@@ -239,7 +254,10 @@ private fun LiveOnSatMatchCard(
             Spacer(Modifier.width(10.dp))
             ChannelLogo(match.participantBLogoUrl, match.participantB, Modifier.width(64.dp).height(64.dp))
         }
-        if (match.channels.isNotEmpty()) {
+        if (channelsPending && match.channels.isNotEmpty()) {
+            Spacer(Modifier.height(10.dp))
+            ChannelChipsSkeleton(count = minOf(match.channels.size, 4))
+        } else if (match.channels.isNotEmpty()) {
             Spacer(Modifier.height(10.dp))
             // Les chaînes reconnues dans la liste du profil passent en tête : ce sont elles qu'on
             // peut réellement zapper, les autres restant visibles en lecture seule.
@@ -273,6 +291,61 @@ private fun LiveOnSatMatchCard(
             }
         }
       }
+    }
+}
+
+/** Liste fantôme pendant le premier chargement : mêmes cartes que LiveOnSatMatchCard. */
+@Composable
+private fun MatchListSkeleton(modifier: Modifier) {
+    val pulse = rememberSkeletonPulse()
+    Column(modifier.graphicsLayer { alpha = pulse.value }, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        repeat(4) {
+            GlassSurface(modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        SkeletonBlock(Modifier.width(44.dp).height(12.dp))
+                        Spacer(Modifier.width(10.dp))
+                        SkeletonBlock(Modifier.width(180.dp).height(12.dp))
+                    }
+                    Spacer(Modifier.height(7.dp))
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        SkeletonBlock(Modifier.size(64.dp), CircleShape)
+                        Spacer(Modifier.width(10.dp))
+                        SkeletonBlock(Modifier.weight(1f).height(22.dp))
+                        Spacer(Modifier.width(10.dp))
+                        SkeletonBlock(Modifier.size(64.dp), CircleShape)
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    ChannelChipsSkeletonContent(count = 3)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChannelChipsSkeleton(count: Int) {
+    val pulse = rememberSkeletonPulse()
+    Box(Modifier.graphicsLayer { alpha = pulse.value }) { ChannelChipsSkeletonContent(count) }
+}
+
+/** Même gabarit qu'une ChannelChip reconnue (logo 34 dp + nom), sans focus. */
+@Composable
+private fun ChannelChipsSkeletonContent(count: Int) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        repeat(count) {
+            Row(
+                Modifier
+                    .clip(RoundedCornerShape(RadiusTile))
+                    .background(DeepSurface)
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                SkeletonBlock(Modifier.size(34.dp), RoundedCornerShape(8.dp))
+                Spacer(Modifier.width(9.dp))
+                SkeletonBlock(Modifier.width(90.dp).height(12.dp))
+            }
+        }
     }
 }
 

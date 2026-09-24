@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -40,6 +41,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.tv.material3.Text
 import fr.streamia.tv.beinsports.ResolvedBeinProgrammeItem
+import fr.streamia.tv.data.HomeBlock
 import fr.streamia.tv.data.UserLibrarySnapshot
 import fr.streamia.tv.data.isResumable
 import fr.streamia.tv.domain.Catalog
@@ -96,6 +98,9 @@ fun HomeScreen(
     ukGuideNow: List<ResolvedUkProgrammeItem> = emptyList(),
     ukGuideNext: List<ResolvedUkProgrammeItem> = emptyList(),
     liveMatches: List<fr.streamia.tv.liveonsat.ResolvedLiveOnSatMatch> = emptyList(),
+    /** Blocs pas encore chargés une première fois : rangée squelette à la place du contenu. */
+    pendingBlocks: Set<HomeBlock> = emptySet(),
+    liveMatchesPending: Boolean = false,
     restoreContext: ContentReturnContext? = null,
     focusTarget: HomeFocusTarget? = null,
     onFocusConsumed: () -> Unit = {},
@@ -403,6 +408,13 @@ fun HomeScreen(
                     modifier = Modifier.padding(bottom = CardRowSpacing),
                 )
             }
+        } else if (liveMatchesPending) {
+            item {
+                Column(Modifier.fillMaxWidth()) {
+                    SkeletonRow("Matchs en direct") { LiveMatchCardSkeleton() }
+                    Spacer(Modifier.height(CardRowSpacing))
+                }
+            }
         }
 
         if (recentChannelCards.isNotEmpty()) {
@@ -450,6 +462,13 @@ fun HomeScreen(
                     Spacer(Modifier.height(CardRowSpacing))
                 }
             }
+        } else if (HomeBlock.TvProgrammeNow in pendingBlocks) {
+            item {
+                Column(Modifier.fillMaxWidth()) {
+                    SkeletonRow("Programme TV FR en direct") { ProgrammeCardSkeleton() }
+                    Spacer(Modifier.height(CardRowSpacing))
+                }
+            }
         }
 
         if (tvProgrammeTonight.isNotEmpty()) {
@@ -469,6 +488,13 @@ fun HomeScreen(
                             )
                         },
                     )
+                    Spacer(Modifier.height(CardRowSpacing))
+                }
+            }
+        } else if (HomeBlock.TvProgrammeTonight in pendingBlocks) {
+            item {
+                Column(Modifier.fillMaxWidth()) {
+                    SkeletonRow("Programme TV FR ce soir") { ProgrammeCardSkeleton() }
                     Spacer(Modifier.height(CardRowSpacing))
                 }
             }
@@ -497,6 +523,13 @@ fun HomeScreen(
                     Spacer(Modifier.height(CardRowSpacing))
                 }
             }
+        } else if (HomeBlock.BeinSportsNow in pendingBlocks) {
+            item {
+                Column(Modifier.fillMaxWidth()) {
+                    SkeletonRow("beIN Sports en direct") { ProgrammeCardSkeleton() }
+                    Spacer(Modifier.height(CardRowSpacing))
+                }
+            }
         }
 
         if (beinSportsNext.isNotEmpty()) {
@@ -519,6 +552,13 @@ fun HomeScreen(
                             )
                         },
                     )
+                    Spacer(Modifier.height(CardRowSpacing))
+                }
+            }
+        } else if (HomeBlock.BeinSportsNext in pendingBlocks) {
+            item {
+                Column(Modifier.fillMaxWidth()) {
+                    SkeletonRow("beIN Sports suivant") { ProgrammeCardSkeleton() }
                     Spacer(Modifier.height(CardRowSpacing))
                 }
             }
@@ -547,6 +587,13 @@ fun HomeScreen(
                     Spacer(Modifier.height(CardRowSpacing))
                 }
             }
+        } else if (HomeBlock.UkGuideNow in pendingBlocks) {
+            item {
+                Column(Modifier.fillMaxWidth()) {
+                    SkeletonRow("UK en direct") { ProgrammeCardSkeleton() }
+                    Spacer(Modifier.height(CardRowSpacing))
+                }
+            }
         }
 
         if (ukGuideNext.isNotEmpty()) {
@@ -569,6 +616,23 @@ fun HomeScreen(
                             )
                         },
                     )
+                    Spacer(Modifier.height(CardRowSpacing))
+                }
+            }
+        } else if (HomeBlock.UkGuideNext in pendingBlocks) {
+            item {
+                Column(Modifier.fillMaxWidth()) {
+                    SkeletonRow("UK suivant") { ProgrammeCardSkeleton() }
+                    Spacer(Modifier.height(CardRowSpacing))
+                }
+            }
+        }
+
+        if (recommendationRows.isEmpty() && HomeBlock.Recommendations in pendingBlocks) {
+            // Titres inconnus avant le calcul : barre fantôme à la place du titre.
+            items(2) {
+                Column(Modifier.fillMaxWidth()) {
+                    SkeletonRow(title = null) { PosterCardSkeleton() }
                     Spacer(Modifier.height(CardRowSpacing))
                 }
             }
@@ -1063,11 +1127,11 @@ private fun HomeRecommendationCard(
 
 private const val RESTORE_FOCUS_DELAY_MS = 60L
 
-private val HomeCardWidth = 172.dp
+internal val HomeCardWidth = 172.dp
 // 128dp d'illustration + jusqu'à 2 lignes de titre en 13sp/16sp de lineHeight + le label de type
 // + une éventuelle barre de progression : 224dp laisse une marge confortable dans le pire cas
 // (titre sur 2 lignes ET progression affichée) plutôt que de risquer un rognage en bas de carte.
-private val HomeCardHeight = 224.dp
+internal val HomeCardHeight = 224.dp
 // Favoris / dernières chaînes : surtout des logos, un titre sur une ligne suffit.
 private val HomeCompactCardWidth = 136.dp
 private val HomeCompactCardHeight = 150.dp

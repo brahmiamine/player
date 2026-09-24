@@ -187,6 +187,8 @@ private suspend fun fetchTodayMatches(): List<FootballMatch> = withContext(Dispa
 @Composable
 internal fun FootballScoresRow(modifier: Modifier = Modifier) {
     var matches by remember { mutableStateOf(footballCache?.second.orEmpty()) }
+    // Squelette seulement avant le tout premier chargement de la session (cache mémoire vide).
+    var firstLoadDone by remember { mutableStateOf(footballCache != null) }
     // Seulement app visible : aucune requête en arrière-plan, rafraîchissement immédiat au retour.
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     LaunchedEffect(lifecycle) {
@@ -200,9 +202,14 @@ internal fun FootballScoresRow(modifier: Modifier = Modifier) {
                     ?: (now to (runCatching { fetchTodayMatches() }.getOrNull() ?: footballCache?.second.orEmpty()))
                         .also { footballCache = it }
                 matches = loaded.second
+                firstLoadDone = true
                 delay(loaded.first + footballRefreshDelayMs(loaded.second, Instant.ofEpochMilli(now)) - now)
             }
         }
+    }
+    if (!firstLoadDone) {
+        SkeletonRow("Scores football", modifier) { FootballCardSkeleton() }
+        return
     }
     if (matches.isEmpty()) return
     Column(modifier.fillMaxWidth()) {

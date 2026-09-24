@@ -106,6 +106,8 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     ukGuideNow = state.homeUkGuideNow.ifDisabled(HomeBlock.UkGuideNow, state.appSettings),
                     ukGuideNext = state.homeUkGuideNext.ifDisabled(HomeBlock.UkGuideNext, state.appSettings),
                     liveMatches = state.liveOnSatMatches,
+                    pendingBlocks = state.homePendingBlocks - state.appSettings.disabledHomeBlocks,
+                    liveMatchesPending = state.liveOnSatPending,
                     restoreContext = state.contentReturnContext,
                     focusTarget = state.homeFocusTarget,
                     onFocusConsumed = viewModel::consumeHomeFocusTarget,
@@ -266,6 +268,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                 state.screen is StreamiaScreen.LiveMatches -> LiveOnSatScreen(
                     matches = state.liveOnSatMatches,
                     loading = state.liveOnSatLoading,
+                    resolvingChannels = state.liveOnSatResolving,
                     error = state.liveOnSatError,
                     fetchedAtEpochMillis = state.liveOnSatFetchedAtEpochMillis,
                     restoreMatchKey = state.contentReturnContext

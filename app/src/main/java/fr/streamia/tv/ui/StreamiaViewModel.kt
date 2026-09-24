@@ -56,6 +56,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -97,6 +98,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
 
     // Guides tiers de l'accueil : même cycle chargement → rapprochement → publication, voir [HomeGuide].
     private val tvProgrammeNowGuide = HomeGuide(
+        blocks = setOf(HomeBlock.TvProgrammeNow),
         fetch = { repository.loadTvProgrammeNow(it) },
         isEmpty = { it.programmes.isEmpty() },
     ) { fetch, catalog, visible ->
@@ -104,6 +106,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         ({ state -> state.copy(homeTvProgrammeNow = resolved) })
     }
     private val tvProgrammeTonightGuide = HomeGuide(
+        blocks = setOf(HomeBlock.TvProgrammeTonight),
         fetch = { repository.loadTvProgrammeTonight(it) },
         isEmpty = { it.programmes.isEmpty() },
     ) { fetch, catalog, visible ->
@@ -111,6 +114,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         ({ state -> state.copy(homeTvProgrammeTonight = resolved) })
     }
     private val beinSportsGuide = HomeGuide(
+        blocks = setOf(HomeBlock.BeinSportsNow, HomeBlock.BeinSportsNext),
         fetch = { repository.loadBeinSportsGuide(it) },
         isEmpty = { it.rows.current.isEmpty() && it.rows.next.isEmpty() },
     ) { fetch, catalog, visible ->
@@ -119,6 +123,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         ({ state -> state.copy(homeBeinSportsNow = current, homeBeinSportsNext = next) })
     }
     private val ukGuide = HomeGuide(
+        blocks = setOf(HomeBlock.UkGuideNow, HomeBlock.UkGuideNext),
         fetch = { repository.loadUkGuide(it) },
         isEmpty = { it.rows.current.isEmpty() && it.rows.next.isEmpty() },
     ) { fetch, catalog, visible ->
@@ -1700,7 +1705,10 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             !force &&
             homeRecommendationLastBuiltProfileId == profileId &&
             nowMillis - homeRecommendationLastBuiltAtMillis < HOME_RECOMMENDATION_REBUILD_INTERVAL_MS
-        ) return
+        ) {
+            settleHomeBlocks(setOf(HomeBlock.Recommendations))
+            return
+        }
         if (!force && homeRecommendationJob?.isActive == true) return
 
         val library = state.library
@@ -1719,6 +1727,11 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         // Comme pour les Matchs : le scoring (similarité texte, décroissance des signaux) est du
         // CPU pur sur potentiellement plusieurs centaines de candidats, donc jamais sur Main.
         homeRecommendationJob = viewModelScope.launch(Dispatchers.Default) {
+            // Fin du calcul (résultat, rien à recommander ou erreur) : plus de squelette, sauf si un
+            // calcul plus récent a pris le relais.
+            coroutineContext.job.invokeOnCompletion {
+                if (sequence == homeRecommendationBuildSequence) settleHomeBlocks(setOf(HomeBlock.Recommendations))
+            }
             val tasteSources = (
                 library.history.sortedByDescending { it.updatedAt }.map { it.entry } +
                     library.favoriteEntries.mapNotNull(catalog::entry)
@@ -1953,6 +1966,8 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
      * publié seulement s'il est toujours le plus récent pour le profil actif (séquences).
      */
     private inner class HomeGuide<Raw : Any>(
+        /** Blocs de l'accueil alimentés par ce guide : squelette tant que le premier chargement n'est pas fini. */
+        private val blocks: Set<HomeBlock>,
         private val fetch: suspend (forceRefresh: Boolean) -> Raw,
         private val isEmpty: (Raw) -> Boolean,
         private val match: (Raw, Catalog, visible: (MediaEntry) -> Boolean) -> (StreamiaUiState) -> StreamiaUiState,
@@ -1972,6 +1987,8 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                     if (sequence != loadSequence || _uiState.value.activeProfileId != profileId) return@onSuccess
                     raw = fetched
                     resolve()
+                }.onFailure { error ->
+                    if (error !is CancellationException && sequence == loadSequence) settleHomeBlocks(blocks)
                 }
             }
         }
@@ -1980,7 +1997,11 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             val state = _uiState.value
             val profileId = state.activeProfileId ?: return
             val catalog = state.catalog ?: return
-            val fetched = raw?.takeUnless(isEmpty) ?: return
+            val fetched = raw?.takeUnless(isEmpty) ?: run {
+                // Chargé mais vide (aucun programme) : la rangée disparaît au lieu de rester en squelette.
+                if (raw != null) settleHomeBlocks(blocks)
+                return
+            }
             val excludedCategoryKeys = if (state.appSettings.parentalControlEnabled && !state.parentalUnlocked) {
                 state.library.hiddenCategories + state.library.lockedCategories
             } else {
@@ -1996,7 +2017,9 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                     channel.key !in hiddenEntries && channel.categoryId !in excludedCategoryIds
                 }
                 if (sequence != resolveSequence) return@launch
-                _uiState.update { latest -> if (latest.activeProfileId == profileId) publish(latest) else latest }
+                _uiState.update { latest ->
+                    if (latest.activeProfileId == profileId) publish(latest).copy(homePendingBlocks = latest.homePendingBlocks - blocks) else latest
+                }
             }
         }
 
@@ -2025,6 +2048,10 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         liveOnSatNextCheckAtMillis = System.currentTimeMillis() + LIVE_ONSAT_RETRY_MS
         _uiState.update { it.copy(liveOnSatLoading = true, liveOnSatError = null) }
         liveOnSatLoadJob = viewModelScope.launch {
+            // Scrape + rapprochement des chaînes terminés (ou en échec) : plus de squelette.
+            coroutineContext.job.invokeOnCompletion {
+                if (sequence == liveOnSatLoadSequence) _uiState.update { it.copy(liveOnSatPending = false, liveOnSatResolving = false) }
+            }
             val result = runCatching { repository.loadLiveOnSatMatches(forceRefresh) }
             if (sequence != liveOnSatLoadSequence) return@launch
 
@@ -2085,6 +2112,9 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         if (matches.isEmpty()) return
         val state = _uiState.value
         if (state.activeProfileId != profileId) return
+        // Page Matchs : chaînes fantômes dès maintenant — la préparation (chaînes Direct depuis
+        // SQLite, index) prend déjà plusieurs secondes sur un gros catalogue. Fin du job = retrait.
+        _uiState.update { if (sequence == liveOnSatLoadSequence) it.copy(liveOnSatResolving = true) else it }
         val catalog = state.catalog
 
         // Le matcher a besoin des catégories (bouquet AR pour "beIN Connect MENA"...), pas
@@ -2131,6 +2161,11 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         }
         // Gardé jusqu'au prochain scrape : les prochaines ouvertures sautent tout ce calcul.
         repository.saveLiveOnSatResolution(profileId, version, resolved)
+    }
+
+    /** Premier chargement de ces blocs terminé : l'accueil remplace leur squelette par le contenu, ou rien. */
+    private fun settleHomeBlocks(blocks: Set<HomeBlock>) {
+        _uiState.update { if (it.homePendingBlocks.any(blocks::contains)) it.copy(homePendingBlocks = it.homePendingBlocks - blocks) else it }
     }
 
     /** Matchs affichés s'ils proviennent déjà de ce même scrape. */
@@ -2391,6 +2426,12 @@ data class StreamiaUiState(
     val epgSelectedDate: LocalDate? = null,
     val epgLoading: Boolean = false,
     val homeRecommendationRows: List<RecommendationRow> = emptyList(),
+    /** Blocs de l'accueil dont le premier chargement n'est pas fini (squelette affiché). */
+    val homePendingBlocks: Set<HomeBlock> = HomeBlock.entries.toSet() - HomeBlock.Resume - HomeBlock.Favorites,
+    /** Premier chargement des matchs liveonsat pas encore fini (squelette « Matchs en direct »). */
+    val liveOnSatPending: Boolean = true,
+    /** Rapprochement des chaînes liveonsat en cours (page Matchs : chaînes fantômes). */
+    val liveOnSatResolving: Boolean = false,
     val homeTvProgrammeNow: List<ResolvedTvProgrammeNowItem> = emptyList(),
     val homeTvProgrammeTonight: List<ResolvedTvProgrammeItem> = emptyList(),
     val homeBeinSportsNow: List<ResolvedBeinProgrammeItem> = emptyList(),
