@@ -32,6 +32,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.key
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -1057,7 +1058,9 @@ private fun VodCatalogLayout(
             modifier = Modifier.width(250.dp).fillMaxHeight(),
         )
 
-        PosterGrid(
+        // Une grille neuve par catégorie : la nouvelle liste repart en haut au lieu de garder le
+        // défilement de la précédente (le retour depuis une fiche repositionne via restoreEntryKey).
+        key(type, selectedCategoryId) { PosterGrid(
             type = type,
             categoryName = categories.firstOrNull { it.id == selectedCategoryId }?.name.orEmpty(),
             // Favoris/Historique sont déjà entièrement matérialisés (dérivés de library.*), à la
@@ -1077,7 +1080,7 @@ private fun VodCatalogLayout(
             onToggleFavorite = onToggleEntryFavorite,
             onLoadMore = onLoadMore,
             modifier = Modifier.weight(1f).fillMaxHeight(),
-        )
+        ) }
     }
 }
 
@@ -1256,6 +1259,8 @@ private fun PosterGrid(
             LazyVerticalGrid(
                 state = gridState,
                 columns = GridCells.Adaptive(155.dp),
+                // Marge pour la carte focalisée (agrandie + bordure) : sinon rognée en haut, en bas et sur les côtés.
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
@@ -1315,7 +1320,7 @@ private fun PosterCard(
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 val ratingText = entry.rating?.let { "%.1f".format(it) }
                 if (ratingText != null) {
-                    StreamiaIcon(StreamiaIconGlyph.Star, size = 16.dp)
+                    StreamiaIcon(StreamiaIconGlyph.Star, tint = FocusBlueBright, size = 16.dp)
                     Spacer(Modifier.width(3.dp))
                     Text(ratingText, color = FocusBlueBright, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                 } else {

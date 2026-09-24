@@ -358,6 +358,9 @@ private fun RemoteArtwork(
     // produceState est annulé quand l'élément quitte l'écran : un élément dépassé pendant un
     // défilement rapide abandonne sa place dans la file au lieu de retarder les logos visibles.
     val bitmap by produceState<ImageBitmap?>(initialValue = ArtworkLoader.get(url, maxDecodePx), key1 = url) {
+        // produceState garde la valeur précédente quand l'URL change : sans cette remise à zéro,
+        // l'image de l'ancien contenu restait affichée et la nouvelle n'était jamais chargée.
+        value = ArtworkLoader.get(url, maxDecodePx)
         if (url.isNullOrBlank() || value != null) return@produceState
         value = ArtworkLoader.load(context, url, maxDecodePx, opaque)
     }

@@ -19,6 +19,7 @@ import fr.streamia.tv.domain.XtreamUrlBuilder
 import fr.streamia.tv.recommendation.ContentCandidateIndex
 import fr.streamia.tv.recommendation.ContentFeatures
 import fr.streamia.tv.recommendation.IndexedContent
+import fr.streamia.tv.recommendation.MetadataSimilarityEngine
 import fr.streamia.tv.recommendation.MovieLensNeighbors
 import fr.streamia.tv.recommendation.SimilarityBoost
 import kotlinx.coroutines.Dispatchers
@@ -102,6 +103,8 @@ class XtreamRepository(context: Context) {
      */
     suspend fun loadSection(profileId: String, type: MediaType): List<MediaEntry> = cache.loadType(profileId, type)
 
+    suspend fun entriesByKeys(profileId: String, keys: Set<String>): List<MediaEntry> = cache.loadEntriesByKeys(profileId, keys)
+
     /** Contenus récents pour l'accueil ; les goûts complètent ce pool dans le ViewModel. */
     suspend fun homeRecommendationCandidates(profileId: String, type: MediaType, limit: Int): List<MediaEntry> =
         cache.loadHomeRecommendationCandidates(profileId, type, limit)
@@ -174,8 +177,9 @@ class XtreamRepository(context: Context) {
             fresh() ?: run {
                 val features = withContext(Dispatchers.IO) { recommendationStore.features(profileId) }
                 val sagas = withContext(Dispatchers.IO) { recommendationStore.sagas(profileId) }
-                val entries = (loadSection(profileId, MediaType.Movie) + loadSection(profileId, MediaType.Series))
-                    .associateBy(MediaEntry::key)
+                // Seulement les contenus enrichis : charger tout Films + Séries (plus de 200 000
+                // entrées avec résumés) saturait la mémoire et faisait planter l'app (OOM).
+                val entries = cache.loadEntriesByKeys(profileId, features.keys).associateBy(MediaEntry::key)
                 val index = withContext(Dispatchers.Default) {
                     ContentCandidateIndex(
                         features.mapNotNull { (key, stored) ->
@@ -200,6 +204,25 @@ class XtreamRepository(context: Context) {
     }
 
     private val wikidata = WikidataClient()
+    private val justWatch = JustWatchClient()
+    private val justWatchCache = ConcurrentHashMap<JustWatchSection, Pair<Long, List<TrendingTitle>>>()
+
+    /** Section JustWatch (cache mémoire 6 h) réduite aux titres présents dans le catalogue, ordre JustWatch. */
+    suspend fun justWatch(profileId: String, section: JustWatchSection, limit: Int): List<MediaEntry> {
+        val now = System.currentTimeMillis()
+        val titles = justWatchCache[section]?.takeIf { now - it.first < JUSTWATCH_TTL_MS }?.second
+            ?: withContext(Dispatchers.IO) { justWatch.titles(section) }.also { justWatchCache[section] = now to it }
+        val result = LinkedHashMap<String, MediaEntry>()
+        for (title in titles) {
+            if (result.size >= limit) break
+            val match = search(profileId, title.title, title.type, JUSTWATCH_SEARCH_LIMIT).firstOrNull { matchesTrending(it, title) }
+                ?: title.originalTitle?.let { original ->
+                    search(profileId, original, title.type, JUSTWATCH_SEARCH_LIMIT).firstOrNull { matchesTrending(it, title) }
+                }
+            match?.let { result.putIfAbsent(titleKey(it.displayName), it) }
+        }
+        return result.values.toList()
+    }
 
     /**
      * Interroge Wikidata pour un lot de contenus enrichis jamais vérifiés. Renvoie le nombre traité
@@ -812,3 +835,19 @@ data class LoadedCatalog(
 )
 
 enum class CatalogSource { Network, Cache, Local, Import }
+
+private val titleTokenizer = MetadataSimilarityEngine()
+private val YEAR_IN_NAME = Regex("\\b(19|20)\\d{2}\\b")
+private const val JUSTWATCH_TTL_MS = 6 * 60 * 60 * 1000L
+private const val JUSTWATCH_SEARCH_LIMIT = 30
+
+/** Titre normalisé sans année, qualité ni préfixe de langue : « FR - Dune (2021) 4K » → « dune ». */
+internal fun titleKey(name: String): String = titleTokenizer.titleTokens(name).joinToString(" ")
+
+/** Même titre (français ou original) et, si le nom IPTV porte une année, à un an près. */
+internal fun matchesTrending(entry: MediaEntry, title: TrendingTitle): Boolean {
+    val key = titleKey(entry.displayName)
+    if (key.isEmpty() || (key != titleKey(title.title) && key != title.originalTitle?.let(::titleKey))) return false
+    val year = YEAR_IN_NAME.findAll(entry.displayName).lastOrNull()?.value?.toInt() ?: return true
+    return title.year == null || kotlin.math.abs(year - title.year) <= 1
+}

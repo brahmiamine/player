@@ -13,6 +13,12 @@ enum class RecommendationRowKind {
     BecauseYouWatched,
     RecentlyAdded,
     RecentReleases,
+    JustWatchTopMoviesWeek,
+    JustWatchTopSeriesWeek,
+    JustWatchPopularMovies,
+    JustWatchPopularSeries,
+    JustWatchNewMovies,
+    JustWatchNewSeries,
 }
 
 data class RecommendedMedia(

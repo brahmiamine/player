@@ -46,10 +46,15 @@ class MetadataEnrichmentWorker(context: Context, params: WorkerParameters) : Cor
         // Priorité : ce que l'utilisateur a regardé ou mis en favori (sources des recommandations),
         // puis les ajouts les plus récents.
         val preferred = library.favoriteEntries + library.history.map { it.entry.key }.toSet()
-        val todo = listOf(MediaType.Movie, MediaType.Series)
-            .flatMap { repository.loadSection(profileId, it) }
-            .filter { it.key !in done }
-            .sortedWith(compareByDescending<fr.streamia.tv.domain.MediaEntry> { it.key in preferred }.thenByDescending { it.addedAtEpochSeconds ?: 0L })
+        // Pas de chargement de tout Films + Séries (plus de 200 000 entrées : OOM) : favoris et
+        // historique, puis les plus récents en nombre juste suffisant pour trouver MAX_PER_RUN non traités.
+        val preferredEntries = repository.entriesByKeys(profileId, preferred)
+        val recent = listOf(MediaType.Movie, MediaType.Series)
+            .flatMap { repository.homeRecommendationCandidates(profileId, it, done.size + MAX_PER_RUN) }
+            .sortedByDescending { it.addedAtEpochSeconds ?: 0L }
+        val todo = (preferredEntries + recent)
+            .filter { it.type != MediaType.Live && it.key !in done }
+            .distinctBy { it.key }
             .take(MAX_PER_RUN)
 
         var consecutiveFailures = 0

@@ -12,6 +12,7 @@ import fr.streamia.tv.data.AppSettings
 import fr.streamia.tv.data.CatalogSource
 import fr.streamia.tv.data.EpgCacheMetadata
 import fr.streamia.tv.data.HomeBlock
+import fr.streamia.tv.data.JustWatchSection
 import fr.streamia.tv.data.LoadedCatalog
 import fr.streamia.tv.data.PlaylistProfile
 import fr.streamia.tv.data.UpdateCheckResult
@@ -47,6 +48,7 @@ import fr.streamia.tv.recommendation.RecommendationBuildContext
 import fr.streamia.tv.recommendation.RecommendationEngine
 import fr.streamia.tv.recommendation.RecommendationProfileInput
 import fr.streamia.tv.recommendation.RecommendationRow
+import fr.streamia.tv.recommendation.RecommendationRowKind
 import fr.streamia.tv.recommendation.RecommendedMedia
 import fr.streamia.tv.recommendation.ViewingRecord
 import kotlinx.coroutines.CancellationException
@@ -1766,12 +1768,41 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 boostsBySource = boostsBySource,
             )
             val snapshot = recommendationEngine.buildSnapshot(profileId, context)
+            // Sections JustWatch en parallèle : chacune fait plusieurs appels réseau et recherches.
+            val justWatchRows = JustWatchSection.entries.map { section ->
+                async {
+                    val entries = runCatching { repository.justWatch(profileId, section, JUSTWATCH_ROW_LIMIT * 2) }
+                        .getOrDefault(emptyList())
+                        .filterNot { it.key in library.hiddenEntries || it.categoryId in excludedCategoryIds }
+                        .take(JUSTWATCH_ROW_LIMIT)
+                    // Un Top 10 n'a que 10 titres : quelques-uns suffisent à former une rangée.
+                    val minimum = when (section) {
+                        JustWatchSection.TopMoviesWeek, JustWatchSection.TopSeriesWeek -> 1
+                        else -> JUSTWATCH_ROW_MIN
+                    }
+                    entries.takeIf { it.size >= minimum }?.let { items ->
+                        RecommendationRow(
+                            when (section) {
+                                JustWatchSection.TopMoviesWeek -> RecommendationRowKind.JustWatchTopMoviesWeek
+                                JustWatchSection.TopSeriesWeek -> RecommendationRowKind.JustWatchTopSeriesWeek
+                                JustWatchSection.PopularMovies -> RecommendationRowKind.JustWatchPopularMovies
+                                JustWatchSection.PopularSeries -> RecommendationRowKind.JustWatchPopularSeries
+                                JustWatchSection.NewMovies -> RecommendationRowKind.JustWatchNewMovies
+                                JustWatchSection.NewSeries -> RecommendationRowKind.JustWatchNewSeries
+                            },
+                            section.title,
+                            items.map { RecommendedMedia(it, score = 0.0) },
+                        )
+                    }
+                }
+            }.awaitAll().filterNotNull()
+            val rows = snapshot.rows + justWatchRows
 
             if (sequence != homeRecommendationBuildSequence || _uiState.value.activeProfileId != profileId) return@launch
             homeRecommendationLastBuiltProfileId = profileId
             homeRecommendationLastBuiltAtMillis = System.currentTimeMillis()
             _uiState.update { current ->
-                if (current.activeProfileId == profileId) current.copy(homeRecommendationRows = snapshot.rows) else current
+                if (current.activeProfileId == profileId) current.copy(homeRecommendationRows = rows) else current
             }
         }
     }
@@ -2377,6 +2408,8 @@ private const val SECONDARY_LOADS_GAP_MS = 600L
 private const val CATALOG_BACKGROUND_REFRESH_DELAY_MS = 20_000L
 private const val MAX_EPG_DAY_SPAN = 30L
 private const val HOME_RECOMMENDATION_CANDIDATE_LIMIT = 400
+private const val JUSTWATCH_ROW_LIMIT = 20
+private const val JUSTWATCH_ROW_MIN = 5
 private const val HOME_RECOMMENDATION_RECENT_LIMIT = 240
 private const val HOME_RECOMMENDATION_TASTE_SOURCE_LIMIT = 4
 private const val HOME_RECOMMENDATION_PER_SOURCE_LIMIT = 80

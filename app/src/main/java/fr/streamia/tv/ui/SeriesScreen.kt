@@ -211,7 +211,7 @@ fun SeriesScreen(
                                         Spacer(Modifier.weight(1f))
                                         episode.rating?.let {
                                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                                StreamiaIcon(StreamiaIconGlyph.Star, size = 18.dp)
+                                                StreamiaIcon(StreamiaIconGlyph.Star, tint = FocusBlueBright, size = 18.dp)
                                                 Spacer(Modifier.width(3.dp))
                                                 Text("%.1f".format(it), color = FocusBlueBright, fontSize = 12.sp)
                                             }

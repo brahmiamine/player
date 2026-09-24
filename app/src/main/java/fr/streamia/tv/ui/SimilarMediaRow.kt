@@ -2,6 +2,7 @@ package fr.streamia.tv.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -37,7 +38,11 @@ fun SimilarMediaRow(
     Column(modifier.fillMaxWidth()) {
         SectionLabel(title, fontSize = 15.sp)
         Spacer(Modifier.height(10.dp))
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        LazyRow(
+            // Marge pour la carte focalisée (agrandie + bordure) : sans elle, elle était rognée aux bords.
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
             itemsIndexed(items, key = { _, recommended -> recommended.entry.key }) { _, recommended ->
                 SimilarMediaCard(recommended = recommended, onClick = { onOpenSimilar(recommended.entry) })
             }

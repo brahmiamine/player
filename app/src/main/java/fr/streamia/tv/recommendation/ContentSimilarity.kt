@@ -267,7 +267,7 @@ class MetadataSimilarityEngine(
         val YEAR_TOKEN = Regex("(?:19|20)\\d{2}")
 
         val TITLE_NOISE_TOKENS = setOf(
-            "multi", "multilang", "multilingual", "fhd", "uhd", "hdr", "hdr10", "dolby",
+            "multi", "multilang", "multilingual", "4k", "hd", "sd", "fhd", "uhd", "hdr", "hdr10", "dolby",
             "vostfr", "vost", "truefrench", "french", "vf", "vfq", "vo", "fr", "en", "de",
             "it", "es", "ar", "pt", "ru", "tr", "webrip", "webdl", "bluray",
             "bdrip", "dvdrip", "remux", "x264", "x265", "hevc", "av1", "aac", "dts",
