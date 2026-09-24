@@ -3,30 +3,19 @@ package fr.streamia.tv.ui
 import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.recommendation.MetadataSimilarityEngine
 import fr.streamia.tv.recommendation.RecommendedMedia
+import fr.streamia.tv.recommendation.splitProviderPrefix
 
-// Préfixe fournisseur en majuscules : « 4K-TOP - », « EN-TOP -», « AR-SUBS - », « FR: », « |EN| »…
-// Casse sensible : un vrai titre (« Mission - Impossible ») n'est pas pris pour un préfixe.
-private val VERSION_PREFIX = Regex("""^\s*(\|[^|]{1,15}\|\s*|[A-Z0-9]{2,5}(-[A-Z0-9]{2,5})*\s*[-:|]\s*)""")
-// Numérotation de liste après le préfixe : « 49. 12 Years… », « 183.12.Years… ».
-private val LIST_NUMBER = Regex("""^(\d{1,4}\.\s+|\d{3,4}\.)""")
 private val YEAR = Regex("""\b(19|20)\d{2}\b""")
 private val titleEngine = MetadataSimilarityEngine()
 
 private data class VersionKey(val tokens: Set<String>, val year: String?)
 
-private fun splitPrefix(name: String): Pair<String?, String> {
-    val match = VERSION_PREFIX.find(name) ?: return null to name
-    val prefix = match.value.trim().trim('|', '-', ':', ' ').ifBlank { null }
-    return prefix to name.substring(match.range.last + 1).replaceFirst(LIST_NUMBER, "")
-}
-
 /** Titre sans préfixe ni année, à passer à la recherche du catalogue complet. */
 internal fun versionSearchQuery(movie: MediaEntry): String =
-    titleEngine.titleTokens(splitPrefix(movie.displayName).second).joinToString(" ")
+    titleEngine.titleTokens(movie.displayName).joinToString(" ")
 
 private fun versionKey(name: String): VersionKey {
-    val title = splitPrefix(name).second
-    return VersionKey(titleEngine.titleTokens(title), YEAR.find(title)?.value)
+    return VersionKey(titleEngine.titleTokens(name), YEAR.find(splitProviderPrefix(name).second)?.value)
 }
 
 /**
@@ -44,6 +33,6 @@ internal fun otherVersionsOf(movie: MediaEntry, entries: List<MediaEntry>): List
         }
         .distinctBy { it.key }
         .take(30)
-        .map { RecommendedMedia(it, score = 1.0, reason = splitPrefix(it.displayName).first ?: "Autre version") }
+        .map { RecommendedMedia(it, score = 1.0, reason = splitProviderPrefix(it.displayName).first ?: "Autre version") }
         .toList()
 }

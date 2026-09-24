@@ -78,6 +78,14 @@ fun AboutScreen(
             fontSize = 13.sp,
             lineHeight = 18.sp,
         )
+        Spacer(Modifier.height(10.dp))
+        // Mention exigée par les conditions d'utilisation de l'API TMDB (recommandations, mots-clés).
+        Text(
+            "Ce produit utilise l'API TMDB mais n'est ni approuvé ni certifié par TMDB.",
+            color = MutedInk,
+            fontSize = 13.sp,
+            lineHeight = 18.sp,
+        )
     }
 }
 

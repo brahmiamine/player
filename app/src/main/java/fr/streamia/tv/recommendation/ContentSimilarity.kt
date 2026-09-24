@@ -16,6 +16,8 @@ data class ContentFeatures(
     val releaseDate: String? = null,
     val rating: Double? = entry.rating,
     val tmdbId: String? = null,
+    /** Mots-clés TMDB (« serial killer », « nuclear catastrophe »…), en anglais quelle que soit la langue du fournisseur. */
+    val keywords: List<String> = emptyList(),
     val enriched: Boolean = false,
 ) {
     companion object {
@@ -79,6 +81,9 @@ class MetadataSimilarityEngine(
         val candidateDirector = personTokens(candidate.director)
         val sourceCountries = tokens(source.country)
         val candidateCountries = tokens(candidate.country)
+        val sourceKeywords = keywordSet(source.keywords)
+        val candidateKeywords = keywordSet(candidate.keywords)
+        val sharedKeywords = sourceKeywords.filter { it in candidateKeywords }
 
         val titleSimilarity = dice(sourceTitleTokens, candidateTitleTokens)
         val plotSimilarity = dice(sourcePlotTokens, candidatePlotTokens)
@@ -86,6 +91,7 @@ class MetadataSimilarityEngine(
         val castSimilarity = dice(sourceCast, candidateCast)
         val directorSimilarity = dice(sourceDirector, candidateDirector)
         val countrySimilarity = dice(sourceCountries, candidateCountries)
+        val keywordSimilarity = dice(sourceKeywords, candidateKeywords)
         val yearSimilarity = yearSimilarity(source, candidate)
         val ratingSimilarity = ratingSimilarity(source.rating, candidate.rating)
         val categoryMatch = source.entry.categoryId == candidate.entry.categoryId
@@ -100,9 +106,11 @@ class MetadataSimilarityEngine(
 
         // Pour une fiche détail, l'histoire et le genre doivent dominer nettement.
         // Catégorie IPTV, année et note restent seulement des critères de départage.
-        add(0.06, titleSimilarity, sourceTitleTokens.isNotEmpty() && candidateTitleTokens.isNotEmpty())
-        add(0.46, plotSimilarity, sourcePlotTokens.isNotEmpty() && candidatePlotTokens.isNotEmpty())
+        add(0.03, titleSimilarity, sourceTitleTokens.isNotEmpty() && candidateTitleTokens.isNotEmpty())
+        add(0.49, plotSimilarity, sourcePlotTokens.isNotEmpty() && candidatePlotTokens.isNotEmpty())
         add(0.34, genreSimilarity, sourceGenres.isNotEmpty() && candidateGenres.isNotEmpty())
+        // Mots-clés TMDB : thèmes précis et comparables quelle que soit la langue du résumé.
+        add(0.30, keywordSimilarity, sourceKeywords.isNotEmpty() && candidateKeywords.isNotEmpty())
         add(0.04, castSimilarity, sourceCast.isNotEmpty() && candidateCast.isNotEmpty())
         add(0.05, directorSimilarity, sourceDirector.isNotEmpty() && candidateDirector.isNotEmpty())
         add(0.01, countrySimilarity, sourceCountries.isNotEmpty() && candidateCountries.isNotEmpty())
@@ -117,15 +125,19 @@ class MetadataSimilarityEngine(
             ?.takeIf(Double::isFinite)
             ?.coerceIn(0.0, 1.0)
 
-        val strongTitleRelation = titleSimilarity >= 0.45
+        // Un titre proche ne suffit pas (« The Bride » / « Bride Wars ») : il faut aussi un genre commun.
+        val genresCompatible = sourceGenres.isEmpty() || candidateGenres.isEmpty() || genreSimilarity > 0.0
+        val strongTitleRelation = titleSimilarity >= 0.45 && genresCompatible
         val plotAndGenreRelation = plotSimilarity >= 0.08 && genreSimilarity >= 0.34
         val strongPlotRelation = plotSimilarity >= 0.18
         val strongGenreUniverse = genreSimilarity >= 0.66 &&
             (titleSimilarity >= 0.34 || castSimilarity >= 0.20 || directorSimilarity >= 0.72)
         val peopleRelation = directorSimilarity >= 0.72 || castSimilarity >= 0.30
         val semanticRelation = semantic != null && semantic >= 0.62
+        val keywordRelation = sharedKeywords.size >= 2 ||
+            (sharedKeywords.isNotEmpty() && genreSimilarity >= 0.34 && plotSimilarity >= 0.05)
         val substantive = strongTitleRelation || plotAndGenreRelation || strongPlotRelation ||
-            strongGenreUniverse || peopleRelation || semanticRelation
+            strongGenreUniverse || peopleRelation || semanticRelation || keywordRelation
 
         // Deux genres explicitement incompatibles doivent fortement pénaliser un rapprochement
         // faible basé sur quelques mots génériques du synopsis.
@@ -134,6 +146,7 @@ class MetadataSimilarityEngine(
             candidateGenres.isNotEmpty() &&
             genreSimilarity == 0.0 &&
             !strongPlotRelation &&
+            !keywordRelation &&
             !peopleRelation &&
             !semanticRelation
         ) {
@@ -151,13 +164,14 @@ class MetadataSimilarityEngine(
         val finalScore = if (substantive) blended.coerceIn(0.0, 1.0) else 0.0
 
         val reason = when {
+            sharedKeywords.size >= 2 -> "Thèmes : " + sharedKeywords.take(2).joinToString(", ")
             genreSimilarity >= 0.66 && plotSimilarity >= 0.10 -> "Genre, intrigue et univers très proches"
             plotAndGenreRelation -> "Genre et histoire similaires"
             semantic != null && semantic >= 0.72 -> "Intrigue et ambiance similaires"
             directorSimilarity >= 0.72 -> "Même réalisateur"
             plotSimilarity >= 0.18 -> "Intrigue et thèmes similaires"
             castSimilarity >= 0.30 -> "Distribution similaire"
-            titleSimilarity >= 0.45 -> "Même saga ou univers"
+            strongTitleRelation -> "Même saga ou univers"
             else -> null
         }
 
@@ -180,12 +194,19 @@ class MetadataSimilarityEngine(
         features.releaseDate?.takeIf(String::isNotBlank)?.let { add("Date: $it") }
     }.joinToString(". ").take(MAX_EMBEDDING_TEXT_CHARS)
 
-    internal fun titleTokens(value: String): Set<String> = rawTokens(value, minLength = 2)
+    // Titre sans préfixe fournisseur : sinon « RO - 12 Years a Slave » et « RO - 12 Round Gun »
+    // partageaient « ro » et passaient pour une même saga.
+    internal fun titleTokens(value: String): Set<String> = rawTokens(splitProviderPrefix(value).second, minLength = 2)
         .filterNotTo(linkedSetOf()) { token ->
             token in TITLE_NOISE_TOKENS || token in STOP_WORDS || YEAR_TOKEN.matches(token)
         }
 
     private fun cleanTitle(value: String): String = titleTokens(value).joinToString(" ")
+
+    /** Mots-clés TMDB normalisés, sans les étiquettes trop génériques pour rapprocher deux histoires. */
+    internal fun keywordSet(keywords: List<String>): Set<String> = keywords.asSequence()
+        .map { it.trim().lowercase(Locale.ROOT) }
+        .filterTo(linkedSetOf()) { it.isNotEmpty() && it !in GENERIC_KEYWORDS }
 
     internal fun genreTokens(value: String?): Set<String> = rawTokens(value, minLength = 2)
         .mapTo(linkedSetOf()) { token -> GENRE_ALIASES[token] ?: token }
@@ -262,6 +283,11 @@ class MetadataSimilarityEngine(
         const val METADATA_WEIGHT_WITH_SEMANTIC = 0.22
         const val DISJOINT_GENRE_PENALTY = 0.20
 
+        val GENERIC_KEYWORDS = setOf(
+            "woman director", "sequel", "remake", "duringcreditsstinger", "aftercreditsstinger", "miniseries",
+            "based on novel or book", "based on comic", "based on manga", "anime", "new york city",
+            "los angeles, california", "london, england", "paris, france", "short film", "live action",
+        )
         val TOKEN_REGEX = Regex("[\\p{L}\\p{N}]+")
         val COMBINING_MARKS = Regex("\\p{M}+")
         val YEAR_TOKEN = Regex("(?:19|20)\\d{2}")
@@ -412,9 +438,11 @@ internal fun likelySameContent(source: ContentFeatures, candidate: ContentFeatur
     val candidateTitle = canonicalIdentityTitle(candidate.entry.displayName)
     if (title.isBlank() || title != candidateTitle) return false
 
+    // Même titre sous un autre préfixe = autre version du même contenu (rangée « Autres versions »),
+    // jamais une recommandation. Seules deux années connues et différentes (remake) les séparent.
     val sourceYear = source.releaseYear()
     val candidateYear = candidate.releaseYear()
-    return sourceYear != null && candidateYear != null && sourceYear == candidateYear
+    return sourceYear == null || candidateYear == null || sourceYear == candidateYear
 }
 
 /**
@@ -434,8 +462,24 @@ internal fun ContentFeatures.identityKey(): String? {
 
 private val RELEASE_YEAR_REGEX = Regex("\\b(?:19|20)\\d{2}\\b")
 
+// Préfixe fournisseur en majuscules : « 4K-TOP - », « EN-TOP -», « AR-SUBS - », « FR: », « |EN| »…
+// Casse sensible : un vrai titre (« Mission - Impossible ») n'est pas pris pour un préfixe.
+private val PROVIDER_PREFIX = Regex("""^\s*(\|[^|]{1,15}\|\s*|[A-Z0-9]{2,5}(-[A-Z0-9]{2,5})*\s*[-:|]\s*)""")
+// Numérotation de liste après le préfixe : « 49. 12 Years… », « 183.12.Years… ».
+private val LIST_NUMBER = Regex("""^(\d{1,4}\.\s+|\d{3,4}\.)""")
+// Code pays ajouté en fin de nom : « The Blame (2026) (GB) ».
+private val COUNTRY_SUFFIX = Regex("""(\s*\([A-Z]{2,3}\))+\s*$""")
+
+/** Sépare le préfixe fournisseur (langue, qualité…) du vrai titre : `"AR-SUBS" to "The Blame (2026)"`. */
+internal fun splitProviderPrefix(name: String): Pair<String?, String> {
+    val match = PROVIDER_PREFIX.find(name)
+    val prefix = match?.value?.trim()?.trim('|', '-', ':', ' ')?.ifBlank { null }
+    val rest = if (match == null) name else name.substring(match.range.last + 1).replaceFirst(LIST_NUMBER, "")
+    return prefix to rest.replace(COUNTRY_SUFFIX, "")
+}
+
 private fun canonicalIdentityTitle(value: String): String {
-    val normalized = Normalizer.normalize(value, Normalizer.Form.NFD)
+    val normalized = Normalizer.normalize(splitProviderPrefix(value).second, Normalizer.Form.NFD)
         .replace(Regex("\\p{M}+"), "")
         .lowercase(Locale.ROOT)
     val noise = setOf(

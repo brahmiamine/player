@@ -66,15 +66,18 @@ class MetadataEnrichmentWorker(context: Context, params: WorkerParameters) : Cor
             delay(PAUSE_MS)
         }
         // Puis les sagas Wikidata des contenus enrichis (un lot = une requête pour ~100 titres).
-        repeat(MAX_SAGA_BATCHES) {
+        for (batch in 0 until MAX_SAGA_BATCHES) {
             if (isStopped) return Result.success()
             val processed = runCatching { repository.fetchSagaBatch(profileId, SAGA_BATCH_SIZE) }.getOrElse { error ->
                 android.util.Log.w(TAG, "Wikidata indisponible, reprise au prochain passage", error)
-                return Result.success()
+                break
             }
-            if (processed == 0) return Result.success()
+            if (processed == 0) break
             delay(SAGA_PAUSE_MS)
         }
+        // Enfin TMDB (résumé anglais, mots-clés, recommandations), une requête par contenu.
+        runCatching { repository.fetchTmdbBatch(profileId, TMDB_PER_RUN, TMDB_PAUSE_MS) }
+            .onFailure { android.util.Log.w(TAG, "TMDB indisponible, reprise au prochain passage", it) }
         return Result.success()
     }
 
@@ -91,6 +94,8 @@ class MetadataEnrichmentWorker(context: Context, params: WorkerParameters) : Cor
         private const val SAGA_BATCH_SIZE = 100
         private const val MAX_SAGA_BATCHES = 20
         private const val SAGA_PAUSE_MS = 1_500L
+        private const val TMDB_PER_RUN = 800
+        private const val TMDB_PAUSE_MS = 150L
 
         /** Idempotent, comme [EpgSyncScheduler.schedule]. */
         fun schedule(context: Context) {

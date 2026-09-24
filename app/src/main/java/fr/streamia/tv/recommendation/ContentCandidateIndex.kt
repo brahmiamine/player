@@ -13,6 +13,8 @@ internal data class IndexedContent(
     val tmdbId: String? = null,
     /** Sagas / franchises Wikidata : (Q-id, libellé). */
     val sagas: List<Pair<String, String>> = emptyList(),
+    /** Mots-clés TMDB. */
+    val keywords: List<String> = emptyList(),
 )
 
 /** Lien fort hors métadonnées (même saga, mêmes spectateurs) : score plancher + raison affichée. */
@@ -28,7 +30,13 @@ data class SimilarityBoost(val score: Double, val reason: String)
  * [MetadataSimilarityEngine] ; cet index ne fait que lui amener les bons candidats.
  */
 internal class ContentCandidateIndex(contents: Collection<IndexedContent>) {
-    private class Signals(val genres: Set<String>, val people: Set<String>, val plot: Set<String>, val title: Set<String>)
+    private class Signals(
+        val genres: Set<String>,
+        val people: Set<String>,
+        val plot: Set<String>,
+        val title: Set<String>,
+        val keywords: Set<String>,
+    )
 
     private val tokenizer = MetadataSimilarityEngine()
     private val signals = HashMap<String, Signals>(contents.size * 2)
@@ -36,6 +44,7 @@ internal class ContentCandidateIndex(contents: Collection<IndexedContent>) {
     private val byPerson = HashMap<String, MutableList<String>>()
     private val byPlot = HashMap<String, MutableList<String>>()
     private val byTitle = HashMap<String, MutableList<String>>()
+    private val byKeyword = HashMap<String, MutableList<String>>()
     private val bySaga = HashMap<String, MutableList<String>>()
     private val sagaLabels = HashMap<String, String>()
     private val sagasByKey = HashMap<String, List<String>>()
@@ -50,6 +59,7 @@ internal class ContentCandidateIndex(contents: Collection<IndexedContent>) {
             s.people.forEach { byPerson.getOrPut(it) { mutableListOf() } += content.key }
             s.plot.forEach { byPlot.getOrPut(it) { mutableListOf() } += content.key }
             s.title.forEach { byTitle.getOrPut(it) { mutableListOf() } += content.key }
+            s.keywords.forEach { byKeyword.getOrPut(it) { mutableListOf() } += content.key }
             content.sagas.forEach { (qid, label) ->
                 bySaga.getOrPut(qid) { mutableListOf() } += content.key
                 sagaLabels[qid] = label
@@ -67,6 +77,7 @@ internal class ContentCandidateIndex(contents: Collection<IndexedContent>) {
             .filterTo(mutableSetOf()) { it.length >= 5 },
         plot = tokenizer.plotTokens(content.plot),
         title = tokenizer.titleTokens(content.title).filterTo(mutableSetOf()) { it.length >= 4 },
+        keywords = tokenizer.keywordSet(content.keywords),
     )
 
     /**
@@ -115,23 +126,26 @@ internal class ContentCandidateIndex(contents: Collection<IndexedContent>) {
         val plotScores = HashMap<String, Double>()
         val peopleScores = HashMap<String, Double>()
         val titleScores = HashMap<String, Double>()
+        val keywordScores = HashMap<String, Double>()
         src.plot.forEach { accumulate(plotScores, byPlot[it], idf(byPlot[it]?.size ?: 0)) }
         src.people.forEach { accumulate(peopleScores, byPerson[it], PERSON_WEIGHT) }
         src.title.forEach { accumulate(titleScores, byTitle[it], TITLE_WEIGHT) }
+        // Mots-clés rares (« nuclear catastrophe ») pèsent bien plus que les fréquents (« murder »).
+        src.keywords.forEach { accumulate(keywordScores, byKeyword[it], idf(byKeyword[it]?.size ?: 0) * KEYWORD_SCALE) }
         // Genres : part de genres partagés (Dice), pas le nombre brut.
         val genreHits = HashMap<String, Int>()
         src.genres.forEach { genre ->
             byGenre[genre]?.forEach { key -> if (key != source.key && key.startsWith(typePrefix)) genreHits.merge(key, 1, Int::plus) }
         }
         val plotNorm = src.plot.sumOf { idf(byPlot[it]?.size ?: 0) }.coerceAtLeast(1.0)
-        val keys = HashSet<String>().apply { addAll(plotScores.keys); addAll(peopleScores.keys); addAll(titleScores.keys); addAll(genreHits.keys) }
+        val keys = HashSet<String>().apply { addAll(plotScores.keys); addAll(peopleScores.keys); addAll(titleScores.keys); addAll(keywordScores.keys); addAll(genreHits.keys) }
         return keys.asSequence()
             .map { key ->
                 val shared = genreHits[key] ?: 0
                 val candidateGenres = signals[key]?.genres?.size ?: 0
                 val genreScore = if (shared == 0) 0.0 else 2.0 * shared / (src.genres.size + candidateGenres)
                 val plotScore = (plotScores[key] ?: 0.0) / plotNorm * PLOT_SCALE
-                key to (GENRE_WEIGHT * genreScore + plotScore + (peopleScores[key] ?: 0.0) + (titleScores[key] ?: 0.0))
+                key to (GENRE_WEIGHT * genreScore + plotScore + (peopleScores[key] ?: 0.0) + (titleScores[key] ?: 0.0) + (keywordScores[key] ?: 0.0))
             }
             .filter { it.second >= MIN_SCORE }
             .sortedByDescending { it.second }
@@ -147,6 +161,7 @@ internal class ContentCandidateIndex(contents: Collection<IndexedContent>) {
         const val TITLE_WEIGHT = 0.6
         const val GENRE_WEIGHT = 1.0
         const val PLOT_SCALE = 3.0
+        const val KEYWORD_SCALE = 0.25
         const val MIN_SCORE = 0.25
         const val MAX_SAGA_SIZE = 60
         val UNLABELED = Regex("Q\\d+")

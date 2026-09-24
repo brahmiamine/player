@@ -133,6 +133,46 @@ class ContentSimilarityTest {
         assertEquals(0.0, result.score, 0.0001)
     }
 
+    @Test
+    fun `provider prefixes never make two titles look like a saga`() {
+        val slave = features(20, "RO - 12 Years a Slave", "A free man is abducted and sold into slavery.", genre = "Drama, History")
+        val gun = features(21, "RO - 12 Round Gun", "A boxer fights a final bout against his demons.", genre = "Action")
+        val bride = features(22, "4K-TOP - The Bride (2026)", "A monster bride is brought back to life.", genre = "Horror")
+        val warfare = features(23, "4K-TOP - Warfare (2025)", "Navy SEALs are trapped during an Iraq mission.", genre = "War")
+
+        assertFalse(engine.compare(slave, gun).substantive)
+        assertFalse(engine.compare(bride, warfare).substantive)
+        assertEquals(setOf("12", "years", "slave"), engine.titleTokens("EN-TOP -183.12.Years.A.Slave.2013"))
+        assertEquals(setOf("blame"), engine.titleTokens("AR-SUBS - The Blame (2026) (GB)"))
+    }
+
+    @Test
+    fun `same title under another prefix is the same content, not a recommendation`() {
+        val ro = features(30, "RO - 12 Years a Slave", "plot", genre = "Drama")
+        val fr = features(31, "FR - 12 Years a Slave (2013)", "plot", genre = "Drama")
+        val remake = features(32, "FR - Michael (1990)", "plot").copy(releaseDate = "1990")
+        val michael = features(33, "4K-TOP - Michael (2026)", "plot")
+
+        assertTrue(likelySameContent(ro, fr))
+        assertFalse(likelySameContent(michael, remake))
+    }
+
+    @Test
+    fun `shared TMDB keywords link stories even without common plot words`() {
+        val chernobyl = features(40, "4K-AR - Chernobyl (2019) (US)", "A reactor explodes in 1986.", genre = "Drama")
+            .copy(keywords = listOf("nuclear catastrophe", "based on true story", "miniseries", "disaster"))
+        val theDays = features(41, "EN - The Days (2023)", "Workers fight to contain a meltdown at a power plant.", genre = "Drama")
+            .copy(keywords = listOf("nuclear catastrophe", "disaster", "miniseries"))
+        val family = features(42, "AR - Family Saga", "A family drama in old Damascus.", genre = "Drama")
+            .copy(keywords = listOf("miniseries", "woman director"))
+
+        val related = engine.compare(chernobyl, theDays)
+        assertTrue(related.substantive)
+        assertEquals("Thèmes : nuclear catastrophe, disaster", related.reason)
+        // « miniseries » est une étiquette générique : ne rapproche rien à elle seule.
+        assertFalse(engine.compare(chernobyl, family).substantive)
+    }
+
     private fun features(
         id: Int,
         name: String,

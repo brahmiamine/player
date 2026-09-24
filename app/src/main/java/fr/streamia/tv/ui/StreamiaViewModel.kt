@@ -1833,7 +1833,8 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             .filter { it.key in excludedCategoryKeys }
             .mapTo(mutableSetOf()) { it.id }
 
-        val sourceFeatures = ContentFeatures.from(entry, details)
+        // Résumé anglais + mots-clés TMDB : même langue que le reste du catalogue enrichi.
+        val sourceFeatures = repository.withTmdb(profileId, ContentFeatures.from(entry, details))
         val candidates = runCatching {
             repository.similarityCandidates(profileId, entry, SIMILAR_CANDIDATE_LIMIT, sourceFeatures)
         }.getOrDefault(emptyList())

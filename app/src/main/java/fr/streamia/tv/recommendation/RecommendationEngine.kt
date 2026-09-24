@@ -268,8 +268,14 @@ class RecommendationEngine(
         }
         .filter { it.score >= minimumScore.coerceIn(0.0, 1.0) }
         .sortedWith(compareByDescending<RecommendedMedia> { it.score }.thenBy { it.entry.key })
-        .take(limit.coerceAtLeast(0))
-        .toList()
+        // Un même film n'apparaît qu'une fois (meilleur score), pas sous chaque langue/résolution :
+        // les autres versions ont leur propre rangée.
+        .fold(mutableListOf<Pair<RecommendedMedia, ContentFeatures>>()) { kept, item ->
+            val features = featuresFor(item.entry, detailsByKey)
+            if (kept.size < limit && kept.none { likelySameContent(it.second, features) }) kept += item to features
+            kept
+        }
+        .map { it.first }
 
     private fun scoreCandidate(
         entry: MediaEntry,

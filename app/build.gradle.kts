@@ -48,6 +48,14 @@ android {
         }.standardOutput.asText.get().trim().toIntOrNull()?.coerceAtLeast(16) ?: 16
         versionName = "1.5.8"
 
+        // Jeton TMDB (lecture seule, gratuit, usage personnel) : secret GitHub `TMDB_TOKEN` en CI,
+        // `tmdb.token` dans local.properties (ignoré par git) en local. Absent : fonctions TMDB désactivées.
+        val tmdbToken = System.getenv("TMDB_TOKEN")?.takeIf(String::isNotBlank)
+            ?: rootProject.file("local.properties").takeIf { it.exists() }
+                ?.readLines()?.firstOrNull { it.startsWith("tmdb.token=") }?.substringAfter('=')?.trim()
+            ?: ""
+        buildConfigField("String", "TMDB_TOKEN", "\"$tmdbToken\"")
+
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
     }

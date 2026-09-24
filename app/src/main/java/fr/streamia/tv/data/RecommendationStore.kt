@@ -89,6 +89,94 @@ internal class RecommendationStore(context: Context) :
             )
             """.trimIndent(),
         )
+        // Données TMDB (anglais) ; ligne vide si TMDB ne connaît pas le contenu, pour ne pas redemander.
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS recommendation_tmdb (
+                profile_id TEXT NOT NULL,
+                media_type TEXT NOT NULL,
+                media_id INTEGER NOT NULL,
+                overview TEXT,
+                genres TEXT NOT NULL,
+                keywords TEXT NOT NULL,
+                recommendations TEXT NOT NULL,
+                fetched_at INTEGER NOT NULL,
+                PRIMARY KEY (profile_id, media_type, media_id)
+            )
+            """.trimIndent(),
+        )
+    }
+
+    fun saveTmdb(profileId: String, key: String, info: TmdbInfo?) {
+        val id = key.substringAfter(':').toIntOrNull() ?: return
+        writableDatabase.insertWithOnConflict(
+            "recommendation_tmdb",
+            null,
+            ContentValues().apply {
+                put("profile_id", profileId)
+                put("media_type", key.substringBefore(':'))
+                put("media_id", id)
+                putNullable("overview", info?.overview)
+                put("genres", info?.genres.orEmpty().joinToString("|"))
+                put("keywords", info?.keywords.orEmpty().joinToString("|") { it.replace("|", " ") })
+                put(
+                    "recommendations",
+                    info?.recommendations.orEmpty().joinToString("\n") { t ->
+                        listOf(t.id.toString(), t.year?.toString().orEmpty(), t.title, t.originalTitle.orEmpty())
+                            .joinToString("\t") { it.replace('\t', ' ').replace('\n', ' ') }
+                    },
+                )
+                put("fetched_at", System.currentTimeMillis())
+            },
+            SQLiteDatabase.CONFLICT_REPLACE,
+        )
+    }
+
+    /** `null` : jamais interrogé ; `TmdbInfo` vide : TMDB ne connaît pas ce contenu. */
+    fun tmdb(profileId: String, key: String): TmdbInfo? =
+        readableDatabase.rawQuery(
+            "SELECT overview, genres, keywords, recommendations FROM recommendation_tmdb WHERE profile_id = ? AND media_type = ? AND media_id = ?",
+            arrayOf(profileId, key.substringBefore(':'), key.substringAfter(':')),
+        ).use { cursor ->
+            if (!cursor.moveToFirst()) return@use null
+            TmdbInfo(
+                overview = cursor.nullableString(0),
+                genres = cursor.getString(1).split('|').filter(String::isNotBlank),
+                keywords = cursor.getString(2).split('|').filter(String::isNotBlank),
+                recommendations = cursor.getString(3).split('\n').mapNotNull { line ->
+                    val parts = line.split('\t')
+                    val tmdbId = parts.getOrNull(0)?.toIntOrNull() ?: return@mapNotNull null
+                    val title = parts.getOrNull(2)?.takeIf(String::isNotBlank) ?: return@mapNotNull null
+                    TmdbTitle(tmdbId, title, parts.getOrNull(3)?.takeIf(String::isNotBlank), parts.getOrNull(1)?.toIntOrNull())
+                },
+            )
+        }
+
+    /** Contenus enrichis avec un TMDB ID jamais interrogés sur TMDB : clé → TMDB ID. */
+    fun missingTmdbLookups(profileId: String, limit: Int): Map<String, String> =
+        readableDatabase.rawQuery(
+            """
+            SELECT f.media_type, f.media_id, f.tmdb_id FROM recommendation_features f
+            LEFT JOIN recommendation_tmdb t
+              ON t.profile_id = f.profile_id AND t.media_type = f.media_type AND t.media_id = f.media_id
+            WHERE f.profile_id = ? AND t.media_id IS NULL AND f.tmdb_id GLOB '[1-9]*'
+            ORDER BY f.updated_at DESC
+            LIMIT ?
+            """.trimIndent(),
+            arrayOf(profileId, limit.toString()),
+        ).use { cursor ->
+            buildMap { while (cursor.moveToNext()) put("${cursor.getString(0)}:${cursor.getInt(1)}", cursor.getString(2).trim()) }
+        }
+
+    /** Clés du catalogue enrichi par TMDB ID, pour retrouver les recommandations TMDB chez soi. */
+    fun keysByTmdbId(profileId: String, type: MediaType, tmdbIds: Collection<Int>): Map<Int, String> {
+        if (tmdbIds.isEmpty()) return emptyMap()
+        return readableDatabase.rawQuery(
+            "SELECT tmdb_id, media_id FROM recommendation_features WHERE profile_id = ? AND media_type = ? AND tmdb_id IN (${tmdbIds.joinToString(",") { "'$it'" }})",
+            arrayOf(profileId, type.name),
+        ).use { cursor ->
+            buildMap { while (cursor.moveToNext()) cursor.getString(0).trim().toIntOrNull()?.let { putIfAbsent(it, "${type.name}:${cursor.getInt(1)}") } }
+        }
     }
 
     /**
@@ -306,10 +394,12 @@ internal class RecommendationStore(context: Context) :
     fun features(profileId: String): Map<String, StoredRecommendationFeatures> =
         readableDatabase.rawQuery(
             """
-            SELECT media_type, media_id, plot, genre, cast_members, director, release_date, country,
-                   rating, tmdb_id, updated_at
-            FROM recommendation_features
-            WHERE profile_id = ?
+            SELECT f.media_type, f.media_id, COALESCE(t.overview, f.plot), COALESCE(NULLIF(t.genres, ''), f.genre),
+                   f.cast_members, f.director, f.release_date, f.country, f.rating, f.tmdb_id, f.updated_at, t.keywords
+            FROM recommendation_features f
+            LEFT JOIN recommendation_tmdb t
+              ON t.profile_id = f.profile_id AND t.media_type = f.media_type AND t.media_id = f.media_id
+            WHERE f.profile_id = ?
             """.trimIndent(),
             arrayOf(profileId),
         ).use { cursor ->
@@ -329,6 +419,7 @@ internal class RecommendationStore(context: Context) :
                             rating = cursor.nullableDouble(8),
                             tmdbId = cursor.nullableString(9),
                             updatedAtMillis = cursor.getLong(10),
+                            keywords = cursor.nullableString(11)?.split('|')?.filter(String::isNotBlank).orEmpty(),
                         ),
                     )
                 }
@@ -341,6 +432,7 @@ internal class RecommendationStore(context: Context) :
         try {
             db.delete("recommendation_feedback", "profile_id = ?", arrayOf(profileId))
             db.delete("recommendation_features", "profile_id = ?", arrayOf(profileId))
+            db.delete("recommendation_tmdb", "profile_id = ?", arrayOf(profileId))
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()
@@ -423,6 +515,7 @@ internal data class StoredRecommendationFeatures(
     val rating: Double?,
     val tmdbId: String?,
     val updatedAtMillis: Long,
+    val keywords: List<String> = emptyList(),
 ) {
     fun merge(entry: MediaEntry): ContentFeatures = ContentFeatures(
         entry = entry,
@@ -434,6 +527,7 @@ internal data class StoredRecommendationFeatures(
         releaseDate = releaseDate,
         rating = rating ?: entry.rating,
         tmdbId = tmdbId,
+        keywords = keywords,
         enriched = true,
     )
 }
