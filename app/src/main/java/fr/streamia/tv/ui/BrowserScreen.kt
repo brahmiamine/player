@@ -21,6 +21,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import fr.streamia.tv.player.isDecoderError
+import fr.streamia.tv.player.MAX_STREAM_RECOVERY_ATTEMPTS
+import fr.streamia.tv.player.StreamRecovery
+import fr.streamia.tv.player.isRecoverableStreamError
+import fr.streamia.tv.player.streamRecoveryDelayMs
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -29,6 +33,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -926,6 +931,10 @@ private fun LivePreview(
     var activeUrl by remember { mutableStateOf("") }
     var streamCandidates by remember { mutableStateOf(emptyList<String>()) }
     var candidateIndex by remember { mutableStateOf(0) }
+    // Aperçu déjà affiché : une coupure réseau ensuite relance la même URL (voir PlayerScreen).
+    var streamHasPlayed by remember(entry?.key) { mutableStateOf(false) }
+    var recoveryAttempt by remember(entry?.key) { mutableIntStateOf(0) }
+    var pendingRecovery by remember(entry?.key) { mutableStateOf<StreamRecovery?>(null) }
 
     DisposableEffect(player, entry?.key) {
         val listener = object : Player.Listener {
@@ -938,6 +947,8 @@ private fun LivePreview(
                 if (entry?.key == livePlaybackSession.entryKey) {
                     buffering = false
                     error = false
+                    streamHasPlayed = true
+                    recoveryAttempt = 0
                     transportStore.recordSuccess(activeUrl, MediaType.Live)
                 }
             }
@@ -949,6 +960,12 @@ private fun LivePreview(
                     unsupportedFormat = true
                     error = true
                     buffering = false
+                    return
+                }
+                if (streamHasPlayed && isRecoverableStreamError(playbackException.errorCode) && recoveryAttempt < MAX_STREAM_RECOVERY_ATTEMPTS) {
+                    recoveryAttempt += 1
+                    buffering = true
+                    pendingRecovery = StreamRecovery(activeUrl, 0L, recoveryAttempt)
                     return
                 }
                 val next = candidateIndex + 1
@@ -1019,6 +1036,13 @@ private fun LivePreview(
         // l'accueil). Le délai évite d'enregistrer chaque chaîne survolée en zappant.
         delay(LIVE_PREVIEW_WATCHED_MS)
         onWatched(target)
+    }
+
+    LaunchedEffect(pendingRecovery) {
+        val recovery = pendingRecovery ?: return@LaunchedEffect
+        delay(streamRecoveryDelayMs(recovery.attempt))
+        if (enabled && entry != null && livePlaybackSession.entryKey == entry.key) livePlaybackSession.playUrl(entry, recovery.url)
+        pendingRecovery = null
     }
 
     LaunchedEffect(entry?.key, buffering) {

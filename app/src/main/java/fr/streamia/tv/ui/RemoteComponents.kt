@@ -6,6 +6,7 @@ import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.sync.Semaphore
 import android.graphics.BitmapFactory
 import android.content.Context
+import android.content.ComponentCallbacks2
 import android.util.LruCache
 import android.view.KeyEvent as AndroidKeyEvent
 import androidx.compose.animation.core.animateFloatAsState
@@ -388,6 +389,13 @@ private fun RemoteArtwork(
     }
 }
 
+/**
+ * Mémoire demandée par le système (boîtier à peu de RAM, lecture 4K, app passée en arrière-plan) :
+ * les affiches déjà décodées sont libérées plutôt que de laisser Android tuer l'app ou le lecteur.
+ * Le cache disque HTTP reste : les réafficher ne coûte qu'un décodage.
+ */
+internal fun trimArtworkCache(level: Int) = ArtworkLoader.trim(level)
+
 private object ArtworkLoader {
     // Dimensionné en octets réels (⅛ du tas max) plutôt qu'en nombre d'entrées.
     private val cache = object : LruCache<String, ImageBitmap>(cacheSizeBytes()) {
@@ -399,6 +407,13 @@ private object ArtworkLoader {
     @Volatile private var client: OkHttpClient? = null
 
     private fun cacheKey(url: String, maxPx: Int) = "$maxPx|$url"
+
+    fun trim(level: Int) {
+        when {
+            level >= ComponentCallbacks2.TRIM_MEMORY_BACKGROUND || level == ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL -> cache.evictAll()
+            level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW -> cache.trimToSize(cache.maxSize() / 2)
+        }
+    }
 
     fun get(url: String?, maxPx: Int): ImageBitmap? = url?.takeIf(String::isNotBlank)?.let { cache.get(cacheKey(it, maxPx)) }
 

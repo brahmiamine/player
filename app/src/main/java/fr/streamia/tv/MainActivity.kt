@@ -12,6 +12,7 @@ import androidx.lifecycle.ViewModelProvider
 import fr.streamia.tv.data.XtreamRepository
 import fr.streamia.tv.logging.CrashReporter
 import fr.streamia.tv.ui.StreamiaTvRoot
+import fr.streamia.tv.ui.trimArtworkCache
 import fr.streamia.tv.ui.StreamiaViewModel
 import fr.streamia.tv.ui.StreamiaViewModelFactory
 import fr.streamia.tv.work.EpgSyncScheduler
@@ -49,6 +50,12 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         // Retour du réglage « Installer des applis inconnues » : l'installation de la mise à jour reprend.
         if (::viewModel.isInitialized) viewModel.resumePendingUpdateInstall()
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        trimArtworkCache(level)
+        if (::viewModel.isInitialized) viewModel.onTrimMemory(level)
     }
 
     override fun onNewIntent(intent: Intent) {

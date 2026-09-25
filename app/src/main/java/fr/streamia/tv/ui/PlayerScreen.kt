@@ -31,6 +31,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -68,6 +69,10 @@ import androidx.media3.exoplayer.mediacodec.MediaCodecRenderer
 import fr.streamia.tv.data.DisplayModeSwitch
 import fr.streamia.tv.player.unsupportedFormatMessage
 import fr.streamia.tv.player.isDecoderError
+import fr.streamia.tv.player.MAX_STREAM_RECOVERY_ATTEMPTS
+import fr.streamia.tv.player.StreamRecovery
+import fr.streamia.tv.player.isRecoverableStreamError
+import fr.streamia.tv.player.streamRecoveryDelayMs
 import fr.streamia.tv.player.DisplayModeSwitcher
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
@@ -245,6 +250,11 @@ fun PlayerScreen(
     var positionMs by remember(entry.key) { mutableStateOf(0L) }
     var durationMs by remember(entry.key) { mutableStateOf(0L) }
     var watchdogRecoveryCount by remember(entry.key) { mutableStateOf(0) }
+    // Flux déjà affiché au moins une fois : une erreur réseau ensuite (coupure après des heures de
+    // lecture) relance la même URL au lieu d'afficher un écran d'erreur définitif.
+    var streamHasPlayed by remember(entry.key) { mutableStateOf(false) }
+    var recoveryAttempt by remember(entry.key) { mutableIntStateOf(0) }
+    var pendingRecovery by remember(entry.key) { mutableStateOf<StreamRecovery?>(null) }
     // Sous-titre externe (.srt/.vtt) chargé pour cette session de lecture uniquement : pas de
     // persistance entre relectures, il repart à null à chaque nouvelle entrée (remember(entry.key)).
     var externalSubtitle by remember(entry.key) { mutableStateOf<MediaItem.SubtitleConfiguration?>(null) }
@@ -373,6 +383,8 @@ fun PlayerScreen(
                 diagnosticsTracker.onBufferingEnded(now)
                 diagnostics = diagnosticsTracker.snapshot(now)
                 buffering = false
+                streamHasPlayed = true
+                recoveryAttempt = 0
                 transportStore.recordSuccess(activeStreamUrl, entry.type)
             }
 
@@ -456,6 +468,12 @@ fun PlayerScreen(
                     buffering = false
                     return
                 }
+                if (streamHasPlayed && isRecoverableStreamError(error.errorCode) && recoveryAttempt < MAX_STREAM_RECOVERY_ATTEMPTS) {
+                    recoveryAttempt += 1
+                    buffering = true
+                    pendingRecovery = StreamRecovery(activeStreamUrl, player.currentPosition.coerceAtLeast(0L), recoveryAttempt)
+                    return
+                }
                 val next = candidateIndex + 1
                 if (next < streamCandidates.size) {
                     val previousPosition = player.currentPosition.coerceAtLeast(0L)
@@ -471,8 +489,18 @@ fun PlayerScreen(
         onDispose { player.removeListener(listener) }
     }
 
+    LaunchedEffect(pendingRecovery) {
+        val recovery = pendingRecovery ?: return@LaunchedEffect
+        delay(streamRecoveryDelayMs(recovery.attempt))
+        startCandidate(recovery.url, recovery.positionMs)
+        pendingRecovery = null
+    }
+
     DisposableEffect(entry.key) {
         onDispose {
+            // Direct : compté comme regardé après 2,5 s (effet plus bas), pas à chaque chaîne
+            // traversée en zappant.
+            if (entry.type == MediaType.Live) return@onDispose
             runCatching {
                 val duration = player.duration.takeIf { it > 0 && it != C.TIME_UNSET } ?: 0L
                 onProgress(entry, player.currentPosition.coerceAtLeast(0), duration)

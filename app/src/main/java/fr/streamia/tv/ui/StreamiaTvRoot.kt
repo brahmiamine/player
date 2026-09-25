@@ -14,11 +14,14 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.streamia.tv.data.PlaybackSessionStore
 import fr.streamia.tv.data.resolveStartupProfileId
+import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.player.LivePlaybackSession
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 
 /**
  * OK / gauche / menu sur le lecteur Live demandent un retour vers le Browser Live principal
@@ -111,41 +114,30 @@ fun StreamiaTvRoot(viewModel: StreamiaViewModel) {
 
     LaunchedEffect(Unit) {
         var previouslyActiveProfileId: String? = null
-        viewModel.uiState.collect { current ->
-            val activeProfileId = current.activeProfileId
-            if (activeProfileId != null) {
-                val savedPlayback = sessionStore.load()
-                if (savedPlayback != null && savedPlayback.profileId != activeProfileId) {
-                    sessionStore.clearPlayback()
+        // Seuls profil, page et contenu comptent : l'état complet change en continu (pages chargées,
+        // progression, guides…) et chaque émission relisait puis réécrivait ces préférences sur le
+        // thread principal.
+        viewModel.uiState
+            .map(::persistedNavigationOf)
+            .distinctUntilChanged()
+            .collect { current ->
+                val activeProfileId = current.activeProfileId
+                if (activeProfileId != null) {
+                    val savedPlayback = sessionStore.load()
+                    if (savedPlayback != null && savedPlayback.profileId != activeProfileId) {
+                        sessionStore.clearPlayback()
+                    }
+                    sessionStore.saveActiveProfile(activeProfileId)
+                    previouslyActiveProfileId = activeProfileId
+                    current.lastPage?.let(sessionStore::saveLastPage)
+                    current.content?.let { sessionStore.save(activeProfileId, it, current.returnToSeries) }
                 }
-                sessionStore.saveActiveProfile(activeProfileId)
-                previouslyActiveProfileId = activeProfileId
-            }
 
-            // Fiches et lecteur ne comptent pas : on garde la page d'où ils ont été ouverts.
-            when (current.screen) {
-                StreamiaScreen.Home -> "home"
-                StreamiaScreen.Browser -> current.browserType?.let { "browser:${it.name}" }
-                StreamiaScreen.Search -> "search"
-                StreamiaScreen.LiveMatches -> "live_matches"
-                StreamiaScreen.Epg -> "epg"
-                StreamiaScreen.Settings -> "settings"
-                else -> null
-            }?.takeIf { activeProfileId != null }?.let(sessionStore::saveLastPage)
-
-            val playerScreen = current.screen as? StreamiaScreen.Player
-            if (playerScreen != null && activeProfileId != null) {
-                sessionStore.save(activeProfileId, playerScreen.entry, playerScreen.returnToSeries)
-            } else if (current.lastViewedEntry != null && activeProfileId != null) {
-                val entry = current.lastViewedEntry ?: return@collect
-                sessionStore.save(activeProfileId, entry, entry.type == MediaType.Series)
+                if (current.onLogin && activeProfileId == null && previouslyActiveProfileId != null) {
+                    sessionStore.disableAutoOpen()
+                    previouslyActiveProfileId = null
+                }
             }
-
-            if (current.screen is StreamiaScreen.Login && activeProfileId == null && previouslyActiveProfileId != null) {
-                sessionStore.disableAutoOpen()
-                previouslyActiveProfileId = null
-            }
-        }
     }
 
     LaunchedEffect(Unit) {
@@ -179,4 +171,35 @@ fun StreamiaTvRoot(viewModel: StreamiaViewModel) {
     }
 
     StreamiaApp(viewModel, livePlaybackSession)
+}
+
+/** Ce que [StreamiaTvRoot] garde pour rouvrir l'app au même endroit au prochain démarrage. */
+private data class PersistedNavigation(
+    val activeProfileId: String?,
+    val lastPage: String?,
+    val content: MediaEntry?,
+    val returnToSeries: Boolean,
+    val onLogin: Boolean,
+)
+
+private fun persistedNavigationOf(state: StreamiaUiState): PersistedNavigation {
+    // Fiches et lecteur ne comptent pas : on garde la page d'où ils ont été ouverts.
+    val lastPage = when (state.screen) {
+        StreamiaScreen.Home -> "home"
+        StreamiaScreen.Browser -> state.browserType?.let { "browser:${it.name}" }
+        StreamiaScreen.Search -> "search"
+        StreamiaScreen.LiveMatches -> "live_matches"
+        StreamiaScreen.Epg -> "epg"
+        StreamiaScreen.Settings -> "settings"
+        else -> null
+    }
+    val playerScreen = state.screen as? StreamiaScreen.Player
+    val content = playerScreen?.entry ?: state.lastViewedEntry
+    return PersistedNavigation(
+        activeProfileId = state.activeProfileId,
+        lastPage = lastPage,
+        content = content,
+        returnToSeries = playerScreen?.returnToSeries ?: (content?.type == MediaType.Series),
+        onLogin = state.screen is StreamiaScreen.Login,
+    )
 }

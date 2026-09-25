@@ -1,6 +1,7 @@
 package fr.streamia.tv.ui
 
 import fr.streamia.tv.data.WatchNextPublisher
+import android.content.ComponentCallbacks2
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -177,6 +178,17 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             profiles = repository.profiles(),
             appSettings = repository.appSettings(),
         ))
+    }
+
+    /**
+     * Pression mémoire signalée par Android : les journées EPG gardées en RAM (des dizaines de Mo
+     * sur un gros guide) sont relâchées, SQLite les redonnera au besoin. Le guide du jour affiché
+     * reste dans l'état. Passage en arrière-plan simple (UI_HIDDEN) : rien à faire.
+     */
+    fun onTrimMemory(level: Int) {
+        if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW && level != ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN) {
+            epgGuideMemoryCache.clear()
+        }
     }
 
     fun finishStartup() {
@@ -1381,7 +1393,9 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             libraryMutation.withLock {
                 val history = withContext(Dispatchers.IO) {
                     repository.recordPlayback(profileId, entry, positionMs, durationMs)
-                    repository.publishWatchNext(profileId)
+                    // « Continuer à regarder » de Google TV ne liste que films et épisodes : rien à
+                    // republier (≈ 10 appels au fournisseur système) à chaque chaîne Direct.
+                    if (entry.type != MediaType.Live) repository.publishWatchNext(profileId)
                     repository.library(profileId).history
                 }
                 _uiState.update { state ->
