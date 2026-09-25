@@ -14,6 +14,7 @@ import fr.streamia.tv.domain.SeriesEpisode
 import fr.streamia.tv.domain.ServerCredentials
 import fr.streamia.tv.domain.XtreamUrlBuilder
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.asExecutor
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -22,6 +23,9 @@ import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.charset.StandardCharsets
+import java.util.concurrent.Callable
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.FutureTask
 
 class XtreamClient {
     /**
@@ -61,16 +65,28 @@ class XtreamClient {
      */
     internal fun loadCatalogOnIo(credentials: ServerCredentials, sink: CatalogWriteSink): CatalogFetchResult {
         val urls = XtreamUrlBuilder(credentials)
-        val account = testConnectionOnIo(credentials)
-        if (!account.status.equals("Active", ignoreCase = true)) {
-            throw XtreamException("Ce compte n'est pas actif (${account.status}).")
+        // Les trois listes de catégories sont petites mais chaque appel coûte un aller-retour
+        // complet (souvent 1 à 3 s sur un panneau chargé) : elles partent en parallèle de la
+        // vérification du compte au lieu de s'enchaîner. Seule l'écriture en base (sink) reste sur
+        // ce thread, qui porte la transaction SQLite.
+        val liveCategories = fetchInBackground { parseCategories(fetchArray(urls.api("get_live_categories")), MediaType.Live) }
+        val vodCategories = fetchInBackground { parseCategories(fetchArray(urls.api("get_vod_categories")), MediaType.Movie) }
+        val seriesCategories = fetchInBackground { parseCategories(fetchArray(urls.api("get_series_categories")), MediaType.Series) }
+        val pending = listOf(liveCategories, vodCategories, seriesCategories)
+        val (categories, account) = try {
+            val account = testConnectionOnIo(credentials)
+            if (!account.status.equals("Active", ignoreCase = true)) {
+                throw XtreamException("Ce compte n'est pas actif (${account.status}).")
+            }
+            buildList {
+                addAll(liveCategories.await())
+                addAll(runCatching { vodCategories.await() }.getOrDefault(emptyList()))
+                addAll(runCatching { seriesCategories.await() }.getOrDefault(emptyList()))
+            }.distinctBy(MediaCategory::key) to account
+        } finally {
+            // Sans interruption : un thread IO interrompu garderait ce drapeau pour la tâche suivante.
+            pending.forEach { it.cancel(false) }
         }
-
-        val categories = buildList {
-            addAll(parseCategories(fetchArray(urls.api("get_live_categories")), MediaType.Live))
-            addAll(runCatching { parseCategories(fetchArray(urls.api("get_vod_categories")), MediaType.Movie) }.getOrDefault(emptyList()))
-            addAll(runCatching { parseCategories(fetchArray(urls.api("get_series_categories")), MediaType.Series) }.getOrDefault(emptyList()))
-        }.distinctBy(MediaCategory::key)
         sink.writeCategories(categories)
 
         // Les catalogues de certains fournisseurs dépassent largement 200 000 entrées. JsonReader
@@ -229,6 +245,16 @@ class XtreamClient {
             rating = rating,
             tmdbId = info.firstNonBlank("tmdb_id", "tmdb"),
         )
+    }
+
+    private fun <T> fetchInBackground(block: () -> T): FutureTask<T> =
+        FutureTask(Callable { block() }).also { Dispatchers.IO.asExecutor().execute(it) }
+
+    /** Résultat d'une requête lancée par [fetchInBackground], avec son exception d'origine. */
+    private fun <T> FutureTask<T>.await(): T = try {
+        get()
+    } catch (error: ExecutionException) {
+        throw error.cause ?: error
     }
 
     private fun fetchObject(url: String): JSONObject = JSONObject(fetch(url))

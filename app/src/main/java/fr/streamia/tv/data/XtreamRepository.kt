@@ -6,6 +6,7 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import fr.streamia.tv.domain.AccountInfo
 import fr.streamia.tv.domain.Catalog
+import fr.streamia.tv.domain.EpgChannel
 import fr.streamia.tv.domain.EpgGuide
 import fr.streamia.tv.domain.EpgNowContext
 import fr.streamia.tv.domain.EpgProgram
@@ -24,7 +25,11 @@ import fr.streamia.tv.recommendation.MetadataSimilarityEngine
 import fr.streamia.tv.recommendation.MovieLensNeighbors
 import fr.streamia.tv.recommendation.SimilarityBoost
 import fr.streamia.tv.recommendation.releaseYear
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.job
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -770,11 +775,13 @@ class XtreamRepository(context: Context) {
                 add(provider)
             }.distinct()
 
+            val job = coroutineContext.job
             var lastError: Throwable? = null
             for (source in sources) {
                 val session = epgCache.beginReplaceOnIo(profileId)
                 try {
-                    xmlTvRepository.syncOnIo(source, liveEntries, session)
+                    xmlTvRepository.syncOnIo(source, liveEntries, session.cancellableBy(job))
+                    job.ensureActive()
                     if (session.writtenProgramCount <= 0) {
                         throw XtreamException("La source EPG ne contient aucun programme exploitable correspondant aux chaînes.")
                     }
@@ -782,6 +789,9 @@ class XtreamRepository(context: Context) {
                     return@withLock true
                 } catch (error: Throwable) {
                     epgCache.abortReplaceOnIo(session)
+                    // Liste quittée : ne pas enchaîner sur la source suivante (plusieurs minutes de
+                    // téléchargement et d'écriture en base pour une liste qui n'est plus affichée).
+                    if (error is CancellationException) throw error
                     lastError = error
                 }
             }
@@ -859,9 +869,15 @@ class XtreamRepository(context: Context) {
      */
     private suspend fun fetchAndStoreXtreamCatalog(profileId: String, credentials: ServerCredentials): Catalog =
         withContext(Dispatchers.IO) {
+            val job = coroutineContext.job
             val session = cache.beginReplaceOnIo(profileId)
             val result = try {
-                client.loadCatalogOnIo(credentials, session)
+                client.loadCatalogOnIo(credentials, session.cancellableBy(job)).also {
+                    // Les sections Films/Séries avalent leurs erreurs (runCatching) : une annulation
+                    // survenue pendant leur lecture doit tout de même empêcher de valider un
+                    // catalogue partiel.
+                    job.ensureActive()
+                }
             } catch (error: Throwable) {
                 cache.abortReplaceOnIo(session)
                 throw error
@@ -1076,4 +1092,40 @@ internal fun matchesTrending(entry: MediaEntry, title: TrendingTitle): Boolean {
     if (key.isEmpty() || (key != titleKey(title.title) && key != title.originalTitle?.let(::titleKey))) return false
     val year = YEAR_IN_NAME.findAll(entry.displayName).lastOrNull()?.value?.toInt() ?: return true
     return title.year == null || kotlin.math.abs(year - title.year) <= 1
+}
+
+/**
+ * Lot écrit seulement si la coroutine appelante est encore active. Le parsing est synchrone (la
+ * transaction SQLite doit rester sur un seul thread) et ne passe par aucun point de suspension :
+ * sans ce contrôle, annuler l'ouverture d'une liste laissait son téléchargement aller au bout.
+ * L'exception levée ici remonte sur le même thread jusqu'à l'annulation de la transaction.
+ */
+internal fun CatalogWriteSink.cancellableBy(job: Job): CatalogWriteSink {
+    val sink = this
+    return object : CatalogWriteSink {
+        override fun writeCategories(categories: List<MediaCategory>) {
+            job.ensureActive()
+            sink.writeCategories(categories)
+        }
+
+        override fun writeEntries(entries: List<MediaEntry>) {
+            job.ensureActive()
+            sink.writeEntries(entries)
+        }
+    }
+}
+
+internal fun EpgWriteSink.cancellableBy(job: Job): EpgWriteSink {
+    val sink = this
+    return object : EpgWriteSink {
+        override fun writeChannel(channel: EpgChannel) {
+            job.ensureActive()
+            sink.writeChannel(channel)
+        }
+
+        override fun writePrograms(programs: List<EpgProgram>) {
+            job.ensureActive()
+            sink.writePrograms(programs)
+        }
+    }
 }

@@ -160,6 +160,12 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     private val detailsTrail = ArrayDeque<MediaEntry>()
     private var lastLiveEntry: MediaEntry? = null
     private var secondaryLoadsJob: Job? = null
+    /**
+     * Ouverture d'une liste et son actualisation différée (téléchargement du catalogue). Annulée
+     * au changement de liste : sinon l'ancienne liste continuait de se télécharger et d'écrire en
+     * base pendant que la nouvelle s'ouvrait.
+     */
+    private var profileLoadJob: Job? = null
     // Clé comparée par identité des instances (catalogue/ensembles), recalculée seulement quand
     // l'un d'eux change réellement.
     private var zapIndexCache: Pair<List<Any>, LiveZapIndex>? = null
@@ -229,7 +235,8 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         warmEpgGuideCache(profileId)
         // Reprise directe dans le lecteur : la vidéo passe d'abord, les guides tiers attendent.
         scheduleSecondaryLoads(fromPlayer = true)
-        viewModelScope.launch {
+        profileLoadJob?.cancel()
+        profileLoadJob = viewModelScope.launch {
             // Catalogue déjà résolu (favoris/ordre déjà appliqués) persisté lors d'une précédente
             // réconciliation réussie pour ce profil : s'il est encore valide pour l'organisation
             // courante, il permet de sortir de catalogHydrating immédiatement, sans attendre que
@@ -254,6 +261,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                     }
                 }
                 .onFailure {
+                    if (it is CancellationException) throw it
                     _uiState.update { state ->
                         if (state.activeProfileId == profileId) {
                             state.copy(catalogHydrating = false, offline = true, message = it.safeMessage())
@@ -335,7 +343,8 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         // télécommande, ou simple impatience) repasserait le garde busy ci-dessus et déclencherait
         // un second openProfile() concurrent pour le même profil.
         _uiState.update { it.copy(busy = true) }
-        viewModelScope.launch {
+        profileLoadJob?.cancel()
+        profileLoadJob = viewModelScope.launch {
             val profile = repository.profile(profileId)
             val credentials = profile?.credentialsOrNull()
             val cachedCatalog = if (credentials != null) repository.cachedCatalog(profileId) else null
@@ -364,6 +373,8 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                         delay(CATALOG_BACKGROUND_REFRESH_DELAY_MS)
                         refreshSilently(profileId)
                     }
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
                 } catch (error: Throwable) {
                     _uiState.update { state ->
                         if (state.activeProfileId == profileId) state.copy(offline = true, message = error.safeMessage())
@@ -377,6 +388,8 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 val loaded = repository.openProfile(profileId)
                 showCatalog(loaded)
                 if (loaded.source == CatalogSource.Cache) refreshSilently(profileId)
+            } catch (cancellation: CancellationException) {
+                throw cancellation
             } catch (error: Throwable) {
                 showError(error)
             }
@@ -2567,8 +2580,12 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     }
 
     private suspend fun refreshSilently(profileId: String) {
+        // Liste quittée pendant l'attente : rien à télécharger pour elle.
+        if (_uiState.value.activeProfileId != profileId) return
         try {
             mergeCatalog(repository.refreshProfile(profileId))
+        } catch (cancellation: CancellationException) {
+            throw cancellation
         } catch (_: Throwable) {
             if (_uiState.value.activeProfileId == profileId) {
                 _uiState.update { state -> state.copy(offline = true, busy = false) }
@@ -2658,6 +2675,8 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     }
 
     private fun showLogin() {
+        profileLoadJob?.cancel()
+        profileLoadJob = null
         liveZapList = null
         detailsTrail.clear()
         previousLiveEntry = null

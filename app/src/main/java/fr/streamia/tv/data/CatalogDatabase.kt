@@ -291,12 +291,13 @@ internal class CatalogDatabase(context: Context) :
             loadRecent(profileId, type, recentPerType).forEach { entries[it.key] = it }
         }
         loadEntriesByKeys(profileId, extraEntryKeys).forEach { entries[it.key] = it }
+        val counts = loadCounts(profileId)
         return Catalog(
             categories = categories,
             entries = entries.values.toList(),
             account = loadAccount(profileId),
-            totalCounts = loadTotalCounts(profileId),
-            categoryCounts = loadCategoryCounts(profileId),
+            totalCounts = counts.totals,
+            categoryCounts = counts.byCategory,
         )
     }
 
@@ -328,7 +329,9 @@ internal class CatalogDatabase(context: Context) :
         val orderBy = when (order) {
             VodSortOrder.Provider -> "number, media_id"
             VodSortOrder.Alphabetical -> "display_name COLLATE LOCALIZED, media_id"
-            VodSortOrder.RecentlyAdded -> "added_at IS NULL, added_at DESC, media_id"
+            // DESC range déjà les NULL en dernier : sans expression, l'index idx_catalog_recent
+            // donne l'ordre directement au lieu de trier toute la section à chaque page.
+            VodSortOrder.RecentlyAdded -> "added_at DESC, media_id"
             // Notes hors échelle envoyées par certains fournisseurs (7125/10…) : en fin de liste.
             VodSortOrder.Rating -> "(rating IS NULL OR rating < 0 OR rating > 10), rating DESC, media_id"
         }
@@ -561,7 +564,10 @@ internal class CatalogDatabase(context: Context) :
             """
             SELECT ${ENTRY_COLUMNS.joinToString()} FROM catalog_entries
             WHERE profile_id = ? AND media_type = ? AND navigable = 1
-            ORDER BY COALESCE(added_at, 0) DESC, number DESC, media_id DESC
+            -- Pas de COALESCE : il empêchait d'utiliser idx_catalog_recent et obligeait à trier toute
+            -- la section (des centaines de milliers de lignes) pour 40 résultats. Les NULL restent
+            -- en dernier avec DESC, comme avant.
+            ORDER BY added_at DESC, number DESC, media_id DESC
             LIMIT ?
             """.trimIndent(),
             arrayOf(profileId, type.name, limit.toString()),
@@ -583,31 +589,28 @@ internal class CatalogDatabase(context: Context) :
         }
     }
 
-    private fun loadTotalCounts(profileId: String): Map<MediaType, Int> = readableDatabase.rawQuery(
-        """
-        SELECT media_type, COUNT(*) FROM catalog_entries
-        WHERE profile_id = ? AND navigable = 1 GROUP BY media_type
-        """.trimIndent(),
-        arrayOf(profileId),
-    ).use { cursor ->
-        buildMap {
-            while (cursor.moveToNext()) put(cursor.getString(0).toMediaType(), cursor.getInt(1))
-        }
-    }
+    private class CatalogCounts(val totals: Map<MediaType, Int>, val byCategory: Map<String, Int>)
 
-    private fun loadCategoryCounts(profileId: String): Map<String, Int> = readableDatabase.rawQuery(
+    /**
+     * Comptes par catégorie et, par simple addition, totaux par type : un seul parcours de l'index
+     * au lieu de deux à chaque ouverture de liste (des centaines de milliers de lignes chacun).
+     */
+    private fun loadCounts(profileId: String): CatalogCounts = readableDatabase.rawQuery(
         """
         SELECT media_type, category_id, COUNT(*) FROM catalog_entries
         WHERE profile_id = ? AND navigable = 1 GROUP BY media_type, category_id
         """.trimIndent(),
         arrayOf(profileId),
     ).use { cursor ->
-        buildMap {
-            while (cursor.moveToNext()) {
-                val type = cursor.getString(0).toMediaType()
-                put(Catalog.categoryKey(type, cursor.getString(1)), cursor.getInt(2))
-            }
+        val totals = HashMap<MediaType, Int>()
+        val byCategory = HashMap<String, Int>()
+        while (cursor.moveToNext()) {
+            val type = cursor.getString(0).toMediaType()
+            val count = cursor.getInt(2)
+            byCategory[Catalog.categoryKey(type, cursor.getString(1))] = count
+            totals[type] = (totals[type] ?: 0) + count
         }
+        CatalogCounts(totals, byCategory)
     }
 
     private fun loadAccount(profileId: String): AccountInfo? = readableDatabase.rawQuery(
