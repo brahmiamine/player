@@ -262,6 +262,8 @@ data class Catalog(
     val categoryCounts: Map<String, Int> = emptyMap(),
     /** Categories for which at least one database page is currently materialized in [entries]. */
     val loadedCategoryKeys: Set<String> = emptySet(),
+    /** Sections chargées en entier (organisateur) : leurs entrées ne sont jamais évincées. */
+    val fullSections: Set<MediaType> = emptySet(),
 ) {
     /**
      * Index only the entries that are actually materialized. A SQLite-backed catalogue can carry
@@ -355,8 +357,36 @@ data class Catalog(
         entries.forEach { merged[it.key] = it }
         newEntries.forEach { merged[it.key] = it }
         val sectionKeys = categoriesFor(type).map { categoryKey(type, it.id) } + categoryKey(type, ALL_CATEGORY_ID)
-        return copy(entries = merged.values.toList(), loadedCategoryKeys = loadedCategoryKeys + sectionKeys)
+        return copy(entries = merged.values.toList(), loadedCategoryKeys = loadedCategoryKeys + sectionKeys, fullSections = fullSections + type)
             .inheritSections(this, except = setOf(type))
+    }
+
+    /**
+     * Libère les entrées Films/Séries matérialisées par des pages qui ne sont plus retenues.
+     *
+     * Sans éviction, chaque catégorie ouverte (plus ses deux voisines préchargées, 500 entrées par
+     * page) restait en mémoire jusqu'à la fermeture du processus : après un ou deux jours sans
+     * redémarrage de l'app, des dizaines de milliers d'entrées étaient recopiées et réindexées à
+     * chaque nouvelle page, et toute la navigation ralentissait. Le Direct et les sections chargées
+     * en entier ([fullSections]) ne sont jamais touchés ; une catégorie évincée est simplement
+     * relue depuis SQLite à sa prochaine ouverture.
+     */
+    fun retainingVodEntries(retainedKeys: Set<String>, retainedCategoryKeys: Set<String>): Catalog {
+        if (!isPaged) return this
+        fun evictable(type: MediaType) = type != MediaType.Live && type !in fullSections
+        val evictedTypes = HashSet<MediaType>()
+        val keptEntries = entries.filter { entry ->
+            val keep = !evictable(entry.type) || entry.key in retainedKeys
+            if (!keep) evictedTypes += entry.type
+            keep
+        }
+        val keptCategoryKeys = loadedCategoryKeys.filterTo(HashSet()) { key ->
+            val type = MediaType.entries.firstOrNull { key.startsWith("${it.name}:") }
+            type == null || !evictable(type) || key in retainedCategoryKeys
+        }
+        if (evictedTypes.isEmpty() && keptCategoryKeys.size == loadedCategoryKeys.size) return this
+        return copy(entries = keptEntries, loadedCategoryKeys = keptCategoryKeys)
+            .inheritSections(this, except = evictedTypes)
     }
 
     fun search(query: String, type: MediaType? = null, limit: Int = 500): List<MediaEntry> {

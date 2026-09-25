@@ -562,6 +562,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             is StreamiaScreen.Player -> Unit
             else -> detailsTrail.clear()
         }
+        while (detailsTrail.size > MAX_DETAILS_TRAIL) detailsTrail.removeFirst()
         // Le Browser reste le retour par défaut. Depuis un détail (contenu similaire / retry),
         // conserver le contexte qui a amené l'utilisateur jusque-là au lieu de l'écraser.
         when (_uiState.value.screen) {
@@ -1063,19 +1064,12 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                     return@launch
                 }
                 if (page.entries.isEmpty() && offset > 0) return@launch
-                mergeIntoCatalog(profileId) { base ->
-                    base.withMaterializedEntries(page.entries, type, categoryId)
-                }
-                if (type != MediaType.Live) {
-                    _uiState.update { state ->
-                        val known = state.vodPageKeys[pageKey]
-                        when {
-                            state.activeProfileId != profileId -> state
-                            offset == 0 -> state.copy(vodPageKeys = state.vodPageKeys + (pageKey to page.entries.map(MediaEntry::key)))
-                            known?.size == offset -> state.copy(vodPageKeys = state.vodPageKeys + (pageKey to (known + page.entries.map(MediaEntry::key)).distinct()))
-                            else -> state
-                        }
+                if (type == MediaType.Live) {
+                    mergeIntoCatalog(profileId) { base ->
+                        base.withMaterializedEntries(page.entries, type, categoryId)
                     }
+                } else {
+                    mergeVodPage(profileId, type, categoryId, pageKey, offset, page.entries)
                 }
             } finally {
                 categoryLoadsInFlight.remove(loadKey)
@@ -1107,6 +1101,87 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 if (state.activeProfileId != profileId) state
                 else state.copy(rawCatalog = raw, catalog = customized)
             }
+        }
+    }
+
+    /**
+     * Fusionne une page Films/Séries et enregistre son ordre dans [StreamiaUiState.vodPageKeys] en
+     * une seule étape sous [catalogLayoutMutation], puis libère les pages les moins récemment
+     * ouvertes au-delà de [MAX_MATERIALIZED_VOD_ENTRIES]. Page et ordre sont publiés ensemble : une
+     * éviction concurrente ne peut donc jamais retirer les entrées d'une page déjà référencée.
+     */
+    private suspend fun mergeVodPage(
+        profileId: String,
+        type: MediaType,
+        categoryId: String,
+        pageKey: String,
+        offset: Int,
+        entries: List<MediaEntry>,
+    ) {
+        catalogLayoutMutation.withLock {
+            while (true) {
+                val state = _uiState.value
+                if (state.activeProfileId != profileId) return
+                val base = state.rawCatalog ?: state.catalog ?: return
+                val known = state.vodPageKeys[pageKey]
+                val pageKeys = when {
+                    offset == 0 -> entries.map(MediaEntry::key)
+                    known?.size == offset -> (known + entries.map(MediaEntry::key)).distinct()
+                    else -> known
+                }
+                // Page (re)lue : passe en fin de liste, la plus récemment utilisée.
+                val pages = if (pageKeys == null) state.vodPageKeys else state.vodPageKeys - pageKey + (pageKey to pageKeys)
+                val retained = retainedVodPages(pages, protectedVodCategoryKey(state), MAX_MATERIALIZED_VOD_ENTRIES)
+                val pinned = if (retained.size == pages.size) emptySet() else pinnedEntryKeys(state)
+                val raw = withContext(Dispatchers.Default) {
+                    val merged = base.withMaterializedEntries(entries, type, categoryId)
+                    if (retained.size == pages.size) merged
+                    else merged.retainingVodEntries(
+                        retainedKeys = retained.values.flatMapTo(HashSet(pinned)) { it },
+                        retainedCategoryKeys = retained.keys.mapTo(HashSet()) { it.substringBefore('|') },
+                    )
+                }
+                val customized = withContext(Dispatchers.Default) { repository.customizedCatalog(profileId, raw) }
+                var published = false
+                _uiState.update { current ->
+                    published = false
+                    when {
+                        current.activeProfileId != profileId -> current
+                        // Catalogue remplacé pendant le calcul (actualisation) : ne pas l'écraser
+                        // avec une version dérivée de l'ancien, refaire la fusion sur le nouveau.
+                        (current.rawCatalog ?: current.catalog) !== base -> current
+                        else -> {
+                            published = true
+                            current.copy(rawCatalog = raw, catalog = customized, vodPageKeys = retained)
+                        }
+                    }
+                }
+                if (published || _uiState.value.activeProfileId != profileId) return
+            }
+        }
+    }
+
+    /** Catégorie Films/Séries affichée dans le navigateur : ses pages ne sont jamais évincées. */
+    private fun protectedVodCategoryKey(state: StreamiaUiState): String? {
+        val type = state.browserType?.takeIf { it != MediaType.Live } ?: return null
+        return state.browserCategoryId?.let { Catalog.categoryKey(type, it) }
+    }
+
+    /**
+     * Entrées gardées en mémoire même hors des pages retenues : celles que le catalogue léger
+     * charge d'office (favoris, déplacées, historique) et celles actuellement à l'écran.
+     */
+    private fun pinnedEntryKeys(state: StreamiaUiState): Set<String> = buildSet {
+        addAll(state.library.favoriteEntries)
+        addAll(state.library.movedEntries.keys)
+        state.library.history.forEach { add(it.entry.key) }
+        state.lastViewedEntry?.let { add(it.key) }
+        detailsTrail.forEach { add(it.key) }
+        when (val screen = state.screen) {
+            is StreamiaScreen.MovieDetails -> add(screen.movie.key)
+            is StreamiaScreen.Series -> add(screen.series.key)
+            is StreamiaScreen.Player -> add(screen.entry.key)
+            else -> Unit
         }
     }
 
@@ -2780,6 +2855,8 @@ sealed interface StreamiaScreen {
 }
 
 private const val EPG_PLAYER_REFRESH_MS = 30_000L
+/** Fiches empilées au plus pour Retour (contenus similaires enchaînés). */
+private const val MAX_DETAILS_TRAIL = 30
 private const val ZAP_SETTLE_MS = 350L
 private const val STARTUP_SECONDARY_LOADS_HOME_DELAY_MS = 1_200L
 private const val STARTUP_SECONDARY_LOADS_PLAYER_DELAY_MS = 8_000L
@@ -2810,3 +2887,36 @@ class StreamiaViewModelFactory(private val repository: XtreamRepository) : ViewM
 /** Clé des pages Films/Séries d'une catégorie pour un tri donné : changer de tri n'écrase pas l'autre ordre. */
 internal fun vodPageKey(type: MediaType, categoryId: String, order: VodSortOrder): String =
     Catalog.categoryKey(type, categoryId) + "|" + order.name
+
+/**
+ * Pages Films/Séries gardées en mémoire, de la plus récente (fin de [pages]) à la plus ancienne,
+ * tant que leur total d'entrées reste sous [maxEntries]. La plus récente et celles de la
+ * catégorie [protectedCategoryKey] (affichée à l'écran) sont toujours gardées. L'ordre relatif
+ * des pages retenues est conservé.
+ */
+internal fun retainedVodPages(
+    pages: Map<String, List<String>>,
+    protectedCategoryKey: String?,
+    maxEntries: Int,
+): Map<String, List<String>> {
+    if (pages.values.sumOf { it.size } <= maxEntries) return pages
+    val protectedPrefix = protectedCategoryKey?.let { "$it|" }
+    val keptKeys = HashSet<String>()
+    var total = 0
+    var full = false
+    pages.entries.reversed().forEachIndexed { index, (key, keys) ->
+        val isProtected = protectedPrefix != null && key.startsWith(protectedPrefix)
+        if (!full && index > 0 && total + keys.size > maxEntries) full = true
+        if (index == 0 || isProtected || !full) {
+            keptKeys += key
+            total += keys.size
+        }
+    }
+    return pages.filterKeys { it in keptKeys }
+}
+
+/**
+ * Plafond d'entrées Films/Séries matérialisées par les pages de catégories (≈ 10 pages de 500).
+ * Au-delà, les pages les moins récemment ouvertes sont libérées puis relues depuis SQLite au besoin.
+ */
+internal const val MAX_MATERIALIZED_VOD_ENTRIES = 5_000

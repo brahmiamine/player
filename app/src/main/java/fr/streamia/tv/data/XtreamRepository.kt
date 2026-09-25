@@ -193,8 +193,8 @@ class XtreamRepository(context: Context) {
     }
 
     private val tmdb = TmdbClient()
-    // ponytail: cache mémoire non borné (une entrée par fiche ouverte dans la session), LRU si besoin.
-    private val tmdbRelatedCache = ConcurrentHashMap<String, Map<String, SimilarityBoost>>()
+    // LRU borné : une entrée par fiche ouverte, la session pouvant durer des jours sur une TV.
+    private val tmdbRelatedCache = android.util.LruCache<String, Map<String, SimilarityBoost>>(TMDB_RELATED_CACHE_SIZE)
 
     /**
      * Données TMDB d'un contenu (résumé anglais, genres, mots-clés) substituées aux métadonnées du
@@ -223,7 +223,7 @@ class XtreamRepository(context: Context) {
      */
     private suspend fun tmdbRelated(profileId: String, source: MediaEntry): Map<String, SimilarityBoost> {
         val cacheKey = "$profileId|${source.key}"
-        tmdbRelatedCache[cacheKey]?.let { return it }
+        tmdbRelatedCache.get(cacheKey)?.let { return it }
         val info = withContext(Dispatchers.IO) { recommendationStore.tmdb(profileId, source.key) } ?: return emptyMap()
         val titles = info.recommendations.take(TMDB_RELATED_LIMIT)
         val byId = withContext(Dispatchers.IO) { recommendationStore.keysByTmdbId(profileId, source.type, titles.map { it.id }) }
@@ -239,7 +239,7 @@ class XtreamRepository(context: Context) {
             } ?: return@forEachIndexed
             if (key != source.key) result.putIfAbsent(key, SimilarityBoost(TMDB_TOP_SCORE - rank * TMDB_RANK_STEP, "Recommandé par TMDB"))
         }
-        tmdbRelatedCache[cacheKey] = result
+        tmdbRelatedCache.put(cacheKey, result)
         return result
     }
 
@@ -998,6 +998,7 @@ class XtreamRepository(context: Context) {
 
     companion object {
         const val DEFAULT_CATEGORY_PAGE_SIZE = 500
+        private const val TMDB_RELATED_CACHE_SIZE = 64
 
         // Chargé au démarrage de l'app puis relu depuis ce cache disque (page Matchs, accueil) :
         // un nouveau scrape au plus toutes les 2 h, ou sur le bouton Actualiser. liveonsat.com n'a
