@@ -58,6 +58,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.media3.common.PlaybackException
@@ -773,6 +774,9 @@ private fun LiveChannelList(
     }
     val channelFocus = selectedFocusRequester
     val entryIndexByKey = remember(entries) { entries.withIndex().associate { (index, entry) -> entry.key to index } }
+    // Colonne des numéros assez large pour le plus long de la liste : à largeur fixe (38 dp), un
+    // numéro à 5 chiffres (17055) passait sur deux lignes.
+    val numberColumnWidth = remember(entries) { channelNumberColumnWidth(entries.maxOfOrNull { it.number } ?: 0) }
     val previewIndex = previewKey?.let { entryIndexByKey[it] } ?: -1
     val focusTargetIndex = previewIndex.takeIf { it >= 0 }
         ?: listState.firstVisibleItemIndex.coerceIn(0, lastIndex)
@@ -857,7 +861,14 @@ private fun LiveChannelList(
                             Modifier.fillMaxWidth().padding(horizontal = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Text(entry.number.toString(), color = MutedInk, fontSize = 13.sp, modifier = Modifier.width(38.dp))
+                            Text(
+                                entry.number.toString(),
+                                color = MutedInk,
+                                fontSize = 13.sp,
+                                maxLines = 1,
+                                softWrap = false,
+                                modifier = Modifier.width(numberColumnWidth),
+                            )
                             ChannelLogo(entry.iconUrl, entry.displayName, Modifier.size(42.dp))
                             Spacer(Modifier.width(8.dp))
                             val nowProgram = remember(todayEpgGuide, entry.key, nowEpochSeconds) {
@@ -907,6 +918,10 @@ private fun LiveChannelList(
 }
 
 private const val LIVE_PREVIEW_WATCHED_MS = 20_000L
+
+/** ≈ 8 dp par chiffre à 13 sp (marge comprise pour l'agrandissement du texte), jamais moins que l'ancienne colonne. */
+internal fun channelNumberColumnWidth(maxNumber: Int): Dp =
+    maxOf(38, maxNumber.coerceAtLeast(0).toString().length * 8 + 6).dp
 
 @androidx.annotation.OptIn(markerClass = [UnstableApi::class])
 @Composable

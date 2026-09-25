@@ -2335,6 +2335,9 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         private var loadJob: Job? = null
         private var loadSequence = 0L
         private var resolveSequence = 0L
+        private var resolveJob: Job? = null
+        /** Entrées du dernier rapprochement publié : identiques, rien à recalculer ni à republier. */
+        @Volatile private var resolvedKey: List<Any?>? = null
         private var raw: Raw? = null
 
         fun load(forceRefresh: Boolean) {
@@ -2375,8 +2378,18 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 .filter { it.type == MediaType.Live && it.key in excludedCategoryKeys }
                 .mapTo(mutableSetOf()) { it.id }
             val hiddenEntries = state.library.hiddenEntries
+            // Retour à l'accueil, cache du guide relu, page Films chargée… : tant que le guide, les
+            // chaînes Direct et les masquages sont les mêmes, le résultat publié est déjà le bon.
+            // Refaire le rapprochement (toutes les chaînes FR) à chaque retour, sans annuler le
+            // précédent, empilait des calculs lourds et ralentissait l'app à chaque aller-retour.
+            val key = listOf(profileId, fetched, catalog.entriesFor(MediaType.Live), hiddenEntries, excludedCategoryIds)
+            if (key == resolvedKey) {
+                settleHomeBlocks(blocks)
+                return
+            }
             val sequence = ++resolveSequence
-            viewModelScope.launch(Dispatchers.Default) {
+            resolveJob?.cancel()
+            resolveJob = viewModelScope.launch(Dispatchers.Default) {
                 val publish = match(fetched, catalog) { channel ->
                     channel.key !in hiddenEntries && channel.categoryId !in excludedCategoryIds
                 }
@@ -2384,6 +2397,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 _uiState.update { latest ->
                     if (latest.activeProfileId == profileId) publish(latest).copy(homePendingBlocks = latest.homePendingBlocks - blocks) else latest
                 }
+                resolvedKey = key
             }
         }
 
@@ -2394,6 +2408,8 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
          */
         fun reset() {
             resolveSequence += 1
+            resolveJob?.cancel()
+            resolvedKey = null
         }
     }
 
@@ -2720,6 +2736,8 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
      * liste — la météo de l'en-tête, sinon absente jusqu'à la prochaine requête (30 min).
      */
     private fun resetUiState(state: StreamiaUiState) {
+        // Nouvel état = rangées des guides vides : leur prochain rapprochement doit être republié.
+        homeGuides.forEach { it.reset() }
         val previous = _uiState.value
         _uiState.value = state.copy(weather = previous.weather, weatherPlace = previous.weatherPlace)
     }

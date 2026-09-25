@@ -29,41 +29,13 @@ class TvProgrammeChannelMatcher {
         channels: List<MediaEntry>,
     ): List<ResolvedTvProgrammeNowItem> {
         if (programmes.isEmpty() || channels.isEmpty()) return emptyList()
-
-        val indexed = channels.map { channel ->
-            IndexedChannel(
-                channel = channel,
-                display = normalized(channel.displayName),
-                raw = normalized(channel.name),
-                quality = maxOf(qualityRank(channel.displayName), qualityRank(channel.name)),
-            )
-        }
-
+        val index = ChannelIndex(channels)
         val seenChannels = mutableSetOf<String>()
-        return programmes.asSequence()
-            .mapNotNull { programme ->
-                val source = normalized(programme.channelName)
-                val best = indexed.asSequence()
-                    .map { candidate ->
-                        RankedChannel(
-                            channel = candidate.channel,
-                            score = maxOf(similarity(source, candidate.display), similarity(source, candidate.raw)),
-                            quality = candidate.quality,
-                        )
-                    }
-                    .filter { it.score >= MIN_MATCH_SCORE }
-                    .sortedWith(
-                        compareByDescending<RankedChannel> { it.score }
-                            .thenByDescending { it.quality }
-                            .thenBy { it.channel.number },
-                    )
-                    .firstOrNull()
-                    ?: return@mapNotNull null
-
-                if (!seenChannels.add(best.channel.key)) return@mapNotNull null
-                ResolvedTvProgrammeNowItem(programme = programme, channel = best.channel)
-            }
-            .toList()
+        return programmes.mapNotNull { programme ->
+            val best = index.best(programme.channelName) ?: return@mapNotNull null
+            if (!seenChannels.add(best.key)) return@mapNotNull null
+            ResolvedTvProgrammeNowItem(programme = programme, channel = best)
+        }
     }
 
     fun resolve(
@@ -71,8 +43,25 @@ class TvProgrammeChannelMatcher {
         channels: List<MediaEntry>,
     ): List<ResolvedTvProgrammeItem> {
         if (programmes.isEmpty() || channels.isEmpty()) return emptyList()
+        val index = ChannelIndex(channels)
+        val seenChannels = mutableSetOf<String>()
+        return programmes.mapNotNull { programme ->
+            val best = index.best(programme.channelName) ?: return@mapNotNull null
+            if (!seenChannels.add(best.key)) return@mapNotNull null
+            ResolvedTvProgrammeItem(programme = programme, channel = best)
+        }
+    }
 
-        val indexed = channels.map { channel ->
+    /**
+     * Chaînes normalisées une seule fois, et indexées par mot et par nom compact. Le score
+     * (Jaccard sur les mots, ou 1 si les noms compacts sont identiques) vaut 0 pour une chaîne sans
+     * aucun mot commun : seules les chaînes qui partagent un mot ou le nom compact sont comparées,
+     * au lieu de toutes les chaînes FR pour chaque programme (des centaines de milliers de
+     * comparaisons, qui figeaient l'accueil à chaque retour). Le résultat est identique : mêmes
+     * scores, même ordre de départage (score, qualité, numéro, puis ordre de la playlist).
+     */
+    private inner class ChannelIndex(channels: List<MediaEntry>) {
+        private val indexed = channels.map { channel ->
             IndexedChannel(
                 channel = channel,
                 display = normalized(channel.displayName),
@@ -80,32 +69,42 @@ class TvProgrammeChannelMatcher {
                 quality = maxOf(qualityRank(channel.displayName), qualityRank(channel.name)),
             )
         }
+        private val byToken = HashMap<String, MutableList<Int>>()
+        private val byCompact = HashMap<String, MutableList<Int>>()
 
-        val seenChannels = mutableSetOf<String>()
-        return programmes.asSequence()
-            .mapNotNull { programme ->
-                val source = normalized(programme.channelName)
-                val best = indexed.asSequence()
-                    .map { candidate ->
-                        RankedChannel(
-                            channel = candidate.channel,
-                            score = maxOf(similarity(source, candidate.display), similarity(source, candidate.raw)),
-                            quality = candidate.quality,
-                        )
-                    }
-                    .filter { it.score >= MIN_MATCH_SCORE }
-                    .sortedWith(
-                        compareByDescending<RankedChannel> { it.score }
-                            .thenByDescending { it.quality }
-                            .thenBy { it.channel.number },
-                    )
-                    .firstOrNull()
-                    ?: return@mapNotNull null
-
-                if (!seenChannels.add(best.channel.key)) return@mapNotNull null
-                ResolvedTvProgrammeItem(programme = programme, channel = best.channel)
+        init {
+            indexed.forEachIndexed { position, candidate ->
+                for (name in listOf(candidate.display, candidate.raw)) {
+                    name.tokens.forEach { byToken.getOrPut(it) { mutableListOf() } += position }
+                    if (name.compact.isNotBlank()) byCompact.getOrPut(name.compact) { mutableListOf() } += position
+                }
             }
-            .toList()
+        }
+
+        fun best(channelName: String): MediaEntry? {
+            val source = normalized(channelName)
+            if (source.compact.isBlank()) return null
+            val positions = sortedSetOf<Int>()
+            byCompact[source.compact]?.let(positions::addAll)
+            source.tokens.forEach { token -> byToken[token]?.let(positions::addAll) }
+            return positions.asSequence()
+                .map { position ->
+                    val candidate = indexed[position]
+                    RankedChannel(
+                        channel = candidate.channel,
+                        score = maxOf(similarity(source, candidate.display), similarity(source, candidate.raw)),
+                        quality = candidate.quality,
+                    )
+                }
+                .filter { it.score >= MIN_MATCH_SCORE }
+                .sortedWith(
+                    compareByDescending<RankedChannel> { it.score }
+                        .thenByDescending { it.quality }
+                        .thenBy { it.channel.number },
+                )
+                .firstOrNull()
+                ?.channel
+        }
     }
 
     private fun similarity(source: NormalizedName, candidate: NormalizedName): Double {

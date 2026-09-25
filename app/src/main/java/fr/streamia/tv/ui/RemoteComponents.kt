@@ -38,7 +38,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
@@ -113,7 +113,9 @@ fun FocusableSurface(
     // graphicsLayer : bon marché. Pas d'ombre au repos ni d'élévation animée — une ombre animée
     // force son re-rendu à chaque image, et une ombre par ligne dans des listes de centaines de
     // chaînes suffisait à faire saccader les petits GPU des boîtiers TV.
-    val scale by animateFloatAsState(if (focused) focusScale else 1f, animationSpec = tween(110), label = "focus-scale")
+    // Lu uniquement dans graphicsLayer (phase de dessin) : l'animation ne recompose plus les deux
+    // éléments concernés à chaque image, ce qui comptait en maintenant une flèche dans une longue liste.
+    val scale = animateFloatAsState(if (focused) focusScale else 1f, animationSpec = tween(110), label = "focus-scale")
     val elevation = when {
         focused -> 18.dp
         accent -> 10.dp
@@ -185,7 +187,10 @@ fun FocusableSurface(
         Box(
             modifier = Modifier
                 .then(if (wrapContent) Modifier else Modifier.fillMaxSize())
-                .scale(scale)
+                .graphicsLayer {
+                    scaleX = scale.value
+                    scaleY = scale.value
+                }
                 .then(
                     if (elevation > 0.dp) Modifier.shadow(elevation, shape, clip = false, ambientColor = glowColor, spotColor = glowColor)
                     else Modifier,

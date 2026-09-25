@@ -69,10 +69,26 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
         state.liveOnSatMatches.withoutHiddenChannels(state.catalog, state.library, state.appSettings.parentalControlEnabled && !state.parentalUnlocked)
     }
 
+    // Mêmes instances tant que leurs sources ne changent pas : recréées à chaque émission de l'état,
+    // elles faisaient recomposer tout l'accueil (et relancer sa restauration de défilement) à chaque
+    // chargement de guide, de page ou d'historique, même sans aucun changement pour l'accueil.
+    val homeRecommendationRows = remember(state.homeRecommendationRows, state.homeJustWatchRows, state.appSettings.disabledHomeBlocks) {
+        (state.homeRecommendationRows + state.homeJustWatchRows).filter { it.kind.homeBlock !in state.appSettings.disabledHomeBlocks }
+    }
+    val homePendingBlocks = remember(state.homePendingBlocks, state.appSettings.disabledHomeBlocks) {
+        state.homePendingBlocks - state.appSettings.disabledHomeBlocks
+    }
+
     StreamiaTheme {
         ResponsiveTvViewport {
             Box(Modifier.fillMaxSize()) {
-              GlassBackdrop(glassBlobsFor(state.screen))
+              // Lecteur : fond noir plein écran sous la vidéo, les dégradés y seraient dessinés pour rien
+              // à chaque rafraîchissement du HUD. Ailleurs, la liste ne change qu'avec le type d'écran.
+              val screenKind = state.screen::class
+              if (state.screen !is StreamiaScreen.Player) {
+                  val blobs = remember(screenKind) { glassBlobsFor(state.screen) }
+                  GlassBackdrop(blobs)
+              }
               when {
                 // Texte selon ce qui charge réellement : l'ancien « Ouverture de votre dernière
                 // lecture… » s'affichait aussi à l'ouverture d'une liste, sans aucune reprise.
@@ -111,7 +127,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     favoritesRowEnabled = HomeBlock.Favorites !in state.appSettings.disabledHomeBlocks,
                     footballScoresEnabled = HomeBlock.FootballScores !in state.appSettings.disabledHomeBlocks,
                     recentChannelsEnabled = HomeBlock.RecentChannels !in state.appSettings.disabledHomeBlocks,
-                    recommendationRows = (state.homeRecommendationRows + state.homeJustWatchRows).filter { it.kind.homeBlock !in state.appSettings.disabledHomeBlocks },
+                    recommendationRows = homeRecommendationRows,
                     tvProgrammeNow = state.homeTvProgrammeNow.ifDisabled(HomeBlock.TvProgrammeNow, state.appSettings),
                     tvProgrammeTonight = state.homeTvProgrammeTonight.ifDisabled(HomeBlock.TvProgrammeTonight, state.appSettings),
                     beinSportsNow = state.homeBeinSportsNow.ifDisabled(HomeBlock.BeinSportsNow, state.appSettings),
@@ -119,7 +135,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     ukGuideNow = state.homeUkGuideNow.ifDisabled(HomeBlock.UkGuideNow, state.appSettings),
                     ukGuideNext = state.homeUkGuideNext.ifDisabled(HomeBlock.UkGuideNext, state.appSettings),
                     liveMatches = liveOnSatMatches.ifDisabled(HomeBlock.LiveMatches, state.appSettings),
-                    pendingBlocks = state.homePendingBlocks - state.appSettings.disabledHomeBlocks,
+                    pendingBlocks = homePendingBlocks,
                     liveMatchesPending = state.liveOnSatPending && HomeBlock.LiveMatches !in state.appSettings.disabledHomeBlocks,
                     liveMatchesResolving = state.liveOnSatResolving,
                     restoreContext = state.contentReturnContext,

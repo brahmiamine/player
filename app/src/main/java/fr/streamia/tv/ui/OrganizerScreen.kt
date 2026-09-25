@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
@@ -327,7 +328,7 @@ fun OrganizerScreen(
                                 modifier = Modifier.weight(1f).height(50.dp),
                             ) {
                                 Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Text(entry.number.toString(), color = MutedInk, fontSize = 12.sp, modifier = Modifier.width(48.dp))
+                                    Text(entry.number.toString(), color = MutedInk, fontSize = 12.sp, maxLines = 1, softWrap = false, modifier = Modifier.widthIn(min = 48.dp))
                                     Column(Modifier.weight(1f)) {
                                         Text(entry.displayName, color = Ink, fontSize = TypeLabel, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                         if (entry.key in hiddenEntries) {
