@@ -255,6 +255,8 @@ fun PlayerScreen(
     var streamHasPlayed by remember(entry.key) { mutableStateOf(false) }
     var recoveryAttempt by remember(entry.key) { mutableIntStateOf(0) }
     var pendingRecovery by remember(entry.key) { mutableStateOf<StreamRecovery?>(null) }
+    // Abandon après une erreur réseau (coupure plus longue que les relances) : repris au retour du réseau.
+    var gaveUpOnNetworkError by remember(entry.key) { mutableStateOf(false) }
     // Sous-titre externe (.srt/.vtt) chargé pour cette session de lecture uniquement : pas de
     // persistance entre relectures, il repart à null à chaque nouvelle entrée (remember(entry.key)).
     var externalSubtitle by remember(entry.key) { mutableStateOf<MediaItem.SubtitleConfiguration?>(null) }
@@ -481,12 +483,21 @@ fun PlayerScreen(
                     startCandidate(streamCandidates[next], previousPosition)
                     return
                 }
+                gaveUpOnNetworkError = isRecoverableStreamError(error.errorCode)
                 playbackError = "Ce contenu ne peut pas être lu pour le moment."
                 buffering = false
             }
         }
         player.addListener(listener)
         onDispose { player.removeListener(listener) }
+    }
+
+    val networkReconnections = LocalNetworkReconnections.current
+    LaunchedEffect(networkReconnections) {
+        if (!gaveUpOnNetworkError || playbackError == null) return@LaunchedEffect
+        gaveUpOnNetworkError = false
+        recoveryAttempt = 0
+        startCandidate(activeStreamUrl.ifBlank { streamCandidates.firstOrNull() ?: return@LaunchedEffect }, player.currentPosition.coerceAtLeast(0L))
     }
 
     LaunchedEffect(pendingRecovery) {
@@ -587,6 +598,7 @@ fun PlayerScreen(
                     // Both automatic recovery attempts already failed to unstick this stream.
                     // Without this branch the loop keeps silently doing nothing forever: the
                     // screen stays frozen with no error and no visible sign anything is wrong.
+                    gaveUpOnNetworkError = true
                     playbackError = "La lecture semble bloquée."
                     buffering = false
                 }

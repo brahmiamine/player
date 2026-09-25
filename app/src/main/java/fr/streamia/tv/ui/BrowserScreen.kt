@@ -1038,6 +1038,16 @@ private fun LivePreview(
         onWatched(target)
     }
 
+    // Aperçu tombé en erreur pendant une coupure : relancé dès le retour du réseau.
+    val networkReconnections = LocalNetworkReconnections.current
+    LaunchedEffect(networkReconnections) {
+        if (!error || unsupportedFormat || !enabled || entry == null || activeUrl.isBlank()) return@LaunchedEffect
+        error = false
+        buffering = true
+        recoveryAttempt = 0
+        livePlaybackSession.playUrl(entry, activeUrl)
+    }
+
     LaunchedEffect(pendingRecovery) {
         val recovery = pendingRecovery ?: return@LaunchedEffect
         delay(streamRecoveryDelayMs(recovery.attempt))

@@ -234,6 +234,11 @@ internal fun saveFootballDiskCache(file: File, fetchedAt: Long, matches: List<Fo
  * encore valables (1 min pendant un match, 15 min sinon).
  */
 @Volatile private var footballCache: Pair<Long, List<FootballMatch>>? = null
+/**
+ * Dernier chargement en échec (coupure réseau), noté avec le compteur de retours du réseau d'alors :
+ * refait dès que le réseau revient, sans attendre le créneau suivant ni insister entre-temps.
+ */
+@Volatile private var footballFailedAtReconnection: Int? = null
 
 @Composable
 internal fun FootballScoresRow(modifier: Modifier = Modifier) {
@@ -243,7 +248,9 @@ internal fun FootballScoresRow(modifier: Modifier = Modifier) {
     // Seulement app visible : aucune requête en arrière-plan, rafraîchissement immédiat au retour.
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val cacheFile = File(LocalContext.current.filesDir, FOOTBALL_CACHE_FILE)
-    LaunchedEffect(lifecycle) {
+    // Retour du réseau : la boucle repart, et un dernier chargement en échec est refait aussitôt.
+    val networkReconnections = LocalNetworkReconnections.current
+    LaunchedEffect(lifecycle, networkReconnections) {
         // Premier affichage depuis le lancement : derniers scores du jour lus sur disque, sans réseau.
         if (footballCache == null) footballCache = withContext(Dispatchers.IO) { loadFootballDiskCache(cacheFile) }
         footballCache?.let { (_, cached) ->
@@ -256,8 +263,12 @@ internal fun FootballScoresRow(modifier: Modifier = Modifier) {
                 // Un échec compte aussi comme un chargement (données précédentes gardées) : pas de
                 // nouvel essai avant le prochain créneau, au lieu d'insister en boucle.
                 val loaded = footballCache
-                    ?.takeIf { (at, cached) -> now - at < footballRefreshDelayMs(cached, Instant.ofEpochMilli(now)) }
+                    ?.takeIf { (at, cached) ->
+                        val failedBeforeReconnection = footballFailedAtReconnection.let { it != null && it != networkReconnections }
+                        !failedBeforeReconnection && now - at < footballRefreshDelayMs(cached, Instant.ofEpochMilli(now))
+                    }
                     ?: runCatching { fetchTodayMatches() }.getOrNull()?.let { fetched ->
+                        footballFailedAtReconnection = null
                         // Scores affichés tout de suite, écussons manquants cherchés ensuite.
                         matches = withKnownBadges(fetched)
                         firstLoadDone = true
@@ -265,7 +276,10 @@ internal fun FootballScoresRow(modifier: Modifier = Modifier) {
                         withContext(Dispatchers.IO) { saveFootballDiskCache(cacheFile, now, withLogos) }
                         (now to withLogos).also { footballCache = it }
                     }
-                    ?: (now to footballCache?.second.orEmpty()).also { footballCache = it }
+                    ?: (now to footballCache?.second.orEmpty()).also {
+                        footballCache = it
+                        footballFailedAtReconnection = networkReconnections
+                    }
                 matches = loaded.second
                 firstLoadDone = true
                 delay(loaded.first + footballRefreshDelayMs(loaded.second, Instant.ofEpochMilli(now)) - now)

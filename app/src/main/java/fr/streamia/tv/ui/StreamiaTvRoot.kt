@@ -1,27 +1,33 @@
 package fr.streamia.tv.ui
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.repeatOnLifecycle
+import fr.streamia.tv.data.NetworkMonitor
 import fr.streamia.tv.data.PlaybackSessionStore
 import fr.streamia.tv.data.resolveStartupProfileId
 import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.player.LivePlaybackSession
-import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.launch
 
 /**
  * OK / gauche / menu sur le lecteur Live demandent un retour vers le Browser Live principal
@@ -51,6 +57,29 @@ fun StreamiaTvRoot(viewModel: StreamiaViewModel) {
     }
     val lifecycleOwner = LocalLifecycleOwner.current
     var pendingLiveBrowserReturn by remember { mutableStateOf(false) }
+    val networkMonitor = remember { NetworkMonitor.get(context) }
+    val networkReconnections by networkMonitor.reconnections.collectAsStateWithLifecycle()
+
+    // App visible seulement (aucune requête en arrière-plan) : retour du réseau, y compris pendant
+    // que l'app était cachée, et nouvel essai régulier tant que la liste reste en « Mode cache »
+    // (serveur Xtream injoignable alors que la connexion, elle, fonctionne).
+    LaunchedEffect(lifecycleOwner) {
+        var handledReconnections = networkMonitor.reconnections.value
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            launch {
+                networkMonitor.reconnections.collect { count ->
+                    if (count != handledReconnections) {
+                        handledReconnections = count
+                        viewModel.onNetworkRestored()
+                    }
+                }
+            }
+            while (true) {
+                viewModel.retryOfflineCatalog()
+                delay(OFFLINE_CATALOG_RETRY_MS)
+            }
+        }
+    }
 
     DisposableEffect(livePlaybackSession, lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -170,7 +199,9 @@ fun StreamiaTvRoot(viewModel: StreamiaViewModel) {
         }
     }
 
-    StreamiaApp(viewModel, livePlaybackSession)
+    CompositionLocalProvider(LocalNetworkReconnections provides networkReconnections) {
+        StreamiaApp(viewModel, livePlaybackSession)
+    }
 }
 
 /** Ce que [StreamiaTvRoot] garde pour rouvrir l'app au même endroit au prochain démarrage. */
@@ -203,3 +234,11 @@ private fun persistedNavigationOf(state: StreamiaUiState): PersistedNavigation {
         onLogin = state.screen is StreamiaScreen.Login,
     )
 }
+
+/**
+ * Nombre de retours du réseau depuis le lancement : les composants qui ont échoué pendant une
+ * coupure (logos, scores, lecteur) le prennent comme clé pour réessayer dès qu'il change.
+ */
+internal val LocalNetworkReconnections = compositionLocalOf { 0 }
+
+private const val OFFLINE_CATALOG_RETRY_MS = 5 * 60_000L

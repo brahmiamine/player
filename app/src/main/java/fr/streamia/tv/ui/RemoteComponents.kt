@@ -356,9 +356,12 @@ private fun RemoteArtwork(
     opaque: Boolean,
 ) {
     val context = LocalContext.current.applicationContext
+    // Retour du réseau : les images restées vides pendant la coupure sont redemandées (celles déjà
+    // en cache ressortent tout de suite, sans requête).
+    val networkReconnections = LocalNetworkReconnections.current
     // produceState est annulé quand l'élément quitte l'écran : un élément dépassé pendant un
     // défilement rapide abandonne sa place dans la file au lieu de retarder les logos visibles.
-    val bitmap by produceState<ImageBitmap?>(initialValue = ArtworkLoader.get(url, maxDecodePx), key1 = url) {
+    val bitmap by produceState<ImageBitmap?>(initialValue = ArtworkLoader.get(url, maxDecodePx), key1 = url, key2 = networkReconnections) {
         // produceState garde la valeur précédente quand l'URL change : sans cette remise à zéro,
         // l'image de l'ancien contenu restait affichée et la nouvelle n'était jamais chargée.
         value = ArtworkLoader.get(url, maxDecodePx)

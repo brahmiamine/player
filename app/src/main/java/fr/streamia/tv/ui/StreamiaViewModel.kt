@@ -166,6 +166,8 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
      * base pendant que la nouvelle s'ouvrait.
      */
     private var profileLoadJob: Job? = null
+    private var catalogRetryJob: Job? = null
+    private val catalogRefreshLock = Mutex()
     // Clé comparée par identité des instances (catalogue/ensembles), recalculée seulement quand
     // l'un d'eux change réellement.
     private var zapIndexCache: Pair<List<Any>, LiveZapIndex>? = null
@@ -2029,14 +2031,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         if (!force && homeRecommendationJob?.isActive == true) return
 
         val library = state.library
-        val excludedCategoryKeys = if (state.appSettings.parentalControlEnabled && !state.parentalUnlocked) {
-            library.hiddenCategories + library.lockedCategories
-        } else {
-            library.hiddenCategories
-        }
-        val excludedCategoryIds = catalog.categories.asSequence()
-            .filter { it.type != MediaType.Live && it.key in excludedCategoryKeys }
-            .mapTo(mutableSetOf()) { it.id }
+        val excludedCategoryIds = excludedVodCategoryIds(state, catalog)
 
         loadJustWatchRows(profileId, library.hiddenEntries, excludedCategoryIds)
 
@@ -2131,6 +2126,26 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
      * Celles gardées sur disque s'affichent tout de suite ; les expirées sont recalculées (réseau +
      * rapprochement avec la playlist) en parallèle, l'ancienne rangée restant affichée en attendant.
      */
+    /** Catégories Films/Séries masquées (et verrouillées tant que le contrôle parental n'est pas levé). */
+    private fun excludedVodCategoryIds(state: StreamiaUiState, catalog: Catalog): Set<String> {
+        val library = state.library
+        val excludedCategoryKeys = if (state.appSettings.parentalControlEnabled && !state.parentalUnlocked) {
+            library.hiddenCategories + library.lockedCategories
+        } else {
+            library.hiddenCategories
+        }
+        return catalog.categories.asSequence()
+            .filter { it.type != MediaType.Live && it.key in excludedCategoryKeys }
+            .mapTo(mutableSetOf()) { it.id }
+    }
+
+    private fun reloadJustWatchRows() {
+        val state = _uiState.value
+        val profileId = state.activeProfileId ?: return
+        val catalog = state.catalog ?: return
+        loadJustWatchRows(profileId, state.library.hiddenEntries, excludedVodCategoryIds(state, catalog))
+    }
+
     private fun loadJustWatchRows(profileId: String, hiddenEntries: Set<String>, excludedCategoryIds: Set<String>) {
         justWatchJob?.cancel()
         // Autre liste : ses rangées ne doivent pas rester affichées sous les contenus de la nouvelle.
@@ -2582,6 +2597,9 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     private suspend fun refreshSilently(profileId: String) {
         // Liste quittée pendant l'attente : rien à télécharger pour elle.
         if (_uiState.value.activeProfileId != profileId) return
+        // Une seule actualisation à la fois (retour du réseau, nouvel essai, actualisation
+        // différée de l'ouverture) : un second téléchargement du catalogue n'apporterait rien.
+        if (!catalogRefreshLock.tryLock()) return
         try {
             mergeCatalog(repository.refreshProfile(profileId))
         } catch (cancellation: CancellationException) {
@@ -2590,7 +2608,39 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             if (_uiState.value.activeProfileId == profileId) {
                 _uiState.update { state -> state.copy(offline = true, busy = false) }
             }
+        } finally {
+            catalogRefreshLock.unlock()
         }
+    }
+
+    /**
+     * Liste affichée depuis le cache après un échec (« Mode cache ») : nouvel essai
+     * d'actualisation. Sans effet si la liste est à jour, si une actualisation est déjà en cours
+     * ou si l'ouverture de la liste doit encore la lancer elle-même.
+     */
+    fun retryOfflineCatalog() {
+        val state = _uiState.value
+        val profileId = state.activeProfileId ?: return
+        if (!state.offline || state.busy || profileLoadJob?.isActive == true || catalogRetryJob?.isActive == true) return
+        catalogRetryJob = viewModelScope.launch { refreshSilently(profileId) }
+    }
+
+    /**
+     * Réseau revenu après une coupure (appelé seulement app visible) : chaque bloc resté sur un
+     * échec ou sur des données de repli est rechargé tout de suite, au lieu d'attendre son
+     * prochain créneau (jusqu'à 15 min) ou une relance de l'app. Les blocs encore frais ne
+     * contactent aucun site (caches).
+     */
+    fun onNetworkRestored() {
+        if (_uiState.value.activeProfileId == null) return
+        retryOfflineCatalog()
+        weatherNextCheckAtMillis = 0L
+        refreshWeatherIfStale()
+        liveOnSatNextCheckAtMillis = 0L
+        refreshLiveOnSatIfStale()
+        homeGuides.forEach { it.load(forceRefresh = false) }
+        reloadJustWatchRows()
+        startEpgBackgroundSync()
     }
 
     private suspend fun mergeCatalog(loaded: LoadedCatalog) {
@@ -2677,6 +2727,8 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     private fun showLogin() {
         profileLoadJob?.cancel()
         profileLoadJob = null
+        catalogRetryJob?.cancel()
+        catalogRetryJob = null
         liveZapList = null
         detailsTrail.clear()
         previousLiveEntry = null
