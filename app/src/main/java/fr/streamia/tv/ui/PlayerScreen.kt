@@ -30,6 +30,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -67,6 +68,7 @@ import androidx.media3.ui.PlayerView
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.media3.exoplayer.mediacodec.MediaCodecRenderer
 import fr.streamia.tv.data.DisplayModeSwitch
+import fr.streamia.tv.data.LiveVersionStatsStore
 import fr.streamia.tv.player.unsupportedFormatMessage
 import fr.streamia.tv.player.isDecoderError
 import fr.streamia.tv.player.MAX_STREAM_RECOVERY_ATTEMPTS
@@ -82,6 +84,11 @@ import fr.streamia.tv.data.VideoAspectSetting
 import fr.streamia.tv.domain.Catalog
 import fr.streamia.tv.domain.EpgNowContext
 import fr.streamia.tv.domain.EpgProgram
+import fr.streamia.tv.domain.LiveVersionIndex
+import fr.streamia.tv.domain.LiveVersionStats
+import fr.streamia.tv.domain.qualityClassHeight
+import fr.streamia.tv.domain.qualityClassLabel
+import fr.streamia.tv.domain.rankLiveVersions
 import fr.streamia.tv.domain.MediaCategory
 import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.MediaType
@@ -117,6 +124,8 @@ import fr.streamia.tv.ui.theme.Night
 import fr.streamia.tv.ui.theme.RadiusCard
 import fr.streamia.tv.ui.theme.RadiusTile
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -142,6 +151,11 @@ internal data class TrackChoice(
 private const val EXTERNAL_SUBTITLE_LANGUAGE_TAG = "und"
 private const val NEXT_EPISODE_COUNTDOWN_SECONDS = 8
 private const val LIVE_EPG_PROGRESS_REFRESH_MS = 5_000L
+private const val LIVE_VERSION_MEASURE_DELAY_MS = 3_000L
+private const val LIVE_VERSION_WATCH_SAMPLE_MS = 60_000L
+
+/** Changement de version en attente de sa première image : [from] est relancée s'il échoue. */
+private data class LiveVersionSwitch(val from: MediaEntry, val targetKey: String)
 
 @androidx.annotation.OptIn(markerClass = [UnstableApi::class])
 @Composable
@@ -167,6 +181,8 @@ fun PlayerScreen(
     /** Chaîne annoncée par un zap rapide, affichée avant que son flux ne démarre. */
     pendingZapEntry: MediaEntry? = null,
     onEntrySelected: (MediaEntry) -> Unit,
+    /** Autre version de la chaîne en cours choisie dans le panneau « Versions ». */
+    onSwitchVersion: (MediaEntry) -> Unit = onEntrySelected,
     onProgress: (MediaEntry, Long, Long) -> Unit,
     onCycleVideoAspect: () -> Unit,
     onPlayNextEpisode: () -> Unit,
@@ -194,6 +210,10 @@ fun PlayerScreen(
     // Lecteur quitté : l'écran reprend le mode de l'interface.
     DisposableEffect(activity) { onDispose { activity?.let(DisplayModeSwitcher::reset) } }
     val transportStore = remember { PlaybackTransportStore(context.applicationContext) }
+    // Qualité réellement mesurée de chaque version de chaîne (panneau « Versions » du Direct).
+    val versionStatsStore = remember { LiveVersionStatsStore(context.applicationContext) }
+    val versionScope = remember(credentials) { LiveVersionStatsStore.scopeFor(credentials) }
+    var versionStatsRevision by remember { mutableIntStateOf(0) }
     val trackPreferenceStore = remember { PlaybackTrackPreferenceStore(context.applicationContext) }
     val diagnosticsTracker = remember { PlaybackDiagnosticsTracker() }
     val dolbyCapabilities = remember { DolbyCapabilityDetector.detect(context.applicationContext) }
@@ -202,6 +222,8 @@ fun PlayerScreen(
 
     var guideOpen by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
+    // Panneau « Versions » affiché à la place du panneau « Lecture » (settingsOpen reste vrai).
+    var versionsOpen by remember { mutableStateOf(false) }
     // OK/gauche/menu/retour sur le Live ne rouvrent plus un sélecteur superposé : ils demandent un
     // retour vers le Browser principal (PlayerOverlayController.requestReturnToBrowser), qui peut être
     // différé le temps que le catalogue restauré au démarrage finisse de s'hydrater
@@ -388,6 +410,10 @@ fun PlayerScreen(
                 streamHasPlayed = true
                 recoveryAttempt = 0
                 transportStore.recordSuccess(activeStreamUrl, entry.type)
+                if (entry.type == MediaType.Live) {
+                    versionStatsStore.recordSuccess(versionScope, entry.key, diagnostics.startupTimeMs)
+                    versionStatsRevision++
+                }
             }
 
             override fun onVideoSizeChanged(videoSize: VideoSize) {
@@ -547,6 +573,19 @@ fun PlayerScreen(
             activeStreamUrl = livePlaybackSession.activeUrl
             buffering = player.playbackState != Player.STATE_READY
             livePlaybackSession.continuePlayback()
+            // Flux déjà lancé par l'aperçu : ses pistes ne seront pas renotifiées, on relit le format
+            // en cours (bandeau d'infos et mesure de la version pour le panneau « Versions »).
+            player.videoFormat?.takeIf { it.width > 0 && it.height > 0 }?.let { format ->
+                val isDolbyVision = isDolbyVisionFormat(format.sampleMimeType, format.codecs)
+                technicalInfo = StreamTechnicalInfo(
+                    width = format.width,
+                    height = format.height,
+                    frameRate = format.frameRate.takeIf { it > 0f },
+                    codec = if (isDolbyVision) "Dolby Vision" else codecLabel(format.sampleMimeType, format.codecs),
+                    bitrate = format.bitrate.takeIf { it > 0 },
+                    hdr = if (isDolbyVision) "Dolby Vision" else hdrLabel(format.sampleMimeType, format.colorInfo?.colorTransfer),
+                )
+            }
         } else {
             val url = streamCandidates.firstOrNull() ?: baseUrl
             startCandidate(url, resumePositionMs)
@@ -639,6 +678,112 @@ fun PlayerScreen(
         }
     }
 
+    // Versions de la chaîne en cours (« TF1 », « TF1 FHD », « FR| TF1 UHD »…) : index construit une
+    // fois par catalogue hors du thread principal, filtré comme le zapping (masquées, verrouillées).
+    val liveVersionIndex by produceState<LiveVersionIndex?>(null, catalog, sharedLivePlayer) {
+        if (!sharedLivePlayer) return@produceState
+        value = withContext(Dispatchers.Default) { LiveVersionIndex(catalog.entriesFor(MediaType.Live)) }
+    }
+    val liveVersions = remember(liveVersionIndex, entry.key, hiddenEntries, numericJumpLockedCategoryIds) {
+        if (entry.type != MediaType.Live) {
+            emptyList()
+        } else {
+            liveVersionIndex?.versionsOf(entry).orEmpty().filter {
+                it.key == entry.key || (it.key !in hiddenEntries && it.categoryId !in numericJumpLockedCategoryIds)
+            }
+        }
+    }
+    val hasOtherVersions = liveVersions.size > 1
+    val maxDisplayHeight = remember(activity) { activity?.let(DisplayModeSwitcher::maxDisplayHeight) }
+    val versionOptions = remember(liveVersions, versionStatsRevision, technicalInfo, versionsOpen) {
+        if (!hasOtherVersions || !versionsOpen) {
+            emptyList()
+        } else {
+            val stored = versionStatsStore.load(versionScope, liveVersions.map { it.key })
+            // Version en cours : mesure en direct, sans attendre qu'elle soit enregistrée.
+            val width = technicalInfo.width
+            val height = technicalInfo.height
+            val merged = if (width != null && height != null) {
+                val previous = stored[entry.key] ?: LiveVersionStats()
+                stored + (
+                    entry.key to previous.copy(
+                        width = width,
+                        height = height,
+                        frameRate = technicalInfo.frameRate ?: previous.frameRate,
+                        codec = technicalInfo.codec ?: previous.codec,
+                        bitrate = technicalInfo.bitrate ?: previous.bitrate,
+                        hdr = technicalInfo.hdr ?: previous.hdr,
+                        lastSuccessAtMs = maxOf(previous.lastSuccessAtMs, previous.lastFailureAtMs + 1),
+                        consecutiveFailures = 0,
+                    )
+                    )
+            } else {
+                stored
+            }
+            rankLiveVersions(entry, liveVersions, merged, System.currentTimeMillis(), maxDisplayHeight)
+        }
+    }
+    val versionSummary = remember(entry.key, technicalInfo.width, technicalInfo.height, liveVersions.size) {
+        val quality = technicalInfo.width?.let { w -> technicalInfo.height?.let { h -> qualityClassLabel(qualityClassHeight(w, h)) } }
+        listOfNotNull(entry.displayName, quality, "${liveVersions.size} versions").joinToString(" · ")
+    }
+
+    // Mesure réelle de la version en cours, enregistrée une fois l'image stabilisée (et pas à
+    // chaque chaîne traversée pendant un zap rapide).
+    LaunchedEffect(entry.key, technicalInfo, buffering, playbackError) {
+        if (entry.type != MediaType.Live || buffering || playbackError != null) return@LaunchedEffect
+        val width = technicalInfo.width ?: return@LaunchedEffect
+        val height = technicalInfo.height ?: return@LaunchedEffect
+        delay(LIVE_VERSION_MEASURE_DELAY_MS)
+        versionStatsStore.recordMeasurement(
+            versionScope, entry.key, width, height,
+            technicalInfo.frameRate, technicalInfo.codec, technicalInfo.bitrate, technicalInfo.hdr,
+        )
+        versionStatsRevision++
+    }
+    // Stabilité : temps regardé et coupures, relevés chaque minute de lecture effective.
+    LaunchedEffect(entry.key, player) {
+        if (entry.type != MediaType.Live) return@LaunchedEffect
+        var reportedRebuffers = 0
+        while (true) {
+            delay(LIVE_VERSION_WATCH_SAMPLE_MS)
+            val rebuffers = diagnostics.rebufferCount
+            if (player.isPlaying || rebuffers > reportedRebuffers) {
+                versionStatsStore.recordWatch(versionScope, entry.key, LIVE_VERSION_WATCH_SAMPLE_MS, (rebuffers - reportedRebuffers).coerceAtLeast(0))
+            }
+            reportedRebuffers = rebuffers
+        }
+    }
+    // Version choisie dans le panneau qui ne démarre pas : échec mémorisé et retour sur la précédente.
+    var versionSwitch by remember { mutableStateOf<LiveVersionSwitch?>(null) }
+    var versionNotice by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(entry.key, playbackError, streamHasPlayed) {
+        if (entry.type != MediaType.Live) return@LaunchedEffect
+        val pending = versionSwitch
+        if (pending != null && pending.targetKey != entry.key) {
+            // Zap ailleurs entre-temps : plus de retour automatique.
+            versionSwitch = null
+            return@LaunchedEffect
+        }
+        if (streamHasPlayed) {
+            versionSwitch = null
+            return@LaunchedEffect
+        }
+        if (playbackError == null) return@LaunchedEffect
+        versionStatsStore.recordFailure(versionScope, entry.key)
+        versionStatsRevision++
+        if (pending != null) {
+            versionSwitch = null
+            versionNotice = "${entry.displayName} ne répond pas · retour sur ${pending.from.displayName}"
+            onSwitchVersion(pending.from)
+        }
+    }
+    LaunchedEffect(versionNotice) {
+        if (versionNotice == null) return@LaunchedEffect
+        delay(4_000)
+        versionNotice = null
+    }
+
     LaunchedEffect(seekFeedback) {
         if (seekFeedback == null) return@LaunchedEffect
         delay(1_100)
@@ -648,6 +793,13 @@ fun PlayerScreen(
     LaunchedEffect(Unit) { rootFocus.requestFocus() }
     LaunchedEffect(settingsOpen) {
         if (settingsOpen) {
+            yield()
+            runCatching { settingsFocus.requestFocus() }
+        }
+    }
+    // Retour du panneau « Versions » : le focus revient sur la ligne « Version ».
+    LaunchedEffect(versionsOpen) {
+        if (!versionsOpen && settingsOpen) {
             yield()
             runCatching { settingsFocus.requestFocus() }
         }
@@ -662,6 +814,7 @@ fun PlayerScreen(
 
     BackHandler {
         when {
+            settingsOpen && versionsOpen -> versionsOpen = false
             settingsOpen -> { settingsOpen = false; rootFocus.requestFocus() }
             guideOpen -> { guideOpen = false; rootFocus.requestFocus() }
             // Passe par le même chemin que OK/gauche (PlayerOverlayController.requestReturnToBrowser) au
@@ -703,7 +856,7 @@ fun PlayerScreen(
                         hudVisible = false
                         true
                     }
-                    PlaybackRemoteAction.OpenSettings -> { settingsOpen = true; hudVisible = true; true }
+                    PlaybackRemoteAction.OpenSettings -> { versionsOpen = false; settingsOpen = true; hudVisible = true; true }
                     PlaybackRemoteAction.ToggleHud -> { hudVisible = true; true }
                     PlaybackRemoteAction.TogglePlayback -> {
                         if (player.isPlaying) player.pause() else player.play()
@@ -812,6 +965,7 @@ fun PlayerScreen(
                 resumePositionMs = resumePositionMs,
                 positionMs = positionMs,
                 durationMs = durationMs,
+                otherVersionsCount = (liveVersions.size - 1).coerceAtLeast(0),
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
         }
@@ -846,6 +1000,19 @@ fun PlayerScreen(
                     .padding(horizontal = 22.dp, vertical = 14.dp),
             ) {
                 Text(numberBuffer, color = FocusBlueBright, fontSize = 32.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+        versionNotice?.let { notice ->
+            Box(
+                Modifier
+                    .align(Alignment.TopStart)
+                    .padding(34.dp)
+                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(RadiusTile))
+                    .background(Night.copy(alpha = 0.86f))
+                    .border(BorderStroke(1.dp, GlassBorder), androidx.compose.foundation.shape.RoundedCornerShape(RadiusTile))
+                    .padding(horizontal = 22.dp, vertical = 14.dp),
+            ) {
+                Text(notice, color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold, maxLines = 2)
             }
         }
         missingChannelNumber?.let { number ->
@@ -892,7 +1059,19 @@ fun PlayerScreen(
             )
         }
 
-        if (settingsOpen) {
+        if (settingsOpen && versionsOpen && hasOtherVersions) {
+            LiveVersionsPanel(
+                channelName = entry.displayName,
+                options = versionOptions,
+                currentLoading = buffering && playbackError == null,
+                currentFailed = playbackError != null,
+                onSelect = { target ->
+                    versionSwitch = LiveVersionSwitch(from = entry, targetKey = target.key)
+                    onSwitchVersion(target)
+                },
+                onBack = { versionsOpen = false },
+            )
+        } else if (settingsOpen) {
             PlayerSettings(
                 audioTracks = audioTracks,
                 audioIndex = audioIndex,
@@ -915,7 +1094,9 @@ fun PlayerScreen(
                     trackPreferenceStore.saveSubtitle(subtitleTracks[subtitleIndex].language)
                 },
                 onNextAspect = onCycleVideoAspect,
-                onClose = { settingsOpen = false; rootFocus.requestFocus() },
+                onClose = { settingsOpen = false; versionsOpen = false; rootFocus.requestFocus() },
+                versionLabel = versionSummary.takeIf { hasOtherVersions },
+                onOpenVersions = { versionsOpen = true },
                 externalSubtitleAvailable = !sharedLivePlayer,
                 externalSubtitleLabel = externalSubtitle?.label,
                 externalSubtitleError = externalSubtitleError,
@@ -1015,6 +1196,7 @@ private fun PlayerInfoBand(
     positionMs: Long,
     durationMs: Long,
     modifier: Modifier = Modifier,
+    otherVersionsCount: Int = 0,
 ) {
     var epgClockEpochSeconds by remember(
         entry.key,
@@ -1161,6 +1343,15 @@ private fun PlayerInfoBand(
                 Spacer(Modifier.width(20.dp))
             } else {
                 Text("← −10 s · +10 s → · Lecture/Pause", color = MutedInk, fontSize = 13.sp)
+                Spacer(Modifier.width(20.dp))
+            }
+            if (otherVersionsCount > 0) {
+                Text(
+                    "→ ${if (otherVersionsCount == 1) "1 autre version" else "$otherVersionsCount autres versions"}",
+                    color = FocusBlueBright,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                )
                 Spacer(Modifier.width(20.dp))
             }
             Text("⚙ audio / sous-titres / écran", color = MutedInk, fontSize = 13.sp)

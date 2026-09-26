@@ -1643,6 +1643,21 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     }
 
     /**
+     * Autre version de la chaîne en cours (panneau « Versions » du lecteur). Elle prend la place de
+     * la chaîne dans la liste de zapping, pour que CH+/CH− repartent du même endroit.
+     */
+    fun switchLiveVersion(version: MediaEntry) {
+        val current = (_uiState.value.screen as? StreamiaScreen.Player)?.entry ?: return
+        if (current.type != MediaType.Live || version.type != MediaType.Live || version.key == current.key) return
+        liveZapList = liveZapList?.let { list ->
+            if (list.any { it.key == version.key }) list else list.map { if (it.key == current.key) version else it }
+        }
+        zapJob?.cancel()
+        _playerState.update { it.copy(pendingZapEntry = null) }
+        openPlayer(version, returnToSeries = false)
+    }
+
+    /**
      * Le repli sur toutes les chaînes peut faire sauter le zapping dans une autre catégorie : une
      * catégorie verrouillée et pas encore déverrouillée cette session est exclue comme si elle était
      * masquée — il n'y a pas d'écran de code pendant le zapping.

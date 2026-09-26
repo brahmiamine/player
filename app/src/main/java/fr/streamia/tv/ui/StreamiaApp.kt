@@ -427,6 +427,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                         onPreviousChannel = viewModel::previousChannel,
                         pendingZapEntry = playerState.pendingZapEntry,
                         onEntrySelected = viewModel::openEntry,
+                        onSwitchVersion = viewModel::switchLiveVersion,
                         onProgress = viewModel::recordPlayback,
                         onCycleVideoAspect = viewModel::cycleVideoAspect,
                         onPlayNextEpisode = viewModel::playNextEpisode,

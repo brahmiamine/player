@@ -65,6 +65,10 @@ object DisplayModeSwitcher {
         window.attributes = window.attributes.apply { preferredDisplayModeId = 0 }
     }
 
+    /** Plus grande hauteur d'image que l'écran sait afficher (2160 sur une TV 4K), `null` si inconnue. */
+    fun maxDisplayHeight(activity: Activity): Int? =
+        runCatching { display(activity)?.supportedModes?.maxOfOrNull { it.physicalHeight } }.getOrNull()?.takeIf { it > 0 }
+
     private fun spec(mode: Display.Mode) = DisplayModeSpec(mode.modeId, mode.physicalWidth, mode.physicalHeight, mode.refreshRate)
 
     @Suppress("DEPRECATION")
