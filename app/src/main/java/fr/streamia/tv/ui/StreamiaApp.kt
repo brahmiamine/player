@@ -409,6 +409,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                 state.screen is StreamiaScreen.Player && state.catalog != null && state.credentials != null -> {
                     val playerScreen = state.screen as StreamiaScreen.Player
                     val playerState by viewModel.playerState.collectAsStateWithLifecycle()
+                    val liveVersionIndex by viewModel.liveVersionIndex.collectAsStateWithLifecycle()
                     PlayerScreen(
                         catalog = state.catalog!!,
                         credentials = state.credentials!!,
@@ -442,6 +443,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                         pendingZapEntry = playerState.pendingZapEntry,
                         onEntrySelected = viewModel::openEntry,
                         onSwitchVersion = viewModel::switchLiveVersion,
+                        liveVersionIndex = liveVersionIndex,
                         onProgress = viewModel::recordPlayback,
                         onCycleVideoAspect = viewModel::cycleVideoAspect,
                         onPlayNextEpisode = viewModel::playNextEpisode,

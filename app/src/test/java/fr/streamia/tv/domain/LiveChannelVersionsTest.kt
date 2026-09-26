@@ -17,6 +17,27 @@ class LiveChannelVersionsTest {
     }
 
     @Test
+    fun recognisesGluedSplitAndSuffixDecorations() {
+        val key = LiveVersionNames.groupKey("TF1")
+        listOf("TF1HD", "TF1FHD", "TF1 1080p50", "TF1 FHD60", "TF1 4K50", "TF1 50 FPS", "TF1 H.265", "TF1 x264", "TF1 FR", "TF1 (FR)", "FR| TF1 HD (BE)")
+            .forEach { assertEquals(it, key, LiveVersionNames.groupKey(it)) }
+        assertEquals(1080, LiveVersionNames.announcedHeight("TF1 1080p50"))
+        assertEquals(720, LiveVersionNames.announcedHeight("TF1HD"))
+        assertEquals("BE", LiveVersionNames.language("TF1 HD BE"))
+        assertEquals("FR", LiveVersionNames.language("FR| TF1 HD (BE)"))
+        // Le mot « FR » seul, ou un vrai nom de deux mots, n'est pas un code pays à retirer.
+        assertNotEquals(LiveVersionNames.groupKey("RMC Sport 1"), LiveVersionNames.groupKey("RMC Sport Live 1"))
+        assertNotEquals(LiveVersionNames.groupKey("TF1"), LiveVersionNames.groupKey("TF1 Séries Films"))
+    }
+
+    @Test
+    fun sameLanguageVersionsComeFirst() {
+        val current = live(1, "FR| TF1 HD")
+        val index = LiveVersionIndex(listOf(live(2, "AR| TF1 HD"), current, live(3, "FR| TF1 FHD"), live(4, "TF1 4K")))
+        assertEquals(listOf(1, 3, 4, 2), index.versionsOf(current).map { it.id })
+    }
+
+    @Test
     fun keepsDifferentChannelsApart() {
         assertNotEquals(LiveVersionNames.groupKey("TF1"), LiveVersionNames.groupKey("TF1 +1"))
         assertNotEquals(LiveVersionNames.groupKey("beIN SPORTS 1 HD"), LiveVersionNames.groupKey("beIN SPORTS 2 HD"))

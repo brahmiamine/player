@@ -32,7 +32,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -138,8 +137,6 @@ import fr.streamia.tv.ui.theme.Night
 import fr.streamia.tv.ui.theme.RadiusCard
 import fr.streamia.tv.ui.theme.RadiusTile
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -224,6 +221,8 @@ fun PlayerScreen(
     onEntrySelected: (MediaEntry) -> Unit,
     /** Autre version de la chaîne en cours choisie dans le panneau « Versions ». */
     onSwitchVersion: (MediaEntry) -> Unit = onEntrySelected,
+    /** Versions des chaînes du Direct, construit une fois par le ViewModel (toutes catégories). */
+    liveVersionIndex: LiveVersionIndex? = null,
     onProgress: (MediaEntry, Long, Long) -> Unit,
     onCycleVideoAspect: () -> Unit,
     onPlayNextEpisode: () -> Unit,
@@ -717,12 +716,8 @@ fun PlayerScreen(
         }
     }
 
-    // Versions de la chaîne en cours (« TF1 », « TF1 FHD », « FR| TF1 UHD »…) : index construit une
-    // fois par catalogue hors du thread principal, filtré comme le zapping (masquées, verrouillées).
-    val liveVersionIndex by produceState<LiveVersionIndex?>(null, catalog, sharedLivePlayer) {
-        if (!sharedLivePlayer) return@produceState
-        value = withContext(Dispatchers.Default) { LiveVersionIndex(catalog.entriesFor(MediaType.Live)) }
-    }
+    // Versions de la chaîne en cours (« TF1 », « TF1 FHD », « FR| TF1 UHD »…), filtrées comme le
+    // zapping (masquées, verrouillées). L'index vient du ViewModel : prêt avant l'ouverture du lecteur.
     val liveVersions = remember(liveVersionIndex, entry.key, hiddenEntries, numericJumpLockedCategoryIds) {
         if (entry.type != MediaType.Live) {
             emptyList()

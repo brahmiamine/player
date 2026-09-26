@@ -5,20 +5,21 @@ import kotlin.math.abs
 import java.util.Locale
 
 /**
- * Reconnaissance des versions d'une même chaîne (« TF1 », « FR| TF1 FHD », « TF1 UHD ᴴᴰ »…).
+ * Reconnaissance des versions d'une même chaîne (« TF1 », « FR| TF1 FHD », « TF1 UHD ᴴᴰ »,
+ * « TF1HD », « TF1 1080p50 », « TF1 (FR) »…).
  *
  * Les noms des fournisseurs sont peu fiables : ils ne servent qu'à regrouper et à estimer une
  * qualité de départ. La qualité réellement affichée vient des mesures du lecteur
- * ([LiveVersionStats]).
+ * ([LiveVersionStats]). L'analyse d'un nom est faite en une passe, sans expression régulière
+ * dans le cas courant (nom ASCII) : elle tourne sur des dizaines de milliers de chaînes.
  */
 object LiveVersionNames {
     // Préfixe fournisseur : « |FR| », « [AR] », « FR: », « UK | », « FR-HD - »… (majuscules seulement,
     // sans chiffre : « TF1 : » ou « M6 | » ne sont pas des préfixes).
     private val PREFIX = Regex("""^\s*(?:\|\s*([^|]{1,15}?)\s*\||\[\s*([^\]]{1,15}?)\s*]|([A-Z]{2,4}(?:-[A-Z]{2,4})*)\s*[-:|])\s*""")
-    private val TIMESHIFT = Regex("""(?<![\p{L}\p{N}])\+\s?(\d{1,2})(?![\p{N}])""")
-    private val SUPERSCRIPT_DIGITS = Regex("[¹²³⁰⁴⁵⁶⁷⁸⁹]")
-    private val TOKEN = Regex("""[\p{L}\p{N}]+""")
     private val MARKS = Regex("""\p{M}+""")
+    // Résolution/fréquence/codec collés : « 1080p50 », « 2160p », « fhd60 », « 4k50 », « 50fps », « h265 »…
+    private val QUALITY_PATTERN = Regex("""^(?:\d{3,4}[pi]\d{0,3}|(?:u|f)?hd\d{2,3}|[48]k\d{0,3}|\d{2,3}fps|[hx]26[45]|hevc\w*|hdr\w*|avc\d*)$""")
 
     private val QUALITY_HEIGHTS = mapOf(
         "8k" to 2160, "4k" to 2160, "uhd" to 2160, "2160p" to 2160, "2160" to 2160,
@@ -29,109 +30,219 @@ object LiveVersionNames {
 
     /** Mots de qualité ou de flux ignorés pour reconnaître la chaîne. */
     private val NOISE = QUALITY_HEIGHTS.keys + setOf(
-        "hq", "lq", "hdr", "hdr10", "sdr", "hevc", "h265", "h264", "x265", "x264", "avc",
-        "25fps", "50fps", "60fps", "fps", "backup", "bkp", "alt", "raw", "vip", "multi", "multiaudio", "dual",
+        "hq", "lq", "low", "hdr", "hdr10", "sdr", "hevc", "h265", "h264", "x265", "x264", "avc", "hls", "ts",
+        "25fps", "50fps", "60fps", "fps", "backup", "bkp", "bk", "alt", "raw", "vip", "multi", "multiaudio", "dual",
+    )
+
+    /** Codes pays qu'un fournisseur ajoute en fin de nom (« TF1 FR », « TF1 (BE) ») : retirés, gardés comme langue. */
+    private val COUNTRY_SUFFIXES = setOf(
+        "fr", "uk", "gb", "us", "be", "ch", "ca", "de", "es", "pt", "nl", "tr", "ar", "tn", "dz", "ae", "sa",
+        "qa", "eg", "pl", "ro", "gr", "ie", "au", "lb", "it", "se", "dk",
     )
 
     /** Clé commune aux versions d'une chaîne ; vide si le nom ne contient rien d'exploitable. */
-    fun groupKey(name: String): String {
-        val parsed = parse(name)
-        if (parsed.core.isEmpty()) return ""
-        return parsed.core + (parsed.timeshift?.let { "+$it" } ?: "")
-    }
+    fun groupKey(name: String): String = parse(name).groupKey
 
     /** Qualité annoncée par le nom (hauteur d'image), `null` si le nom n'en dit rien. */
     fun announcedHeight(name: String): Int? = parse(name).announcedHeight
 
-    /** Langue/pays du préfixe fournisseur (« FR », « AR »…), `null` sans préfixe. */
+    /** Langue/pays du préfixe (ou du code pays final) fournisseur (« FR », « AR »…), `null` sans. */
     fun language(name: String): String? = parse(name).language
 
     internal fun numbers(name: String): Set<String> = parse(name).numbers
 
     internal fun timeshift(name: String): String? = parse(name).timeshift
 
-    private data class Parsed(
-        val core: String,
+    internal class Parsed(
+        val groupKey: String,
         val numbers: Set<String>,
         val timeshift: String?,
         val announcedHeight: Int?,
         val language: String?,
     )
 
-    private fun parse(name: String): Parsed {
-        var rest = name.replace("⁴ᴷ", " 4K ").replace("⁸ᴷ", " 8K ")
+    internal fun parse(name: String): Parsed {
+        var rest = name
         var language: String? = null
-        var announced: Int? = null
+        var announced = 0
         repeat(3) {
             val match = PREFIX.find(rest) ?: return@repeat
             val raw = match.groupValues.drop(1).firstOrNull(String::isNotBlank).orEmpty().trim()
             val value = raw.lowercase(Locale.ROOT)
             if (value in QUALITY_HEIGHTS || value in NOISE) {
-                announced = maxOf(announced ?: 0, QUALITY_HEIGHTS[value] ?: 0).takeIf { it > 0 }
+                announced = maxOf(announced, QUALITY_HEIGHTS[value] ?: 0)
             } else if (language == null && raw.isNotBlank()) {
                 language = raw.uppercase(Locale.ROOT)
             }
             val remainder = rest.substring(match.range.last + 1)
             // Ne jamais vider le nom : « UK | » seul reste un nom (rare, mais pas une chaîne vide).
-            if (TOKEN.containsMatchIn(remainder)) rest = remainder else return@repeat
+            if (remainder.any(Char::isLetterOrDigit)) rest = remainder else return@repeat
         }
-        rest = rest.replace(SUPERSCRIPT_DIGITS, " ")
-        val normalized = Normalizer.normalize(rest, Normalizer.Form.NFKD).replace(MARKS, "").lowercase(Locale.ROOT)
-        val timeshift = TIMESHIFT.find(normalized)?.groupValues?.get(1)?.trimStart('0')?.ifEmpty { null }
-        val tokens = TOKEN.findAll(normalized.replace(TIMESHIFT, " ")).map { it.value }.toList()
-        tokens.forEach { token -> QUALITY_HEIGHTS[token]?.let { announced = maxOf(announced ?: 0, it) } }
-        val kept = tokens.filter { it !in NOISE }
+        // Accents, exposants (ᴴᴰ, ⁴ᴷ) et lettres de fantaisie ramenés à l'ASCII seulement si besoin.
+        val text = if (rest.all { it.code < 0x80 }) {
+            rest.lowercase(Locale.ROOT)
+        } else {
+            val withoutMarkers = StringBuilder(rest.length + 4)
+            for (char in rest.replace("⁴ᴷ", " 4K ").replace("⁸ᴷ", " 8K ")) withoutMarkers.append(if (char in SUPERSCRIPT_DIGITS) ' ' else char)
+            Normalizer.normalize(withoutMarkers, Normalizer.Form.NFKD).replace(MARKS, "").lowercase(Locale.ROOT)
+        }
+
+        val tokens = ArrayList<String>(6)
+        var timeshift: String? = null
+        var index = 0
+        while (index < text.length) {
+            val char = text[index]
+            when {
+                char.isLetterOrDigit() -> {
+                    val start = index
+                    while (index < text.length && text[index].isLetterOrDigit()) index++
+                    tokens += text.substring(start, index)
+                    continue
+                }
+                // « +1 », « + 2 » isolé : chaîne décalée, jamais une version de la chaîne d'origine.
+                char == '+' && (index == 0 || !text[index - 1].isLetterOrDigit()) -> {
+                    var cursor = index + 1
+                    if (cursor < text.length && text[cursor] == ' ') cursor++
+                    val digitsStart = cursor
+                    while (cursor < text.length && text[cursor].isDigit()) cursor++
+                    val digits = cursor - digitsStart
+                    if (digits in 1..2 && (cursor == text.length || !text[cursor].isLetterOrDigit())) {
+                        timeshift = text.substring(digitsStart, cursor).trimStart('0').ifEmpty { null }
+                        index = cursor
+                        continue
+                    }
+                }
+            }
+            index++
+        }
+
+        val kept = ArrayList<String>(tokens.size)
+        for ((position, token) in tokens.withIndex()) {
+            val next = tokens.getOrNull(position + 1)
+            val previous = tokens.getOrNull(position - 1)
+            // Formes coupées par la ponctuation : « H.265 », « x.264 », « 50 FPS », « 1080 p ».
+            if ((token == "h" || token == "x") && (next == "264" || next == "265")) continue
+            if ((token == "264" || token == "265") && (previous == "h" || previous == "x")) continue
+            if (token.all(Char::isDigit) && (next == "fps" || next == "p" || next == "i") && token.length >= 2) {
+                announced = maxOf(announced, patternHeight(token))
+                continue
+            }
+            if ((token == "p" || token == "i") && previous != null && previous.length >= 3 && previous.all(Char::isDigit)) continue
+            QUALITY_HEIGHTS[token]?.let { announced = maxOf(announced, it) }
+            if (token in NOISE) continue
+            if (token.length >= 3 && token.any(Char::isDigit) && QUALITY_PATTERN.matches(token)) {
+                announced = maxOf(announced, patternHeight(token))
+                continue
+            }
+            // « TF1HD », « M6FHD », « RMCUHD » : qualité collée au nom.
+            val glued = GLUED_QUALITIES.firstOrNull { token.endsWith(it) && token.length - it.length >= 2 }
+            if (glued != null) {
+                val stem = token.dropLast(glued.length)
+                if (stem.any(Char::isDigit) || stem.length >= 3) {
+                    announced = maxOf(announced, QUALITY_HEIGHTS.getValue(glued))
+                    kept += stem
+                    continue
+                }
+            }
+            kept += token
+        }
+        // Code pays final (« TF1 FR ») : c'est la langue, pas le nom.
+        if (kept.size >= 2 && kept.last() in COUNTRY_SUFFIXES) {
+            val country = kept.removeAt(kept.lastIndex)
+            if (language == null) language = country.uppercase(Locale.ROOT)
+        }
+
+        val core = kept.joinToString("")
+        val numbers = kept.filterTo(HashSet()) { token -> token.all(Char::isDigit) }
         return Parsed(
-            core = kept.joinToString(""),
-            numbers = kept.filter { token -> token.all(Char::isDigit) }.toSet(),
+            groupKey = if (core.isEmpty()) "" else core + (timeshift?.let { "+$it" } ?: ""),
+            numbers = if (numbers.isEmpty()) emptySet() else numbers,
             timeshift = timeshift,
-            announcedHeight = announced,
+            announcedHeight = announced.takeIf { it > 0 },
             language = language,
         )
     }
+
+    private fun patternHeight(token: String): Int = when {
+        token.startsWith("2160") || token.startsWith("4k") || token.startsWith("8k") || token.startsWith("uhd") -> 2160
+        token.startsWith("1080") || token.startsWith("fhd") -> 1080
+        token.startsWith("720") || token.startsWith("hd") -> 720
+        token.startsWith("576") || token.startsWith("480") -> 576
+        else -> 0
+    }
+
+    private val GLUED_QUALITIES = listOf("fhd", "uhd", "hd")
+    private val SUPERSCRIPT_DIGITS = setOf('¹', '²', '³', '⁰', '⁴', '⁵', '⁶', '⁷', '⁸', '⁹')
 }
 
 /**
  * Index des chaînes du Direct par version : même nom nettoyé, ou même identifiant de guide TV
  * (`epg_channel_id` / `tvg-id`) sans numéro ni décalage (+1) contradictoire.
+ *
+ * Construit une seule fois par liste de chaînes (voir le ViewModel), hors du thread principal :
+ * chaque nom n'est analysé qu'une fois, puis les recherches sont immédiates.
  */
-class LiveVersionIndex(channels: List<MediaEntry>) {
-    private val byGroupKey: Map<String, List<MediaEntry>>
-    private val byGuideId: Map<String, List<MediaEntry>>
+class LiveVersionIndex(channels: List<MediaEntry>, val fingerprint: Long = fingerprintOf(channels)) {
+    private val parsed = HashMap<String, LiveVersionNames.Parsed>(channels.size * 2)
+    private val byGroupKey = HashMap<String, MutableList<MediaEntry>>()
+    private val byGuideId = HashMap<String, MutableList<MediaEntry>>()
 
     init {
-        val live = channels.filter { it.type == MediaType.Live }
-        byGroupKey = live.groupBy { LiveVersionNames.groupKey(it.displayName) }
-            .filterKeys(String::isNotEmpty)
-        byGuideId = live.groupBy { guideId(it) }
-            .filterKeys { it != null }
-            .mapKeys { it.key!! }
-            // Un même identifiant posé sur des dizaines de chaînes est un défaut du fournisseur, pas une version.
-            .filterValues { it.size <= MAX_GUIDE_ID_SHARE }
+        for (channel in channels) {
+            if (channel.type != MediaType.Live) continue
+            val info = LiveVersionNames.parse(channel.displayName)
+            parsed[channel.key] = info
+            if (info.groupKey.isNotEmpty()) byGroupKey.getOrPut(info.groupKey) { ArrayList(2) } += channel
+            guideId(channel)?.let { byGuideId.getOrPut(it) { ArrayList(2) } += channel }
+        }
+        // Un même identifiant posé sur des dizaines de chaînes est un défaut du fournisseur, pas une version.
+        byGuideId.values.removeAll { it.size > MAX_GUIDE_ID_SHARE }
     }
 
-    /** Versions de [entry], elle comprise, dans l'ordre du fournisseur. */
+    val size: Int get() = parsed.size
+
+    /**
+     * Versions de [entry], elle comprise : d'abord celles de la même langue, puis les autres pays,
+     * chacune dans l'ordre du fournisseur.
+     */
     fun versionsOf(entry: MediaEntry): List<MediaEntry> {
-        val key = LiveVersionNames.groupKey(entry.displayName)
-        val sameName = if (key.isEmpty()) emptyList() else byGroupKey[key].orEmpty()
-        val sameGuide = guideId(entry)?.let { id ->
-            val numbers = LiveVersionNames.numbers(entry.displayName)
-            val timeshift = LiveVersionNames.timeshift(entry.displayName)
-            byGuideId[id].orEmpty().filter {
-                LiveVersionNames.numbers(it.displayName) == numbers &&
-                    LiveVersionNames.timeshift(it.displayName) == timeshift
+        val info = parsed[entry.key] ?: LiveVersionNames.parse(entry.displayName)
+        val candidates = LinkedHashMap<String, MediaEntry>()
+        candidates[entry.key] = entry
+        if (info.groupKey.isNotEmpty()) byGroupKey[info.groupKey]?.forEach { candidates.putIfAbsent(it.key, it) }
+        guideId(entry)?.let { id ->
+            byGuideId[id]?.forEach { other ->
+                val otherInfo = parsed[other.key] ?: return@forEach
+                if (otherInfo.numbers == info.numbers && otherInfo.timeshift == info.timeshift) candidates.putIfAbsent(other.key, other)
             }
-        }.orEmpty()
-        return (listOf(entry) + sameName + sameGuide).distinctBy { it.key }.take(MAX_VERSIONS)
+        }
+        if (candidates.size == 1) return listOf(entry)
+        val language = info.language
+        val (same, others) = candidates.values.partition { other ->
+            val otherLanguage = parsed[other.key]?.language
+            language == null || otherLanguage == null || otherLanguage == language
+        }
+        return (same + others).take(MAX_VERSIONS)
     }
 
     private fun guideId(entry: MediaEntry): String? =
         entry.tvgId?.trim()?.lowercase(Locale.ROOT)?.takeIf { it.length >= 3 && it !in INVALID_GUIDE_IDS }
 
-    private companion object {
-        const val MAX_GUIDE_ID_SHARE = 12
-        const val MAX_VERSIONS = 40
-        val INVALID_GUIDE_IDS = setOf("none", "null", "n/a", "undefined")
+    companion object {
+        private const val MAX_GUIDE_ID_SHARE = 12
+        private const val MAX_VERSIONS = 80
+        private val INVALID_GUIDE_IDS = setOf("none", "null", "n/a", "undefined")
+
+        /** Empreinte de la liste (clés, noms, identifiants de guide) : même empreinte = rien à reconstruire. */
+        fun fingerprintOf(channels: List<MediaEntry>): Long {
+            var hash = channels.size.toLong()
+            for (channel in channels) {
+                hash = hash * 31 + channel.key.hashCode()
+                hash = hash * 31 + channel.displayName.hashCode()
+                hash = hash * 31 + (channel.tvgId?.hashCode() ?: 0)
+            }
+            return hash
+        }
     }
 }
 
