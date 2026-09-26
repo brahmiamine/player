@@ -141,7 +141,7 @@ fun BrowserScreen(
     library: UserLibrarySnapshot,
     appSettings: AppSettings,
     loadingCategoryKeys: Set<String> = emptySet(),
-    vodPageKeys: Map<String, List<String>> = emptyMap(),
+    vodPages: Map<String, List<MediaEntry>> = emptyMap(),
     categoryLoadErrors: Set<String> = emptySet(),
     parentalUnlocked: Boolean,
     offline: Boolean,
@@ -283,15 +283,15 @@ fun BrowserScreen(
         FAVORITES_CATEGORY_ID -> favoriteEntriesForType
         HISTORY_CATEGORY_ID -> historyForType.map { it.second }
         else -> {
-            // Films/Séries paginés : ordre des pages lues en base, déjà triées (voir vodPageKeys).
+            // Films/Séries paginés : ordre des pages lues en base, déjà triées (voir vodPages).
             // Rien tant que la première page au tri courant n'est pas là, plutôt qu'un ordre
             // provisoire qui se réorganiserait sous les yeux de l'utilisateur.
             val paged = selectedType != MediaType.Live && catalog.isPaged
-            val pageKeys = vodPageKeys[vodPageKey(selectedType, selectedCategoryId, categorySortOrder)]
+            val pageEntries = vodPages[vodPageKey(selectedType, selectedCategoryId, categorySortOrder)]
             val source = when {
                 !paged -> catalog.entriesIn(selectedType, selectedCategoryId)
-                pageKeys == null -> emptyList()
-                else -> pageKeys.mapNotNull(catalog::entry).filter {
+                pageEntries == null -> emptyList()
+                else -> pageEntries.filter {
                     // Contenu déplacé ailleurs dans l'organisateur : n'appartient plus à cette catégorie.
                     selectedCategoryId == Catalog.ALL_CATEGORY_ID || it.categoryId == selectedCategoryId
                 }
@@ -333,7 +333,7 @@ fun BrowserScreen(
     val favoritesKey = favoriteEntriesForType.takeIf { selectedCategoryId == FAVORITES_CATEGORY_ID }
     val historyKey = historyForType.takeIf { selectedCategoryId == HISTORY_CATEGORY_ID }
     LaunchedEffect(
-        catalog, favoritesKey, historyKey, excludedCategoryIds, library.hiddenEntries, vodPageKeys, categorySortOrder,
+        catalog, favoritesKey, historyKey, excludedCategoryIds, library.hiddenEntries, vodPages, categorySortOrder,
         appSettings.liveChannelSortOrder, appSettings.vodSortOrder,
     ) {
         val target = location
@@ -357,7 +357,7 @@ fun BrowserScreen(
     val currentCategoryKey = Catalog.categoryKey(selectedType, selectedCategoryId)
     // Pages absentes au tri courant (tri changé, liste actualisée) : relues sans quitter l'écran.
     val pagesMissing = selectedType != MediaType.Live && catalog.isPaged &&
-        vodPageKey(selectedType, selectedCategoryId, categorySortOrder) !in vodPageKeys
+        vodPageKey(selectedType, selectedCategoryId, categorySortOrder) !in vodPages
     androidx.compose.runtime.LaunchedEffect(selectedType, selectedCategoryId, pagesMissing) {
         onLocationChanged(selectedType, selectedCategoryId)
         if (selectedType != MediaType.Live) {

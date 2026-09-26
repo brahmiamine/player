@@ -77,6 +77,10 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.SharingStarted
 import fr.streamia.tv.domain.LiveVersionIndex
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -190,6 +194,21 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     // même chargement (ex. sélection rapide de catégories, LaunchedEffect qui se relance).
     private val categoryLoadsInFlight = mutableSetOf<String>()
     val uiState: StateFlow<StreamiaUiState> = _uiState.asStateFlow()
+    private val _homeState = MutableStateFlow(HomeUiState())
+    val homeState: StateFlow<HomeUiState> = _homeState.asStateFlow()
+
+    /**
+     * Matchs du jour sans les chaînes masquées ou verrouillées, calculés hors du thread principal et
+     * seulement quand les matchs, le catalogue ou les masquages changent (auparavant dans la
+     * composition de la racine, à chaque lot de matchs rapprochés, quel que soit l'écran affiché).
+     */
+    val visibleLiveOnSatMatches: StateFlow<List<ResolvedLiveOnSatMatch>> = combine(
+        _homeState.map { it.liveOnSatMatches }.distinctUntilChanged { old, new -> old === new },
+        _uiState.map { LiveMatchVisibility(it.catalog, it.library, it.appSettings.parentalControlEnabled && !it.parentalUnlocked) }
+            .distinctUntilChanged { old, new -> old.sameAs(new) },
+    ) { matches, visibility -> matches.withoutHiddenChannels(visibility.catalog, visibility.library, visibility.parentalLocked) }
+        .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     private val _playerState = MutableStateFlow(PlayerUiState())
     val playerState: StateFlow<PlayerUiState> = _playerState.asStateFlow()
 
@@ -204,6 +223,12 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     private var liveVersionIndexProfileId: String? = null
     private var liveVersionIndexFromDatabase = false
 
+    private val startupData = kotlinx.coroutines.CompletableDeferred<Unit>()
+
+    /** Lien « Continuer à regarder » en cours de traitement : la restauration habituelle s'efface. */
+    @Volatile var resumeLinkPending: Boolean = false
+        private set
+
     init {
         viewModelScope.launch { UpdateInstallEvents.events.collect(::onUpdateInstallEvent) }
         viewModelScope.launch {
@@ -214,13 +239,34 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 }
                 .collectLatest(::rebuildLiveVersionIndex)
         }
-        resetUiState(StreamiaUiState(
-            booting = true,
-            screen = StreamiaScreen.Login,
-            profiles = repository.profiles(),
-            appSettings = repository.appSettings(),
-        ))
+        resetUiState(StreamiaUiState(booting = true, screen = StreamiaScreen.Login))
+        // Listes (déchiffrement Android Keystore) et réglages lus hors du thread principal : ils
+        // retardaient la première image. StreamiaTvRoot attend [awaitStartupData] avant de choisir
+        // quoi rouvrir.
+        viewModelScope.launch {
+            val (profiles, settings) = withContext(Dispatchers.IO) { repository.profiles() to repository.appSettings() }
+            _uiState.update { state ->
+                if (state.activeProfileId == null) state.copy(profiles = profiles, appSettings = settings)
+                else state.copy(profiles = profiles)
+            }
+            startupData.complete(Unit)
+        }
     }
+
+    /** Listes et réglages chargés (voir init). */
+    suspend fun awaitStartupData() = startupData.await()
+
+    /**
+     * Données du profil qui sera rouvert (bibliothèque, liste, réglages) lues une première fois hors
+     * du thread principal : les appels suivants, eux sur le thread principal, les trouvent en mémoire.
+     */
+    suspend fun prewarmProfile(profileId: String) = withContext(Dispatchers.IO) {
+        repository.profile(profileId)
+        repository.library(profileId)
+        repository.appSettings()
+    }
+
+
 
     /**
      * Pression mémoire signalée par Android : les journées EPG gardées en RAM (des dizaines de Mo
@@ -274,6 +320,10 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     fun finishStartup() {
         if (_uiState.value.activeProfileId == null) showLogin()
     }
+
+    /** Réponse de [canResumeLiveOnStartup] lue hors du thread principal. */
+    suspend fun canResumeLiveOnStartupAsync(profileId: String, entry: MediaEntry): Boolean =
+        withContext(Dispatchers.IO) { canResumeLiveOnStartup(profileId, entry) }
 
     /**
      * Lance immédiatement le dernier média avec les informations sauvegardées. Le catalogue
@@ -954,7 +1004,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     fun showLiveMatches() {
         navigateToMenu(StreamiaScreen.LiveMatches, HomeFocusTarget.LiveMatches)
         // Déjà chargés au démarrage : affichage direct depuis l'état, sans relire ni rescraper.
-        if (_uiState.value.liveOnSatMatches.isEmpty()) loadLiveOnSatMatches(forceRefresh = false) else refreshLiveOnSatIfStale()
+        if (_homeState.value.liveOnSatMatches.isEmpty()) loadLiveOnSatMatches(forceRefresh = false) else refreshLiveOnSatIfStale()
     }
 
     /** Appelé en boucle par l'accueil et la page Matchs : recharge quand le cache atteint 2 h. */
@@ -978,14 +1028,14 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             val result = withContext(Dispatchers.IO) {
                 runCatching {
                     val place = _uiState.value.appSettings.homePlace
-                        ?: _uiState.value.weatherPlace
+                        ?: _homeState.value.weatherPlace
                         ?: weatherClient.locateByIp()
                         ?: error("Localisation impossible.")
                     place to weatherClient.currentWeather(place)
                 }
             }
             result.onSuccess { (place, weather) ->
-                _uiState.update { it.copy(weatherPlace = place, weather = weather) }
+                _homeState.update { it.copy(weatherPlace = place, weather = weather) }
             }
             weatherNextCheckAtMillis = System.currentTimeMillis() + if (result.isSuccess) 30 * 60_000L else 5 * 60_000L
         }
@@ -999,7 +1049,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         updateAppSettings { it.copy(homePlace = place) }
         weatherJob?.cancel()
         weatherNextCheckAtMillis = 0L
-        _uiState.update { it.copy(weatherPlace = place, weather = null) }
+        _homeState.update { it.copy(weatherPlace = place, weather = null) }
         refreshWeatherIfStale()
     }
 
@@ -1170,7 +1220,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
      * certaines de ses entrées sont déjà en mémoire (favoris, autre tri, autre catégorie).
      */
     private fun needsFirstPage(catalog: Catalog, type: MediaType, categoryId: String, order: VodSortOrder): Boolean =
-        if (type != MediaType.Live && catalog.isPaged) vodPageKey(type, categoryId, order) !in _uiState.value.vodPageKeys
+        if (type != MediaType.Live && catalog.isPaged) vodPageKey(type, categoryId, order) !in _uiState.value.vodPages
         else !catalog.isCategoryLoaded(type, categoryId)
 
     /**
@@ -1203,15 +1253,15 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         // Paginé : l'offset est le nombre d'entrées déjà lues pour CETTE catégorie et ce tri —
         // entriesIn() compterait aussi des entrées chargées ailleurs (favoris, autres catégories
         // dans « Tout ») et ferait sauter des pages.
-        val pageKeys = if (type != MediaType.Live && catalog.isPaged) {
-            _uiState.value.vodPageKeys[vodPageKey(type, categoryId, order)] ?: return ensureCategoryLoaded(type, categoryId, order)
+        val page = if (type != MediaType.Live && catalog.isPaged) {
+            _uiState.value.vodPages[vodPageKey(type, categoryId, order)] ?: return ensureCategoryLoaded(type, categoryId, order)
         } else {
             null
         }
-        val loaded = pageKeys?.size ?: catalog.entriesIn(type, categoryId).size
+        val loaded = page?.size ?: catalog.entriesIn(type, categoryId).size
         if (loaded > 0 && loaded >= catalog.countIn(type, categoryId)) return
         // Films/Séries : la page suivante part de la dernière entrée affichée (curseur d'index).
-        loadCategoryPage(profileId, type, categoryId, offset = loaded, order = order, afterKey = pageKeys?.lastOrNull())
+        loadCategoryPage(profileId, type, categoryId, offset = loaded, order = order, afterKey = page?.lastOrNull()?.key)
     }
 
     private fun loadCategoryPage(
@@ -1241,7 +1291,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                         base.withMaterializedEntries(page.entries, type, categoryId)
                     }
                 } else {
-                    mergeVodPage(profileId, type, categoryId, pageKey, offset, page.entries)
+                    mergeVodPage(profileId, pageKey, offset, page.entries)
                 }
             } finally {
                 categoryLoadsInFlight.remove(loadKey)
@@ -1277,58 +1327,37 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     }
 
     /**
-     * Fusionne une page Films/Séries et enregistre son ordre dans [StreamiaUiState.vodPageKeys] en
-     * une seule étape sous [catalogLayoutMutation], puis libère les pages les moins récemment
-     * ouvertes au-delà de [MAX_MATERIALIZED_VOD_ENTRIES]. Page et ordre sont publiés ensemble : une
-     * éviction concurrente ne peut donc jamais retirer les entrées d'une page déjà référencée.
+     * Publie une page Films/Séries dans [StreamiaUiState.vodPages] — une liste autonome par
+     * catégorie et par tri — puis libère les pages les moins récemment ouvertes au-delà de
+     * [MAX_MATERIALIZED_VOD_ENTRIES]. Le catalogue global n'est plus touché : fusionner chaque page
+     * recopiait et réindexait toutes les entrées matérialisées (dont les chaînes Direct).
+     * Les déplacements de l'organisateur sont appliqués aux seules entrées de la page.
      */
     private suspend fun mergeVodPage(
         profileId: String,
-        type: MediaType,
-        categoryId: String,
         pageKey: String,
         offset: Int,
         entries: List<MediaEntry>,
     ) {
         catalogLayoutMutation.withLock {
-            while (true) {
-                val state = _uiState.value
-                if (state.activeProfileId != profileId) return
-                val base = state.rawCatalog ?: state.catalog ?: return
-                val known = state.vodPageKeys[pageKey]
-                val pageKeys = when {
-                    offset == 0 -> entries.map(MediaEntry::key)
-                    known?.size == offset -> (known + entries.map(MediaEntry::key)).distinct()
-                    else -> known
-                }
-                // Page (re)lue : passe en fin de liste, la plus récemment utilisée.
-                val pages = if (pageKeys == null) state.vodPageKeys else state.vodPageKeys - pageKey + (pageKey to pageKeys)
-                val retained = retainedVodPages(pages, protectedVodCategoryKey(state), MAX_MATERIALIZED_VOD_ENTRIES)
-                val pinned = if (retained.size == pages.size) emptySet() else pinnedEntryKeys(state)
-                val raw = withContext(Dispatchers.Default) {
-                    val merged = base.withMaterializedEntries(entries, type, categoryId)
-                    if (retained.size == pages.size) merged
-                    else merged.retainingVodEntries(
-                        retainedKeys = retained.values.flatMapTo(HashSet(pinned)) { it },
-                        retainedCategoryKeys = retained.keys.mapTo(HashSet()) { it.substringBefore('|') },
-                    )
-                }
-                val customized = withContext(Dispatchers.Default) { repository.customizedCatalog(profileId, raw) }
-                var published = false
-                _uiState.update { current ->
-                    published = false
-                    when {
-                        current.activeProfileId != profileId -> current
-                        // Catalogue remplacé pendant le calcul (actualisation) : ne pas l'écraser
-                        // avec une version dérivée de l'ancien, refaire la fusion sur le nouveau.
-                        (current.rawCatalog ?: current.catalog) !== base -> current
-                        else -> {
-                            published = true
-                            current.copy(rawCatalog = raw, catalog = customized, vodPageKeys = retained)
-                        }
+            val moves = _uiState.value.library.movedEntries
+            val placed = if (moves.isEmpty()) entries else entries.map { entry -> moves[entry.key]?.let { entry.copy(categoryId = it) } ?: entry }
+            _uiState.update { state ->
+                if (state.activeProfileId != profileId) return@update state
+                val known = state.vodPages[pageKey]
+                val page = when {
+                    offset == 0 -> placed
+                    known != null && known.size == offset -> {
+                        val merged = LinkedHashMap<String, MediaEntry>(known.size + placed.size)
+                        known.forEach { merged[it.key] = it }
+                        placed.forEach { merged.putIfAbsent(it.key, it) }
+                        merged.values.toList()
                     }
-                }
-                if (published || _uiState.value.activeProfileId != profileId) return
+                    else -> known
+                } ?: return@update state
+                // Page (re)lue : passe en fin de liste, la plus récemment utilisée.
+                val pages = state.vodPages - pageKey + (pageKey to page)
+                state.copy(vodPages = retainedVodPages(pages, protectedVodCategoryKey(state), MAX_MATERIALIZED_VOD_ENTRIES))
             }
         }
     }
@@ -1337,24 +1366,6 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     private fun protectedVodCategoryKey(state: StreamiaUiState): String? {
         val type = state.browserType?.takeIf { it != MediaType.Live } ?: return null
         return state.browserCategoryId?.let { Catalog.categoryKey(type, it) }
-    }
-
-    /**
-     * Entrées gardées en mémoire même hors des pages retenues : celles que le catalogue léger
-     * charge d'office (favoris, déplacées, historique) et celles actuellement à l'écran.
-     */
-    private fun pinnedEntryKeys(state: StreamiaUiState): Set<String> = buildSet {
-        addAll(state.library.favoriteEntries)
-        addAll(state.library.movedEntries.keys)
-        state.library.history.forEach { add(it.entry.key) }
-        state.lastViewedEntry?.let { add(it.key) }
-        detailsTrail.forEach { add(it.key) }
-        when (val screen = state.screen) {
-            is StreamiaScreen.MovieDetails -> add(screen.movie.key)
-            is StreamiaScreen.Series -> add(screen.series.key)
-            is StreamiaScreen.Player -> add(screen.entry.key)
-            else -> Unit
-        }
     }
 
     /**
@@ -1505,8 +1516,16 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         }
     }
 
-    fun toggleEntryFavorite(entry: MediaEntry) = toggleInLibrary(entry.key, { it.favoriteEntries }, { lib, set -> lib.copy(favoriteEntries = set) }) { profileId ->
-        repository.toggleEntryFavorite(profileId, entry)
+    fun toggleEntryFavorite(entry: MediaEntry) {
+        toggleInLibrary(entry.key, { it.favoriteEntries }, { lib, set -> lib.copy(favoriteEntries = set) }) { profileId ->
+            repository.toggleEntryFavorite(profileId, entry)
+        }
+        // Film/série ajouté depuis une page (hors du catalogue global) : ajouté au catalogue pour
+        // apparaître dans « Favoris » et sur l'accueil, comme les favoris chargés à l'ouverture.
+        val profileId = _uiState.value.activeProfileId ?: return
+        if (_uiState.value.catalog?.entry(entry.key) == null) {
+            viewModelScope.launch { mergeIntoCatalog(profileId) { base -> base.withExtraEntries(listOf(entry)) } }
+        }
     }
 
     fun toggleEntryHidden(entry: MediaEntry) = toggleInLibrary(entry.key, { it.hiddenEntries }, { lib, set -> lib.copy(hiddenEntries = set) }) { profileId ->
@@ -1771,9 +1790,21 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         if (uri?.scheme != WatchNextPublisher.SCHEME || uri.host != WatchNextPublisher.HOST_RESUME) return false
         val profileId = uri.getQueryParameter("profile") ?: return false
         val key = uri.getQueryParameter("key") ?: return false
-        if (repository.profile(profileId) == null) return false
-        val entry = repository.library(profileId).history.firstOrNull { it.entry.key == key }?.entry ?: return false
-        resumeStartup(profileId, entry, returnToSeries = entry.type == MediaType.Series)
+        resumeLinkPending = true
+        // Liste et historique lus hors du thread principal (appelé depuis onCreate).
+        viewModelScope.launch {
+            try {
+                val entry = withContext(Dispatchers.IO) {
+                    if (repository.profile(profileId) == null) return@withContext null
+                    repository.appSettings()
+                    repository.library(profileId).history.firstOrNull { it.entry.key == key }?.entry
+                } ?: return@launch
+                awaitStartupData()
+                resumeStartup(profileId, entry, returnToSeries = entry.type == MediaType.Series)
+            } finally {
+                resumeLinkPending = false
+            }
+        }
         return true
     }
 
@@ -2252,9 +2283,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
 
             if (sequence != homeRecommendationBuildSequence || _uiState.value.activeProfileId != profileId) return@launch
             if (candidates.isEmpty()) {
-                _uiState.update { current ->
-                    if (current.activeProfileId == profileId) current.copy(homeRecommendationRows = emptyList()) else current
-                }
+                if (_uiState.value.activeProfileId == profileId) _homeState.update { it.copy(homeRecommendationRows = emptyList()) }
                 return@launch
             }
 
@@ -2297,9 +2326,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             if (sequence != homeRecommendationBuildSequence || _uiState.value.activeProfileId != profileId) return@launch
             homeRecommendationLastBuiltProfileId = profileId
             homeRecommendationLastBuiltAtMillis = System.currentTimeMillis()
-            _uiState.update { current ->
-                if (current.activeProfileId == profileId) current.copy(homeRecommendationRows = rows) else current
-            }
+            if (_uiState.value.activeProfileId == profileId) _homeState.update { it.copy(homeRecommendationRows = rows) }
         }
     }
 
@@ -2331,7 +2358,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     private fun loadJustWatchRows(profileId: String, hiddenEntries: Set<String>, excludedCategoryIds: Set<String>) {
         justWatchJob?.cancel()
         // Autre liste : ses rangées ne doivent pas rester affichées sous les contenus de la nouvelle.
-        if (justWatchRowsProfileId != profileId) _uiState.update { it.copy(homeJustWatchRows = emptyList()) }
+        if (justWatchRowsProfileId != profileId) _homeState.update { it.copy(homeJustWatchRows = emptyList()) }
         justWatchRowsProfileId = profileId
         val disabledBlocks = _uiState.value.appSettings.disabledHomeBlocks
         justWatchJob = viewModelScope.launch(BackgroundWork.light) {
@@ -2370,8 +2397,8 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             JustWatchSection.NewSeries -> RecommendationRowKind.JustWatchNewSeries
         }
         val row = items.takeIf { it.size >= minimum }?.let { RecommendationRow(kind, section.title, it.map { entry -> RecommendedMedia(entry, score = 0.0) }) }
-        _uiState.update { current ->
-            if (current.activeProfileId != profileId) return@update current
+        if (_uiState.value.activeProfileId != profileId) return
+        _homeState.update { current ->
             // Ordre JustWatch fixe (ordre de RecommendationRowKind), quel que soit l'ordre d'arrivée.
             current.copy(homeJustWatchRows = (current.homeJustWatchRows.filterNot { it.kind == kind } + listOfNotNull(row)).sortedBy { it.kind.ordinal })
         }
@@ -2514,7 +2541,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         /** Données déjà sur disque, même anciennes, affichées en attendant [fetch]. */
         private val cached: suspend () -> Raw?,
         private val isEmpty: (Raw) -> Boolean,
-        private val match: (Raw, Catalog, visible: (MediaEntry) -> Boolean) -> (StreamiaUiState) -> StreamiaUiState,
+        private val match: (Raw, Catalog, visible: (MediaEntry) -> Boolean) -> (HomeUiState) -> HomeUiState,
     ) {
         private var loadJob: Job? = null
         private var loadSequence = 0L
@@ -2595,8 +2622,8 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                     channel.key !in hiddenEntries && channel.categoryId !in excludedCategoryIds
                 }
                 if (sequence != resolveSequence) return@launch
-                _uiState.update { latest ->
-                    if (latest.activeProfileId == profileId) publish(latest).copy(homePendingBlocks = latest.homePendingBlocks - blocks) else latest
+                if (_uiState.value.activeProfileId == profileId) {
+                    _homeState.update { latest -> publish(latest).copy(homePendingBlocks = latest.homePendingBlocks - blocks) }
                 }
                 resolvedKey = key
             }
@@ -2642,16 +2669,17 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
      * restent plus vides pendant le scrape de liveonsat.com, qui les remplace ensuite.
      */
     private fun showCachedLiveOnSatMatches() {
-        if (_uiState.value.liveOnSatMatches.isNotEmpty()) return
+        if (_homeState.value.liveOnSatMatches.isNotEmpty()) return
         if (HomeBlock.LiveMatches in _uiState.value.appSettings.disabledHomeBlocks) return
         val sequence = liveOnSatLoadSequence
         viewModelScope.launch {
             val fetch = runCatching { repository.cachedLiveOnSatMatches() }.getOrNull() ?: return@launch
             val profileId = _uiState.value.activeProfileId ?: return@launch
             val (_, saved) = liveOnSatSavedResolution(profileId, fetch)
-            _uiState.update { state ->
+            if (_uiState.value.activeProfileId != profileId) return@launch
+            _homeState.update { state ->
                 // Un chargement plus récent a déjà publié : il a priorité.
-                if (state.activeProfileId != profileId || state.liveOnSatMatches.isNotEmpty() || sequence != liveOnSatLoadSequence) state
+                if (state.liveOnSatMatches.isNotEmpty() || sequence != liveOnSatLoadSequence) state
                 else state.copy(
                     liveOnSatMatches = saved ?: fetch.matches.map { match -> ResolvedLiveOnSatMatch(match, emptyMap()) },
                     liveOnSatFetchedAtEpochMillis = fetch.fetchedAtEpochMillis,
@@ -2670,11 +2698,11 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         if (forceRefresh) liveOnSatLoadJob?.cancel()
         val sequence = ++liveOnSatLoadSequence
         liveOnSatNextCheckAtMillis = System.currentTimeMillis() + LIVE_ONSAT_RETRY_MS
-        _uiState.update { it.copy(liveOnSatLoading = true, liveOnSatError = null) }
+        _homeState.update { it.copy(liveOnSatLoading = true, liveOnSatError = null) }
         liveOnSatLoadJob = viewModelScope.launch {
             // Scrape + rapprochement des chaînes terminés (ou en échec) : plus de squelette.
             coroutineContext.job.invokeOnCompletion {
-                if (sequence == liveOnSatLoadSequence) _uiState.update { it.copy(liveOnSatPending = false, liveOnSatResolving = false) }
+                if (sequence == liveOnSatLoadSequence) _homeState.update { it.copy(liveOnSatPending = false, liveOnSatResolving = false) }
             }
             val result = runCatching { repository.loadLiveOnSatMatches(forceRefresh) }
             if (sequence != liveOnSatLoadSequence) return@launch
@@ -2691,7 +2719,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 if (sequence != liveOnSatLoadSequence) return@launch
                 // Phase 1 : afficher immédiatement tous les matchs du jour, sans attendre la
                 // résolution des chaînes ni l'enrichissement EPG (les deux étapes coûteuses).
-                _uiState.update {
+                _homeState.update {
                     it.copy(
                         liveOnSatLoading = false,
                         liveOnSatMatches = cachedResolution
@@ -2715,7 +2743,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 }
             }.onFailure { error ->
                 if (sequence != liveOnSatLoadSequence) return@launch
-                _uiState.update { it.copy(liveOnSatLoading = false, liveOnSatError = error.safeMessage()) }
+                _homeState.update { it.copy(liveOnSatLoading = false, liveOnSatError = error.safeMessage()) }
             }
         }
     }
@@ -2734,7 +2762,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         if (state.activeProfileId != profileId) return
         // Page Matchs : chaînes fantômes dès maintenant — la préparation (chaînes Direct depuis
         // SQLite, index) prend déjà plusieurs secondes sur un gros catalogue. Fin du job = retrait.
-        _uiState.update { if (sequence == liveOnSatLoadSequence) it.copy(liveOnSatResolving = true) else it }
+        _homeState.update { if (sequence == liveOnSatLoadSequence) it.copy(liveOnSatResolving = true) else it }
         val catalog = state.catalog
 
         // Le matcher a besoin des catégories (bouquet AR pour "beIN Connect MENA"...), pas
@@ -2767,7 +2795,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         }
         // Recalcul des mêmes matchs (playlist ou EPG renouvelés) : l'ancien résultat reste affiché
         // pour les paquets pas encore refaits, au lieu de faire disparaître les chaînes.
-        val resolved = (state.liveOnSatMatchesFor(fetch) ?: matches.map { ResolvedLiveOnSatMatch(it, emptyMap()) }).toMutableList()
+        val resolved = (_homeState.value.liveOnSatMatchesFor(fetch) ?: matches.map { ResolvedLiveOnSatMatch(it, emptyMap()) }).toMutableList()
 
         var offset = 0
         while (offset < matches.size) {
@@ -2785,7 +2813,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 }
             }
             for (i in offset until end) resolved[i] = chunk[i - offset]
-            _uiState.update { current ->
+            _homeState.update { current ->
                 if (sequence != liveOnSatLoadSequence) current
                 else current.copy(liveOnSatMatches = resolved.toList())
             }
@@ -2797,11 +2825,11 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
 
     /** Premier chargement de ces blocs terminé : l'accueil remplace leur squelette par le contenu, ou rien. */
     private fun settleHomeBlocks(blocks: Set<HomeBlock>) {
-        _uiState.update { if (it.homePendingBlocks.any(blocks::contains)) it.copy(homePendingBlocks = it.homePendingBlocks - blocks) else it }
+        _homeState.update { if (it.homePendingBlocks.any(blocks::contains)) it.copy(homePendingBlocks = it.homePendingBlocks - blocks) else it }
     }
 
     /** Matchs affichés s'ils proviennent déjà de ce même scrape. */
-    private fun StreamiaUiState.liveOnSatMatchesFor(fetch: LiveOnSatFetchResult): List<ResolvedLiveOnSatMatch>? =
+    private fun HomeUiState.liveOnSatMatchesFor(fetch: LiveOnSatFetchResult): List<ResolvedLiveOnSatMatch>? =
         liveOnSatMatches.takeIf { liveOnSatFetchedAtEpochMillis == fetch.fetchedAtEpochMillis && it.size == fetch.matches.size }
 
     /**
@@ -2809,7 +2837,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
      * de 2 h) pour refaire le rapprochement des chaînes, dont la version enregistrée ne correspond plus.
      */
     private fun reresolveLiveOnSat() {
-        if (_uiState.value.liveOnSatMatches.isNotEmpty()) loadLiveOnSatMatches(forceRefresh = false)
+        if (_homeState.value.liveOnSatMatches.isNotEmpty()) loadLiveOnSatMatches(forceRefresh = false)
     }
 
     private fun epgDayBounds(date: LocalDate): Pair<Long, Long> {
@@ -2857,7 +2885,12 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     private fun applyLibraryPresentation(profileId: String, presentation: Pair<Catalog?, UserLibrarySnapshot>) {
         _uiState.update { state ->
             if (state.activeProfileId != profileId) state
-            else state.copy(catalog = presentation.first ?: state.catalog, library = presentation.second)
+            else state.copy(
+                catalog = presentation.first ?: state.catalog,
+                library = presentation.second,
+                // Déplacements modifiés (organisateur, restauration) : les pages Films/Séries sont relues.
+                vodPages = if (state.library.movedEntries == presentation.second.movedEntries) state.vodPages else emptyMap(),
+            )
         }
     }
 
@@ -2931,7 +2964,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                         committed = true
                         state.copy(
                             // Catalogue relu (actualisation) : les pages Films/Séries sont relues au tri courant.
-                            vodPageKeys = emptyMap(),
+                            vodPages = emptyMap(),
                             booting = false,
                             busy = false,
                             catalogHydrating = false,
@@ -2978,8 +3011,9 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     private fun resetUiState(state: StreamiaUiState) {
         // Nouvel état = rangées des guides vides : leur prochain rapprochement doit être republié.
         homeGuides.forEach { it.reset() }
-        val previous = _uiState.value
-        _uiState.value = state.copy(weather = previous.weather, weatherPlace = previous.weatherPlace)
+        _uiState.value = state
+        // Nouvelle liste : rangées de l'accueil vides (squelettes), la météo de l'en-tête est gardée.
+        _homeState.update { HomeUiState(weatherPlace = it.weatherPlace, weather = it.weather) }
     }
 
     private fun showLogin() {
@@ -3119,6 +3153,41 @@ data class StreamiaUiState(
     val epgAvailableDates: List<LocalDate> = emptyList(),
     val epgSelectedDate: LocalDate? = null,
     val epgLoading: Boolean = false,
+    val similarMedia: List<RecommendedMedia> = emptyList(),
+    val resumePositionMs: Long = 0,
+    val browserType: MediaType? = null,
+    val browserCategoryId: String? = null,
+    /**
+     * Catégories dont une page est en cours de lecture SQLite, clés [Catalog.categoryKey]. Permet à
+     * l'interface d'afficher « Chargement… » plutôt que « Aucun contenu » pendant l'ouverture d'une
+     * catégorie Films/Séries encore jamais parcourue.
+     */
+    val loadingCategoryKeys: Set<String> = emptySet(),
+    /** Films/Séries paginés : clés des entrées dans l'ordre des pages lues en base, par catégorie et par tri (voir vodPageKey). */
+    val vodPages: Map<String, List<MediaEntry>> = emptyMap(),
+    /** Catégories dont le dernier chargement de page a échoué (message + nouvel essai dans la grille). */
+    val categoryLoadErrors: Set<String> = emptySet(),
+    val searchQuery: String = "",
+    val searchType: MediaType? = null,
+    val contentReturnContext: ContentReturnContext? = null,
+    /** Liste quittée par « Changer de liste » : Retour dans le gestionnaire la rouvre. */
+    val returnProfileId: String? = null,
+    /**
+     * Pile des écrans de menu traversés (Accueil, Direct/Films/Séries, Paramètres, Recherche, EPG,
+     * Outils…). Elle permet à Retour de revenir à l'écran d'où l'on vient au lieu de l'accueil.
+     */
+    val menuBackStack: List<StreamiaScreen> = emptyList(),
+    /** Carte de l'accueil à refocaliser au retour (voir [HomeFocusTarget]). */
+    val homeFocusTarget: HomeFocusTarget? = null,
+    val lastViewedEntry: MediaEntry? = null,
+)
+
+/**
+ * État de l'accueil (guides tiers, matchs, recommandations, météo), dans son propre flux : ses
+ * mises à jour fréquentes (lots de matchs rapprochés, guides, rangées JustWatch) ne réémettent plus
+ * l'état de toute l'application ni ne recomposent les autres écrans.
+ */
+data class HomeUiState(
     val homeRecommendationRows: List<RecommendationRow> = emptyList(),
     /** Rangées JustWatch, chargées à part (cache disque puis actualisation) : voir loadJustWatchRows. */
     val homeJustWatchRows: List<RecommendationRow> = emptyList(),
@@ -3140,37 +3209,10 @@ data class StreamiaUiState(
     /** Ville effective de l'en-tête (réglée, ou détectée d'après la connexion). */
     val weatherPlace: HomePlace? = null,
     val weather: CurrentWeather? = null,
-    val similarMedia: List<RecommendedMedia> = emptyList(),
     val liveOnSatMatches: List<ResolvedLiveOnSatMatch> = emptyList(),
     val liveOnSatLoading: Boolean = false,
     val liveOnSatError: String? = null,
     val liveOnSatFetchedAtEpochMillis: Long? = null,
-    val resumePositionMs: Long = 0,
-    val browserType: MediaType? = null,
-    val browserCategoryId: String? = null,
-    /**
-     * Catégories dont une page est en cours de lecture SQLite, clés [Catalog.categoryKey]. Permet à
-     * l'interface d'afficher « Chargement… » plutôt que « Aucun contenu » pendant l'ouverture d'une
-     * catégorie Films/Séries encore jamais parcourue.
-     */
-    val loadingCategoryKeys: Set<String> = emptySet(),
-    /** Films/Séries paginés : clés des entrées dans l'ordre des pages lues en base, par catégorie et par tri (voir vodPageKey). */
-    val vodPageKeys: Map<String, List<String>> = emptyMap(),
-    /** Catégories dont le dernier chargement de page a échoué (message + nouvel essai dans la grille). */
-    val categoryLoadErrors: Set<String> = emptySet(),
-    val searchQuery: String = "",
-    val searchType: MediaType? = null,
-    val contentReturnContext: ContentReturnContext? = null,
-    /** Liste quittée par « Changer de liste » : Retour dans le gestionnaire la rouvre. */
-    val returnProfileId: String? = null,
-    /**
-     * Pile des écrans de menu traversés (Accueil, Direct/Films/Séries, Paramètres, Recherche, EPG,
-     * Outils…). Elle permet à Retour de revenir à l'écran d'où l'on vient au lieu de l'accueil.
-     */
-    val menuBackStack: List<StreamiaScreen> = emptyList(),
-    /** Carte de l'accueil à refocaliser au retour (voir [HomeFocusTarget]). */
-    val homeFocusTarget: HomeFocusTarget? = null,
-    val lastViewedEntry: MediaEntry? = null,
 )
 
 /**
@@ -3244,11 +3286,11 @@ internal fun vodPageKey(type: MediaType, categoryId: String, order: VodSortOrder
  * catégorie [protectedCategoryKey] (affichée à l'écran) sont toujours gardées. L'ordre relatif
  * des pages retenues est conservé.
  */
-internal fun retainedVodPages(
-    pages: Map<String, List<String>>,
+internal fun <T> retainedVodPages(
+    pages: Map<String, List<T>>,
     protectedCategoryKey: String?,
     maxEntries: Int,
-): Map<String, List<String>> {
+): Map<String, List<T>> {
     if (pages.values.sumOf { it.size } <= maxEntries) return pages
     val protectedPrefix = protectedCategoryKey?.let { "$it|" }
     val keptKeys = HashSet<String>()
@@ -3275,3 +3317,13 @@ internal const val MAX_MATERIALIZED_VOD_ENTRIES = 5_000
 private class LiveVersionIndexSource(val profileId: String?, val catalog: Catalog?, val hydrating: Boolean)
 
 private const val LIVE_VERSION_INDEX_SETTLE_MS = 1_500L
+
+/** Ce dont dépend le filtrage des chaînes des matchs (voir [StreamiaViewModel.visibleLiveOnSatMatches]). */
+private class LiveMatchVisibility(val catalog: Catalog?, val library: UserLibrarySnapshot, val parentalLocked: Boolean) {
+    fun sameAs(other: LiveMatchVisibility): Boolean =
+        catalog?.categories === other.catalog?.categories &&
+            library.hiddenEntries == other.library.hiddenEntries &&
+            library.hiddenCategories == other.library.hiddenCategories &&
+            library.lockedCategories == other.library.lockedCategories &&
+            parentalLocked == other.parentalLocked
+}
