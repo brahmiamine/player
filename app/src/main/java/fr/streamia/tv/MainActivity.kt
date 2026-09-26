@@ -3,6 +3,9 @@ package fr.streamia.tv
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import androidx.activity.compose.setContent
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.WindowCompat
@@ -26,8 +29,12 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         CrashReporter.initialize(applicationContext)
-        EpgSyncScheduler.schedule(applicationContext)
-        MetadataEnrichmentWorker.schedule(applicationContext)
+        // WorkManager crée et ouvre sa base à la première utilisation : hors du thread principal,
+        // pour ne pas retarder le premier affichage.
+        lifecycleScope.launch(Dispatchers.Default) {
+            EpgSyncScheduler.schedule(applicationContext)
+            MetadataEnrichmentWorker.schedule(applicationContext)
+        }
 
         WindowCompat.setDecorFitsSystemWindows(window, false)
         WindowInsetsControllerCompat(window, window.decorView).apply {

@@ -17,6 +17,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -45,12 +47,16 @@ import fr.streamia.tv.ui.theme.TypeSectionTitle
 fun ParentalPinDialog(
     title: String,
     subtitle: String,
-    onSubmit: (String) -> Boolean,
+    /** Vérifie le code hors du thread principal (hachage PBKDF2 volontairement lent). */
+    onSubmit: suspend (String) -> Boolean,
     onCancel: () -> Unit,
     digitCount: Int = 4,
 ) {
     var pin by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    // Vérification en cours : les touches sont ignorées jusqu'au verdict.
+    var checking by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
     Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.78f)), contentAlignment = Alignment.Center) {
         GlassSurface(modifier = Modifier.width(420.dp)) {
@@ -74,29 +80,34 @@ fun ParentalPinDialog(
             }
             Spacer(Modifier.height(14.dp))
             Text(
-                errorMessage ?: " ",
-                color = MaterialTheme.colorScheme.error,
+                if (checking) "Vérification…" else errorMessage ?: " ",
+                color = if (checking) MutedInk else MaterialTheme.colorScheme.error,
                 fontSize = 12.sp,
                 textAlign = TextAlign.Center,
             )
             Spacer(Modifier.height(6.dp))
             NumericKeypad(
                 onDigit = { digit ->
-                    if (pin.length >= digitCount) return@NumericKeypad
+                    if (checking || pin.length >= digitCount) return@NumericKeypad
                     val next = pin + digit
                     pin = next
                     if (next.length == digitCount) {
-                        if (onSubmit(next)) {
-                            errorMessage = null
-                        } else {
-                            errorMessage = "Code incorrect — après 5 erreurs, patientez avant de réessayer"
-                            pin = ""
+                        checking = true
+                        scope.launch {
+                            val correct = onSubmit(next)
+                            checking = false
+                            if (correct) {
+                                errorMessage = null
+                            } else {
+                                errorMessage = "Code incorrect — après 5 erreurs, patientez avant de réessayer"
+                                pin = ""
+                            }
                         }
                     } else {
                         errorMessage = null
                     }
                 },
-                onClear = { pin = ""; errorMessage = null },
+                onClear = { if (!checking) { pin = ""; errorMessage = null } },
                 onCancel = onCancel,
             )
         }

@@ -148,7 +148,7 @@ fun BrowserScreen(
     onEntrySelected: (MediaEntry) -> Unit,
     onToggleEntryFavorite: (MediaEntry) -> Unit,
     onToggleCategoryFavorite: (MediaCategory) -> Unit,
-    onVerifyParentalPin: (String) -> Boolean,
+    onVerifyParentalPin: suspend (String) -> Boolean,
     onRememberContent: (MediaEntry) -> Unit,
     onLivePreviewWatched: (MediaEntry) -> Unit = {},
     onLocationChanged: (MediaType, String?) -> Unit,
@@ -277,16 +277,26 @@ fun BrowserScreen(
                     selectedCategoryId == Catalog.ALL_CATEGORY_ID || it.categoryId == selectedCategoryId
                 }
             }
-            val filtered = source.filterNot {
-                it.key in library.hiddenEntries || it.categoryId in excludedCategoryIds
+            // Tri déjà fait pour cette même source (retour du plein écran, aller-retour) : réutilisé.
+            val sortOrder: Any? = when {
+                selectedType == MediaType.Live -> appSettings.liveChannelSortOrder.takeIf { it != LiveChannelSortOrder.Provider }
+                paged -> null
+                else -> categorySortOrder.takeIf { it != VodSortOrder.Provider }
             }
-            // « Favoris »/« Historique » gardent leur propre ordre (ajout / dernière lecture),
-            // qui perdrait son sens sous un tri alphabétique ou par numéro : seule une vraie
-            // catégorie suit la préférence de tri de son type.
-            when {
-                selectedType == MediaType.Live -> sortedForLiveDisplay(filtered, appSettings.liveChannelSortOrder)
-                paged -> filtered
-                else -> sortedForVodDisplay(filtered, categorySortOrder)
+            sortOrder?.let { BrowserSortMemo.get(source, library.hiddenEntries, excludedCategoryIds, it) } ?: run {
+                val filtered = source.filterNot {
+                    it.key in library.hiddenEntries || it.categoryId in excludedCategoryIds
+                }
+                // « Favoris »/« Historique » gardent leur propre ordre (ajout / dernière lecture),
+                // qui perdrait son sens sous un tri alphabétique ou par numéro : seule une vraie
+                // catégorie suit la préférence de tri de son type.
+                val result = when {
+                    selectedType == MediaType.Live -> sortedForLiveDisplay(filtered, appSettings.liveChannelSortOrder)
+                    paged -> filtered
+                    else -> sortedForVodDisplay(filtered, categorySortOrder)
+                }
+                if (sortOrder != null) BrowserSortMemo.put(source, library.hiddenEntries, excludedCategoryIds, sortOrder, result)
+                result
             }
         }
     }
@@ -1605,16 +1615,63 @@ private fun PlaybackHistoryItem.progressPercent(): Int = (progress * 100).toInt(
 /**
  * Ordre d'affichage des chaînes Direct au sein d'une catégorie, choisi dans Paramètres. `Provider`
  * conserve l'ordre déjà renvoyé par le fournisseur/SQLite (aucun tri, coût nul) ; `Alphabetical`
- * réutilise `Collator` (comme le tri de catégories dans l'Organizer) pour rester correct avec les
- * accents français plutôt que trier par point de code Unicode.
+ * ignore les accents français plutôt que trier par point de code Unicode (voir [sortedAlphabetically]).
  */
 internal fun sortedForLiveDisplay(entries: List<MediaEntry>, order: LiveChannelSortOrder): List<MediaEntry> = when (order) {
     LiveChannelSortOrder.Provider -> entries
     LiveChannelSortOrder.Number -> entries.sortedBy(MediaEntry::number)
-    LiveChannelSortOrder.Alphabetical -> {
-        val collator = java.text.Collator.getInstance(java.util.Locale.FRENCH)
-        entries.sortedWith(Comparator { a, b -> collator.compare(a.displayName, b.displayName) })
+    LiveChannelSortOrder.Alphabetical -> sortedAlphabetically(entries)
+}
+
+/**
+ * Tri alphabétique à la française (accents ignorés, puis casse) : une clé calculée **une fois par
+ * titre**, puis de simples comparaisons de chaînes. `Collator.compare` à chaque comparaison
+ * coûtait des centaines de milliers d'appels lents sur le thread principal pour « Tout » (des
+ * dizaines de milliers de chaînes) : plusieurs secondes de gel à l'ouverture de la liste.
+ */
+internal fun sortedAlphabetically(entries: List<MediaEntry>): List<MediaEntry> {
+    if (entries.size < 2) return entries
+    val keys = HashMap<String, String>(entries.size * 2)
+    fun key(name: String) = keys.getOrPut(name) {
+        java.text.Normalizer.normalize(name, java.text.Normalizer.Form.NFD)
+            .replace(COMBINING_MARKS, "")
+            .replace("œ", "oe").replace("æ", "ae").replace("Œ", "OE").replace("Æ", "AE")
+            .lowercase(java.util.Locale.FRENCH)
     }
+    return entries.sortedWith(compareBy<MediaEntry> { key(it.displayName) }.thenBy { it.displayName })
+}
+
+private val COMBINING_MARKS = Regex("\\p{M}+")
+
+/**
+ * Dernières listes triées du navigateur, pour la même source (même instance), les mêmes masquages
+ * et le même tri : rouvrir la liste (retour du plein écran, aller-retour de catégorie) ne refait
+ * pas le tri. Utilisé depuis le thread principal et depuis Dispatchers.Default.
+ */
+internal object BrowserSortMemo {
+    private class Entry(
+        val source: List<MediaEntry>,
+        val hiddenEntries: Set<String>,
+        val excludedCategoryIds: Set<String>,
+        val order: Any,
+        val result: List<MediaEntry>,
+    )
+
+    private val recent = ArrayDeque<Entry>()
+
+    @Synchronized
+    fun get(source: List<MediaEntry>, hiddenEntries: Set<String>, excludedCategoryIds: Set<String>, order: Any): List<MediaEntry>? =
+        recent.firstOrNull {
+            it.source === source && it.hiddenEntries === hiddenEntries && it.order == order && it.excludedCategoryIds == excludedCategoryIds
+        }?.result
+
+    @Synchronized
+    fun put(source: List<MediaEntry>, hiddenEntries: Set<String>, excludedCategoryIds: Set<String>, order: Any, result: List<MediaEntry>) {
+        recent.addFirst(Entry(source, hiddenEntries, excludedCategoryIds, order, result))
+        while (recent.size > MAX_ENTRIES) recent.removeLast()
+    }
+
+    private const val MAX_ENTRIES = 6
 }
 
 /**
@@ -1626,10 +1683,7 @@ internal fun sortedForLiveDisplay(entries: List<MediaEntry>, order: LiveChannelS
  */
 internal fun sortedForVodDisplay(entries: List<MediaEntry>, order: VodSortOrder): List<MediaEntry> = when (order) {
     VodSortOrder.Provider -> entries
-    VodSortOrder.Alphabetical -> {
-        val collator = java.text.Collator.getInstance(java.util.Locale.FRENCH)
-        entries.sortedWith(Comparator { a, b -> collator.compare(a.displayName, b.displayName) })
-    }
+    VodSortOrder.Alphabetical -> sortedAlphabetically(entries)
     VodSortOrder.RecentlyAdded -> entries.sortedByDescending(MediaEntry::addedAtEpochSeconds)
     VodSortOrder.Rating -> entries.sortedByDescending { entry -> entry.rating?.takeIf { it in 0.0..10.0 } }
 }

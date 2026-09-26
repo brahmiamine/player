@@ -1470,8 +1470,11 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
 
     /** Enregistre un nouveau code parental et active le verrouillage — déverrouille aussi la session en cours puisque c'est l'utilisateur qui vient de le saisir. */
     fun setParentalPin(pin: String) {
-        val settings = repository.setParentalPin(pin)
-        _uiState.update { it.copy(appSettings = settings, parentalUnlocked = true) }
+        // PBKDF2 volontairement lent (plusieurs centaines de ms sur un boîtier TV) : hors du thread principal.
+        viewModelScope.launch {
+            val settings = withContext(Dispatchers.Default) { repository.setParentalPin(pin) }
+            _uiState.update { it.copy(appSettings = settings, parentalUnlocked = true) }
+        }
     }
 
     fun disableParentalControl() {
@@ -1480,8 +1483,8 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     }
 
     /** Code correct : déverrouille le contenu verrouillé pour le reste de la session (jusqu'à la fermeture de l'app). */
-    fun verifyParentalPin(pin: String): Boolean {
-        val correct = repository.verifyParentalPin(pin)
+    suspend fun verifyParentalPin(pin: String): Boolean {
+        val correct = withContext(Dispatchers.Default) { repository.verifyParentalPin(pin) }
         if (correct) _uiState.update { it.copy(parentalUnlocked = true) }
         return correct
     }
@@ -1514,9 +1517,15 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
 
     fun clearHistory(type: MediaType? = null) {
         val profileId = _uiState.value.activeProfileId ?: return
-        repository.clearHistory(profileId, type)
-        refreshLibraryPresentation()
-        viewModelScope.launch(Dispatchers.IO) { repository.publishWatchNext(profileId) }
+        // Relit et réécrit tout le JSON du profil (historique compris) : hors du thread principal,
+        // sous le même verrou que les autres écritures de la bibliothèque.
+        viewModelScope.launch {
+            libraryMutation.withLock {
+                withContext(Dispatchers.IO) { repository.clearHistory(profileId, type) }
+            }
+            refreshLibraryPresentation()
+            withContext(Dispatchers.IO) { repository.publishWatchNext(profileId) }
+        }
     }
 
     fun setCategoryOrder(type: MediaType, categoryKeys: List<String>) {

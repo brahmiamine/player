@@ -38,7 +38,7 @@ private sealed interface NewPinStep {
 fun ParentalControlScreen(
     enabled: Boolean,
     onSetPin: (String) -> Unit,
-    onVerifyPin: (String) -> Boolean,
+    onVerifyPin: suspend (String) -> Boolean,
     onDisable: () -> Unit,
     onBack: () -> Unit,
 ) {

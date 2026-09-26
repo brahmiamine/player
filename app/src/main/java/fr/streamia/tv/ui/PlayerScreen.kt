@@ -1,6 +1,8 @@
 package fr.streamia.tv.ui
 
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.provider.OpenableColumns
 import android.view.KeyEvent as AndroidKeyEvent
@@ -164,6 +166,7 @@ private const val EXTERNAL_SUBTITLE_LANGUAGE_TAG = "und"
 private const val NEXT_EPISODE_COUNTDOWN_SECONDS = 8
 private const val LIVE_EPG_PROGRESS_REFRESH_MS = 5_000L
 private const val LIVE_VERSION_WATCH_SAMPLE_MS = 60_000L
+private const val VOD_PLAYER_RELEASE_DELAY_MS = 1_000L
 /** Contrôle réel du Direct : un relevé par seconde, verdict après 2 s de lecture, mesure enregistrée à 4 s. */
 private const val LIVE_CHECK_INTERVAL_MS = 1_000L
 private const val LIVE_CHECK_SETTLE_MS = 2_000L
@@ -389,7 +392,15 @@ fun PlayerScreen(
     }
 
     DisposableEffect(player) {
-        onDispose { if (!sharedLivePlayer) player.release() }
+        onDispose {
+            if (!sharedLivePlayer) {
+                // release() attend sur le thread principal que le décodeur soit libéré (jusqu'à
+                // 0,5 s sur certains boîtiers) : stop() le libère d'abord en arrière-plan, et le
+                // release() différé n'a presque plus rien à attendre une fois l'écran suivant affiché.
+                player.stop()
+                Handler(Looper.getMainLooper()).postDelayed({ player.release() }, VOD_PLAYER_RELEASE_DELAY_MS)
+            }
+        }
     }
 
     fun applyAudio(choice: TrackChoice) {
