@@ -10,6 +10,8 @@ import fr.streamia.tv.domain.Catalog
 import fr.streamia.tv.domain.MediaCategory
 import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.MediaType
+import fr.streamia.tv.domain.catalogRatingRank
+import fr.streamia.tv.domain.catalogSortKey
 import fr.streamia.tv.domain.isVisualSeparator
 
 /**
@@ -70,6 +72,9 @@ internal class CatalogDatabase(context: Context) :
                 playable INTEGER NOT NULL,
                 added_at INTEGER,
                 navigable INTEGER NOT NULL,
+                sort_key TEXT NOT NULL DEFAULT '',
+                rating_rank REAL NOT NULL DEFAULT -1,
+                added_rank INTEGER NOT NULL DEFAULT -1,
                 PRIMARY KEY (profile_id, media_type, media_id)
             )
             """.trimIndent(),
@@ -86,25 +91,90 @@ internal class CatalogDatabase(context: Context) :
         db.execSQL(
             "CREATE INDEX idx_catalog_tvg ON catalog_entries(profile_id, media_type, tvg_id)",
         )
+        createSortIndexes(db)
+        createCountsTable(db)
         createSearchIndex(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         // Explicit migrations only: never wipe a valid provider cache during an application upgrade.
-        if (oldVersion < 2) {
-            createSearchIndex(db)
-            rebuildSearchIndex(db)
+        if (oldVersion < 3) migrateToSortedPaging(db)
+    }
+
+    /**
+     * Version 3 : colonnes de tri indexées (alphabétique, note, ajout), comptes par catégorie
+     * pré-calculés et index plein texte tenu à jour ligne par ligne. La clé alphabétique migrée est
+     * une approximation SQL (`lower`) : la prochaine actualisation du catalogue écrit la clé exacte.
+     */
+    private fun migrateToSortedPaging(db: SQLiteDatabase) {
+        db.execSQL("ALTER TABLE catalog_entries ADD COLUMN sort_key TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE catalog_entries ADD COLUMN rating_rank REAL NOT NULL DEFAULT -1")
+        db.execSQL("ALTER TABLE catalog_entries ADD COLUMN added_rank INTEGER NOT NULL DEFAULT -1")
+        db.execSQL(
+            """
+            UPDATE catalog_entries SET
+                sort_key = lower(display_name),
+                rating_rank = CASE WHEN rating IS NULL OR rating < 0 OR rating > 10 THEN -1 ELSE rating END,
+                added_rank = COALESCE(added_at, -1)
+            """.trimIndent(),
+        )
+        createSortIndexes(db)
+        createCountsTable(db)
+        db.execSQL(
+            """
+            INSERT INTO catalog_counts(profile_id, media_type, category_id, entry_count)
+            SELECT profile_id, media_type, category_id, COUNT(*) FROM catalog_entries
+            WHERE navigable = 1 GROUP BY profile_id, media_type, category_id
+            """.trimIndent(),
+        )
+        runCatching { db.execSQL("DROP TABLE IF EXISTS $LEGACY_SEARCH_TABLE") }
+        createSearchIndex(db)
+        if (searchAvailable(db)) {
+            runCatching {
+                db.execSQL(
+                    "INSERT INTO $SEARCH_TABLE(docid, name, display_name, tvg_id, profile_id) " +
+                        "SELECT rowid, name, display_name, tvg_id, profile_id FROM catalog_entries",
+                )
+            }
         }
     }
 
     /**
-     * Index plein texte (FTS4, contenu externe sur catalog_entries) : la recherche par préfixe de
-     * mots devient une requête indexée au lieu d'un `LIKE '%…%'` qui parcourait tout le catalogue
-     * à chaque frappe. Accents ignorés quand le tokenizer unicode61 est disponible ; si FTS est
-     * absent du SQLite de l'appareil, la recherche reste sur `LIKE` (voir [search]).
+     * Un index par tri et par portée (catégorie ou « Tout ») : chaque page est une lecture d'index
+     * à partir de la dernière ligne affichée, au lieu de trier toute la section à chaque page.
+     */
+    private fun createSortIndexes(db: SQLiteDatabase) {
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_catalog_alpha_cat ON catalog_entries(profile_id, media_type, category_id, navigable, sort_key, media_id)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_catalog_alpha ON catalog_entries(profile_id, media_type, navigable, sort_key, media_id)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_catalog_rating_cat ON catalog_entries(profile_id, media_type, category_id, navigable, rating_rank DESC, media_id)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_catalog_rating ON catalog_entries(profile_id, media_type, navigable, rating_rank DESC, media_id)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_catalog_added_cat ON catalog_entries(profile_id, media_type, category_id, navigable, added_rank DESC, media_id)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_catalog_added ON catalog_entries(profile_id, media_type, navigable, added_rank DESC, media_id)")
+    }
+
+    /** Comptes par catégorie écrits au remplacement du catalogue : l'ouverture ne parcourt plus toute la table. */
+    private fun createCountsTable(db: SQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS catalog_counts (
+                profile_id TEXT NOT NULL,
+                media_type TEXT NOT NULL,
+                category_id TEXT NOT NULL,
+                entry_count INTEGER NOT NULL,
+                PRIMARY KEY (profile_id, media_type, category_id)
+            )
+            """.trimIndent(),
+        )
+    }
+
+    /**
+     * Index plein texte FTS4 tenu à jour au fil de l'écriture (docid = rowid de l'entrée), avec le
+     * profil en colonne non indexée : remplacer un profil ne supprime que ses lignes. L'ancien index
+     * à contenu externe devait être reconstruit en entier — tous les profils — à chaque actualisation.
+     * Accents ignorés quand le tokenizer unicode61 est disponible ; sans FTS, la recherche reste sur `LIKE`.
      */
     private fun createSearchIndex(db: SQLiteDatabase) {
-        val columns = "content=\"catalog_entries\", name, display_name, tvg_id"
+        val columns = "name, display_name, tvg_id, profile_id, notindexed=profile_id"
         runCatching {
             db.execSQL("CREATE VIRTUAL TABLE IF NOT EXISTS $SEARCH_TABLE USING fts4($columns, tokenize=unicode61 \"remove_diacritics=1\")")
         }.recoverCatching {
@@ -112,9 +182,20 @@ internal class CatalogDatabase(context: Context) :
         }
     }
 
-    /** Contenu externe : l'index est reconstruit à chaque remplacement de catalogue validé. */
-    private fun rebuildSearchIndex(db: SQLiteDatabase) {
-        runCatching { db.execSQL("INSERT INTO $SEARCH_TABLE($SEARCH_TABLE) VALUES('rebuild')") }
+    private fun searchAvailable(db: SQLiteDatabase): Boolean = runCatching {
+        db.rawQuery("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", arrayOf(SEARCH_TABLE)).use(Cursor::moveToFirst)
+    }.getOrDefault(false)
+
+    @Volatile private var searchTableChecked: Boolean? = null
+
+    private fun hasSearchTable(db: SQLiteDatabase): Boolean =
+        searchTableChecked ?: searchAvailable(db).also { searchTableChecked = it }
+
+    override fun onOpen(db: SQLiteDatabase) {
+        super.onOpen(db)
+        // WAL : NORMAL suffit (seule la dernière transaction peut être perdue sur coupure de courant,
+        // et le catalogue se retélécharge) et évite une synchronisation disque par validation.
+        if (!db.isReadOnly) runCatching { db.execSQL("PRAGMA synchronous = NORMAL") }
     }
 
     fun hasProfile(profileId: String): Boolean = readableDatabase.rawQuery(
@@ -147,19 +228,30 @@ internal class CatalogDatabase(context: Context) :
         val db = writableDatabase
         db.beginTransaction()
         try {
-            db.delete("catalog_entries", "profile_id = ?", arrayOf(profileId))
-            db.delete("catalog_categories", "profile_id = ?", arrayOf(profileId))
-            db.delete("catalog_profiles", "profile_id = ?", arrayOf(profileId))
+            deleteProfileRows(db, profileId)
         } catch (error: Throwable) {
             db.endTransaction()
             throw error
         }
-        return ReplaceSession(db, profileId)
+        return ReplaceSession(db, profileId, hasSearchTable(db))
     }
 
-    inner class ReplaceSession internal constructor(private val db: SQLiteDatabase, val profileId: String) : CatalogWriteSink {
+    private fun deleteProfileRows(db: SQLiteDatabase, profileId: String) {
+        if (hasSearchTable(db)) runCatching { db.delete(SEARCH_TABLE, "profile_id = ?", arrayOf(profileId)) }
+        db.delete("catalog_entries", "profile_id = ?", arrayOf(profileId))
+        db.delete("catalog_categories", "profile_id = ?", arrayOf(profileId))
+        db.delete("catalog_counts", "profile_id = ?", arrayOf(profileId))
+        db.delete("catalog_profiles", "profile_id = ?", arrayOf(profileId))
+    }
+
+    inner class ReplaceSession internal constructor(
+        private val db: SQLiteDatabase,
+        val profileId: String,
+        private val indexSearch: Boolean,
+    ) : CatalogWriteSink {
         private var categoryStatement: android.database.sqlite.SQLiteStatement? = null
         private var entryStatement: android.database.sqlite.SQLiteStatement? = null
+        private var searchStatement: android.database.sqlite.SQLiteStatement? = null
         private val categoryPositions = HashMap<String, Int>()
         private var nextCategoryPosition = 0
         private var finished = false
@@ -199,10 +291,11 @@ internal class CatalogDatabase(context: Context) :
             if (entries.isEmpty()) return
             val statement = entryStatement ?: db.compileStatement(
                 """
-                INSERT OR REPLACE INTO catalog_entries(
+                INSERT INTO catalog_entries(
                     profile_id, media_type, media_id, name, display_name, category_id, icon_url,
-                    number, extension, tvg_id, plot, rating, playable, added_at, navigable
-                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    number, extension, tvg_id, plot, rating, playable, added_at, navigable,
+                    sort_key, rating_rank, added_rank
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """.trimIndent(),
             ).also { entryStatement = it }
             entries.forEach { entry ->
@@ -222,6 +315,43 @@ internal class CatalogDatabase(context: Context) :
                 statement.bindLong(13, if (entry.playable) 1 else 0)
                 statement.bindNullableLong(14, entry.addedAtEpochSeconds)
                 statement.bindLong(15, if (entry.isVisualSeparator()) 0 else 1)
+                statement.bindString(16, catalogSortKey(entry.displayName))
+                statement.bindDouble(17, catalogRatingRank(entry.rating))
+                statement.bindLong(18, entry.addedAtEpochSeconds ?: -1L)
+                val rowId = try {
+                    statement.executeInsert()
+                } catch (_: android.database.sqlite.SQLiteConstraintException) {
+                    // Même entrée réécrite par une nouvelle tentative réseau (la section est
+                    // reparsée depuis le début) : l'ancienne ligne et son entrée de recherche sont
+                    // retirées avant de réécrire, pour ne laisser aucun doublon dans l'index.
+                    removeEntry(entry)
+                    statement.executeInsert()
+                }
+                if (indexSearch && rowId > 0) indexForSearch(rowId, entry)
+            }
+        }
+
+        private fun removeEntry(entry: MediaEntry) {
+            val args = arrayOf(profileId, entry.type.name, entry.id.toString())
+            if (indexSearch) {
+                db.rawQuery("SELECT rowid FROM catalog_entries WHERE profile_id = ? AND media_type = ? AND media_id = ?", args).use { cursor ->
+                    if (cursor.moveToFirst()) runCatching { db.delete(SEARCH_TABLE, "docid = ?", arrayOf(cursor.getLong(0).toString())) }
+                }
+            }
+            db.delete("catalog_entries", "profile_id = ? AND media_type = ? AND media_id = ?", args)
+        }
+
+        private fun indexForSearch(rowId: Long, entry: MediaEntry) {
+            runCatching {
+                val statement = searchStatement ?: db.compileStatement(
+                    "INSERT INTO $SEARCH_TABLE(docid, name, display_name, tvg_id, profile_id) VALUES(?,?,?,?,?)",
+                ).also { searchStatement = it }
+                statement.clearBindings()
+                statement.bindLong(1, rowId)
+                statement.bindString(2, entry.name)
+                statement.bindString(3, entry.displayName)
+                statement.bindNullableString(4, entry.tvgId)
+                statement.bindString(5, profileId)
                 statement.executeInsert()
             }
         }
@@ -243,11 +373,19 @@ internal class CatalogDatabase(context: Context) :
                     }
                 }
                 check(db.insertOrThrow("catalog_profiles", null, profileValues) != -1L)
-                rebuildSearchIndex(db)
+                db.execSQL(
+                    """
+                    INSERT INTO catalog_counts(profile_id, media_type, category_id, entry_count)
+                    SELECT profile_id, media_type, category_id, COUNT(*) FROM catalog_entries
+                    WHERE profile_id = ? AND navigable = 1 GROUP BY media_type, category_id
+                    """.trimIndent(),
+                    arrayOf(profileId),
+                )
                 db.setTransactionSuccessful()
             } finally {
                 categoryStatement?.close()
                 entryStatement?.close()
+                searchStatement?.close()
                 db.endTransaction()
             }
         }
@@ -258,6 +396,7 @@ internal class CatalogDatabase(context: Context) :
             finished = true
             categoryStatement?.close()
             entryStatement?.close()
+            searchStatement?.close()
             db.endTransaction()
         }
     }
@@ -269,10 +408,7 @@ internal class CatalogDatabase(context: Context) :
         val db = writableDatabase
         db.beginTransaction()
         try {
-            db.delete("catalog_entries", "profile_id = ?", arrayOf(profileId))
-            db.delete("catalog_categories", "profile_id = ?", arrayOf(profileId))
-            db.delete("catalog_profiles", "profile_id = ?", arrayOf(profileId))
-            rebuildSearchIndex(db)
+            deleteProfileRows(db, profileId)
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()
@@ -301,19 +437,13 @@ internal class CatalogDatabase(context: Context) :
         )
     }
 
-    fun loadFull(profileId: String): Catalog? {
-        if (!hasProfile(profileId)) return null
-        val entries = readableDatabase.rawQuery(
-            """
-            SELECT ${ENTRY_COLUMNS.joinToString()} FROM catalog_entries
-            WHERE profile_id = ? AND navigable = 1
-            ORDER BY CASE media_type WHEN 'Live' THEN 0 WHEN 'Movie' THEN 1 ELSE 2 END, number, media_id
-            """.trimIndent(),
-            arrayOf(profileId),
-        ).use(::readEntries)
-        return Catalog(loadCategories(profileId), entries, loadAccount(profileId))
-    }
-
+    /**
+     * Page d'une catégorie (ou de « Tout »), déjà triée par un index. [afterKey] : clé de la dernière
+     * entrée déjà affichée pour cette catégorie et ce tri. La page suivante part alors de sa position
+     * dans l'index (pagination par curseur) : son coût ne grandit plus avec la profondeur, comme
+     * avec `OFFSET` qui relisait toutes les lignes précédentes. Sans curseur exploitable
+     * (première page, entrée disparue), repli sur [offset].
+     */
     fun loadCategoryPage(
         profileId: String,
         type: MediaType,
@@ -321,92 +451,67 @@ internal class CatalogDatabase(context: Context) :
         offset: Int,
         limit: Int,
         order: VodSortOrder = VodSortOrder.Provider,
+        afterKey: String? = null,
     ): List<MediaEntry> {
         if (limit <= 0) return emptyList()
         val all = categoryId == Catalog.ALL_CATEGORY_ID
-        // Tri fait ici plutôt qu'à l'écran : trier seulement les pages déjà chargées donnait un
-        // ordre faux (« Tout » : 500 films sur 180 000) qui se réordonnait à chaque nouvelle page.
-        val orderBy = when (order) {
-            VodSortOrder.Provider -> "number, media_id"
-            VodSortOrder.Alphabetical -> "display_name COLLATE LOCALIZED, media_id"
-            // DESC range déjà les NULL en dernier : sans expression, l'index idx_catalog_recent
-            // donne l'ordre directement au lieu de trier toute la section à chaque page.
-            VodSortOrder.RecentlyAdded -> "added_at DESC, media_id"
-            // Notes hors échelle envoyées par certains fournisseurs (7125/10…) : en fin de liste.
-            VodSortOrder.Rating -> "(rating IS NULL OR rating < 0 OR rating > 10), rating DESC, media_id"
-        }
+        val sort = SortSpec.of(order)
+        val cursor = afterKey?.let { cursorFor(profileId, type, it, sort) }
         val whereCategory = if (all) "" else " AND category_id = ?"
+        val keyset = when {
+            cursor == null -> ""
+            sort.descending -> " AND ${sort.column} <= ? AND (${sort.column} < ? OR media_id > ?)"
+            else -> " AND ${sort.column} >= ? AND (${sort.column} > ? OR media_id > ?)"
+        }
         val args = buildList {
             add(profileId)
             add(type.name)
             if (!all) add(categoryId)
+            if (cursor != null) {
+                add(cursor.first)
+                add(cursor.first)
+                add(cursor.second.toString())
+            }
             add(limit.coerceAtMost(MAX_PAGE_SIZE).toString())
-            add(offset.coerceAtLeast(0).toString())
+            add(if (cursor != null) "0" else offset.coerceAtLeast(0).toString())
         }.toTypedArray()
         return readableDatabase.rawQuery(
             """
-            SELECT ${ENTRY_COLUMNS.joinToString()} FROM catalog_entries
-            WHERE profile_id = ? AND media_type = ? AND navigable = 1$whereCategory
-            ORDER BY $orderBy
+            SELECT ${LIST_COLUMNS.joinToString()} FROM catalog_entries
+            WHERE profile_id = ? AND media_type = ? AND navigable = 1$whereCategory$keyset
+            ORDER BY ${sort.column}${if (sort.descending) " DESC" else ""}, media_id
             LIMIT ? OFFSET ?
             """.trimIndent(),
             args,
         ).use(::readEntries)
     }
 
-    /** Reads the next/previous provider row directly from the index and wraps at section/category ends. */
-    fun loadAdjacent(
-        profileId: String,
-        current: MediaEntry,
-        categoryId: String,
-        delta: Int,
-    ): MediaEntry? {
-        if (delta == 0) return current
-        val all = categoryId == Catalog.ALL_CATEGORY_ID
-        val categoryClause = if (all) "" else " AND category_id = ?"
-        val forward = delta > 0
-        val comparison = if (forward) ">" else "<"
-        val idComparison = if (forward) ">" else "<"
-        val direction = if (forward) "ASC" else "DESC"
-        val args = buildList {
-            add(profileId)
-            add(current.type.name)
-            if (!all) add(categoryId)
-            add(current.number.toString())
-            add(current.number.toString())
-            add(current.id.toString())
-        }.toTypedArray()
-        val adjacent = readableDatabase.rawQuery(
-            """
-            SELECT ${ENTRY_COLUMNS.joinToString()} FROM catalog_entries
-            WHERE profile_id = ? AND media_type = ? AND navigable = 1$categoryClause
-              AND (number $comparison ? OR (number = ? AND media_id $idComparison ?))
-            ORDER BY number $direction, media_id $direction
-            LIMIT 1
-            """.trimIndent(),
-            args,
-        ).use { cursor -> if (cursor.moveToFirst()) readEntry(cursor) else null }
-        if (adjacent != null) return adjacent
-
-        val wrapArgs = buildList {
-            add(profileId)
-            add(current.type.name)
-            if (!all) add(categoryId)
-        }.toTypedArray()
+    /** Valeur de tri et identifiant de l'entrée [key], lus en base (donc toujours cohérents avec l'index). */
+    private fun cursorFor(profileId: String, type: MediaType, key: String, sort: SortSpec): Pair<String, Int>? {
+        val id = key.substringAfter(':', "").toIntOrNull() ?: return null
+        if (!key.startsWith("${type.name}:")) return null
         return readableDatabase.rawQuery(
-            """
-            SELECT ${ENTRY_COLUMNS.joinToString()} FROM catalog_entries
-            WHERE profile_id = ? AND media_type = ? AND navigable = 1$categoryClause
-            ORDER BY number $direction, media_id $direction
-            LIMIT 1
-            """.trimIndent(),
-            wrapArgs,
-        ).use { cursor -> if (cursor.moveToFirst()) readEntry(cursor) else null }
+            "SELECT ${sort.column}, media_id FROM catalog_entries WHERE profile_id = ? AND media_type = ? AND media_id = ? AND navigable = 1",
+            arrayOf(profileId, type.name, id.toString()),
+        ).use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) to cursor.getInt(1) else null }
+    }
+
+    /** Colonne indexée et sens de chaque tri (départage par `media_id` croissant). */
+    private class SortSpec(val column: String, val descending: Boolean) {
+        companion object {
+            fun of(order: VodSortOrder): SortSpec = when (order) {
+                VodSortOrder.Provider -> SortSpec("number", descending = false)
+                VodSortOrder.Alphabetical -> SortSpec("sort_key", descending = false)
+                // Sans date d'ajout / note : -1, donc en fin de liste.
+                VodSortOrder.RecentlyAdded -> SortSpec("added_rank", descending = true)
+                VodSortOrder.Rating -> SortSpec("rating_rank", descending = true)
+            }
+        }
     }
 
     fun loadType(profileId: String, type: MediaType): List<MediaEntry> = readableDatabase.rawQuery(
         """
-        SELECT ${ENTRY_COLUMNS.joinToString()} FROM catalog_entries
+        SELECT ${LIST_COLUMNS.joinToString()} FROM catalog_entries
         WHERE profile_id = ? AND media_type = ? AND navigable = 1
         ORDER BY number, media_id
         """.trimIndent(),
@@ -427,17 +532,19 @@ internal class CatalogDatabase(context: Context) :
     }
 
     private fun searchIndexed(profileId: String, matchQuery: String, type: MediaType?, limit: Int): List<MediaEntry> {
+        if (!hasSearchTable(readableDatabase)) return emptyList()
         val typeClause = if (type == null) "" else " AND media_type = ?"
         val args = buildList {
             add(matchQuery)
+            add(profileId)
             add(profileId)
             if (type != null) add(type.name)
             add(limit.coerceIn(1, MAX_SEARCH_RESULTS).toString())
         }.toTypedArray()
         return readableDatabase.rawQuery(
             """
-            SELECT ${ENTRY_COLUMNS.joinToString()} FROM catalog_entries
-            WHERE rowid IN (SELECT docid FROM $SEARCH_TABLE WHERE $SEARCH_TABLE MATCH ?)
+            SELECT ${LIST_COLUMNS.joinToString()} FROM catalog_entries
+            WHERE rowid IN (SELECT docid FROM $SEARCH_TABLE WHERE $SEARCH_TABLE MATCH ? AND profile_id = ?)
               AND profile_id = ? AND navigable = 1$typeClause
             ORDER BY number, media_id
             LIMIT ?
@@ -460,7 +567,7 @@ internal class CatalogDatabase(context: Context) :
         }.toTypedArray()
         return readableDatabase.rawQuery(
             """
-            SELECT ${ENTRY_COLUMNS.joinToString()} FROM catalog_entries
+            SELECT ${LIST_COLUMNS.joinToString()} FROM catalog_entries
             WHERE profile_id = ? AND navigable = 1$typeClause
               AND (name LIKE ? COLLATE NOCASE OR display_name LIKE ? COLLATE NOCASE OR tvg_id LIKE ? COLLATE NOCASE)
             ORDER BY number, media_id
@@ -606,25 +713,26 @@ internal class CatalogDatabase(context: Context) :
     private class CatalogCounts(val totals: Map<MediaType, Int>, val byCategory: Map<String, Int>)
 
     /**
-     * Comptes par catégorie et, par simple addition, totaux par type : un seul parcours de l'index
-     * au lieu de deux à chaque ouverture de liste (des centaines de milliers de lignes chacun).
+     * Comptes par catégorie écrits au remplacement du catalogue ([catalog_counts]) : une lecture de
+     * quelques centaines de lignes au lieu d'un parcours de l'index entier à chaque ouverture.
      */
-    private fun loadCounts(profileId: String): CatalogCounts = readableDatabase.rawQuery(
-        """
-        SELECT media_type, category_id, COUNT(*) FROM catalog_entries
-        WHERE profile_id = ? AND navigable = 1 GROUP BY media_type, category_id
-        """.trimIndent(),
-        arrayOf(profileId),
-    ).use { cursor ->
-        val totals = HashMap<MediaType, Int>()
-        val byCategory = HashMap<String, Int>()
-        while (cursor.moveToNext()) {
-            val type = cursor.getString(0).toMediaType()
-            val count = cursor.getInt(2)
-            byCategory[Catalog.categoryKey(type, cursor.getString(1))] = count
-            totals[type] = (totals[type] ?: 0) + count
+    private fun loadCounts(profileId: String): CatalogCounts {
+        fun read(sql: String) = readableDatabase.rawQuery(sql, arrayOf(profileId)).use { cursor ->
+            val totals = HashMap<MediaType, Int>()
+            val byCategory = HashMap<String, Int>()
+            while (cursor.moveToNext()) {
+                val type = cursor.getString(0).toMediaType()
+                val count = cursor.getInt(2)
+                byCategory[Catalog.categoryKey(type, cursor.getString(1))] = count
+                totals[type] = (totals[type] ?: 0) + count
+            }
+            CatalogCounts(totals, byCategory)
         }
-        CatalogCounts(totals, byCategory)
+        val stored = read("SELECT media_type, category_id, entry_count FROM catalog_counts WHERE profile_id = ?")
+        if (stored.byCategory.isNotEmpty()) return stored
+        return read(
+            "SELECT media_type, category_id, COUNT(*) FROM catalog_entries WHERE profile_id = ? AND navigable = 1 GROUP BY media_type, category_id",
+        )
     }
 
     private fun loadAccount(profileId: String): AccountInfo? = readableDatabase.rawQuery(
@@ -696,8 +804,9 @@ internal class CatalogDatabase(context: Context) :
 
     private companion object {
         const val DATABASE_NAME = "catalog-v5.db"
-        const val DATABASE_VERSION = 2
-        const val SEARCH_TABLE = "catalog_entries_fts"
+        const val DATABASE_VERSION = 3
+        const val SEARCH_TABLE = "catalog_search"
+        const val LEGACY_SEARCH_TABLE = "catalog_entries_fts"
         const val DEFAULT_RECENT_PER_TYPE = 8
         const val MAX_PAGE_SIZE = 500
         const val MAX_SEARCH_RESULTS = 1_000
@@ -718,6 +827,12 @@ internal class CatalogDatabase(context: Context) :
             "playable",
             "added_at",
         )
+
+        /**
+         * Lignes de liste (pages, Direct, recherche) : sans le résumé, lu seulement pour une fiche
+         * ou les recommandations — des pages bien plus légères à lire et à garder en mémoire.
+         */
+        val LIST_COLUMNS = ENTRY_COLUMNS.map { if (it == "plot") "NULL AS plot" else it }
     }
 }
 /**

@@ -311,20 +311,6 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         scheduleSecondaryLoads(fromPlayer = true)
         profileLoadJob?.cancel()
         profileLoadJob = viewModelScope.launch {
-            // Catalogue déjà résolu (favoris/ordre déjà appliqués) persisté lors d'une précédente
-            // réconciliation réussie pour ce profil : s'il est encore valide pour l'organisation
-            // courante, il permet de sortir de catalogHydrating immédiatement, sans attendre que
-            // openProfile()+mergeCatalog() ci-dessous refassent tout le travail. Ce chemin lent
-            // continue de tourner derrière pour rattraper un éventuel changement côté fournisseur
-            // (nouvelles/anciennes chaînes) depuis la dernière fois : c'est lui qui a le dernier mot.
-            val resolved = runCatching { repository.resolvedCatalogIfLayoutUnchanged(profileId, library) }.getOrNull()
-            if (resolved != null) {
-                _uiState.update { state ->
-                    if (state.activeProfileId == profileId) {
-                        state.copy(catalogHydrating = false, rawCatalog = resolved, catalog = resolved)
-                    } else state
-                }
-            }
             runCatching { repository.openProfile(profileId) }
                 .onSuccess { loaded ->
                     mergeCatalog(loaded)
@@ -1217,16 +1203,25 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         // Paginé : l'offset est le nombre d'entrées déjà lues pour CETTE catégorie et ce tri —
         // entriesIn() compterait aussi des entrées chargées ailleurs (favoris, autres catégories
         // dans « Tout ») et ferait sauter des pages.
-        val loaded = if (type != MediaType.Live && catalog.isPaged) {
-            _uiState.value.vodPageKeys[vodPageKey(type, categoryId, order)]?.size ?: return ensureCategoryLoaded(type, categoryId, order)
+        val pageKeys = if (type != MediaType.Live && catalog.isPaged) {
+            _uiState.value.vodPageKeys[vodPageKey(type, categoryId, order)] ?: return ensureCategoryLoaded(type, categoryId, order)
         } else {
-            catalog.entriesIn(type, categoryId).size
+            null
         }
+        val loaded = pageKeys?.size ?: catalog.entriesIn(type, categoryId).size
         if (loaded > 0 && loaded >= catalog.countIn(type, categoryId)) return
-        loadCategoryPage(profileId, type, categoryId, offset = loaded, order = order)
+        // Films/Séries : la page suivante part de la dernière entrée affichée (curseur d'index).
+        loadCategoryPage(profileId, type, categoryId, offset = loaded, order = order, afterKey = pageKeys?.lastOrNull())
     }
 
-    private fun loadCategoryPage(profileId: String, type: MediaType, categoryId: String, offset: Int, order: VodSortOrder) {
+    private fun loadCategoryPage(
+        profileId: String,
+        type: MediaType,
+        categoryId: String,
+        offset: Int,
+        order: VodSortOrder,
+        afterKey: String? = null,
+    ) {
         val categoryKey = Catalog.categoryKey(type, categoryId)
         val pageKey = vodPageKey(type, categoryId, order)
         val loadKey = "$profileId:$categoryKey:$order:$offset"
@@ -1235,7 +1230,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         _uiState.update { if (categoryKey in it.categoryLoadErrors) it.copy(categoryLoadErrors = it.categoryLoadErrors - categoryKey) else it }
         viewModelScope.launch {
             try {
-                val page = runCatching { repository.loadCategoryPage(profileId, type, categoryId, offset, order) }.getOrElse {
+                val page = runCatching { repository.loadCategoryPage(profileId, type, categoryId, offset, order, afterKey = afterKey) }.getOrElse {
                     // Page en échec : signalée à la grille (message + nouvel essai) au lieu d'une fin de liste muette.
                     _uiState.update { state -> state.copy(categoryLoadErrors = state.categoryLoadErrors + categoryKey) }
                     return@launch
@@ -2958,18 +2953,6 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 }
             }
             if (committed || !layoutChanged) {
-                // Garde le catalogue déjà résolu sur disque pour que resumeStartup() puisse le
-                // réutiliser directement à la prochaine relance de l'app tant que l'organisation
-                // courante (categoryOrder/movedEntries) n'a pas changé depuis (voir
-                // resolvedCatalogIfLayoutUnchanged). Seulement quand quelque chose a réellement été
-                // personnalisé (applyUserLibraryToCatalog a reconstruit une nouvelle instance) :
-                // sans chaîne déplacée ni tri de catégories, ce catalogue résolu serait un doublon
-                // strictement identique au cache brut déjà écrit par CatalogCache.save(), payé en
-                // pure perte (I/O + reparsing) à chaque lecture par la majorité des profils qui
-                // n'utilisent pas l'organisateur.
-                if (committed && presentation.catalog !== loaded.catalog) {
-                    runCatching { repository.saveResolvedCatalog(loaded.profileId, presentation.catalog, presentation.library) }
-                }
                 if (committed) {
                     ensureSectionLoaded(MediaType.Live)
                     refreshHomeRecommendations()

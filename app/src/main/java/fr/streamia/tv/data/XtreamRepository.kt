@@ -168,7 +168,8 @@ class XtreamRepository private constructor(context: Context) {
         offset: Int,
         order: VodSortOrder = VodSortOrder.Provider,
         limit: Int = DEFAULT_CATEGORY_PAGE_SIZE,
-    ): CatalogPage = cache.loadCategoryPage(profileId, type, categoryId, offset, limit, order)
+        afterKey: String? = null,
+    ): CatalogPage = cache.loadCategoryPage(profileId, type, categoryId, offset, limit, order, afterKey)
 
     /**
      * Charge tout un type (ex. Live) en une requête. Réservé aux sections qu'on choisit d'hydrater
@@ -565,23 +566,6 @@ class XtreamRepository private constructor(context: Context) {
     suspend fun search(profileId: String, query: String, type: MediaType?, limit: Int = 600): List<MediaEntry> =
         cache.search(profileId, query, type, limit)
 
-    /**
-     * Catalogue déjà résolu (favoris/ordre appliqués) tel qu'obtenu à la fin de la dernière
-     * réconciliation réussie pour ce profil, réutilisable seulement si [librarySnapshot]
-     * correspond toujours à l'organisation utilisée pour le produire (voir
-     * [UserLibrarySnapshot.catalogLayoutFingerprint]). Permet à une relance de l'app de sauter
-     * entièrement le passage par [prepareCatalogPresentation] plutôt que juste la lecture réseau :
-     * l'appelant doit tout de même laisser [openProfile] + la réconciliation habituelle tourner en
-     * arrière-plan pour rattraper un éventuel changement côté fournisseur depuis.
-     */
-    suspend fun resolvedCatalogIfLayoutUnchanged(profileId: String, librarySnapshot: UserLibrarySnapshot): Catalog? =
-        cache.loadResolved(profileId, librarySnapshot.catalogLayoutFingerprint())
-
-    /** Persiste le résultat d'une réconciliation réussie pour que la prochaine relance de l'app puisse le réutiliser directement. */
-    suspend fun saveResolvedCatalog(profileId: String, catalog: Catalog, librarySnapshot: UserLibrarySnapshot) {
-        cache.saveResolved(profileId, catalog, librarySnapshot.catalogLayoutFingerprint())
-    }
-
     /** Prépare les index d'un catalogue massif hors du thread d'interface. */
     suspend fun prepareCatalogPresentation(
         profileId: String,
@@ -841,16 +825,6 @@ class XtreamRepository private constructor(context: Context) {
             }
             throw lastError ?: XtreamException("Aucune source EPG disponible.")
         }
-    }
-
-    suspend fun fullEpg(profileId: String, credentials: ServerCredentials, catalog: Catalog): EpgGuide {
-        val profile = playlistStore.find(profileId)
-        val preferred = profile?.xmlTvUrl?.trim()?.takeIf(String::isNotBlank)
-        val provider = XtreamUrlBuilder(credentials).xmlTv()
-        if (preferred != null) {
-            runCatching { return xmlTvRepository.load(normalizeRemoteUrl(preferred), catalog.entriesFor(MediaType.Live)) }
-        }
-        return xmlTvRepository.load(provider, catalog.entriesFor(MediaType.Live))
     }
 
     fun toggleEntryFavorite(profileId: String, entry: MediaEntry): Boolean = libraryStore.toggleEntryFavorite(profileId, entry)

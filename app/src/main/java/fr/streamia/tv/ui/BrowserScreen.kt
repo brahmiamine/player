@@ -1679,16 +1679,11 @@ internal fun sortedForLiveDisplay(entries: List<MediaEntry>, order: LiveChannelS
 internal fun sortedAlphabetically(entries: List<MediaEntry>): List<MediaEntry> {
     if (entries.size < 2) return entries
     val keys = HashMap<String, String>(entries.size * 2)
-    fun key(name: String) = keys.getOrPut(name) {
-        java.text.Normalizer.normalize(name, java.text.Normalizer.Form.NFD)
-            .replace(COMBINING_MARKS, "")
-            .replace("œ", "oe").replace("æ", "ae").replace("Œ", "OE").replace("Æ", "AE")
-            .lowercase(java.util.Locale.FRENCH)
-    }
+    fun key(name: String) = keys.getOrPut(name) { fr.streamia.tv.domain.catalogSortKey(name) }
     return entries.sortedWith(compareBy<MediaEntry> { key(it.displayName) }.thenBy { it.displayName })
 }
 
-private val COMBINING_MARKS = Regex("\\p{M}+")
+
 
 /**
  * Dernières listes triées du navigateur, pour la même source (même instance), les mêmes masquages

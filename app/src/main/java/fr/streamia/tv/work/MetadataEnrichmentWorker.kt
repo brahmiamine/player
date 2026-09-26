@@ -104,10 +104,14 @@ class MetadataEnrichmentWorker(context: Context, params: WorkerParameters) : Cor
         listOf(MediaType.Movie, MediaType.Series).flatMap { type ->
             val found = ArrayList<MediaEntry>()
             var offset = 0
+            var lastKey: String? = null
             while (found.size < MAX_PER_RUN && offset < MAX_ENRICHED + MAX_PER_RUN) {
-                val page = repository.loadCategoryPage(profileId, type, Catalog.ALL_CATEGORY_ID, offset, VodSortOrder.RecentlyAdded).entries
+                val page = repository.loadCategoryPage(
+                    profileId, type, Catalog.ALL_CATEGORY_ID, offset, VodSortOrder.RecentlyAdded, afterKey = lastKey,
+                ).entries
                 if (page.isEmpty()) break
                 offset += page.size
+                lastKey = page.last().key
                 page.filterTo(found) { it.key !in done }
             }
             found
