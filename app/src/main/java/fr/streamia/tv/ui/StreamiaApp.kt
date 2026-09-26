@@ -65,6 +65,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
     // seulement dans les écrans qui l'affichent — ses mises à jour ne recomposent pas les autres.
     val homeStateHolder = viewModel.homeState.collectAsStateWithLifecycle()
     val liveOnSatMatchesHolder = viewModel.visibleLiveOnSatMatches.collectAsStateWithLifecycle()
+    val liveEpgProgramsHolder = viewModel.liveEpgPrograms.collectAsStateWithLifecycle()
 
     StreamiaTheme {
         ResponsiveTvViewport {
@@ -180,7 +181,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     credentials = state.credentials!!,
                     livePlaybackSession = livePlaybackSession,
                     liveVideoSurface = liveVideoSurface,
-                    todayEpgGuide = state.todayEpgGuide,
+                    epgPrograms = liveEpgProgramsHolder.value,
                     library = state.library,
                     appSettings = state.appSettings,
                     loadingCategoryKeys = state.loadingCategoryKeys,
@@ -339,6 +340,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onOpenChannel = viewModel::openEntry,
                     onSelectDate = viewModel::selectEpgDate,
                     onReload = viewModel::reloadEpg,
+                    loadDescription = viewModel::epgDescription,
                     onBack = viewModel::backFromMenu,
                 )
 

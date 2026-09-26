@@ -115,6 +115,9 @@ private const val HISTORY_CATEGORY_ID = "__history__"
 /** Distance (en éléments) à la fin de la liste/grille matérialisée à partir de laquelle la page suivante est demandée. */
 private const val LOAD_MORE_THRESHOLD = 20
 
+/** Au-delà, un tri pas encore en mémoire est fait hors du thread principal (liste « Chargement… » d'ici là). */
+private const val HEAVY_SORT_THRESHOLD = 2_000
+
 /** Images préchargées après la dernière ligne/carte visible. */
 private const val ARTWORK_PREFETCH_COUNT = 12
 
@@ -137,7 +140,8 @@ fun BrowserScreen(
     credentials: ServerCredentials,
     livePlaybackSession: LivePlaybackSession,
     liveVideoSurface: @Composable (LiveVideoSurfacePlacement) -> Unit,
-    todayEpgGuide: EpgGuide? = null,
+    /** Programmes du jour par chaîne Direct, pré-rapprochés hors du thread principal (voir StreamiaViewModel.liveEpgPrograms). */
+    epgPrograms: Map<String, List<EpgProgram>> = emptyMap(),
     library: UserLibrarySnapshot,
     appSettings: AppSettings,
     loadingCategoryKeys: Set<String> = emptySet(),
@@ -279,7 +283,12 @@ fun BrowserScreen(
             hasHistory = historyForType.isNotEmpty(),
         )
     }
-    fun computeEntries(): List<MediaEntry> = when (selectedCategoryId) {
+    /**
+     * [allowHeavySort] faux (changement de catégorie, sur le thread principal) : `null` si la liste
+     * doit d'abord être triée alors que ce tri n'est pas encore en mémoire et porte sur beaucoup de
+     * chaînes. Elle est alors triée hors du thread principal (effet plus bas), sans geler la navigation.
+     */
+    fun computeEntries(allowHeavySort: Boolean = true): List<MediaEntry>? = when (selectedCategoryId) {
         FAVORITES_CATEGORY_ID -> favoriteEntriesForType
         HISTORY_CATEGORY_ID -> historyForType.map { it.second }
         else -> {
@@ -302,7 +311,9 @@ fun BrowserScreen(
                 paged -> null
                 else -> categorySortOrder.takeIf { it != VodSortOrder.Provider }
             }
-            sortOrder?.let { BrowserSortMemo.get(source, library.hiddenEntries, excludedCategoryIds, it) } ?: run {
+            val memo = sortOrder?.let { BrowserSortMemo.get(source, library.hiddenEntries, excludedCategoryIds, it) }
+            if (memo == null && sortOrder != null && !allowHeavySort && source.size > HEAVY_SORT_THRESHOLD) return null
+            memo ?: run {
                 val filtered = source.filterNot {
                     it.key in library.hiddenEntries || it.categoryId in excludedCategoryIds
                 }
@@ -325,22 +336,25 @@ fun BrowserScreen(
     // courante affichée d'ici là : trier des milliers de chaînes à chaque page fusionnée faisait
     // saccader la navigation pendant l'hydratation du catalogue.
     val location = selectedType to selectedCategoryId
-    var computedEntries by remember(credentials) { mutableStateOf(location to computeEntries()) }
-    if (computedEntries.first != location) computedEntries = location to computeEntries()
+    var computedEntries by remember(credentials) { mutableStateOf(location to computeEntries(allowHeavySort = false)) }
+    if (computedEntries.first != location) computedEntries = location to computeEntries(allowHeavySort = false)
     // Favoris/historique ne comptent que pour leur propre catégorie : une chaîne regardée en aperçu
     // (ajoutée à l'historique) relançait sinon le tri de toute la liste affichée (« Tout » : des
     // dizaines de milliers de chaînes) à chaque aperçu de plus de 20 s.
     val favoritesKey = favoriteEntriesForType.takeIf { selectedCategoryId == FAVORITES_CATEGORY_ID }
     val historyKey = historyForType.takeIf { selectedCategoryId == HISTORY_CATEGORY_ID }
+    // Liste en attente de tri (grande catégorie) : clé supplémentaire pour la calculer tout de suite.
+    val pendingLocation = location.takeIf { computedEntries.second == null }
     LaunchedEffect(
         catalog, favoritesKey, historyKey, excludedCategoryIds, library.hiddenEntries, vodPages, categorySortOrder,
-        appSettings.liveChannelSortOrder, appSettings.vodSortOrder,
+        appSettings.liveChannelSortOrder, appSettings.vodSortOrder, pendingLocation,
     ) {
         val target = location
         val result = withContext(Dispatchers.Default) { computeEntries() }
         if (computedEntries.first == target) computedEntries = target to result
     }
-    val entries = computedEntries.second
+    val entries = computedEntries.second.orEmpty()
+    val entriesPending = computedEntries.second == null
     val historyByKey = remember(historyForType) { historyForType.associate { it.second.key to it.first } }
 
     var pendingLockedCategory by remember { mutableStateOf<MediaCategory?>(null) }
@@ -383,7 +397,7 @@ fun BrowserScreen(
         if (isLive) {
             LiveCatalogLayout(
                 catalog = catalog,
-                todayEpgGuide = todayEpgGuide,
+                epgPrograms = epgPrograms,
                 credentials = credentials,
                 livePlaybackSession = livePlaybackSession,
                 liveVideoSurface = liveVideoSurface,
@@ -391,6 +405,7 @@ fun BrowserScreen(
                 categories = categories,
                 selectedCategoryId = selectedCategoryId,
                 entries = entries,
+                entriesPending = entriesPending,
                 initialPreviewKey = lastLiveEntryKey,
                 initialListPosition = liveListPosition,
                 favoriteCategories = library.favoriteCategories,
@@ -456,7 +471,7 @@ fun BrowserScreen(
                     categories = categories,
                     selectedCategoryId = selectedCategoryId,
                     entries = entries,
-                    loading = currentCategoryKey in loadingCategoryKeys || (pagesMissing && currentCategoryKey !in categoryLoadErrors),
+                    loading = entriesPending || currentCategoryKey in loadingCategoryKeys || (pagesMissing && currentCategoryKey !in categoryLoadErrors),
                     loadError = currentCategoryKey in categoryLoadErrors,
                     favoriteCategories = library.favoriteCategories,
                     favoriteEntries = library.favoriteEntries,
@@ -621,7 +636,7 @@ private fun HeaderAction(
 @Composable
 private fun LiveCatalogLayout(
     catalog: Catalog,
-    todayEpgGuide: EpgGuide?,
+    epgPrograms: Map<String, List<EpgProgram>>,
     credentials: ServerCredentials,
     livePlaybackSession: LivePlaybackSession,
     liveVideoSurface: @Composable (LiveVideoSurfacePlacement) -> Unit,
@@ -629,6 +644,7 @@ private fun LiveCatalogLayout(
     categories: List<MediaCategory>,
     selectedCategoryId: String,
     entries: List<MediaEntry>,
+    entriesPending: Boolean,
     initialPreviewKey: String?,
     initialListPosition: NavigationListPosition,
     favoriteCategories: Set<String>,
@@ -688,6 +704,10 @@ private fun LiveCatalogLayout(
     if (previewEntry != null && catalog.entry(previewEntry!!.key) == null) {
         previewEntry = entries.firstOrNull()
     }
+    // Liste triée hors du thread principal (grande catégorie) : l'aperçu part dès qu'elle arrive.
+    if (previewEntry == null && !entriesPending && entries.isNotEmpty()) {
+        previewEntry = entries.firstOrNull { it.key == initialPreviewKey } ?: entries.firstOrNull()
+    }
 
     Box(modifier) {
         LivePreview(
@@ -745,7 +765,8 @@ private fun LiveCatalogLayout(
             val categoryIdForPosition = selectedCategoryId
             LiveChannelList(
                 entries = entries,
-                todayEpgGuide = todayEpgGuide,
+                entriesPending = entriesPending,
+                epgPrograms = epgPrograms,
                 previewKey = previewEntry?.key,
                 favoriteEntries = favoriteEntries,
                 fullscreenPending = fullscreenTarget != null,
@@ -783,7 +804,8 @@ private fun LiveCatalogLayout(
 @Composable
 private fun LiveChannelList(
     entries: List<MediaEntry>,
-    todayEpgGuide: EpgGuide?,
+    entriesPending: Boolean,
+    epgPrograms: Map<String, List<EpgProgram>>,
     previewKey: String?,
     favoriteEntries: Set<String>,
     fullscreenPending: Boolean,
@@ -804,8 +826,8 @@ private fun LiveChannelList(
     // Heure de référence du programme en cours, rafraîchie chaque minute (une seule horloge pour
     // toute la liste, pas une par ligne).
     var nowEpochSeconds by remember { mutableStateOf(System.currentTimeMillis() / 1000) }
-    LaunchedEffect(todayEpgGuide != null) {
-        if (todayEpgGuide == null) return@LaunchedEffect
+    LaunchedEffect(epgPrograms.isNotEmpty()) {
+        if (epgPrograms.isEmpty()) return@LaunchedEffect
         while (true) {
             nowEpochSeconds = System.currentTimeMillis() / 1000
             delay(60_000L - System.currentTimeMillis() % 60_000L)
@@ -835,11 +857,12 @@ private fun LiveChannelList(
             }
     }
     val channelFocus = selectedFocusRequester
-    val entryIndexByKey = remember(entries) { entries.withIndex().associate { (index, entry) -> entry.key to index } }
+    // Un seul parcours pour retrouver la chaîne en aperçu, au lieu d'un index de toute la liste
+    // (des dizaines de milliers de chaînes) reconstruit sur le thread principal à chaque liste.
     // Colonne des numéros assez large pour le plus long de la liste : à largeur fixe (38 dp), un
     // numéro à 5 chiffres (17055) passait sur deux lignes.
     val numberColumnWidth = remember(entries) { channelNumberColumnWidth(entries.maxOfOrNull { it.number } ?: 0) }
-    val previewIndex = previewKey?.let { entryIndexByKey[it] } ?: -1
+    val previewIndex = remember(entries, previewKey) { previewKey?.let { key -> entries.indexOfFirst { it.key == key } } ?: -1 }
     val focusTargetIndex = previewIndex.takeIf { it >= 0 }
         ?: listState.firstVisibleItemIndex.coerceIn(0, lastIndex)
     val focusTargetKey = entries.getOrNull(focusTargetIndex)?.key
@@ -912,7 +935,7 @@ private fun LiveChannelList(
         }
         if (entries.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("Aucune chaîne", color = MutedInk, fontSize = TypeBody)
+                Text(if (entriesPending) "Chargement…" else "Aucune chaîne", color = MutedInk, fontSize = TypeBody)
             }
         } else {
             LazyColumn(
@@ -954,8 +977,8 @@ private fun LiveChannelList(
                             )
                             ChannelLogo(entry.iconUrl, entry.displayName, Modifier.size(42.dp))
                             Spacer(Modifier.width(8.dp))
-                            val nowProgram = remember(todayEpgGuide, entry.key, nowEpochSeconds) {
-                                todayEpgGuide?.forEntry(entry)?.epgNowContextAt(nowEpochSeconds)?.current
+                            val nowProgram = remember(epgPrograms, entry.key, nowEpochSeconds) {
+                                epgPrograms[entry.key]?.epgNowContextAt(nowEpochSeconds)?.current
                             }
                             Column(Modifier.weight(1f)) {
                                 Text(

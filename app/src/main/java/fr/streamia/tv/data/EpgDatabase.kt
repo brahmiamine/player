@@ -280,7 +280,7 @@ internal class EpgDatabase(context: Context) :
                 c.display_name,
                 c.icon_url,
                 p.title,
-                p.description,
+                NULL AS description,
                 p.start_time,
                 p.end_time,
                 p.category
@@ -326,6 +326,16 @@ internal class EpgDatabase(context: Context) :
             },
         )
     }
+
+    /**
+     * Description d'un programme, lue à la demande (fiche du programme dans le Guide TV) : les
+     * journées du guide sont chargées sans les descriptions, qui en faisaient l'essentiel du poids.
+     */
+    fun loadDescription(profileId: String, channelId: String, sourceStartEpochSeconds: Long): String? =
+        readableDatabase.rawQuery(
+            "SELECT description FROM epg_programs WHERE profile_id = ? AND channel_id = ? AND start_time = ? LIMIT 1",
+            arrayOf(profileId, channelId, sourceStartEpochSeconds.toString()),
+        ).use { cursor -> if (cursor.moveToFirst()) cursor.nullableString(0) else null }
 
     fun delete(profileId: String) {
         val db = writableDatabase

@@ -71,6 +71,9 @@ class EpgCache(context: Context) {
         )
     }
 
+    suspend fun description(profileId: String, channelId: String, sourceStartEpochSeconds: Long): String? =
+        withContext(Dispatchers.IO) { database.loadDescription(profileId, channelId, sourceStartEpochSeconds) }
+
     suspend fun clear(profileId: String) = withContext(Dispatchers.IO) {
         database.delete(profileId)
     }

@@ -177,6 +177,9 @@ class XmlTvRepository {
         val channelNames = HashMap<String, String?>()
         val acceptedChannelIds = HashSet<String>()
         val programBatch = ArrayList<EpgProgram>(PROGRAM_WRITE_BATCH_SIZE)
+        val nowSeconds = System.currentTimeMillis() / 1000
+        val windowStart = nowSeconds - EPG_KEEP_PAST_SECONDS
+        val windowEnd = nowSeconds + EPG_KEEP_FUTURE_SECONDS
         var event = parser.eventType
         var currentChannelId: String? = null
         var currentChannelName: String? = null
@@ -254,7 +257,10 @@ class XmlTvRepository {
                                 channel in acceptedChannelIds ||
                                 channelNames[channel] in acceptedIds
                         )
-                        if (accepted && title != null && channel != null) {
+                        // Hors de la fenêtre utile (programmes finis depuis plus d'un jour, ou
+                        // au-delà d'une semaine) : ni écrits ni indexés.
+                        val inWindow = (currentEnd ?: Long.MAX_VALUE) >= windowStart && (currentStart ?: Long.MIN_VALUE) <= windowEnd
+                        if (accepted && inWindow && title != null && channel != null) {
                             if (channel !in acceptedChannelIds) {
                                 acceptedChannelIds += channel
                                 sink.writeChannel(
@@ -288,6 +294,8 @@ class XmlTvRepository {
     private companion object {
         const val BUFFER_SIZE = 128 * 1024
         const val PROGRAM_WRITE_BATCH_SIZE = 500
+        const val EPG_KEEP_PAST_SECONDS = 24 * 3_600L
+        const val EPG_KEEP_FUTURE_SECONDS = 8 * 24 * 3_600L
     }
 }
 

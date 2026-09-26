@@ -761,6 +761,13 @@ class XtreamRepository private constructor(context: Context) {
         offsetHours: Int,
     ): EpgNowContext? = epgCache.nowContext(profileId, entry, nowEpochSeconds, offsetHours)
 
+    /** Description d'un programme du guide (horaires déjà décalés de [offsetHours]). */
+    suspend fun epgDescription(profileId: String, program: EpgProgram, offsetHours: Int): String? {
+        val channelId = program.channelId ?: return null
+        val start = program.startEpochSeconds ?: return null
+        return epgCache.description(profileId, channelId, start - offsetHours * 3_600L)
+    }
+
     suspend fun cachedEpgGuide(
         profileId: String,
         displayStartEpochSeconds: Long,

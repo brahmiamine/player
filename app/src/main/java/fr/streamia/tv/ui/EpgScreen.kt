@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -93,6 +94,8 @@ fun EpgScreen(
     onSelectDate: (LocalDate) -> Unit,
     onReload: () -> Unit,
     onBack: () -> Unit,
+    /** Description d'un programme, lue à la demande (le guide est chargé sans descriptions). */
+    loadDescription: suspend (EpgProgram) -> String? = { it.description },
 ) {
     val zone = remember { ZoneId.systemDefault() }
     var categoryId by remember { mutableStateOf(Catalog.ALL_CATEGORY_ID) }
@@ -253,6 +256,7 @@ fun EpgScreen(
                         selected = selected!!,
                         onWatch = { onOpenChannel(selected!!.channel) },
                         onClose = { selected = null },
+                        loadDescription = loadDescription,
                     )
                 }
             }
@@ -483,7 +487,11 @@ private fun ProgramDetailsPanel(
     selected: SelectedProgram,
     onWatch: () -> Unit,
     onClose: () -> Unit,
+    loadDescription: suspend (EpgProgram) -> String?,
 ) {
+    val description by produceState(selected.program.description, selected.program) {
+        if (value == null) value = loadDescription(selected.program)
+    }
     GlassSurface(modifier = Modifier.fillMaxWidth()) {
       Column(Modifier.fillMaxWidth().padding(18.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -504,9 +512,9 @@ private fun ProgramDetailsPanel(
                 Text("Fermer", color = Ink, fontSize = TypeLabel, modifier = Modifier.padding(horizontal = 14.dp))
             }
         }
-        if (!selected.program.description.isNullOrBlank()) {
+        description?.takeIf(String::isNotBlank)?.let { text ->
             Spacer(Modifier.height(9.dp))
-            Text(selected.program.description, color = MutedInk, fontSize = 14.sp, maxLines = 4, overflow = TextOverflow.Ellipsis)
+            Text(text, color = MutedInk, fontSize = 14.sp, maxLines = 4, overflow = TextOverflow.Ellipsis)
         }
         if (!selected.program.category.isNullOrBlank()) {
             Spacer(Modifier.height(5.dp))

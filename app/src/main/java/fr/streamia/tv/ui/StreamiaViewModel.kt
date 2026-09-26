@@ -34,6 +34,7 @@ import fr.streamia.tv.data.XtreamRepository
 import fr.streamia.tv.domain.AccountInfo
 import fr.streamia.tv.domain.Catalog
 import fr.streamia.tv.domain.EpgGuide
+import fr.streamia.tv.domain.EpgProgram
 import fr.streamia.tv.domain.EpgNowContext
 import fr.streamia.tv.domain.MediaCategory
 import fr.streamia.tv.domain.MediaDetails
@@ -78,6 +79,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.SharingStarted
@@ -202,6 +204,29 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
      * seulement quand les matchs, le catalogue ou les masquages changent (auparavant dans la
      * composition de la racine, à chaque lot de matchs rapprochés, quel que soit l'écran affiché).
      */
+    /**
+     * Programmes du jour de chaque chaîne Direct (clé d'entrée), rapprochés du guide une seule fois
+     * par guide et par liste, en priorité basse. La liste des chaînes affichait sinon le programme
+     * en cours en résolvant chaque ligne (alias par expressions régulières) pendant le défilement.
+     */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val liveEpgPrograms: StateFlow<Map<String, List<EpgProgram>>> = _uiState
+        .map { state -> state.todayEpgGuide to state.catalog?.entriesFor(MediaType.Live) }
+        .distinctUntilChanged { old, new -> old.first === new.first && old.second === new.second }
+        .mapLatest { (guide, channels) ->
+            if (guide == null || channels.isNullOrEmpty()) emptyMap()
+            else withContext(BackgroundWork.light) {
+                val result = HashMap<String, List<EpgProgram>>()
+                for (channel in channels) {
+                    guide.forEntry(channel).takeIf { it.isNotEmpty() }?.let { result[channel.key] = it }
+                }
+                result
+            }
+        }
+        // Lecture de l'état et accès à la section Direct hors du thread principal.
+        .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
+
     val visibleLiveOnSatMatches: StateFlow<List<ResolvedLiveOnSatMatch>> = combine(
         _homeState.map { it.liveOnSatMatches }.distinctUntilChanged { old, new -> old === new },
         _uiState.map { LiveMatchVisibility(it.catalog, it.library, it.appSettings.parentalControlEnabled && !it.parentalUnlocked) }
@@ -303,7 +328,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             val channels = if (complete) {
                 catalog.entriesFor(MediaType.Live)
             } else {
-                withContext(Dispatchers.IO) { runCatching { repository.loadSection(profileId, MediaType.Live) }.getOrDefault(emptyList()) }
+                runCatching { liveSection(profileId) }.getOrDefault(emptyList())
             }
             if (channels.isEmpty()) return@withContext null
             val fingerprint = LiveVersionIndex.fingerprintOf(channels)
@@ -1406,7 +1431,9 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         if (!categoryLoadsInFlight.add(loadKey)) return
         viewModelScope.launch {
             try {
-                val section = runCatching { repository.loadSection(profileId, type) }.getOrNull() ?: return@launch
+                val section = runCatching {
+                    if (type == MediaType.Live) liveSection(profileId) else repository.loadSection(profileId, type)
+                }.getOrNull() ?: return@launch
                 mergeIntoCatalog(profileId) { base -> base.withFullSectionMaterialized(section, type) }
                 if (type == MediaType.Live) {
                     startEpgBackgroundSync()
@@ -1459,6 +1486,14 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         // bascule atomiquement sur le résultat SQLite.
         _uiState.update { it.copy(epgLoading = true, message = null) }
         loadEpgGuideFromCache(date)
+    }
+
+    /** Description d'un programme du Guide TV, lue à la demande (voir EpgDatabase.loadDescription). */
+    suspend fun epgDescription(program: EpgProgram): String? {
+        program.description?.let { return it }
+        val state = _uiState.value
+        val profileId = state.activeProfileId ?: return null
+        return runCatching { repository.epgDescription(profileId, program, state.appSettings.epgTimeOffsetHours) }.getOrNull()
     }
 
     fun reloadEpg() {
@@ -2772,7 +2807,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             catalog
         } else {
             val liveChannels = withContext(Dispatchers.IO) {
-                runCatching { repository.loadSection(profileId, MediaType.Live) }.getOrDefault(emptyList())
+                runCatching { liveSection(profileId) }.getOrDefault(emptyList())
             }
             Catalog(categories = catalog?.categories.orEmpty(), entries = liveChannels)
         }
@@ -2987,6 +3022,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             }
             if (committed || !layoutChanged) {
                 if (committed) {
+                    if (loaded.source == CatalogSource.Network || loaded.source == CatalogSource.Import) invalidateLiveSection()
                     ensureSectionLoaded(MediaType.Live)
                     refreshHomeRecommendations()
                     if (loaded.source == CatalogSource.Network || loaded.source == CatalogSource.Import) reresolveLiveOnSat()
@@ -3008,7 +3044,29 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
      * Nouvel état complet (ouverture d'une liste, déconnexion) : garde ce qui ne dépend d'aucune
      * liste — la météo de l'en-tête, sinon absente jusqu'à la prochaine requête (30 min).
      */
+    /**
+     * Section Direct entière lue une seule fois depuis la base par version du catalogue et partagée
+     * par le catalogue, l'index des versions et le rapprochement des matchs, qui la relisaient
+     * chacun de leur côté au démarrage (des dizaines de milliers de lignes, jusqu'à trois fois).
+     */
+    private var liveSectionLoad: Pair<String, kotlinx.coroutines.Deferred<List<MediaEntry>>>? = null
+
+    private suspend fun liveSection(profileId: String): List<MediaEntry> {
+        val current = liveSectionLoad?.takeIf { (id, load) ->
+            id == profileId && !(load.isCompleted && load.getCompletionExceptionOrNull() != null)
+        }?.second
+        val load = current ?: viewModelScope.async(Dispatchers.IO) { repository.loadSection(profileId, MediaType.Live) }
+            .also { liveSectionLoad = profileId to it }
+        return load.await()
+    }
+
+    /** Catalogue remplacé (actualisation, import, autre liste) : la section Direct sera relue. */
+    private fun invalidateLiveSection() {
+        liveSectionLoad = null
+    }
+
     private fun resetUiState(state: StreamiaUiState) {
+        invalidateLiveSection()
         // Nouvel état = rangées des guides vides : leur prochain rapprochement doit être republié.
         homeGuides.forEach { it.reset() }
         _uiState.value = state
