@@ -2,7 +2,9 @@ package fr.streamia.tv.ukguide
 
 import fr.streamia.tv.domain.Catalog
 import fr.streamia.tv.domain.LiveChannelPrefix
+import fr.streamia.tv.domain.MediaCategory
 import fr.streamia.tv.domain.MediaEntry
+import fr.streamia.tv.domain.MediaType
 import java.text.Normalizer
 import java.util.Locale
 
@@ -18,15 +20,43 @@ class UkGuideChannelMatcher {
     fun resolve(
         programmes: List<UkProgrammeItem>,
         catalog: Catalog,
-    ): List<ResolvedUkProgrammeItem> = resolve(programmes, ukLiveChannels(catalog))
+    ): List<ResolvedUkProgrammeItem> {
+        if (programmes.isEmpty()) return emptyList()
+        val live = catalog.entriesFor(MediaType.Live)
+        val categories = catalog.categoriesFor(MediaType.Live)
+        val index = cachedIndex?.takeIf { it.live === live && it.categories == categories }?.index
+            ?: ChannelIndex(ukLiveChannels(catalog)).also { cachedIndex = CachedIndex(live, categories, it) }
+        return resolve(programmes, index)
+    }
 
     fun resolve(
         programmes: List<UkProgrammeItem>,
         channels: List<MediaEntry>,
     ): List<ResolvedUkProgrammeItem> {
         if (programmes.isEmpty() || channels.isEmpty()) return emptyList()
+        return resolve(programmes, ChannelIndex(channels))
+    }
 
-        val indexed = channels.map { channel ->
+    private fun resolve(programmes: List<UkProgrammeItem>, index: ChannelIndex): List<ResolvedUkProgrammeItem> {
+        val seenChannels = mutableSetOf<String>()
+        return programmes.mapNotNull { programme ->
+            val best = index.best(programme.channelName) ?: return@mapNotNull null
+            if (!seenChannels.add(best.key)) return@mapNotNull null
+            ResolvedUkProgrammeItem(programme = programme, channel = best)
+        }
+    }
+
+    private class CachedIndex(val live: List<MediaEntry>, val categories: List<MediaCategory>, val index: ChannelIndex)
+    @Volatile private var cachedIndex: CachedIndex? = null
+
+    /**
+     * Chaînes normalisées une seule fois et indexées par mot et par nom compact, comme pour les
+     * chaînes FR : seules les chaînes qui partagent un mot ou le nom compact peuvent obtenir un
+     * score non nul, les autres ne sont plus comparées à chaque programme. Mêmes scores et même
+     * départage (score, qualité, numéro, puis ordre de la playlist) qu'une comparaison exhaustive.
+     */
+    private inner class ChannelIndex(channels: List<MediaEntry>) {
+        private val indexed = channels.map { channel ->
             IndexedChannel(
                 channel = channel,
                 display = normalized(channel.displayName),
@@ -34,32 +64,42 @@ class UkGuideChannelMatcher {
                 quality = maxOf(qualityRank(channel.displayName), qualityRank(channel.name)),
             )
         }
+        private val byToken = HashMap<String, MutableList<Int>>()
+        private val byCompact = HashMap<String, MutableList<Int>>()
 
-        val seenChannels = mutableSetOf<String>()
-        return programmes.asSequence()
-            .mapNotNull { programme ->
-                val source = normalized(programme.channelName)
-                val best = indexed.asSequence()
-                    .map { candidate ->
-                        RankedChannel(
-                            channel = candidate.channel,
-                            score = maxOf(similarity(source, candidate.display), similarity(source, candidate.raw)),
-                            quality = candidate.quality,
-                        )
-                    }
-                    .filter { it.score >= MIN_MATCH_SCORE }
-                    .sortedWith(
-                        compareByDescending<RankedChannel> { it.score }
-                            .thenByDescending { it.quality }
-                            .thenBy { it.channel.number },
-                    )
-                    .firstOrNull()
-                    ?: return@mapNotNull null
-
-                if (!seenChannels.add(best.channel.key)) return@mapNotNull null
-                ResolvedUkProgrammeItem(programme = programme, channel = best.channel)
+        init {
+            indexed.forEachIndexed { position, candidate ->
+                for (name in listOf(candidate.display, candidate.raw)) {
+                    name.tokens.forEach { byToken.getOrPut(it) { mutableListOf() } += position }
+                    if (name.compact.isNotBlank()) byCompact.getOrPut(name.compact) { mutableListOf() } += position
+                }
             }
-            .toList()
+        }
+
+        fun best(channelName: String): MediaEntry? {
+            val source = normalized(channelName)
+            if (source.compact.isBlank()) return null
+            val positions = sortedSetOf<Int>()
+            byCompact[source.compact]?.let(positions::addAll)
+            source.tokens.forEach { token -> byToken[token]?.let(positions::addAll) }
+            return positions.asSequence()
+                .map { position ->
+                    val candidate = indexed[position]
+                    RankedChannel(
+                        channel = candidate.channel,
+                        score = maxOf(similarity(source, candidate.display), similarity(source, candidate.raw)),
+                        quality = candidate.quality,
+                    )
+                }
+                .filter { it.score >= MIN_MATCH_SCORE }
+                .sortedWith(
+                    compareByDescending<RankedChannel> { it.score }
+                        .thenByDescending { it.quality }
+                        .thenBy { it.channel.number },
+                )
+                .firstOrNull()
+                ?.channel
+        }
     }
 
     private fun similarity(source: NormalizedName, candidate: NormalizedName): Double {

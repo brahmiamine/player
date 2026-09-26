@@ -2,6 +2,7 @@ package fr.streamia.tv
 
 import android.content.Intent
 import android.os.Bundle
+import android.os.StrictMode
 import androidx.activity.ComponentActivity
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
@@ -27,6 +28,16 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
+        // Debug : chaque accès disque ou réseau sur le thread principal est signalé dans logcat
+        // (tag StrictMode), pour ne pas réintroduire de gel de l'interface.
+        if (BuildConfig.DEBUG) {
+            StrictMode.setThreadPolicy(
+                StrictMode.ThreadPolicy.Builder().detectDiskReads().detectDiskWrites().detectNetwork().detectCustomSlowCalls().penaltyLog().build(),
+            )
+            StrictMode.setVmPolicy(
+                StrictMode.VmPolicy.Builder().detectLeakedClosableObjects().detectLeakedSqlLiteObjects().penaltyLog().build(),
+            )
+        }
 
         CrashReporter.initialize(applicationContext)
         // WorkManager crée et ouvre sa base à la première utilisation : hors du thread principal,
@@ -53,9 +64,10 @@ class MainActivity : ComponentActivity() {
         setContent { StreamiaTvRoot(viewModel) }
     }
 
-    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+    // Chaque appui télécommande : les tâches de fond lourdes attendent que la navigation se calme.
+    override fun onUserInteraction() {
+        super.onUserInteraction()
         fr.streamia.tv.player.UserActivity.onInteraction()
-        return super.dispatchKeyEvent(event)
     }
 
     override fun onResume() {

@@ -10,7 +10,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -42,19 +43,26 @@ fun GlassBackdrop(blobs: List<GlassBlob>, modifier: Modifier = Modifier) {
         modifier
             .fillMaxSize()
             .background(Night)
-            .drawBehind {
-                blobs.forEach { blob ->
+            // Brosses créées une fois par taille d'écran (et non à chaque image) ; le fond est
+            // ensuite rendu dans une couche mise en cache, sans être redessiné quand le contenu
+            // au-dessus défile ou anime son focus.
+            .graphicsLayer()
+            .drawWithCache {
+                val painted = blobs.map { blob ->
                     val radius = blob.radiusFraction * size.maxDimension
                     val center = Offset(blob.center.x * size.width, blob.center.y * size.height)
-                    drawCircle(
-                        brush = Brush.radialGradient(
+                    Triple(
+                        Brush.radialGradient(
                             colors = listOf(blob.color.copy(alpha = 0.8f), blob.color.copy(alpha = 0f)),
                             center = center,
                             radius = radius,
                         ),
-                        radius = radius,
-                        center = center,
+                        radius,
+                        center,
                     )
+                }
+                onDrawBehind {
+                    painted.forEach { (brush, radius, center) -> drawCircle(brush = brush, radius = radius, center = center) }
                 }
             },
     ) {}

@@ -2,7 +2,9 @@ package fr.streamia.tv.beinsports
 
 import fr.streamia.tv.domain.Catalog
 import fr.streamia.tv.domain.LiveChannelPrefix
+import fr.streamia.tv.domain.MediaCategory
 import fr.streamia.tv.domain.MediaEntry
+import fr.streamia.tv.domain.MediaType
 import java.text.Normalizer
 import java.util.Locale
 
@@ -20,37 +22,41 @@ class BeinSportsChannelMatcher {
         catalog: Catalog,
     ): List<ResolvedBeinProgrammeItem> {
         if (programmes.isEmpty()) return emptyList()
-
-        val candidates = LiveChannelPrefix.AR.channels(catalog)
-            .asSequence()
-            .mapNotNull { channel ->
-                val identity = identityOf(channel.displayName) ?: identityOf(channel.name) ?: return@mapNotNull null
-                IndexedChannel(
-                    channel = channel,
-                    identity = identity,
-                    quality = maxOf(qualityRank(channel.displayName), qualityRank(channel.name)),
-                )
-            }
-            .toList()
-
-        if (candidates.isEmpty()) return emptyList()
+        val bestByIdentity = bestChannelByIdentity(catalog)
+        if (bestByIdentity.isEmpty()) return emptyList()
 
         val seenChannels = mutableSetOf<String>()
         return programmes.mapNotNull { programme ->
             val identity = identityOf(programme.channelName) ?: return@mapNotNull null
-            val best = candidates.asSequence()
-                .filter { it.identity == identity }
-                .sortedWith(
-                    compareByDescending<IndexedChannel> { it.quality }
-                        .thenBy { it.channel.number },
-                )
-                .firstOrNull()
-                ?: return@mapNotNull null
-
-            if (!seenChannels.add(best.channel.key)) return@mapNotNull null
-            ResolvedBeinProgrammeItem(programme = programme, channel = best.channel)
+            val best = bestByIdentity[identity] ?: return@mapNotNull null
+            if (!seenChannels.add(best.key)) return@mapNotNull null
+            ResolvedBeinProgrammeItem(programme = programme, channel = best)
         }
     }
+
+    /**
+     * Meilleure chaîne par identité beIN (qualité, puis numéro, puis ordre de la playlist), calculée
+     * une fois par liste de chaînes Direct : l'ancienne version renormalisait toutes les chaînes AR
+     * (et compilait 5 expressions régulières par chaîne) à chaque rafraîchissement de l'accueil,
+     * puis parcourait toutes les candidates pour chaque programme.
+     */
+    private fun bestChannelByIdentity(catalog: Catalog): Map<String, MediaEntry> {
+        val live = catalog.entriesFor(MediaType.Live)
+        val categories = catalog.categoriesFor(MediaType.Live)
+        cachedIndex?.let { cached -> if (cached.live === live && cached.categories == categories) return cached.best }
+        val candidates = LiveChannelPrefix.AR.channels(catalog).mapNotNull { channel ->
+            val identity = identityOf(channel.displayName) ?: identityOf(channel.name) ?: return@mapNotNull null
+            IndexedChannel(channel, identity, maxOf(qualityRank(channel.displayName), qualityRank(channel.name)))
+        }
+        val best = candidates.groupBy(IndexedChannel::identity).mapValues { (_, group) ->
+            group.sortedWith(compareByDescending<IndexedChannel> { it.quality }.thenBy { it.channel.number }).first().channel
+        }
+        cachedIndex = CachedIndex(live, categories, best)
+        return best
+    }
+
+    private class CachedIndex(val live: List<MediaEntry>, val categories: List<MediaCategory>, val best: Map<String, MediaEntry>)
+    @Volatile private var cachedIndex: CachedIndex? = null
 
     internal fun identityOf(raw: String): String? {
         val normalized = normalize(raw)
@@ -93,11 +99,11 @@ class BeinSportsChannelMatcher {
     private fun qualityRank(raw: String): Int {
         val value = raw.lowercase(Locale.ROOT)
         return when {
-            Regex("""\b4k\b|\b2160p?\b""").containsMatchIn(value) -> 5
-            Regex("""\buhd\b""").containsMatchIn(value) -> 4
-            Regex("""\bfhd\b|\b1080p?\b""").containsMatchIn(value) -> 3
-            Regex("""\bhd\b|\b720p?\b""").containsMatchIn(value) -> 2
-            Regex("""\bsd\b""").containsMatchIn(value) -> 1
+            QUALITY_4K.containsMatchIn(value) -> 5
+            QUALITY_UHD.containsMatchIn(value) -> 4
+            QUALITY_FHD.containsMatchIn(value) -> 3
+            QUALITY_HD.containsMatchIn(value) -> 2
+            QUALITY_SD.containsMatchIn(value) -> 1
             else -> 0
         }
     }
@@ -116,6 +122,11 @@ class BeinSportsChannelMatcher {
         val COMBINING_MARKS = Regex("""\p{Mn}+""")
         val NON_ALNUM = Regex("""[^a-z0-9]+""")
         val MULTI_SPACE = Regex("""\s+""")
+        val QUALITY_4K = Regex("""\b4k\b|\b2160p?\b""")
+        val QUALITY_UHD = Regex("""\buhd\b""")
+        val QUALITY_FHD = Regex("""\bfhd\b|\b1080p?\b""")
+        val QUALITY_HD = Regex("""\bhd\b|\b720p?\b""")
+        val QUALITY_SD = Regex("""\bsd\b""")
         val QUALITY_TOKENS = setOf(
             "uhd", "fhd", "hd", "sd", "1080", "1080p", "720", "720p",
         )

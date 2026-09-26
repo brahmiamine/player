@@ -2,7 +2,9 @@ package fr.streamia.tv.tvprogramme
 
 import fr.streamia.tv.domain.Catalog
 import fr.streamia.tv.domain.LiveChannelPrefix
+import fr.streamia.tv.domain.MediaCategory
 import fr.streamia.tv.domain.MediaEntry
+import fr.streamia.tv.domain.MediaType
 import java.text.Normalizer
 import java.util.Locale
 
@@ -17,19 +19,37 @@ class TvProgrammeChannelMatcher {
     fun resolve(
         programmes: List<TvProgrammeItem>,
         catalog: Catalog,
-    ): List<ResolvedTvProgrammeItem> = resolve(programmes, frenchLiveChannels(catalog))
+    ): List<ResolvedTvProgrammeItem> = if (programmes.isEmpty()) emptyList() else resolve(programmes, indexFor(catalog))
 
     fun resolveNow(
         programmes: List<TvProgrammeNowItem>,
         catalog: Catalog,
-    ): List<ResolvedTvProgrammeNowItem> = resolveNow(programmes, frenchLiveChannels(catalog))
+    ): List<ResolvedTvProgrammeNowItem> = if (programmes.isEmpty()) emptyList() else resolveNow(programmes, indexFor(catalog))
+
+    /**
+     * Index des chaînes FR gardé tant que la liste Direct et ses catégories sont les mêmes : les
+     * blocs « en direct » et « ce soir » le partagent, et un retour à l'accueil ne renormalise plus
+     * toutes les chaînes (normalisation Unicode + 3 expressions régulières par chaîne).
+     */
+    private fun indexFor(catalog: Catalog): ChannelIndex {
+        val live = catalog.entriesFor(MediaType.Live)
+        val categories = catalog.categoriesFor(MediaType.Live)
+        cachedIndex?.let { cached -> if (cached.live === live && cached.categories == categories) return cached.index }
+        return ChannelIndex(frenchLiveChannels(catalog)).also { cachedIndex = CachedIndex(live, categories, it) }
+    }
+
+    private inner class CachedIndex(val live: List<MediaEntry>, val categories: List<MediaCategory>, val index: ChannelIndex)
+    @Volatile private var cachedIndex: CachedIndex? = null
 
     fun resolveNow(
         programmes: List<TvProgrammeNowItem>,
         channels: List<MediaEntry>,
     ): List<ResolvedTvProgrammeNowItem> {
         if (programmes.isEmpty() || channels.isEmpty()) return emptyList()
-        val index = ChannelIndex(channels)
+        return resolveNow(programmes, ChannelIndex(channels))
+    }
+
+    private fun resolveNow(programmes: List<TvProgrammeNowItem>, index: ChannelIndex): List<ResolvedTvProgrammeNowItem> {
         val seenChannels = mutableSetOf<String>()
         return programmes.mapNotNull { programme ->
             val best = index.best(programme.channelName) ?: return@mapNotNull null
@@ -43,7 +63,10 @@ class TvProgrammeChannelMatcher {
         channels: List<MediaEntry>,
     ): List<ResolvedTvProgrammeItem> {
         if (programmes.isEmpty() || channels.isEmpty()) return emptyList()
-        val index = ChannelIndex(channels)
+        return resolve(programmes, ChannelIndex(channels))
+    }
+
+    private fun resolve(programmes: List<TvProgrammeItem>, index: ChannelIndex): List<ResolvedTvProgrammeItem> {
         val seenChannels = mutableSetOf<String>()
         return programmes.mapNotNull { programme ->
             val best = index.best(programme.channelName) ?: return@mapNotNull null

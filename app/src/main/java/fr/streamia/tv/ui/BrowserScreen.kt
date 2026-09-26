@@ -103,6 +103,7 @@ import fr.streamia.tv.ui.theme.WarmSignal
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.onEach
@@ -113,6 +114,9 @@ private const val HISTORY_CATEGORY_ID = "__history__"
 
 /** Distance (en éléments) à la fin de la liste/grille matérialisée à partir de laquelle la page suivante est demandée. */
 private const val LOAD_MORE_THRESHOLD = 20
+
+/** Images préchargées après la dernière ligne/carte visible. */
+private const val ARTWORK_PREFETCH_COUNT = 12
 
 /** Délai sans déplacement du focus avant de mémoriser le contenu focalisé. */
 private const val FOCUSED_ENTRY_SAVE_DELAY_MS = 1_000L
@@ -818,6 +822,18 @@ private fun LiveChannelList(
             .distinctUntilChanged()
             .collect { lastVisible -> if (lastVisible >= entries.size - LOAD_MORE_THRESHOLD) onLoadMore() }
     }
+    val prefetchContext = LocalContext.current.applicationContext
+    // Logos des prochaines chaînes préchargés pendant le défilement (collectLatest : un nouveau
+    // défilement abandonne le préchargement devenu inutile).
+    LaunchedEffect(listState, entries) {
+        snapshotFlow { listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1 }
+            .distinctUntilChanged()
+            .collectLatest { lastVisible ->
+                if (lastVisible < 0) return@collectLatest
+                val upcoming = entries.subList((lastVisible + 1).coerceAtMost(entries.size), (lastVisible + 1 + ARTWORK_PREFETCH_COUNT).coerceAtMost(entries.size))
+                prefetchArtwork(prefetchContext, upcoming.map(MediaEntry::iconUrl), logo = true)
+            }
+    }
     val channelFocus = selectedFocusRequester
     val entryIndexByKey = remember(entries) { entries.withIndex().associate { (index, entry) -> entry.key to index } }
     // Colonne des numéros assez large pour le plus long de la liste : à largeur fixe (38 dp), un
@@ -1442,6 +1458,17 @@ private fun PosterGrid(
         snapshotFlow { gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1 }
             .distinctUntilChanged()
             .collect { lastVisible -> if (lastVisible >= entries.size - LOAD_MORE_THRESHOLD) onLoadMore() }
+    }
+    val prefetchContext = LocalContext.current.applicationContext
+    // Affiches de la rangée suivante préchargées pendant le défilement.
+    LaunchedEffect(gridState, entries) {
+        snapshotFlow { gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1 }
+            .distinctUntilChanged()
+            .collectLatest { lastVisible ->
+                if (lastVisible < 0) return@collectLatest
+                val upcoming = entries.subList((lastVisible + 1).coerceAtMost(entries.size), (lastVisible + 1 + ARTWORK_PREFETCH_COUNT).coerceAtMost(entries.size))
+                prefetchArtwork(prefetchContext, upcoming.map(MediaEntry::iconUrl), logo = false)
+            }
     }
 
     // Retour depuis une fiche : on refait défiler jusqu'au contenu ouvert et on y repose le focus,

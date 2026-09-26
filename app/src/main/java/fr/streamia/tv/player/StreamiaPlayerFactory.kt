@@ -18,9 +18,7 @@ import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import fr.streamia.tv.data.BufferMode
 import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.logging.CrashReporter
-import okhttp3.ConnectionPool
 import okhttp3.OkHttpClient
-import java.util.concurrent.TimeUnit
 
 /** ~35 % de la mémoire Java de l'app (tampon ExoPlayer alloué sur le tas), entre 32 et 200 Mo. */
 internal fun bufferBytesForHeap(heapMb: Int): Int =
@@ -33,15 +31,9 @@ private fun targetBufferBytes(context: Context): Int {
 }
 
 object StreamiaPlayerFactory {
-    private val httpClient: OkHttpClient by lazy {
-        OkHttpClient.Builder()
-            .retryOnConnectionFailure(true)
-            .connectTimeout(4, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)
-            .writeTimeout(15, TimeUnit.SECONDS)
-            .connectionPool(ConnectionPool(8, 5, TimeUnit.MINUTES))
-            .build()
-    }
+    // Client partagé avec l'API et les images : la connexion au serveur du fournisseur (TCP, TLS)
+    // est souvent déjà ouverte au moment du zap.
+    private val httpClient: OkHttpClient get() = fr.streamia.tv.net.HttpClients.player
 
     fun create(
         context: Context,
@@ -69,7 +61,7 @@ object StreamiaPlayerFactory {
             setParameters(buildUponParameters().setTunnelingEnabled(tunneling))
         }
         val httpDataSourceFactory = OkHttpDataSource.Factory(httpClient)
-            .setUserAgent("Streamia-TV/1.5")
+            .setUserAgent(fr.streamia.tv.net.HttpClients.USER_AGENT)
         // DefaultMediaSourceFactory reuses this exact factory for every source it builds, including
         // externally loaded subtitle files (SingleSampleMediaSource). An OkHttpDataSource.Factory alone
         // only understands http(s) — a local subtitle picked via SAF (content://) would fail to load.

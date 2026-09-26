@@ -55,11 +55,9 @@ import fr.streamia.tv.ui.theme.TypeLabel
 import fr.streamia.tv.ui.theme.TypeSectionTitle
 import fr.streamia.tv.ui.theme.TypeScreenTitle
 import kotlinx.coroutines.delay
-import java.text.SimpleDateFormat
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import java.util.Date
 import java.util.Locale
 
 private const val CLOCK_REFRESH_MS = 30_000L
@@ -551,14 +549,17 @@ private fun EpgProgram.elapsedFraction(epoch: Long): Float {
     return ((epoch - start).toFloat() / (end - start).toFloat()).coerceIn(0f, 1f)
 }
 
+// Formateur partagé (DateTimeFormatter est sûr entre threads) : un SimpleDateFormat était créé
+// pour chaque bloc de programme affiché dans la grille.
+private val ClockFormatter: java.time.format.DateTimeFormatter = java.time.format.DateTimeFormatter.ofPattern("HH:mm", Locale.getDefault())
+
 private fun EpgProgram.timeRange(): String {
-    val formatter = SimpleDateFormat("HH:mm", Locale.getDefault())
-    fun format(epoch: Long?): String = epoch?.let { formatter.format(Date(it * 1000)) } ?: "--:--"
+    fun format(epoch: Long?): String = epoch?.let(::formatClock) ?: "--:--"
     return "${format(startEpochSeconds)} – ${format(endEpochSeconds)}"
 }
 
 private fun formatClock(epochSeconds: Long): String =
-    SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(epochSeconds * 1000))
+    java.time.Instant.ofEpochSecond(epochSeconds).atZone(java.time.ZoneId.systemDefault()).format(ClockFormatter)
 
 private fun dayLabel(date: LocalDate): String =
     date.format(DayLabelFormatter).replaceFirstChar { it.titlecase(Locale.FRENCH) }

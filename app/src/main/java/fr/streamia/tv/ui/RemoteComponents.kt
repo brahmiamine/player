@@ -78,11 +78,8 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
-import okhttp3.Cache
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import java.io.File
-import java.util.concurrent.TimeUnit
 
 @Composable
 fun FocusableSurface(
@@ -366,7 +363,7 @@ private fun RemoteArtwork(
 ) {
     val context = LocalContext.current.applicationContext
     // Retour du réseau : les images restées vides pendant la coupure sont redemandées (celles déjà
-    // en cache ressortent tout de suite, sans requête).
+    // en cache ressortent tout de suite, sans requête ; les échecs antérieurs sont oubliés).
     val networkReconnections = LocalNetworkReconnections.current
     // produceState est annulé quand l'élément quitte l'écran : un élément dépassé pendant un
     // défilement rapide abandonne sa place dans la file au lieu de retarder les logos visibles.
@@ -375,7 +372,7 @@ private fun RemoteArtwork(
         // l'image de l'ancien contenu restait affichée et la nouvelle n'était jamais chargée.
         value = ArtworkLoader.get(url, maxDecodePx)
         if (url.isNullOrBlank() || value != null) return@produceState
-        value = ArtworkLoader.load(context, url, maxDecodePx, opaque)
+        value = ArtworkLoader.load(context, url, maxDecodePx, opaque, networkReconnections)
     }
     Box(
         modifier = modifier
@@ -408,6 +405,15 @@ private fun RemoteArtwork(
  */
 internal fun trimArtworkCache(level: Int) = ArtworkLoader.trim(level)
 
+/**
+ * Précharge (téléchargement + décodage, en priorité basse) les images qui vont apparaître au
+ * prochain défilement : quand la ligne arrive à l'écran, l'image sort déjà du cache mémoire.
+ */
+internal suspend fun prefetchArtwork(context: Context, urls: List<String?>, logo: Boolean) {
+    val maxPx = if (logo) LOGO_DECODE_PX else ARTWORK_DECODE_PX
+    ArtworkLoader.prefetch(context.applicationContext, urls, maxPx, opaque = !logo)
+}
+
 private object ArtworkLoader {
     // Dimensionné en octets réels (⅛ du tas max) plutôt qu'en nombre d'entrées.
     private val cache = object : LruCache<String, ImageBitmap>(cacheSizeBytes()) {
@@ -416,7 +422,16 @@ private object ArtworkLoader {
     // Au plus 6 téléchargements/décodages simultanés (au lieu de jusqu'à 64 threads IO vers le même
     // fournisseur) : les éléments visibles passent avant, les autres attendent ou sont annulés.
     private val permits = Semaphore(6)
-    @Volatile private var client: OkHttpClient? = null
+    // Préchargement : 2 à la fois au plus, jamais au détriment des images visibles.
+    private val prefetchPermits = Semaphore(2)
+
+    /**
+     * URL en échec (404, logo mort, serveur injoignable — très fréquent dans les playlists IPTV) :
+     * pas de nouvelle requête à chaque réapparition de la ligne pendant [FAILURE_TTL_MS], ni avant
+     * le prochain retour du réseau (numéro de reconnexion différent).
+     */
+    private class Failure(val atMs: Long, val reconnection: Int)
+    private val failures = LruCache<String, Failure>(MAX_TRACKED_FAILURES)
 
     private fun cacheKey(url: String, maxPx: Int) = "$maxPx|$url"
 
@@ -429,6 +444,12 @@ private object ArtworkLoader {
 
     fun get(url: String?, maxPx: Int): ImageBitmap? = url?.takeIf(String::isNotBlank)?.let { cache.get(cacheKey(it, maxPx)) }
 
+    private fun recentlyFailed(url: String, reconnection: Int): Boolean {
+        val failure = failures.get(url) ?: return false
+        val fresh = android.os.SystemClock.elapsedRealtime() - failure.atMs < FAILURE_TTL_MS
+        return fresh && failure.reconnection == reconnection
+    }
+
     /** Chargements en cours par image : les demandes identiques attendent le même résultat. */
     private val inFlight = java.util.concurrent.ConcurrentHashMap<String, CompletableDeferred<ImageBitmap?>>()
 
@@ -437,8 +458,9 @@ private object ArtworkLoader {
      * catégorie) : un seul téléchargement et un seul décodage, partagés. Si l'élément qui charge
      * quitte l'écran, ceux qui attendaient relancent le chargement eux-mêmes.
      */
-    suspend fun load(context: Context, url: String, maxPx: Int, opaque: Boolean): ImageBitmap? {
+    suspend fun load(context: Context, url: String, maxPx: Int, opaque: Boolean, reconnection: Int = 0): ImageBitmap? {
         get(url, maxPx)?.let { return it }
+        if (recentlyFailed(url, reconnection)) return null
         val key = cacheKey(url, maxPx)
         val mine = CompletableDeferred<ImageBitmap?>()
         val pending = inFlight.putIfAbsent(key, mine)
@@ -450,10 +472,10 @@ private object ArtworkLoader {
                 currentCoroutineContext().ensureActive()
                 null
             }
-            return shared ?: get(url, maxPx) ?: loadNow(context, url, maxPx, opaque)
+            return shared ?: get(url, maxPx) ?: if (recentlyFailed(url, reconnection)) null else loadNow(context, url, maxPx, opaque, reconnection, permits)
         }
         return try {
-            loadNow(context, url, maxPx, opaque).also { mine.complete(it) }
+            loadNow(context, url, maxPx, opaque, reconnection, permits).also { mine.complete(it) }
         } catch (error: Throwable) {
             mine.completeExceptionally(error)
             throw error
@@ -462,44 +484,85 @@ private object ArtworkLoader {
         }
     }
 
-    private suspend fun loadNow(context: Context, url: String, maxPx: Int, opaque: Boolean): ImageBitmap? =
-        permits.withPermit {
+    suspend fun prefetch(context: Context, urls: List<String?>, maxPx: Int, opaque: Boolean) {
+        for (url in urls) {
+            if (url.isNullOrBlank() || get(url, maxPx) != null || recentlyFailed(url, 0)) continue
+            if (inFlight.containsKey(cacheKey(url, maxPx))) continue
+            currentCoroutineContext().ensureActive()
+            loadNow(context, url, maxPx, opaque, reconnection = 0, gate = prefetchPermits)
+        }
+    }
+
+    private suspend fun loadNow(
+        context: Context,
+        url: String,
+        maxPx: Int,
+        opaque: Boolean,
+        reconnection: Int,
+        gate: Semaphore,
+    ): ImageBitmap? =
+        gate.withPermit {
             get(url, maxPx)?.let { return@withPermit it }
             withContext(Dispatchers.IO) {
-                download(client(context), url, maxPx, opaque)?.also { cache.put(cacheKey(url, maxPx), it) }
+                val decoded = download(fr.streamia.tv.net.HttpClients.artwork(context), url, maxPx, opaque)
+                if (decoded == null) {
+                    failures.put(url, Failure(android.os.SystemClock.elapsedRealtime(), reconnection))
+                } else {
+                    failures.remove(url)
+                    cache.put(cacheKey(url, maxPx), decoded)
+                }
+                decoded
             }
         }
 
-    @Synchronized
-    private fun client(context: Context): OkHttpClient = client ?: OkHttpClient.Builder()
-        .cache(Cache(File(context.cacheDir, "artwork-http"), 64L * 1024L * 1024L))
-        .connectTimeout(5, TimeUnit.SECONDS)
-        .readTimeout(8, TimeUnit.SECONDS)
-        .retryOnConnectionFailure(true)
-        .build()
-        .also { client = it }
-
     private fun download(client: OkHttpClient, url: String, maxPx: Int, opaque: Boolean): ImageBitmap? = runCatching {
-        val request = Request.Builder().url(url).header("User-Agent", "Streamia-TV/1.5").build()
+        val request = Request.Builder().url(url).header("User-Agent", fr.streamia.tv.net.HttpClients.USER_AGENT).build()
         client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) return@runCatching null
             val bytes = response.body?.bytes() ?: return@runCatching null
-            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-            var sample = 1
-            while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= maxPx) sample *= 2
-            BitmapFactory.decodeByteArray(
-                bytes,
-                0,
-                bytes.size,
-                BitmapFactory.Options().apply {
-                    inSampleSize = sample
-                    // Affiches/vignettes recadrées : pas de transparence utile, moitié de mémoire.
-                    if (opaque) inPreferredConfig = Bitmap.Config.RGB_565
-                },
-            )?.asImageBitmap()
+            decode(bytes, maxPx, opaque, hardware = HARDWARE_BITMAPS)
+                ?: if (HARDWARE_BITMAPS) decode(bytes, maxPx, opaque, hardware = false) else null
         }
     }.getOrNull()
 
+    /**
+     * Décodage à la taille d'affichage : sous-échantillonnage par puissance de 2 puis mise à
+     * l'échelle exacte pendant le décodage (plus d'image jusqu'à 2 fois trop grande). Sur Android 9+,
+     * bitmap matérielle : ses pixels vivent dans la mémoire graphique, et l'image n'est plus
+     * téléversée vers le GPU au premier dessin pendant le défilement.
+     */
+    private fun decode(bytes: ByteArray, maxPx: Int, opaque: Boolean, hardware: Boolean): ImageBitmap? {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        val largest = maxOf(bounds.outWidth, bounds.outHeight)
+        if (largest <= 0) return null
+        var sample = 1
+        while (largest / (sample * 2) >= maxPx) sample *= 2
+        val sampled = largest / sample
+        return BitmapFactory.decodeByteArray(
+            bytes,
+            0,
+            bytes.size,
+            BitmapFactory.Options().apply {
+                inSampleSize = sample
+                if (sampled > maxPx) {
+                    inScaled = true
+                    inDensity = sampled
+                    inTargetDensity = maxPx
+                }
+                inPreferredConfig = when {
+                    hardware && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P -> Bitmap.Config.HARDWARE
+                    // Affiches/vignettes recadrées : pas de transparence utile, moitié de mémoire.
+                    opaque -> Bitmap.Config.RGB_565
+                    else -> Bitmap.Config.ARGB_8888
+                }
+            },
+        )?.asImageBitmap()
+    }
+
     private fun cacheSizeBytes(): Int = (Runtime.getRuntime().maxMemory() / 8).coerceIn(4L * 1024 * 1024, Int.MAX_VALUE.toLong()).toInt()
+
+    private val HARDWARE_BITMAPS = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P
+    private const val FAILURE_TTL_MS = 30 * 60_000L
+    private const val MAX_TRACKED_FAILURES = 2_000
 }

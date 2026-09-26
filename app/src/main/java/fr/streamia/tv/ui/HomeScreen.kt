@@ -23,6 +23,8 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -215,21 +217,25 @@ fun HomeScreen(
     // Une seule horloge pour toutes les rangées « en direct » (au lieu d'une boucle par rangée,
     // chacune invalidant l'accueil de son côté).
     val hasLiveRows = liveMatches.isNotEmpty() || tvProgrammeNow.isNotEmpty() || beinSportsNow.isNotEmpty() || ukGuideNow.isNotEmpty()
-    var liveRowsNowEpochMillis by remember { mutableStateOf(System.currentTimeMillis()) }
+    // Lue seulement par les cartes qui affichent une progression (lambdas) : mise à jour toutes les
+    // 30 s, elle recomposait tout l'accueil. Les cartes de matchs passent par derivedStateOf : la
+    // racine n'est recomposée que si la liste des matchs en cours change réellement.
+    val liveRowsNow = remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(hasLiveRows) {
         if (!hasLiveRows) return@LaunchedEffect
         while (true) {
-            liveRowsNowEpochMillis = System.currentTimeMillis()
+            liveRowsNow.longValue = System.currentTimeMillis()
             delay(TV_PROGRAMME_PROGRESS_REFRESH_MS)
         }
     }
-    val liveMatchCards = remember(liveMatches, liveRowsNowEpochMillis, liveMatchesResolving) {
-        liveMatchCards(liveMatches, liveRowsNowEpochMillis / 1000, liveMatchesResolving)
+    val liveMatchCardsState = remember(liveMatches, liveMatchesResolving) {
+        derivedStateOf { liveMatchCards(liveMatches, liveRowsNow.longValue / 1000, liveMatchesResolving) }
     }
-    val tvProgrammeNowEpochMillis = liveRowsNowEpochMillis
-    val beinNowEpochMillis = liveRowsNowEpochMillis
-    val ukGuideNowTime = remember(liveRowsNowEpochMillis) {
-        java.time.Instant.ofEpochMilli(liveRowsNowEpochMillis).atZone(UK_GUIDE_ZONE).toLocalTime()
+    val liveMatchCards = liveMatchCardsState.value
+    val tvProgrammeNowEpochMillis: () -> Long = remember { { liveRowsNow.longValue } }
+    val beinNowEpochMillis = tvProgrammeNowEpochMillis
+    val ukGuideNowTime: () -> LocalTime = remember {
+        { java.time.Instant.ofEpochMilli(liveRowsNow.longValue).atZone(UK_GUIDE_ZONE).toLocalTime() }
     }
     // Seulement app visible : en arrière-plan (bouton Home), aucune requête vers les sites tiers.
     // Au retour, rafraîchissement immédiat ; au premier affichage, les chargements de démarrage
@@ -355,7 +361,7 @@ fun HomeScreen(
             .fillMaxSize()
             .padding(horizontal = 46.dp, vertical = 30.dp),
     ) {
-        item {
+        item(key = "home-header", contentType = "header") {
             Column(Modifier.fillMaxWidth()) {
                 GlassSurface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(RadiusPill)) {
                     Row(
@@ -385,7 +391,7 @@ fun HomeScreen(
             }
         }
 
-        item {
+        item(key = "home-actions", contentType = "actions") {
             MainActionGrid(
                 catalog = catalog,
                 catalogLoading = catalogLoading,
@@ -407,7 +413,7 @@ fun HomeScreen(
         }
 
         if (resumeCards.isNotEmpty()) {
-            item {
+            item(key = HomeRowKey.Resume, contentType = "card-row") {
                 Column(Modifier.fillMaxWidth()) {
                     HomeCardRow(
                         title = "Reprendre la lecture",
@@ -424,7 +430,7 @@ fun HomeScreen(
         }
 
         if (favoriteCards.isNotEmpty()) {
-            item {
+            item(key = HomeRowKey.Favorites, contentType = "card-row") {
                 Column(Modifier.fillMaxWidth()) {
                     HomeCardRow(
                         title = "Favoris",
@@ -444,7 +450,7 @@ fun HomeScreen(
         }
 
         if (recentChannelCards.isNotEmpty()) {
-            item {
+            item(key = HomeRowKey.RecentChannels, contentType = "card-row") {
                 Column(Modifier.fillMaxWidth()) {
                     HomeCardRow(
                         title = "Dernières chaînes regardées",
@@ -470,7 +476,7 @@ fun HomeScreen(
         }
 
         if (liveMatchCards.isNotEmpty()) {
-            item {
+            item(key = HomeRowKey.LiveMatches, contentType = "live-matches") {
                 LiveMatchesRow(
                     cards = liveMatchCards,
                     restoreItemKey = restoreTarget
@@ -481,7 +487,7 @@ fun HomeScreen(
                 )
             }
         } else if (liveMatchesPending) {
-            item {
+            item(key = HomeRowKey.LiveMatches, contentType = "skeleton") {
                 Column(Modifier.fillMaxWidth()) {
                     SkeletonRow("Matchs en direct") { LiveMatchCardSkeleton() }
                     Spacer(Modifier.height(CardRowSpacing))
@@ -490,7 +496,7 @@ fun HomeScreen(
         }
 
         if (tvProgrammeNow.isNotEmpty()) {
-            item {
+            item(key = HomeRowKey.TvProgrammeNow, contentType = "programme-row") {
                 Column(Modifier.fillMaxWidth()) {
                     TvProgrammeNowRow(
                         items = tvProgrammeNow,
@@ -511,7 +517,7 @@ fun HomeScreen(
                 }
             }
         } else if (HomeBlock.TvProgrammeNow in pendingBlocks) {
-            item {
+            item(key = HomeRowKey.TvProgrammeNow, contentType = "skeleton") {
                 Column(Modifier.fillMaxWidth()) {
                     SkeletonRow("Programme TV FR en direct") { ProgrammeCardSkeleton() }
                     Spacer(Modifier.height(CardRowSpacing))
@@ -520,7 +526,7 @@ fun HomeScreen(
         }
 
         if (tvProgrammeTonight.isNotEmpty()) {
-            item {
+            item(key = HomeRowKey.TvProgrammeTonight, contentType = "programme-row") {
                 Column(Modifier.fillMaxWidth()) {
                     TvProgrammeTonightRow(
                         items = tvProgrammeTonight,
@@ -540,7 +546,7 @@ fun HomeScreen(
                 }
             }
         } else if (HomeBlock.TvProgrammeTonight in pendingBlocks) {
-            item {
+            item(key = HomeRowKey.TvProgrammeTonight, contentType = "skeleton") {
                 Column(Modifier.fillMaxWidth()) {
                     SkeletonRow("Programme TV FR ce soir") { ProgrammeCardSkeleton() }
                     Spacer(Modifier.height(CardRowSpacing))
@@ -549,7 +555,7 @@ fun HomeScreen(
         }
 
         if (beinSportsNow.isNotEmpty()) {
-            item {
+            item(key = HomeRowKey.BeinSportsNow, contentType = "programme-row") {
                 Column(Modifier.fillMaxWidth()) {
                     BeinSportsProgrammeRow(
                         title = "beIN Sports en direct",
@@ -572,7 +578,7 @@ fun HomeScreen(
                 }
             }
         } else if (HomeBlock.BeinSportsNow in pendingBlocks) {
-            item {
+            item(key = HomeRowKey.BeinSportsNow, contentType = "skeleton") {
                 Column(Modifier.fillMaxWidth()) {
                     SkeletonRow("beIN Sports en direct") { ProgrammeCardSkeleton() }
                     Spacer(Modifier.height(CardRowSpacing))
@@ -581,7 +587,7 @@ fun HomeScreen(
         }
 
         if (beinSportsNext.isNotEmpty()) {
-            item {
+            item(key = HomeRowKey.BeinSportsNext, contentType = "programme-row") {
                 Column(Modifier.fillMaxWidth()) {
                     BeinSportsProgrammeRow(
                         title = "beIN Sports suivant",
@@ -604,7 +610,7 @@ fun HomeScreen(
                 }
             }
         } else if (HomeBlock.BeinSportsNext in pendingBlocks) {
-            item {
+            item(key = HomeRowKey.BeinSportsNext, contentType = "skeleton") {
                 Column(Modifier.fillMaxWidth()) {
                     SkeletonRow("beIN Sports suivant") { ProgrammeCardSkeleton() }
                     Spacer(Modifier.height(CardRowSpacing))
@@ -613,7 +619,7 @@ fun HomeScreen(
         }
 
         if (ukGuideNow.isNotEmpty()) {
-            item {
+            item(key = HomeRowKey.UkGuideNow, contentType = "programme-row") {
                 Column(Modifier.fillMaxWidth()) {
                     UkGuideProgrammeRow(
                         title = "UK en direct",
@@ -636,7 +642,7 @@ fun HomeScreen(
                 }
             }
         } else if (HomeBlock.UkGuideNow in pendingBlocks) {
-            item {
+            item(key = HomeRowKey.UkGuideNow, contentType = "skeleton") {
                 Column(Modifier.fillMaxWidth()) {
                     SkeletonRow("UK en direct") { ProgrammeCardSkeleton() }
                     Spacer(Modifier.height(CardRowSpacing))
@@ -645,7 +651,7 @@ fun HomeScreen(
         }
 
         if (ukGuideNext.isNotEmpty()) {
-            item {
+            item(key = HomeRowKey.UkGuideNext, contentType = "programme-row") {
                 Column(Modifier.fillMaxWidth()) {
                     UkGuideProgrammeRow(
                         title = "UK suivant",
@@ -668,7 +674,7 @@ fun HomeScreen(
                 }
             }
         } else if (HomeBlock.UkGuideNext in pendingBlocks) {
-            item {
+            item(key = HomeRowKey.UkGuideNext, contentType = "skeleton") {
                 Column(Modifier.fillMaxWidth()) {
                     SkeletonRow("UK suivant") { ProgrammeCardSkeleton() }
                     Spacer(Modifier.height(CardRowSpacing))
@@ -678,7 +684,7 @@ fun HomeScreen(
 
         if (recommendationRows.isEmpty() && HomeBlock.Recommendations in pendingBlocks) {
             // Titres inconnus avant le calcul : barre fantôme à la place du titre.
-            items(2) {
+            items(2, key = { "recommendations-skeleton-$it" }, contentType = { "skeleton" }) {
                 Column(Modifier.fillMaxWidth()) {
                     SkeletonRow(title = null) { PosterCardSkeleton() }
                     Spacer(Modifier.height(CardRowSpacing))
@@ -686,7 +692,7 @@ fun HomeScreen(
             }
         }
 
-        itemsIndexed(recommendationRows, key = { _, row -> row.kind }) { index, row ->
+        itemsIndexed(recommendationRows, key = { _, row -> HomeRowKey.recommendation(row.kind) }, contentType = { _, _ -> "recommendation-row" }) { index, row ->
             Column(Modifier.fillMaxWidth()) {
                 HomeRecommendationRow(
                     row = row,
@@ -911,7 +917,7 @@ internal fun LiveBadge(modifier: Modifier = Modifier) {
 @Composable
 private fun TvProgrammeNowRow(
     items: List<ResolvedTvProgrammeNowItem>,
-    nowEpochMillis: Long,
+    nowEpochMillis: () -> Long,
     firstFocusRequester: FocusRequester?,
     restoreItemKey: String?,
     onOpenProgramme: (ResolvedTvProgrammeNowItem) -> Unit,
@@ -921,7 +927,7 @@ private fun TvProgrammeNowRow(
         timeLabel = item.programme.timeRangeLabel,
         imageUrl = item.programme.imageUrl,
         badge = ProgrammeBadge.Live,
-        progress = item.programme.progressAt(nowEpochMillis),
+        progress = item.programme.progressAt(nowEpochMillis()),
         channel = item.channel,
         onClick = { onOpenProgramme(item) },
         modifier = modifier,
@@ -950,7 +956,7 @@ private fun TvProgrammeTonightRow(
 private fun BeinSportsProgrammeRow(
     title: String,
     items: List<ResolvedBeinProgrammeItem>,
-    nowEpochMillis: Long,
+    nowEpochMillis: () -> Long,
     showLive: Boolean,
     firstFocusRequester: FocusRequester?,
     restoreItemKey: String?,
@@ -962,7 +968,7 @@ private fun BeinSportsProgrammeRow(
         imageUrl = item.programme.imageUrl,
         category = item.programme.category,
         badge = if (showLive) ProgrammeBadge.Live else ProgrammeBadge.Next,
-        progress = if (showLive) item.programme.progressAt(nowEpochMillis) else null,
+        progress = if (showLive) item.programme.progressAt(nowEpochMillis()) else null,
         channel = item.channel,
         onClick = { onOpenProgramme(item) },
         modifier = modifier,
@@ -973,7 +979,7 @@ private fun BeinSportsProgrammeRow(
 private fun UkGuideProgrammeRow(
     title: String,
     items: List<ResolvedUkProgrammeItem>,
-    now: LocalTime,
+    now: () -> LocalTime,
     showLive: Boolean,
     firstFocusRequester: FocusRequester?,
     restoreItemKey: String?,
@@ -984,7 +990,7 @@ private fun UkGuideProgrammeRow(
         timeLabel = item.programme.timeRangeLabel,
         imageUrl = item.programme.imageUrl,
         badge = if (showLive) ProgrammeBadge.Live else ProgrammeBadge.Next,
-        progress = if (showLive) item.programme.progressAt(now) else null,
+        progress = if (showLive) item.programme.progressAt(now()) else null,
         channel = item.channel,
         onClick = { onOpenProgramme(item) },
         modifier = modifier,
