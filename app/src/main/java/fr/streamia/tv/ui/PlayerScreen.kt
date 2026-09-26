@@ -32,6 +32,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -223,7 +224,8 @@ fun PlayerScreen(
     onSwitchVersion: (MediaEntry) -> Unit = onEntrySelected,
     /** Versions des chaînes du Direct, construit une fois par le ViewModel (toutes catégories). */
     liveVersionIndex: LiveVersionIndex? = null,
-    onProgress: (MediaEntry, Long, Long) -> Unit,
+    /** Position, durée, et `true` quand la lecture est quittée ou passe en arrière-plan. */
+    onProgress: (MediaEntry, Long, Long, Boolean) -> Unit,
     onCycleVideoAspect: () -> Unit,
     onPlayNextEpisode: () -> Unit,
     /** Film lu jusqu'au bout : retour sur sa fiche au lieu de rester sur l'écran noir de fin. */
@@ -309,8 +311,12 @@ fun PlayerScreen(
     var dolbyVisionDetected by remember { mutableStateOf(false) }
     var dolbyAtmosDetected by remember { mutableStateOf(false) }
     var seekFeedback by remember(entry.key) { mutableStateOf<String?>(null) }
-    var positionMs by remember(entry.key) { mutableStateOf(0L) }
-    var durationMs by remember(entry.key) { mutableStateOf(0L) }
+    // Lus seulement par la timeline et le retour de saut (lambdas) : mis à jour chaque seconde, ils
+    // recomposaient tout le lecteur tant que le bandeau était affiché.
+    val positionState = remember(entry.key) { mutableLongStateOf(0L) }
+    val durationState = remember(entry.key) { mutableLongStateOf(0L) }
+    var positionMs by positionState
+    var durationMs by durationState
     var watchdogRecoveryCount by remember(entry.key) { mutableStateOf(0) }
     // Flux déjà affiché au moins une fois : une erreur réseau ensuite (coupure après des heures de
     // lecture) relance la même URL au lieu d'afficher un écran d'erreur définitif.
@@ -581,6 +587,22 @@ fun PlayerScreen(
         pendingRecovery = null
     }
 
+    // Application passée en arrière-plan pendant un film : dernière position enregistrée et
+    // « Continuer à regarder » de Google TV mis à jour tout de suite.
+    val playerLifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(entry.key, playerLifecycle) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP && entry.type != MediaType.Live) {
+                runCatching {
+                    val duration = player.duration.takeIf { it > 0 && it != C.TIME_UNSET } ?: 0L
+                    onProgress(entry, player.currentPosition.coerceAtLeast(0), duration, true)
+                }
+            }
+        }
+        playerLifecycle.addObserver(observer)
+        onDispose { playerLifecycle.removeObserver(observer) }
+    }
+
     DisposableEffect(entry.key) {
         onDispose {
             // Direct : compté comme regardé après 2,5 s (effet plus bas), pas à chaque chaîne
@@ -588,7 +610,7 @@ fun PlayerScreen(
             if (entry.type == MediaType.Live) return@onDispose
             runCatching {
                 val duration = player.duration.takeIf { it > 0 && it != C.TIME_UNSET } ?: 0L
-                onProgress(entry, player.currentPosition.coerceAtLeast(0), duration)
+                onProgress(entry, player.currentPosition.coerceAtLeast(0), duration, true)
             }
         }
     }
@@ -633,7 +655,7 @@ fun PlayerScreen(
     LaunchedEffect(entry.key) {
         if (entry.type == MediaType.Live) {
             delay(2_500)
-            onProgress(entry, 0L, 0L)
+            onProgress(entry, 0L, 0L, false)
         } else {
             var lastSavedAt = 0L
             while (true) {
@@ -644,7 +666,7 @@ fun PlayerScreen(
                 val now = SystemClock.elapsedRealtime()
                 if (shouldPersistVodProgress(positionMs, lastSavedAt, now)) {
                     lastSavedAt = now
-                    onProgress(entry, positionMs, duration)
+                    onProgress(entry, positionMs, duration, false)
                 }
             }
         }
@@ -1207,8 +1229,8 @@ fun PlayerScreen(
                 dolbyVisionLabel = dolbyPlaybackLabel("Dolby Vision", dolbyVisionDetected, dolbyCapabilities.dolbyVision),
                 dolbyAtmosLabel = dolbyPlaybackLabel("Dolby Atmos", dolbyAtmosDetected, dolbyCapabilities.dolbyAtmos),
                 resumePositionMs = resumePositionMs,
-                positionMs = positionMs,
-                durationMs = durationMs,
+                positionMs = { positionState.longValue },
+                durationMs = { durationState.longValue },
                 otherVersionsCount = (liveVersions.size - 1).coerceAtLeast(0),
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
@@ -1283,7 +1305,7 @@ fun PlayerScreen(
                     .padding(horizontal = 22.dp, vertical = 14.dp),
                 contentAlignment = Alignment.Center,
             ) {
-                Text("$feedback · ${formatDuration(positionMs)}", color = Ink, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                SeekFeedbackText(feedback) { positionState.longValue }
             }
         }
 
@@ -1442,8 +1464,8 @@ private fun PlayerInfoBand(
     dolbyVisionLabel: String?,
     dolbyAtmosLabel: String?,
     resumePositionMs: Long,
-    positionMs: Long,
-    durationMs: Long,
+    positionMs: () -> Long,
+    durationMs: () -> Long,
     modifier: Modifier = Modifier,
     otherVersionsCount: Int = 0,
 ) {
@@ -1578,7 +1600,7 @@ private fun PlayerInfoBand(
             }
         }
 
-        if (entry.type != MediaType.Live && durationMs > 0L) {
+        if (entry.type != MediaType.Live && durationMs() > 0L) {
             Spacer(Modifier.height(12.dp))
             PlaybackTimeline(positionMs, durationMs)
         }
@@ -1642,7 +1664,9 @@ private fun LiveProgramTimeline(
 }
 
 @Composable
-private fun PlaybackTimeline(positionMs: Long, durationMs: Long) {
+private fun PlaybackTimeline(position: () -> Long, duration: () -> Long) {
+    val positionMs = position()
+    val durationMs = duration().coerceAtLeast(1L)
     val progress = (positionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text(formatDuration(positionMs), color = Ink, fontSize = 12.sp)
@@ -1870,6 +1894,11 @@ private fun documentDisplayName(context: android.content.Context, uri: Uri): Str
         if (nameIndex >= 0 && cursor.moveToFirst()) cursor.getString(nameIndex) else null
     }
 }.getOrNull()
+
+@Composable
+private fun SeekFeedbackText(feedback: String, position: () -> Long) {
+    Text("$feedback · ${formatDuration(position())}", color = Ink, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+}
 
 internal fun formatDuration(positionMs: Long): String {
     val totalSeconds = positionMs.coerceAtLeast(0L) / 1000L

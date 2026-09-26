@@ -290,26 +290,39 @@ fun applyUserLibraryToCatalog(catalog: Catalog, snapshot: UserLibrarySnapshot): 
     // quand ni le tri des catégories ni le déplacement d'entrées n'ont été utilisés.
     if (snapshot.movedEntries.isEmpty() && snapshot.categoryOrder.isEmpty()) return catalog
 
-    val movedEntries = if (snapshot.movedEntries.isEmpty()) {
-        catalog.entries
-    } else {
-        catalog.entries.map { entry ->
-            snapshot.movedEntries[entry.key]?.let { destination -> entry.copy(categoryId = destination) } ?: entry
-        }
-    }
-    val orderedCategories = MediaType.entries.flatMap { type ->
-        val categories = catalog.categoriesFor(type)
-        val preferred = snapshot.categoryOrder[type.name].orEmpty()
-        if (preferred.isEmpty()) categories
-        else {
-            val byKey = categories.associateBy(MediaCategory::key)
-            buildList {
-                preferred.forEach { byKey[it]?.let(::add) }
-                categories.filterNot { it.key in preferred }.forEach(::add)
+    // Seules les entrées réellement déplacées sont recopiées, et seules leurs sections perdent leurs
+    // index : les autres (des dizaines de milliers de chaînes Direct) gardent ceux du catalogue
+    // d'origine au lieu d'être réindexées, souvent sur le thread principal, à chaque page chargée.
+    val changedTypes = HashSet<MediaType>()
+    var movedEntries: MutableList<MediaEntry>? = null
+    if (snapshot.movedEntries.isNotEmpty()) {
+        catalog.entries.forEachIndexed { index, entry ->
+            val destination = snapshot.movedEntries[entry.key]
+            if (destination != null && destination != entry.categoryId) {
+                val target = movedEntries ?: catalog.entries.toMutableList().also { movedEntries = it }
+                target[index] = entry.copy(categoryId = destination)
+                changedTypes += entry.type
             }
         }
     }
-    val adjustedCategoryCounts = if (catalog.categoryCounts.isEmpty() || snapshot.movedEntries.isEmpty()) {
+    val orderedCategories = if (snapshot.categoryOrder.values.all { it.isEmpty() }) {
+        catalog.categories
+    } else {
+        MediaType.entries.flatMap { type ->
+            val categories = catalog.categoriesFor(type)
+            val preferred = snapshot.categoryOrder[type.name].orEmpty()
+            if (preferred.isEmpty()) categories
+            else {
+                val byKey = categories.associateBy(MediaCategory::key)
+                val preferredSet = preferred.toHashSet()
+                buildList {
+                    preferred.forEach { byKey[it]?.let(::add) }
+                    categories.filterNot { it.key in preferredSet }.forEach(::add)
+                }
+            }
+        }
+    }
+    val adjustedCategoryCounts = if (catalog.categoryCounts.isEmpty() || changedTypes.isEmpty()) {
         catalog.categoryCounts
     } else {
         catalog.categoryCounts.toMutableMap().apply {
@@ -323,13 +336,12 @@ fun applyUserLibraryToCatalog(catalog: Catalog, snapshot: UserLibrarySnapshot): 
             }
         }
     }
-    return Catalog(
+    if (movedEntries == null && orderedCategories == catalog.categories) return catalog
+    return catalog.withCustomLayout(
         categories = orderedCategories,
-        entries = movedEntries,
-        account = catalog.account,
-        totalCounts = catalog.totalCounts,
+        entries = movedEntries ?: catalog.entries,
         categoryCounts = adjustedCategoryCounts,
-        loadedCategoryKeys = catalog.loadedCategoryKeys,
+        changedTypes = changedTypes,
     )
 }
 

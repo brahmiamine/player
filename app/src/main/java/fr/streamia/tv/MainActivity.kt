@@ -53,6 +53,11 @@ class MainActivity : ComponentActivity() {
         setContent { StreamiaTvRoot(viewModel) }
     }
 
+    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        fr.streamia.tv.player.UserActivity.onInteraction()
+        return super.dispatchKeyEvent(event)
+    }
+
     override fun onResume() {
         super.onResume()
         // Retour du réglage « Installer des applis inconnues » : l'installation de la mise à jour reprend.

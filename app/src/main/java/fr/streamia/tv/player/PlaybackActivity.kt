@@ -16,3 +16,21 @@ object PlaybackActivity {
         if (isPlaying) playing += playerId else playing -= playerId
     }
 }
+
+/**
+ * Dernière interaction à la télécommande dans l'application. Les tâches de fond lourdes attendent
+ * que l'utilisateur ait cessé de naviguer : elles ne doivent jamais prendre le processeur ou le
+ * réseau pendant qu'il parcourt les listes.
+ */
+object UserActivity {
+    @Volatile private var lastInteractionAtMs = 0L
+
+    fun onInteraction(nowMs: Long = android.os.SystemClock.elapsedRealtime()) {
+        lastInteractionAtMs = nowMs
+    }
+
+    fun isRecentlyActive(windowMs: Long = QUIET_WINDOW_MS, nowMs: Long = android.os.SystemClock.elapsedRealtime()): Boolean =
+        lastInteractionAtMs > 0L && nowMs - lastInteractionAtMs < windowMs
+
+    private const val QUIET_WINDOW_MS = 2 * 60_000L
+}

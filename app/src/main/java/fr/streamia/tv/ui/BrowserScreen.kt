@@ -114,6 +114,9 @@ private const val HISTORY_CATEGORY_ID = "__history__"
 /** Distance (en éléments) à la fin de la liste/grille matérialisée à partir de laquelle la page suivante est demandée. */
 private const val LOAD_MORE_THRESHOLD = 20
 
+/** Délai sans déplacement du focus avant de mémoriser le contenu focalisé. */
+private const val FOCUSED_ENTRY_SAVE_DELAY_MS = 1_000L
+
 /**
  * Hauteur du bandeau haut, partagée entre [BrowserHeader] (qui l'utilise comme hauteur réelle) et
  * [LiveCatalogLayout] (qui décale ses panneaux catégories/chaînes de cette même valeur quand le
@@ -169,6 +172,18 @@ fun BrowserScreen(
     BackHandler(onBack = ::leaveBrowserForHome)
     val context = LocalContext.current.applicationContext
     val navigationStore = remember(credentials) { BrowserNavigationStore(context, credentials) }
+    // Contenu focalisé dans la grille : gardé en mémoire et écrit seulement quand le focus se pose
+    // (1 s sans mouvement) ou à la sortie de l'écran. L'écrire en préférences à chaque appui sur
+    // une flèche faisait une écriture disque par déplacement du focus.
+    val focusedEntry = remember(credentials) { mutableStateOf<Pair<MediaType, String>?>(null) }
+    LaunchedEffect(navigationStore) {
+        snapshotFlow { focusedEntry.value }
+            .debounce(FOCUSED_ENTRY_SAVE_DELAY_MS)
+            .collect { saved -> saved?.let { (type, key) -> navigationStore.saveEntry(type, key) } }
+    }
+    DisposableEffect(navigationStore) {
+        onDispose { focusedEntry.value?.let { (type, key) -> navigationStore.saveEntry(type, key) } }
+    }
     val restoredLiveSelection = remember(credentials) {
         val stored = navigationStore.liveSelection()
         val returnedEntryKey = LiveBrowserReturnState.consume()
@@ -350,6 +365,11 @@ fun BrowserScreen(
     }
 
     val isLive = selectedType == MediaType.Live
+    // Lue une fois par catégorie (la liste des chaînes est recréée à chaque catégorie) et non plus
+    // à chaque recomposition de l'écran.
+    val liveListPosition = remember(navigationStore, selectedCategoryId) {
+        navigationStore.listPosition(MediaType.Live, selectedCategoryId)
+    }
 
     // En Direct, la vidéo doit remplir tout l'écran, bandeau du haut compris : LiveCatalogLayout
     // est donc posé en premier (plein écran) dans ce Box, et le bandeau + le message flottent
@@ -368,7 +388,7 @@ fun BrowserScreen(
                 selectedCategoryId = selectedCategoryId,
                 entries = entries,
                 initialPreviewKey = lastLiveEntryKey,
-                initialListPosition = navigationStore.listPosition(MediaType.Live, selectedCategoryId),
+                initialListPosition = liveListPosition,
                 favoriteCategories = library.favoriteCategories,
                 favoriteEntries = library.favoriteEntries,
                 lockedCategories = library.lockedCategories,
@@ -444,7 +464,7 @@ fun BrowserScreen(
                     onCategorySelected = ::selectCategory,
                     onToggleCategoryFavorite = onToggleCategoryFavorite,
                     onEntrySelected = onEntrySelected,
-                    onEntryFocused = { navigationStore.saveEntry(selectedType, it.key) },
+                    onEntryFocused = { focusedEntry.value = selectedType to it.key },
                     onToggleEntryFavorite = onToggleEntryFavorite,
                     onLoadMore = { onLoadMoreInCategory(selectedType, selectedCategoryId, categorySortOrder) },
                     // Favoris/Historique ont leur propre ordre (ajout, dernière lecture) : pas de tri.

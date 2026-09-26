@@ -997,17 +997,20 @@ class XtreamRepository private constructor(context: Context) {
         playlistStore.upsert(profile)
         credentialsStore.save(imported.credentials)
         cache.save(id, imported.catalog)
-        val catalog = imported.catalog
+        val full = imported.catalog
         val summary = buildString {
             append("${imported.parsedEntries} médias")
-            append(" · ${catalog.count(MediaType.Live)} chaînes")
-            append(" · ${catalog.count(MediaType.Movie)} films")
-            append(" · ${catalog.count(MediaType.Series)} séries")
-            append(" · ${catalog.categories.size} catégories")
+            append(" · ${full.count(MediaType.Live)} chaînes")
+            append(" · ${full.count(MediaType.Movie)} films")
+            append(" · ${full.count(MediaType.Series)} séries")
+            append(" · ${full.categories.size} catégories")
             if ("tvg-logo" in imported.detectedAttributes) append(" · logos")
             if ("tvg-id" in imported.detectedAttributes) append(" · EPG/TVG")
             if (imported.skippedEntries > 0) append(" · ${imported.skippedEntries} ignorés")
         }
+        // Version légère relue depuis la base, comme pour Xtream : publier le catalogue complet
+        // gardait des centaines de milliers d'entrées en mémoire, non paginées, jusqu'au redémarrage.
+        val catalog = cache.load(id) ?: full
         return LoadedCatalog(catalog, imported.credentials, CatalogSource.Import, id, summary)
     }
 

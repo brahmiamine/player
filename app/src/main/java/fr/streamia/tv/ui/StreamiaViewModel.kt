@@ -1555,7 +1555,12 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         repository.toggleCategoryFavorite(profileId, category)
     }
 
-    fun recordPlayback(entry: MediaEntry, positionMs: Long, durationMs: Long) {
+    /**
+     * [final] : lecture quittée ou mise en arrière-plan. La rangée « Continuer à regarder » de
+     * Google TV (≈ 10 appels au fournisseur système) n'est republiée qu'à ce moment-là, plus toutes
+     * les 15 s pendant un film.
+     */
+    fun recordPlayback(entry: MediaEntry, positionMs: Long, durationMs: Long, final: Boolean = false) {
         val profileId = _uiState.value.activeProfileId ?: return
         viewModelScope.launch {
             libraryMutation.withLock {
@@ -1565,7 +1570,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                     repository.recordPlayback(profileId, entry, positionMs, durationMs)
                     // « Continuer à regarder » de Google TV ne liste que films et épisodes : rien à
                     // republier (≈ 10 appels au fournisseur système) à chaque chaîne Direct.
-                    if (entry.type != MediaType.Live) repository.publishWatchNext(profileId)
+                    if (final && entry.type != MediaType.Live) repository.publishWatchNext(profileId)
                     repository.library(profileId).history
                 }
                 _uiState.update { state ->
@@ -3237,7 +3242,7 @@ private const val LIVE_ONSAT_RETRY_MS = 15 * 60_000L
 private const val SIMILAR_CANDIDATE_LIMIT = 300
 private const val SIMILAR_RESULT_LIMIT = 12
 private const val SIMILAR_TARGET_COUNT = 8
-private const val SIMILAR_ENRICH_LIMIT = 12
+private const val SIMILAR_ENRICH_LIMIT = 4
 private const val SIMILAR_ENRICH_CONCURRENCY = 4
 private const val SIMILAR_DETAIL_MIN_SCORE = 0.28
 

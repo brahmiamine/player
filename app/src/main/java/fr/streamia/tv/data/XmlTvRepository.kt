@@ -283,21 +283,7 @@ class XmlTvRepository {
         flushPrograms()
     }
 
-    private fun parseDate(value: String?): Long? {
-        val raw = value?.trim()?.takeIf(String::isNotBlank) ?: return null
-        val normalized = raw.replace(Regex("\\s+"), " ")
-        val patterns = listOf("yyyyMMddHHmmss Z", "yyyyMMddHHmm Z", "yyyyMMddHHmmss")
-        for (pattern in patterns) {
-            val parsed = runCatching {
-                SimpleDateFormat(pattern, Locale.US).apply {
-                    isLenient = true
-                    timeZone = TimeZone.getTimeZone("UTC")
-                }.parse(normalized)?.time
-            }.getOrNull()
-            if (parsed != null) return parsed / 1000
-        }
-        return null
-    }
+    private fun parseDate(value: String?): Long? = parseXmlTvDate(value)
 
     private companion object {
         const val BUFFER_SIZE = 128 * 1024
@@ -305,3 +291,86 @@ class XmlTvRepository {
     }
 }
 
+/**
+ * Date XMLTV (`20260926203000 +0200`, `202609262030 +0200`, `20260926203000`, en UTC sans décalage)
+ * convertie en secondes epoch **sans allocation** : appelée deux fois par programme, soit des
+ * millions de fois par synchronisation. L'ancienne version compilait une expression régulière et
+ * créait jusqu'à trois `SimpleDateFormat` par date (des minutes de processeur sur un boîtier TV).
+ * Format inattendu : repli sur l'analyse tolérante d'origine.
+ */
+internal fun parseXmlTvDate(value: String?): Long? {
+    if (value == null) return null
+    var i = 0
+    val n = value.length
+    while (i < n && value[i].isWhitespace()) i++
+    val digitsStart = i
+    while (i < n && value[i] in '0'..'9') i++
+    val digitCount = i - digitsStart
+    if (digitCount != 12 && digitCount != 14) return parseXmlTvDateLenient(value)
+    fun num(offset: Int, length: Int): Int {
+        var result = 0
+        for (k in digitsStart + offset until digitsStart + offset + length) result = result * 10 + (value[k] - '0')
+        return result
+    }
+    val year = num(0, 4)
+    val month = num(4, 2)
+    val day = num(6, 2)
+    val hour = num(8, 2)
+    val minute = num(10, 2)
+    val second = if (digitCount == 14) num(12, 2) else 0
+    if (month !in 1..12 || day !in 1..31 || hour > 23 || minute > 59 || second > 60) return parseXmlTvDateLenient(value)
+    while (i < n && value[i].isWhitespace()) i++
+    var offsetSeconds = 0
+    if (i < n) {
+        val sign = when (value[i]) {
+            '+' -> 1
+            '-' -> -1
+            else -> return parseXmlTvDateLenient(value)
+        }
+        i++
+        var hh = 0
+        var mm = 0
+        var count = 0
+        while (i < n && count < 4) {
+            val c = value[i]
+            if (c == ':') { i++; continue }
+            if (c !in '0'..'9') break
+            if (count < 2) hh = hh * 10 + (c - '0') else mm = mm * 10 + (c - '0')
+            count++
+            i++
+        }
+        if (count != 4 || hh > 23 || mm > 59) return parseXmlTvDateLenient(value)
+        offsetSeconds = sign * (hh * 3_600 + mm * 60)
+    }
+    return epochDay(year, month, day) * 86_400L + hour * 3_600L + minute * 60L + second - offsetSeconds
+}
+
+/** Jours depuis le 01/01/1970 (algorithme « days from civil » de H. Hinnant, calendrier grégorien). */
+private fun epochDay(year: Int, month: Int, day: Int): Long {
+    val y = (if (month <= 2) year - 1 else year).toLong()
+    val era = (if (y >= 0) y else y - 399) / 400
+    val yoe = y - era * 400
+    val mp = (month + 9) % 12
+    val doy = (153 * mp + 2) / 5 + day - 1
+    val doe = yoe * 365 + yoe / 4 - yoe / 100 + doy
+    return era * 146_097 + doe - 719_468
+}
+
+private val XMLTV_WHITESPACE = Regex("\\s+")
+
+private fun parseXmlTvDateLenient(value: String): Long? {
+    val raw = value.trim().takeIf(String::isNotBlank) ?: return null
+    val normalized = raw.replace(XMLTV_WHITESPACE, " ")
+    for (pattern in XMLTV_PATTERNS) {
+        val parsed = runCatching {
+            java.text.SimpleDateFormat(pattern, Locale.US).apply {
+                isLenient = true
+                timeZone = TimeZone.getTimeZone("UTC")
+            }.parse(normalized)?.time
+        }.getOrNull()
+        if (parsed != null) return parsed / 1000
+    }
+    return null
+}
+
+private val XMLTV_PATTERNS = listOf("yyyyMMddHHmmss Z", "yyyyMMddHHmm Z", "yyyyMMddHHmmss")

@@ -389,6 +389,18 @@ data class Catalog(
             .inheritSections(this, except = evictedTypes)
     }
 
+    /**
+     * Catalogue réorganisé par l'utilisateur (ordre des catégories, entrées déplacées). Les sections
+     * dont aucune entrée n'a changé de catégorie reprennent les index déjà construits de ce catalogue.
+     */
+    fun withCustomLayout(
+        categories: List<MediaCategory>,
+        entries: List<MediaEntry>,
+        categoryCounts: Map<String, Int>,
+        changedTypes: Set<MediaType>,
+    ): Catalog = copy(categories = categories, entries = entries, categoryCounts = categoryCounts)
+        .inheritSections(this, except = changedTypes)
+
     fun search(query: String, type: MediaType? = null, limit: Int = 500): List<MediaEntry> {
         val needle = query.trim().lowercase()
         if (needle.isBlank()) return emptyList()
