@@ -19,7 +19,8 @@ import java.util.zip.GZIPInputStream
 
 /** Charge un guide XMLTV en flux, en ne conservant que les chaînes présentes dans le catalogue. */
 class XmlTvRepository {
-    suspend fun load(url: String, entries: List<MediaEntry>): EpgGuide = withContext(Dispatchers.IO) {
+    // Guide XMLTV (souvent des dizaines de Mo) analysé en priorité basse.
+    suspend fun load(url: String, entries: List<MediaEntry>): EpgGuide = withContext(BackgroundWork.light) {
         val accepted = acceptedIds(entries)
         withRemoteStream(url) { stream -> parse(stream, accepted) }
     }

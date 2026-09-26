@@ -16,10 +16,21 @@ import java.util.concurrent.atomic.AtomicInteger
 internal object BackgroundWork {
     private val threadCount = AtomicInteger()
 
-    val dispatcher: CoroutineDispatcher = Executors.newFixedThreadPool(2) { task ->
+    /** Longs travaux (actualisation du catalogue, synchronisation XMLTV) : plusieurs minutes. */
+    val dispatcher: CoroutineDispatcher = lowPriorityPool(2, "streamia-background")
+
+    /**
+     * Travaux de fond courts, jamais attendus par l'utilisateur à l'instant : index des versions
+     * du Direct, recommandations, guides web, rapprochement des matchs, enrichissement. Même
+     * priorité basse, mais séparés des longs travaux pour ne pas attendre derrière une actualisation.
+     */
+    // 4 fils : un guide web qui attend le réseau n'empêche pas l'index ou les recommandations d'avancer.
+    val light: CoroutineDispatcher = lowPriorityPool(4, "streamia-light")
+
+    private fun lowPriorityPool(threads: Int, name: String): CoroutineDispatcher = Executors.newFixedThreadPool(threads) { task ->
         Thread({
             Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND)
             task.run()
-        }, "streamia-background-${threadCount.incrementAndGet()}").apply { isDaemon = true }
+        }, "$name-${threadCount.incrementAndGet()}").apply { isDaemon = true }
     }.asCoroutineDispatcher()
 }

@@ -22,6 +22,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.MutableIntState
 import androidx.compose.runtime.SideEffect
@@ -410,6 +411,26 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     val playerScreen = state.screen as StreamiaScreen.Player
                     val playerState by viewModel.playerState.collectAsStateWithLifecycle()
                     val liveVersionIndex by viewModel.liveVersionIndex.collectAsStateWithLifecycle()
+                    // Rappels stables (clés : contenu joué) : recréés à chaque évolution de l'état, ils
+                    // faisaient recomposer tout le lecteur dès qu'une tâche de fond publiait quelque
+                    // chose (guides, recommandations, historique), sans rien changer pour lui.
+                    val latestReturnOrigin by rememberUpdatedState(state.contentReturnContext?.origin)
+                    val onPlayerBack = remember(playerScreen.entry, livePlaybackSession) {
+                        {
+                            val origin = latestReturnOrigin
+                            if (origin == null || origin == ContentReturnOrigin.Browser) {
+                                LiveBrowserReturnState.remember(playerScreen.entry)
+                            } else if (playerScreen.entry.type == MediaType.Live) {
+                                // Retour vers un écran sans aperçu (accueil, matchs du jour) : le
+                                // lecteur Live est partagé avec l'aperçu du navigateur, mais ces écrans
+                                // n'affichent aucune vidéo — sans cette coupure, le flux continuerait
+                                // en fond, audio compris.
+                                livePlaybackSession.stop(clearSession = true)
+                            }
+                            viewModel.closePlayer()
+                        }
+                    }
+                    val onMovieFinished = remember(playerScreen.entry) { { viewModel.finishMovie(playerScreen.entry) } }
                     PlayerScreen(
                         catalog = state.catalog!!,
                         credentials = state.credentials!!,
@@ -425,19 +446,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                         livePlaybackSession = livePlaybackSession,
                         liveVideoSurface = liveVideoSurface,
                         liveReturnsToSource = livePlayerReturnsToSource(state.contentReturnContext?.origin),
-                        onBack = {
-                            val origin = state.contentReturnContext?.origin
-                            if (origin == null || origin == ContentReturnOrigin.Browser) {
-                                LiveBrowserReturnState.remember(playerScreen.entry)
-                            } else if (playerScreen.entry.type == MediaType.Live) {
-                                // Retour vers un écran sans aperçu (accueil, matchs du jour) : le
-                                // lecteur Live est partagé avec l'aperçu du navigateur, mais ces écrans
-                                // n'affichent aucune vidéo — sans cette coupure, le flux continuerait
-                                // en fond, audio compris.
-                                livePlaybackSession.stop(clearSession = true)
-                            }
-                            viewModel.closePlayer()
-                        },
+                        onBack = onPlayerBack,
                         onZap = viewModel::zap,
                         onPreviousChannel = viewModel::previousChannel,
                         pendingZapEntry = playerState.pendingZapEntry,
@@ -447,7 +456,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                         onProgress = viewModel::recordPlayback,
                         onCycleVideoAspect = viewModel::cycleVideoAspect,
                         onPlayNextEpisode = viewModel::playNextEpisode,
-                        onMovieFinished = { viewModel.finishMovie(playerScreen.entry) },
+                        onMovieFinished = onMovieFinished,
                     )
                 }
 

@@ -199,7 +199,7 @@ class XtreamRepository private constructor(context: Context) {
         val index = runCatching { candidateIndex(profileId) }.getOrNull()
             ?: return (cache.loadEntriesByKeys(profileId, LinkedHashSet(tmdbKeys)) + neighbours).distinctBy(MediaEntry::key).take(limit)
         val indexed = indexedSource(source, sourceFeatures)
-        val matchedKeys = withContext(Dispatchers.Default) {
+        val matchedKeys = withContext(BackgroundWork.light) {
             // Liens forts (saga, MovieLens, TMDB) d'abord, puis proximité genre / intrigue / mots-clés / personnes.
             (index.related(indexed, movieLens.of(indexed.tmdbId)).keys + tmdbKeys + index.topMatches(indexed, limit = (limit / 2).coerceAtLeast(1)))
                 .distinct()
@@ -219,7 +219,7 @@ class XtreamRepository private constructor(context: Context) {
         val tmdb = tmdbRelated(profileId, source)
         val index = runCatching { candidateIndex(profileId) }.getOrNull() ?: return tmdb
         val indexed = indexedSource(source, sourceFeatures)
-        val related = withContext(Dispatchers.Default) { index.related(indexed, movieLens.of(indexed.tmdbId)) }
+        val related = withContext(BackgroundWork.light) { index.related(indexed, movieLens.of(indexed.tmdbId)) }
         // Saga / MovieLens gardent la priorité quand ils sont plus sûrs que la recommandation TMDB.
         return tmdb + related.filter { (key, boost) -> (tmdb[key]?.score ?: 0.0) < boost.score }
     }
@@ -333,7 +333,7 @@ class XtreamRepository private constructor(context: Context) {
                 // Seulement les contenus enrichis : charger tout Films + Séries (plus de 200 000
                 // entrées avec résumés) saturait la mémoire et faisait planter l'app (OOM).
                 val entries = cache.loadEntriesByKeys(profileId, features.keys).associateBy(MediaEntry::key)
-                val index = withContext(Dispatchers.Default) {
+                val index = withContext(BackgroundWork.light) {
                     ContentCandidateIndex(
                         features.mapNotNull { (key, stored) ->
                             val entry = entries[key] ?: return@mapNotNull null

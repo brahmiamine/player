@@ -66,10 +66,11 @@ internal class BeinSportsGuideRepository(context: Context) {
         cache.load()?.takeIf { now - it.fetchedAtEpochMillis in 0 until FALLBACK_MAX_AGE_MS }?.toFetchResult(fromCache = true)
     }
 
+    // Téléchargement et analyse HTML en priorité basse : jamais au détriment de l'interface ou du lecteur.
     suspend fun loadGuide(
         forceRefresh: Boolean,
         maxAgeMillis: Long,
-    ): BeinSportsGuideFetchResult = withContext(Dispatchers.IO) {
+    ): BeinSportsGuideFetchResult = withContext(BackgroundWork.light) {
         val now = System.currentTimeMillis()
         val cached = cache.load()?.takeIf { now - it.fetchedAtEpochMillis in 0 until FALLBACK_MAX_AGE_MS }
         val fresh = cached != null && now - cached.fetchedAtEpochMillis < maxAgeMillis

@@ -1,5 +1,6 @@
 package fr.streamia.tv.ui
 
+import fr.streamia.tv.data.BackgroundWork
 import fr.streamia.tv.data.WatchNextPublisher
 import android.content.ComponentCallbacks2
 import android.net.Uri
@@ -251,7 +252,8 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         val current = _liveVersionIndex.value
         // Index déjà construit depuis la base pour cette liste : il reste valable jusqu'au catalogue complet.
         if (!complete && current != null && liveVersionIndexFromDatabase && liveVersionIndexProfileId == profileId) return
-        val index = withContext(Dispatchers.Default) {
+        // Priorité basse : l'index ne doit jamais prendre le processeur à l'interface ni au lecteur.
+        val index = withContext(BackgroundWork.light) {
             val channels = if (complete) {
                 catalog.entriesFor(MediaType.Live)
             } else {
@@ -1557,7 +1559,9 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         val profileId = _uiState.value.activeProfileId ?: return
         viewModelScope.launch {
             libraryMutation.withLock {
-                val history = withContext(Dispatchers.IO) {
+                // Réécriture de tout le JSON du profil juste après un zap, pendant que la nouvelle
+                // chaîne démarre : en priorité basse, pour ne pas disputer le processeur au lecteur.
+                val history = withContext(BackgroundWork.light) {
                     repository.recordPlayback(profileId, entry, positionMs, durationMs)
                     // « Continuer à regarder » de Google TV ne liste que films et épisodes : rien à
                     // republier (≈ 10 appels au fournisseur système) à chaque chaîne Direct.
@@ -2218,7 +2222,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
 
         // Comme pour les Matchs : le scoring (similarité texte, décroissance des signaux) est du
         // CPU pur sur potentiellement plusieurs centaines de candidats, donc jamais sur Main.
-        homeRecommendationJob = viewModelScope.launch(Dispatchers.Default) {
+        homeRecommendationJob = viewModelScope.launch(BackgroundWork.light) {
             // Fin du calcul (résultat, rien à recommander ou erreur) : plus de squelette, sauf si un
             // calcul plus récent a pris le relais.
             coroutineContext.job.invokeOnCompletion {
@@ -2330,7 +2334,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         if (justWatchRowsProfileId != profileId) _uiState.update { it.copy(homeJustWatchRows = emptyList()) }
         justWatchRowsProfileId = profileId
         val disabledBlocks = _uiState.value.appSettings.disabledHomeBlocks
-        justWatchJob = viewModelScope.launch(Dispatchers.Default) {
+        justWatchJob = viewModelScope.launch(BackgroundWork.light) {
             JustWatchSection.entries.filter { it.homeBlock !in disabledBlocks }.forEach { section ->
                 launch {
                     fun publish(entries: List<MediaEntry>) = publishJustWatchRow(profileId, section, entries, hiddenEntries, excludedCategoryIds)
@@ -2428,7 +2432,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             }
         }
 
-        suspend fun rank(): List<RecommendedMedia> = withContext(Dispatchers.Default) {
+        suspend fun rank(): List<RecommendedMedia> = withContext(BackgroundWork.light) {
             recommendationEngine.similarTo(
                 source = sourceFeatures,
                 candidates = candidates,
@@ -2586,7 +2590,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             }
             val sequence = ++resolveSequence
             resolveJob?.cancel()
-            resolveJob = viewModelScope.launch(Dispatchers.Default) {
+            resolveJob = viewModelScope.launch(BackgroundWork.light) {
                 val publish = match(fetched, catalog) { channel ->
                     channel.key !in hiddenEntries && channel.categoryId !in excludedCategoryIds
                 }
@@ -2757,7 +2761,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             val cached = liveOnSatIndexCache?.takeIf { (channels, categories, _) ->
                 channels === liveChannels && categories === matcherCatalog.categories
             }?.third
-            val index = cached ?: withContext(Dispatchers.Default) { liveOnSatChannelMatcher.buildIndex(matcherCatalog) }
+            val index = cached ?: withContext(BackgroundWork.light) { liveOnSatChannelMatcher.buildIndex(matcherCatalog) }
                 .also { liveOnSatIndexCache = Triple(liveChannels, matcherCatalog.categories, it) }
             guide.await() to index
         }
@@ -2769,7 +2773,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         while (offset < matches.size) {
             if (sequence != liveOnSatLoadSequence) return
             val end = minOf(offset + LIVE_ONSAT_RESOLVE_BATCH, matches.size)
-            val chunk = withContext(Dispatchers.Default) {
+            val chunk = withContext(BackgroundWork.light) {
                 (offset until end).map { i ->
                     val match = matches[i]
                     val matched = match.channels.mapNotNull { channel ->

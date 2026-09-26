@@ -140,7 +140,8 @@ class LiveVersionStatsStore(context: Context) {
 
     companion object {
         private const val PREFERENCES_NAME = "streamia-live-versions-v1"
-        private const val MAX_ENTRIES = 800
+        // Chaque écriture réécrit tout le fichier : borné pour rester une écriture minuscule.
+        private const val MAX_ENTRIES = 400
         private const val EVICTION_BATCH = 100
         private const val EVICTION_CHECK_EVERY = 25
         private const val DECAY_AFTER_MS = 3 * 3_600_000L

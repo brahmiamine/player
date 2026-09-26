@@ -1,5 +1,7 @@
 package fr.streamia.tv.work
 
+import fr.streamia.tv.data.BackgroundWork
+import kotlinx.coroutines.withContext
 import android.content.Context
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
@@ -35,7 +37,8 @@ class MetadataEnrichmentWorker(context: Context, params: WorkerParameters) : Cor
         // pour ne jamais doubler la charge sur le fournisseur.
         if (!running.compareAndSet(false, true)) return Result.success()
         return try {
-            enrich()
+            // Priorité basse : l'enrichissement tourne pendant que l'utilisateur navigue.
+            withContext(BackgroundWork.light) { enrich() }
         } finally {
             running.set(false)
         }

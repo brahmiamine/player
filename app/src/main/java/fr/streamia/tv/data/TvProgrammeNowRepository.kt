@@ -53,8 +53,9 @@ internal class TvProgrammeNowRepository(context: Context) {
         lastFailureAtEpochMillis = 0L
     }
 
+    // Téléchargement et analyse HTML en priorité basse : jamais au détriment de l'interface ou du lecteur.
     suspend fun loadNow(forceRefresh: Boolean, maxAgeMillis: Long): TvProgrammeNowFetchResult =
-        withContext(Dispatchers.IO) {
+        withContext(BackgroundWork.light) {
             val now = System.currentTimeMillis()
             val cached = cache.load()
             val cachedNow = cached?.let { TvProgrammeNowParser.onAir(it.programmes, now) }.orEmpty()

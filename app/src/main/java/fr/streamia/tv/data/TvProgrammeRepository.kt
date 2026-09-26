@@ -39,8 +39,9 @@ internal class TvProgrammeRepository(context: Context) {
         todayCache()?.let { TvProgrammeFetchResult(it.programmes, it.fetchedAtEpochMillis, fromCache = true) }
     }
 
+    // Téléchargement et analyse HTML en priorité basse : jamais au détriment de l'interface ou du lecteur.
     suspend fun loadTonight(forceRefresh: Boolean, maxAgeMillis: Long): TvProgrammeFetchResult =
-        withContext(Dispatchers.IO) {
+        withContext(BackgroundWork.light) {
             val today = today()
             val cached = todayCache()
             val fresh = isFresh(cached, maxAgeMillis)

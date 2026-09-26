@@ -898,8 +898,8 @@ fun PlayerScreen(
     // « Tester toutes les versions » : chaque version est lancée à l'écran l'une après l'autre (une
     // seule connexion à la fois) le temps d'un contrôle réel, puis la meilleure est gardée.
     var versionScan by remember { mutableStateOf<LiveVersionScan?>(null) }
-    val failoverActive = appSettings.liveVersionFailover && sharedLivePlayer && versionScan == null &&
-        hasFailoverCandidates(entry, liveVersions)
+    val hasFailoverTargets = remember(entry.key, liveVersions) { hasFailoverCandidates(entry, liveVersions) }
+    val failoverActive = appSettings.liveVersionFailover && sharedLivePlayer && versionScan == null && hasFailoverTargets
     var failoverChain by remember { mutableStateOf<LiveFailoverChain?>(null) }
     // Compteur de coupures propre à la version en cours : il repart de zéro sur la suivante.
     val cutCounter = remember(entry.key) { LiveCutCounter() }

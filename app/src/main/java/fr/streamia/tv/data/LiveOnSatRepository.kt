@@ -43,8 +43,9 @@ internal class LiveOnSatRepository(context: Context) {
         cache.load()?.let { LiveOnSatFetchResult(it.matches, it.fetchedAtEpochMillis, fromCache = true) }
     }
 
+    // Téléchargement et analyse HTML en priorité basse : jamais au détriment de l'interface ou du lecteur.
     suspend fun loadMatches(forceRefresh: Boolean, maxAgeMillis: Long): LiveOnSatFetchResult =
-        withContext(Dispatchers.IO) {
+        withContext(BackgroundWork.light) {
             val cached = cache.load()
             val isFresh = cached != null && System.currentTimeMillis() - cached.fetchedAtEpochMillis < maxAgeMillis
             if (!forceRefresh && isFresh && cached != null) {

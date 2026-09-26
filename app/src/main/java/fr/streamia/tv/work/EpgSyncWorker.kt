@@ -1,5 +1,7 @@
 package fr.streamia.tv.work
 
+import fr.streamia.tv.data.BackgroundWork
+import kotlinx.coroutines.withContext
 import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
@@ -15,7 +17,9 @@ import fr.streamia.tv.domain.MediaType
  * que donner à cette vérification une chance de tourner avant que l'utilisateur rouvre l'app.
  */
 class EpgSyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
-    override suspend fun doWork(): Result {
+    override suspend fun doWork(): Result = withContext(BackgroundWork.dispatcher) { sync() }
+
+    private suspend fun sync(): Result {
         val profileId = PlaybackSessionStore(applicationContext).loadActiveProfileId() ?: return Result.success()
         val repository = XtreamRepository.get(applicationContext)
         val profile = repository.profile(profileId) ?: return Result.success()
