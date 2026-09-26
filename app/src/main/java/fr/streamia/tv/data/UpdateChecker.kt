@@ -1,9 +1,8 @@
 package fr.streamia.tv.data
 
+import fr.streamia.tv.net.HttpClients
 import java.io.File
 import java.io.IOException
-import java.net.HttpURLConnection
-import java.net.URL
 import java.nio.charset.StandardCharsets
 import org.json.JSONObject
 
@@ -65,20 +64,15 @@ class UpdateChecker(private val repository: String = "brahmiamine/player") {
     fun downloadApk(release: ReleaseInfo, target: File, onProgress: (Float?) -> Unit = {}) {
         val url = release.apkUrl ?: throw IOException("Aucun APK dans la release " + release.version + ".")
         // browser_download_url redirige vers le stockage GitHub (https → https : suivi automatiquement).
-        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
-            connectTimeout = 15_000
-            readTimeout = 60_000
-            useCaches = false
-            setRequestProperty("User-Agent", "Streamia-TV-UpdateChecker")
-        }
-        try {
-            val code = connection.responseCode
-            if (code !in 200..299) throw IOException("GitHub a répondu avec le code $code.")
+        HttpClients.execute(url, mapOf("User-Agent" to "Streamia-TV-UpdateChecker"), connectTimeoutMs = 15_000, readTimeoutMs = 60_000).use { response ->
+            val code = response.code
+            if (!response.isSuccessful) throw IOException("GitHub a répondu avec le code $code.")
             target.parentFile?.mkdirs()
             val partial = File(target.path + ".part")
-            val total = connection.getHeaderField("Content-Length")?.toLongOrNull()?.takeIf { it > 0 }
+            val body = response.body ?: throw IOException("APK téléchargé invalide.")
+            val total = body.contentLength().takeIf { it > 0 }
             onProgress(if (total == null) null else 0f)
-            connection.inputStream.use { input ->
+            body.byteStream().use { input ->
                 partial.outputStream().use { output ->
                     val buffer = ByteArray(64 * 1024)
                     var copied = 0L
@@ -99,28 +93,21 @@ class UpdateChecker(private val repository: String = "brahmiamine/player") {
                 }
             }
             if (partial.length() == 0L || !partial.renameTo(target)) throw IOException("APK téléchargé invalide.")
-        } finally {
-            connection.disconnect()
         }
     }
 
     /** null si la release "latest" n'existe pas (404). */
     private fun fetchLatestRelease(): JSONObject? {
-        val connection = (URL("https://api.github.com/repos/$repository/releases/tags/latest").openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            connectTimeout = 10_000
-            readTimeout = 15_000
-            useCaches = false
-            setRequestProperty("Accept", "application/vnd.github+json")
-            setRequestProperty("User-Agent", "Streamia-TV-UpdateChecker")
-        }
-        return try {
-            val code = connection.responseCode
+        return HttpClients.execute(
+            "https://api.github.com/repos/$repository/releases/tags/latest",
+            mapOf("Accept" to "application/vnd.github+json", "User-Agent" to "Streamia-TV-UpdateChecker"),
+            connectTimeoutMs = 10_000,
+            readTimeoutMs = 15_000,
+        ).use { response ->
+            val code = response.code
             if (code == 404) return null
-            if (code !in 200..299) throw IllegalStateException("GitHub a répondu avec le code $code.")
-            JSONObject(connection.inputStream.bufferedReader(StandardCharsets.UTF_8).use { it.readText() })
-        } finally {
-            connection.disconnect()
+            if (!response.isSuccessful) throw IllegalStateException("GitHub a répondu avec le code $code.")
+            JSONObject(response.body?.bytes()?.toString(StandardCharsets.UTF_8).orEmpty())
         }
     }
 }

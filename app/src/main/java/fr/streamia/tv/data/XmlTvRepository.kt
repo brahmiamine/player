@@ -1,30 +1,19 @@
 package fr.streamia.tv.data
 
+import fr.streamia.tv.net.HttpClients
 import fr.streamia.tv.domain.EpgChannel
-import fr.streamia.tv.domain.EpgGuide
 import fr.streamia.tv.domain.EpgProgram
 import fr.streamia.tv.domain.MediaEntry
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import org.xmlpull.v1.XmlPullParser
 import org.xmlpull.v1.XmlPullParserFactory
 import java.io.BufferedInputStream
 import java.io.InputStream
-import java.net.HttpURLConnection
-import java.net.URL
-import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
 import java.util.zip.GZIPInputStream
 
 /** Charge un guide XMLTV en flux, en ne conservant que les chaînes présentes dans le catalogue. */
 class XmlTvRepository {
-    // Guide XMLTV (souvent des dizaines de Mo) analysé en priorité basse.
-    suspend fun load(url: String, entries: List<MediaEntry>): EpgGuide = withContext(BackgroundWork.light) {
-        val accepted = acceptedIds(entries)
-        withRemoteStream(url) { stream -> parse(stream, accepted) }
-    }
-
     /**
      * Variante destinée au cache SQLite : aucun guide complet n'est matérialisé en mémoire. Les
      * programmes sont émis par petits lots pendant le parsing et la transaction est pilotée par
@@ -34,9 +23,10 @@ class XmlTvRepository {
         url: String,
         entries: List<MediaEntry>,
         sink: EpgWriteSink,
-    ) {
+        validators: HttpValidators? = null,
+    ): XmlTvSyncOutcome {
         val accepted = acceptedIds(entries)
-        withRemoteStream(url) { stream -> parseToSink(stream, accepted, sink) }
+        return withRemoteStream(url, validators) { stream -> parseToSink(stream, accepted, sink) }
     }
 
     private fun acceptedIds(entries: List<MediaEntry>): Set<String> = buildSet {
@@ -47,123 +37,26 @@ class XmlTvRepository {
         }
     }
 
-    private fun <T> withRemoteStream(url: String, block: (InputStream) -> T): T {
-        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            connectTimeout = 15_000
-            readTimeout = 60_000
-            instanceFollowRedirects = true
-            useCaches = true
-            setRequestProperty("Accept-Encoding", "gzip")
-            setRequestProperty("User-Agent", "Streamia-TV/1.5")
+    /**
+     * Guide téléchargé par le client HTTP partagé (décompression gzip transparente). Avec
+     * [validators] (ETag / Last-Modified de la dernière synchronisation), un guide inchangé répond
+     * 304 : ni téléchargement ni analyse de dizaines de Mo.
+     */
+    private fun withRemoteStream(url: String, validators: HttpValidators?, block: (InputStream) -> Unit): XmlTvSyncOutcome {
+        val headers = buildMap {
+            validators?.etag?.let { put("If-None-Match", it) }
+            validators?.lastModified?.let { put("If-Modified-Since", it) }
         }
-        try {
-            val code = connection.responseCode
-            if (code !in 200..299) throw XtreamException("Le serveur EPG a répondu avec le code $code.")
-            val raw = BufferedInputStream(connection.inputStream, BUFFER_SIZE)
-            val stream: InputStream = if (
-                connection.contentEncoding.equals("gzip", ignoreCase = true) || url.endsWith(".gz", ignoreCase = true)
-            ) GZIPInputStream(raw, BUFFER_SIZE) else raw
-            return stream.use(block)
-        } finally {
-            connection.disconnect()
+        return HttpClients.execute(url, headers, connectTimeoutMs = 15_000, readTimeoutMs = 60_000).use { response ->
+            if (response.code == 304 && validators != null) return@use XmlTvSyncOutcome.NotModified
+            if (!response.isSuccessful) throw XtreamException("Le serveur EPG a répondu avec le code ${response.code}.")
+            val body = response.body ?: throw XtreamException("Le serveur EPG a renvoyé une réponse vide.")
+            val raw = BufferedInputStream(body.byteStream(), BUFFER_SIZE)
+            // Fichier .gz servi tel quel (le gzip de transport, lui, est déjà retiré par OkHttp).
+            val stream: InputStream = if (url.substringBefore('?').endsWith(".gz", ignoreCase = true)) GZIPInputStream(raw, BUFFER_SIZE) else raw
+            stream.use(block)
+            XmlTvSyncOutcome.Written(HttpValidators(response.header("ETag"), response.header("Last-Modified")))
         }
-    }
-
-    private fun parse(stream: InputStream, acceptedIds: Set<String>): EpgGuide {
-        val parser = XmlPullParserFactory.newInstance().newPullParser().apply {
-            setInput(stream, null)
-        }
-        val channelNames = linkedMapOf<String, String?>()
-        val channelIcons = linkedMapOf<String, String?>()
-        val programs = linkedMapOf<String, MutableList<EpgProgram>>()
-        var event = parser.eventType
-        var currentChannelId: String? = null
-        var currentChannelName: String? = null
-        var currentProgramChannel: String? = null
-        var currentProgramTitle: String? = null
-        var currentProgramDescription: String? = null
-        var currentProgramCategory: String? = null
-        var currentStart: Long? = null
-        var currentEnd: Long? = null
-
-        while (event != XmlPullParser.END_DOCUMENT) {
-            when (event) {
-                XmlPullParser.START_TAG -> when (parser.name) {
-                    "channel" -> {
-                        currentChannelId = parser.getAttributeValue(null, "id")
-                        currentChannelName = null
-                    }
-                    "display-name" -> if (currentChannelId != null) {
-                        currentChannelName = parser.nextText().trim().takeIf(String::isNotBlank)
-                    }
-                    "icon" -> if (currentChannelId != null) {
-                        parser.getAttributeValue(null, "src")?.takeIf(String::isNotBlank)?.let {
-                            channelIcons[currentChannelId!!] = it
-                        }
-                    }
-                    "programme" -> {
-                        currentProgramChannel = parser.getAttributeValue(null, "channel")
-                        currentStart = parseDate(parser.getAttributeValue(null, "start"))
-                        currentEnd = parseDate(parser.getAttributeValue(null, "stop"))
-                        currentProgramTitle = null
-                        currentProgramDescription = null
-                        currentProgramCategory = null
-                    }
-                    "title" -> if (currentProgramChannel != null) {
-                        currentProgramTitle = parser.nextText().trim().takeIf(String::isNotBlank)
-                    }
-                    "desc" -> if (currentProgramChannel != null) {
-                        currentProgramDescription = parser.nextText().trim().takeIf(String::isNotBlank)
-                    }
-                    "category" -> if (currentProgramChannel != null) {
-                        currentProgramCategory = parser.nextText().trim().takeIf(String::isNotBlank)
-                    }
-                }
-                XmlPullParser.END_TAG -> when (parser.name) {
-                    "channel" -> {
-                        val id = currentChannelId
-                        if (id != null) channelNames[id] = currentChannelName
-                        currentChannelId = null
-                        currentChannelName = null
-                    }
-                    "programme" -> {
-                        val channel = currentProgramChannel
-                        val title = currentProgramTitle
-                        val accepted = channel != null && (
-                            channel in acceptedIds || channelNames[channel] in acceptedIds
-                        )
-                        if (accepted && title != null) {
-                            programs.getOrPut(channel!!) { ArrayList() }.add(
-                                EpgProgram(
-                                    title = title,
-                                    description = currentProgramDescription,
-                                    startEpochSeconds = currentStart,
-                                    endEpochSeconds = currentEnd,
-                                    channelId = channel,
-                                    category = currentProgramCategory,
-                                ),
-                            )
-                        }
-                        currentProgramChannel = null
-                    }
-                }
-            }
-            event = parser.next()
-        }
-
-        val channels = linkedMapOf<String, EpgChannel>()
-        val keys = (channelNames.keys + programs.keys).distinct()
-        for (id in keys) {
-            if (id !in acceptedIds && channelNames[id] !in acceptedIds) continue
-            channels[id] = EpgChannel(
-                channelId = id,
-                displayName = channelNames[id],
-                iconUrl = channelIcons[id],
-                programs = programs[id].orEmpty().sortedBy { it.startEpochSeconds ?: Long.MAX_VALUE },
-            )
-        }
-        return EpgGuide(channels)
     }
 
     private fun parseToSink(
@@ -382,3 +275,14 @@ private fun parseXmlTvDateLenient(value: String): Long? {
 }
 
 private val XMLTV_PATTERNS = listOf("yyyyMMddHHmmss Z", "yyyyMMddHHmm Z", "yyyyMMddHHmmss")
+
+/** Validateurs HTTP d'un guide déjà synchronisé. */
+internal data class HttpValidators(val etag: String?, val lastModified: String?) {
+    val isEmpty: Boolean get() = etag.isNullOrBlank() && lastModified.isNullOrBlank()
+}
+
+internal sealed interface XmlTvSyncOutcome {
+    /** Guide inchangé depuis la dernière synchronisation (304). */
+    data object NotModified : XmlTvSyncOutcome
+    data class Written(val validators: HttpValidators) : XmlTvSyncOutcome
+}

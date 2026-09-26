@@ -24,6 +24,7 @@ import fr.streamia.tv.work.MetadataEnrichmentWorker
 
 class MainActivity : ComponentActivity() {
     private lateinit var viewModel: StreamiaViewModel
+    private var jankReporter: fr.streamia.tv.logging.JankReporter? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
@@ -62,6 +63,12 @@ class MainActivity : ComponentActivity() {
         // la restauration de session habituelle (StreamiaTvRoot l'ignore dès qu'un profil est actif).
         viewModel.openResumeLink(intent?.data)
         setContent { StreamiaTvRoot(viewModel) }
+
+        // Saccades mesurées par écran en usage réel (journal Crashlytics).
+        jankReporter = runCatching { fr.streamia.tv.logging.JankReporter.attach(window) }.getOrNull()
+        lifecycleScope.launch {
+            viewModel.uiState.collect { state -> jankReporter?.onScreen(state.screen::class.simpleName ?: "screen") }
+        }
     }
 
     // Chaque appui télécommande : les tâches de fond lourdes attendent que la navigation se calme.
@@ -70,8 +77,14 @@ class MainActivity : ComponentActivity() {
         fr.streamia.tv.player.UserActivity.onInteraction()
     }
 
+    override fun onPause() {
+        super.onPause()
+        jankReporter?.setTracking(false)
+    }
+
     override fun onResume() {
         super.onResume()
+        jankReporter?.setTracking(true)
         // Retour du réglage « Installer des applis inconnues » : l'installation de la mise à jour reprend.
         if (::viewModel.isInitialized) viewModel.resumePendingUpdateInstall()
     }

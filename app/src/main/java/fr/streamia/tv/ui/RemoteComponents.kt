@@ -38,6 +38,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.onFocusChanged
@@ -192,10 +193,9 @@ fun FocusableSurface(
                     scaleX = scale.value
                     scaleY = scale.value
                 }
-                .then(
-                    if (elevation > 0.dp) Modifier.shadow(elevation, shape, clip = false, ambientColor = glowColor, spotColor = glowColor)
-                    else Modifier,
-                )
+                // Halo dessiné (anneaux translucides mis en cache) plutôt qu'une ombre colorée :
+                // l'ombre était recalculée par le GPU à chaque déplacement du focus.
+                .then(if (elevation > 0.dp) Modifier.focusHalo(glowColor, elevation, RadiusTile) else Modifier)
                 .clip(shape)
                 .then(
                     if (accent) {
@@ -211,6 +211,32 @@ fun FocusableSurface(
         }
     }
 }
+
+/**
+ * Lueur autour d'une surface : quelques anneaux arrondis d'opacité décroissante, dessinés hors des
+ * bords (la couche de l'échelle n'est pas rognée). Géométrie mise en cache par taille.
+ */
+internal fun Modifier.focusHalo(color: Color, spread: androidx.compose.ui.unit.Dp, radius: androidx.compose.ui.unit.Dp): Modifier =
+    drawWithCache {
+        val spreadPx = spread.toPx() * HALO_SPREAD_RATIO
+        val radiusPx = radius.toPx()
+        val ringWidth = spreadPx / HALO_RINGS
+        onDrawBehind {
+            for (ring in 0 until HALO_RINGS) {
+                val inset = ring * ringWidth + ringWidth / 2
+                drawRoundRect(
+                    color = color.copy(alpha = color.alpha * (1f - ring.toFloat() / HALO_RINGS) * 0.6f),
+                    topLeft = androidx.compose.ui.geometry.Offset(-inset, -inset),
+                    size = androidx.compose.ui.geometry.Size(size.width + inset * 2, size.height + inset * 2),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(radiusPx + inset),
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = ringWidth),
+                )
+            }
+        }
+    }
+
+private const val HALO_RINGS = 4
+private const val HALO_SPREAD_RATIO = 0.6f
 
 private fun AndroidKeyEvent.isTvSelectKey(): Boolean = when (keyCode) {
     AndroidKeyEvent.KEYCODE_DPAD_CENTER,

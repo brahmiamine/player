@@ -337,6 +337,11 @@ internal class EpgDatabase(context: Context) :
             arrayOf(profileId, channelId, sourceStartEpochSeconds.toString()),
         ).use { cursor -> if (cursor.moveToFirst()) cursor.nullableString(0) else null }
 
+    /** Guide inchangé côté serveur (304) : la synchronisation compte comme faite maintenant. */
+    fun touch(profileId: String, nowMillis: Long = System.currentTimeMillis()) {
+        writableDatabase.execSQL("UPDATE epg_profiles SET synced_at = ? WHERE profile_id = ?", arrayOf<Any>(nowMillis, profileId))
+    }
+
     fun delete(profileId: String) {
         val db = writableDatabase
         db.beginTransaction()

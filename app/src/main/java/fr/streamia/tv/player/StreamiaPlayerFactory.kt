@@ -15,6 +15,8 @@ import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
+import androidx.media3.extractor.DefaultExtractorsFactory
+import androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory
 import fr.streamia.tv.data.BufferMode
 import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.logging.CrashReporter
@@ -67,7 +69,16 @@ object StreamiaPlayerFactory {
         // only understands http(s) — a local subtitle picked via SAF (content://) would fail to load.
         // DefaultDataSource.Factory keeps OkHttp for http(s) and adds file/content/asset resolution on top.
         val dataSourceFactory = DefaultDataSource.Factory(context, httpDataSourceFactory)
-        val mediaSourceFactory = DefaultMediaSourceFactory(context)
+        // Direct en MPEG-TS : décodage dès la première image clé (même non IDR, fréquent en IPTV) et
+        // unités d'accès détectées sans délimiteur, pour une première image plus rapide au zap.
+        val extractorsFactory = DefaultExtractorsFactory().apply {
+            if (mediaType == MediaType.Live) {
+                setTsExtractorFlags(
+                    DefaultTsPayloadReaderFactory.FLAG_ALLOW_NON_IDR_KEYFRAMES or DefaultTsPayloadReaderFactory.FLAG_DETECT_ACCESS_UNITS,
+                )
+            }
+        }
+        val mediaSourceFactory = DefaultMediaSourceFactory(context, extractorsFactory)
             .setDataSourceFactory(dataSourceFactory)
             // Le Direct a sa propre bascule d'URL (TS/HLS, HTTP→HTTPS) : 5 relances par URL avant d'y
             // passer laissaient l'écran noir plusieurs dizaines de secondes sur une chaîne morte.

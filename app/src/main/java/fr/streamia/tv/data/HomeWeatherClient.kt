@@ -1,13 +1,12 @@
 package fr.streamia.tv.data
 
+import fr.streamia.tv.net.HttpClients
 import com.batoulapps.adhan.CalculationMethod
 import com.batoulapps.adhan.CalculationParameters
 import com.batoulapps.adhan.Coordinates
 import com.batoulapps.adhan.PrayerTimes
 import com.batoulapps.adhan.data.DateComponents
 import org.json.JSONObject
-import java.net.HttpURLConnection
-import java.net.URL
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.util.Date
@@ -54,18 +53,11 @@ class HomeWeatherClient {
     }
 
     private fun getJson(url: String): JSONObject {
-        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
-            connectTimeout = 10_000
-            readTimeout = 10_000
-            setRequestProperty("User-Agent", "Streamia-TV")
+        val body = HttpClients.execute(url, mapOf("User-Agent" to "Streamia-TV"), connectTimeoutMs = 10_000, readTimeoutMs = 10_000).use { response ->
+            if (!response.isSuccessful) throw IllegalStateException("Service météo : code ${response.code}.")
+            response.body?.bytes()?.toString(Charsets.UTF_8).orEmpty()
         }
-        return try {
-            val code = connection.responseCode
-            if (code !in 200..299) throw IllegalStateException("Service météo : code $code.")
-            JSONObject(connection.inputStream.bufferedReader(StandardCharsets.UTF_8).use { it.readText() })
-        } finally {
-            connection.disconnect()
-        }
+        return JSONObject(body)
     }
 }
 

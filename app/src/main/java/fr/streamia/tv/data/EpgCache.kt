@@ -44,6 +44,8 @@ class EpgCache(context: Context) {
         session.abort()
     }
 
+    internal fun touchOnIo(profileId: String) = database.touch(profileId)
+
     suspend fun metadata(profileId: String): EpgCacheMetadata? = withContext(Dispatchers.IO) {
         database.metadata(profileId)
     }

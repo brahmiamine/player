@@ -1,31 +1,23 @@
 package fr.streamia.tv.data
 
+import fr.streamia.tv.net.HttpClients
 import java.io.IOException
-import java.net.HttpURLConnection
-import java.net.URL
 import java.nio.charset.StandardCharsets
 
 /** Télécharge le HTML des pages publiques de programme TV (tv-programme.com et sites de secours). */
 internal class TvProgrammeClient {
     @Throws(IOException::class)
-    fun fetch(url: String): String {
-        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            connectTimeout = 15_000
-            readTimeout = 20_000
-            instanceFollowRedirects = true
-            setRequestProperty("User-Agent", USER_AGENT)
-            setRequestProperty("Accept", "text/html,application/xhtml+xml")
-            setRequestProperty("Accept-Language", "fr-FR,fr;q=0.9")
-        }
-        try {
-            val code = connection.responseCode
-            if (code !in 200..299) throw IOException(URL(url).host + " a répondu avec le code $code.")
-            return connection.inputStream.use { input -> input.reader(StandardCharsets.UTF_8).readText() }
-        } finally {
-            connection.disconnect()
-        }
-    }
+    fun fetch(url: String): String = HttpClients.getText(
+        url,
+        headers = mapOf(
+            "User-Agent" to USER_AGENT,
+            "Accept" to "text/html,application/xhtml+xml",
+            "Accept-Language" to "fr-FR,fr;q=0.9",
+        ),
+        connectTimeoutMs = 15_000,
+        readTimeoutMs = 20_000,
+        errorMessage = { code -> java.net.URI(url).host + " a répondu avec le code $code." },
+    )
 
     companion object {
         const val TONIGHT_URL = "https://tv-programme.com/"

@@ -1,8 +1,7 @@
 package fr.streamia.tv.data
 
+import fr.streamia.tv.net.HttpClients
 import java.io.IOException
-import java.net.HttpURLConnection
-import java.net.URL
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.time.Instant
@@ -32,27 +31,18 @@ internal class BeinSportsClient {
         return get("$API_BASE/tv-event?$query")
     }
 
-    private fun get(url: String): String {
-        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            connectTimeout = 15_000
-            readTimeout = 20_000
-            instanceFollowRedirects = true
-            setRequestProperty("User-Agent", USER_AGENT)
-            setRequestProperty("Accept", "application/json")
-            setRequestProperty("Accept-Language", "en-US,en;q=0.9,ar;q=0.7")
-            setRequestProperty("Referer", TV_GUIDE_URL)
-        }
-        try {
-            val code = connection.responseCode
-            if (code !in 200..299) throw IOException("beIN SPORTS a répondu avec le code $code.")
-            return connection.inputStream.use { input ->
-                input.reader(StandardCharsets.UTF_8).readText()
-            }
-        } finally {
-            connection.disconnect()
-        }
-    }
+    private fun get(url: String): String = HttpClients.getText(
+        url,
+        headers = mapOf(
+            "User-Agent" to USER_AGENT,
+            "Accept" to "application/json",
+            "Accept-Language" to "en-US,en;q=0.9,ar;q=0.7",
+            "Referer" to TV_GUIDE_URL,
+        ),
+        connectTimeoutMs = 15_000,
+        readTimeoutMs = 20_000,
+        errorMessage = { code -> "beIN SPORTS a répondu avec le code $code." },
+    )
 
     private fun encode(value: String): String = URLEncoder.encode(value, "UTF-8")
 

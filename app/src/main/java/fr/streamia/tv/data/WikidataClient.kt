@@ -1,9 +1,8 @@
 package fr.streamia.tv.data
 
+import fr.streamia.tv.net.HttpClients
 import fr.streamia.tv.domain.MediaType
 import org.json.JSONObject
-import java.net.HttpURLConnection
-import java.net.URL
 import java.net.URLEncoder
 
 /**
@@ -27,21 +26,15 @@ internal class WikidataClient {
               SERVICE wikibase:label { bd:serviceParam wikibase:language "fr,en". }
             }
         """.trimIndent()
-        val connection = URL(ENDPOINT).openConnection() as HttpURLConnection
-        connection.requestMethod = "POST"
-        connection.doOutput = true
-        connection.connectTimeout = 15_000
-        connection.readTimeout = 60_000
-        connection.setRequestProperty("Accept", "application/sparql-results+json")
-        connection.setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
-        // Wikidata exige un User-Agent identifiable.
-        connection.setRequestProperty("User-Agent", "StreamiaTV/1.0 (personal Android TV player)")
-        val body = try {
-            connection.outputStream.use { it.write("query=${URLEncoder.encode(query, "UTF-8")}".toByteArray()) }
-            connection.inputStream.bufferedReader().use { it.readText() }
-        } finally {
-            connection.disconnect()
-        }
+        val body = HttpClients.getText(
+            ENDPOINT,
+            // Wikidata exige un User-Agent identifiable.
+            headers = mapOf("Accept" to "application/sparql-results+json", "User-Agent" to "StreamiaTV/1.0 (personal Android TV player)"),
+            connectTimeoutMs = 15_000,
+            readTimeoutMs = 60_000,
+            body = "application/x-www-form-urlencoded" to "query=${URLEncoder.encode(query, "UTF-8")}",
+            errorMessage = { code -> "Wikidata a répondu avec le code $code." },
+        )
         val bindings = JSONObject(body).getJSONObject("results").getJSONArray("bindings")
         val result = LinkedHashMap<String, MutableList<Pair<String, String>>>()
         for (i in 0 until bindings.length()) {

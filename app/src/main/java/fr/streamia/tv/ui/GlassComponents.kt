@@ -168,13 +168,8 @@ fun AccentPill(
 ) {
     Box(
         modifier
-            .shadow(
-                elevation = 14.dp,
-                shape = shape,
-                clip = false,
-                ambientColor = AccentPink.copy(alpha = 0.45f),
-                spotColor = AccentPink.copy(alpha = 0.45f),
-            )
+            // Lueur dessinée (anneaux mis en cache) plutôt qu'une ombre colorée permanente.
+            .focusHalo(AccentPink.copy(alpha = 0.45f), 14.dp, RadiusPill.coerceAtMost(40.dp))
             .clip(shape)
             .background(Brush.verticalGradient(listOf(AccentPinkLight, AccentPink)))
             .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.25f)), shape),

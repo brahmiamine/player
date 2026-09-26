@@ -1,5 +1,6 @@
 package fr.streamia.tv.data
 
+import fr.streamia.tv.net.HttpClients
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -38,8 +39,6 @@ import org.json.JSONObject
 import org.json.JSONArray
 import java.io.IOException
 import java.io.InputStreamReader
-import java.net.HttpURLConnection
-import java.net.URL
 import java.nio.charset.StandardCharsets
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -66,6 +65,7 @@ class XtreamRepository private constructor(context: Context) {
     private val beinSportsGuideRepository = BeinSportsGuideRepository(context)
     private val ukGuideRepository = UkGuideRepository(context)
     private val xmlTvRepository = XmlTvRepository()
+    private val epgValidators = EpgHttpValidatorsStore(context)
     private val m3uParser = M3uParser()
     private val updateChecker = UpdateChecker()
     private val backupManager = BackupManager(context)
@@ -812,15 +812,29 @@ class XtreamRepository private constructor(context: Context) {
 
             val job = coroutineContext.job
             var lastError: Throwable? = null
+            // Guide déjà en base pour cette même source : requête conditionnelle (ETag / date).
+            val current = epgCache.metadataOnIo(profileId)
             for (source in sources) {
+                val validators = if (!force && current != null && current.programCount > 0 && current.sourceUrl == source) {
+                    epgValidators.load(profileId, source)
+                } else {
+                    null
+                }
                 val session = epgCache.beginReplaceOnIo(profileId)
                 try {
-                    xmlTvRepository.syncOnIo(source, liveEntries, session.cancellableBy(job))
+                    val outcome = xmlTvRepository.syncOnIo(source, liveEntries, session.cancellableBy(job), validators)
                     job.ensureActive()
+                    if (outcome is XmlTvSyncOutcome.NotModified) {
+                        // Rien de nouveau : l'ancien guide est gardé tel quel (transaction annulée).
+                        epgCache.abortReplaceOnIo(session)
+                        epgCache.touchOnIo(profileId)
+                        return@withLock false
+                    }
                     if (session.writtenProgramCount <= 0) {
                         throw XtreamException("La source EPG ne contient aucun programme exploitable correspondant aux chaînes.")
                     }
                     epgCache.commitReplaceOnIo(session, source)
+                    (outcome as? XmlTvSyncOutcome.Written)?.validators?.let { epgValidators.save(profileId, source, it) }
                     return@withLock true
                 } catch (error: Throwable) {
                     epgCache.abortReplaceOnIo(session)
@@ -1006,20 +1020,11 @@ class XtreamRepository private constructor(context: Context) {
 
     @Throws(IOException::class)
     private fun downloadOnce(url: String, target: File) {
-        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            connectTimeout = 15_000
-            readTimeout = 90_000
-            instanceFollowRedirects = true
-            setRequestProperty("Accept", "application/x-mpegURL,text/plain,*/*")
-            setRequestProperty("User-Agent", "Streamia-TV/1.5")
-        }
-        try {
-            val code = connection.responseCode
-            if (code !in 200..299) throw XtreamException("Le serveur M3U a répondu avec le code $code.")
-            connection.inputStream.use { input -> target.outputStream().buffered().use { output -> input.copyTo(output, 128 * 1024) } }
-        } finally {
-            connection.disconnect()
+        HttpClients.execute(url, mapOf("Accept" to "application/x-mpegURL,text/plain,*/*"), connectTimeoutMs = 15_000, readTimeoutMs = 90_000).use { response ->
+            val code = response.code
+            if (!response.isSuccessful) throw XtreamException("Le serveur M3U a répondu avec le code $code.")
+            val body = response.body ?: throw IOException("Réponse vide.")
+            body.byteStream().use { input -> target.outputStream().buffered().use { output -> input.copyTo(output, 128 * 1024) } }
         }
     }
 

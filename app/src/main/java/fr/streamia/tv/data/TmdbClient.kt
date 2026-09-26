@@ -1,12 +1,10 @@
 package fr.streamia.tv.data
 
+import fr.streamia.tv.net.HttpClients
 import fr.streamia.tv.BuildConfig
 import fr.streamia.tv.domain.MediaType
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.FileNotFoundException
-import java.net.HttpURLConnection
-import java.net.URL
 
 /** Titre recommandé par TMDB, à retrouver ensuite dans le catalogue. */
 internal data class TmdbTitle(val id: Int, val title: String, val originalTitle: String?, val year: Int?)
@@ -33,19 +31,15 @@ internal class TmdbClient(private val token: String = BuildConfig.TMDB_TOKEN) {
     /** `null` si TMDB ne connaît pas cet identifiant (404) ; lève une exception sur erreur réseau. */
     fun info(type: MediaType, tmdbId: String): TmdbInfo? {
         val path = if (type == MediaType.Series) "tv" else "movie"
-        val connection = URL("$BASE/$path/$tmdbId?language=en-US&append_to_response=recommendations,keywords")
-            .openConnection() as HttpURLConnection
-        connection.connectTimeout = 10_000
-        connection.readTimeout = 15_000
-        connection.setRequestProperty("Authorization", "Bearer $token")
-        connection.setRequestProperty("Accept", "application/json")
-        val body = try {
-            if (connection.responseCode == 404) return null
-            connection.inputStream.bufferedReader().use { it.readText() }
-        } catch (_: FileNotFoundException) {
-            return null
-        } finally {
-            connection.disconnect()
+        val body = HttpClients.execute(
+            "$BASE/$path/$tmdbId?language=en-US&append_to_response=recommendations,keywords",
+            mapOf("Authorization" to "Bearer $token", "Accept" to "application/json"),
+            connectTimeoutMs = 10_000,
+            readTimeoutMs = 15_000,
+        ).use { response ->
+            if (response.code == 404) return null
+            if (!response.isSuccessful) throw java.io.IOException("TMDB a répondu avec le code ${response.code}.")
+            response.body?.bytes()?.toString(Charsets.UTF_8).orEmpty()
         }
         return parseTmdbInfo(JSONObject(body))
     }
