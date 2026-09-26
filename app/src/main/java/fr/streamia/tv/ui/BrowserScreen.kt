@@ -41,10 +41,12 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.key
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -616,7 +618,9 @@ private fun LiveCatalogLayout(
     var fullscreenTarget by remember { mutableStateOf<MediaEntry?>(null) }
     var channelsFocused by remember { mutableStateOf(false) }
     var initialChannelFocusPending by remember { mutableStateOf(true) }
-    val categoryFocus = remember { FocusRequester() }
+    // Chaque incrément demande au rail de ramener le focus sur la catégorie sélectionnée, en la
+    // refaisant défiler à l'écran si l'utilisateur a descendu la liste des catégories entre-temps.
+    var categoryFocusRequest by remember { mutableIntStateOf(0) }
     val channelFocus = remember { FocusRequester() }
     val hiddenOffset = with(LocalDensity.current) { (-620).dp.toPx() }
     val controlsOffset by animateFloatAsState(
@@ -643,7 +647,7 @@ private fun LiveCatalogLayout(
     }
     // Retour depuis la liste des chaînes : remonte d'abord au rail des catégories (convention TV),
     // un second Retour quitte vers l'accueil.
-    BackHandler(enabled = channelsFocused) { runCatching { categoryFocus.requestFocus() } }
+    BackHandler(enabled = channelsFocused) { categoryFocusRequest++ }
     if (previewEntry != null && catalog.entry(previewEntry!!.key) == null) {
         previewEntry = entries.firstOrNull()
     }
@@ -690,7 +694,7 @@ private fun LiveCatalogLayout(
             onSelected = onCategorySelected,
             onToggleFavorite = onToggleCategoryFavorite,
             requestInitialFocus = false,
-            selectedFocusRequester = categoryFocus,
+            focusSelectedRequest = categoryFocusRequest,
             onRight = { runCatching { channelFocus.requestFocus() } },
             translucent = true,
             modifier = Modifier.width(250.dp).fillMaxHeight(),
@@ -714,7 +718,7 @@ private fun LiveCatalogLayout(
                 onAutoFocusConsumed = { initialChannelFocusPending = false },
                 // Gauche : retour au rail sur la catégorie parcourue, sans basculer vers la catégorie
                 // d'origine de la chaîne (depuis Favoris/Tout/Historique, la liste était perdue).
-                onLeft = { runCatching { categoryFocus.requestFocus() } },
+                onLeft = { categoryFocusRequest++ },
                 onListPositionChanged = { onListPositionChanged(categoryIdForPosition, it) },
                 onConfirm = { channel ->
                     when (
@@ -1149,8 +1153,8 @@ private fun VodCatalogLayout(
 ) {
     // Retour depuis la grille : remonte d'abord au rail des catégories, comme en Direct.
     var gridFocused by remember { mutableStateOf(false) }
-    val railFocus = remember { FocusRequester() }
-    BackHandler(enabled = gridFocused) { runCatching { railFocus.requestFocus() } }
+    var railFocusRequest by remember { mutableIntStateOf(0) }
+    BackHandler(enabled = gridFocused) { railFocusRequest++ }
     Row(modifier, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
         CategoryRail(
             type = type,
@@ -1167,7 +1171,7 @@ private fun VodCatalogLayout(
             },
             onSelected = onCategorySelected,
             onToggleFavorite = onToggleCategoryFavorite,
-            selectedFocusRequester = railFocus,
+            focusSelectedRequest = railFocusRequest,
             modifier = Modifier.width(250.dp).fillMaxHeight(),
         )
 
@@ -1211,7 +1215,9 @@ private fun CategoryRail(
     onSelected: (MediaCategory) -> Unit,
     onToggleFavorite: (MediaCategory) -> Unit,
     requestInitialFocus: Boolean = true,
-    selectedFocusRequester: FocusRequester? = null,
+    // Incrémenté par l'appelant pour ramener le focus sur la catégorie sélectionnée (Gauche/Retour
+    // depuis les chaînes ou la grille). 0 = aucune demande.
+    focusSelectedRequest: Int = 0,
     onRight: (() -> Unit)? = null,
     // Le Direct affiche ce panneau par-dessus la vidéo plein écran déjà en cours de lecture : les
     // lignes au repos passent en transparent (le fond assombri du Column suffit à garder le texte
@@ -1221,8 +1227,7 @@ private fun CategoryRail(
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
-    val internalSelectedFocus = remember(selectedCategoryId, type) { FocusRequester() }
-    val selectedFocus = selectedFocusRequester ?: internalSelectedFocus
+    val selectedFocus = remember(selectedCategoryId, type) { FocusRequester() }
 
     // Catégorie mise en favori (remontée en tête) ou retirée (revenue à sa place) : la liste la
     // suit jusqu'à sa nouvelle position et lui garde le focus, au lieu de la laisser hors écran.
@@ -1240,6 +1245,27 @@ private fun CategoryRail(
             runCatching { movedFocus.requestFocus() }
         }
         movedCategoryKey = null
+    }
+
+    // Retour au rail : si la liste a été défilée et que la catégorie sélectionnée n'est plus
+    // composée, son FocusRequester n'est rattaché à rien et requestFocus() échouait en silence
+    // (impossible de revenir sur les catégories). On la refait d'abord défiler à l'écran.
+    androidx.compose.runtime.LaunchedEffect(focusSelectedRequest) {
+        if (focusSelectedRequest == 0) return@LaunchedEffect
+        val index = categories.indexOfFirst { it.id == selectedCategoryId }
+        if (index < 0) return@LaunchedEffect
+        if (listState.layoutInfo.visibleItemsInfo.none { it.index == index }) {
+            // Deux catégories au-dessus restent visibles pour garder le contexte.
+            listState.scrollToItem((index - 2).coerceAtLeast(0))
+        }
+        yield()
+        // requestFocus(Enter) renvoie false (sans lever) tant que la ligne n'est pas rattachée :
+        // on retente alors à la frame suivante, une fois le défilement appliqué.
+        val focused = runCatching { selectedFocus.requestFocus(FocusDirection.Enter) }.getOrDefault(false)
+        if (!focused) {
+            withFrameNanos { }
+            runCatching { selectedFocus.requestFocus(FocusDirection.Enter) }
+        }
     }
 
     androidx.compose.runtime.LaunchedEffect(type, categories.size, selectedCategoryId, requestInitialFocus) {
