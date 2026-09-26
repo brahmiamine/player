@@ -96,6 +96,7 @@ fun SettingsScreen(
     onCycleVodSortOrder: () -> Unit,
     onCycleEpgTimeOffset: () -> Unit,
     onToggleAutoPlayNextEpisode: () -> Unit,
+    onToggleLiveVersionFailover: () -> Unit,
     onCycleSubtitleSizeScale: () -> Unit,
     onToggleSubtitleBackground: () -> Unit,
     onToggleHomeBlock: (HomeBlock) -> Unit,
@@ -392,6 +393,27 @@ fun SettingsScreen(
                     modifier = Modifier.weight(1f),
                     selected = settings.tunnelingEnabled,
                 )
+            }
+            Row(Modifier.fillMaxWidth().height(88.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                SettingsTile(
+                    glyph = StreamiaIconGlyph.Swap,
+                    title = "Secours automatique",
+                    subtitle = if (settings.liveVersionFailover) "Activé" else "Désactivé",
+                    onClick = {
+                        openChoices(
+                            "Secours automatique",
+                            "En direct, passe sur une autre version de la chaîne (HD, FHD…) si l'image est coupée " +
+                                "6 secondes, ou après 3 coupures d'au moins 5 secondes en 5 minutes. " +
+                                "Sans effet sur les chaînes qui n'ont qu'une version.",
+                            listOf("Activé" to settings.liveVersionFailover, "Désactivé" to !settings.liveVersionFailover),
+                        ) { index -> if ((index == 0) != settings.liveVersionFailover) onToggleLiveVersionFailover() }
+                    },
+                    modifier = Modifier.weight(1f),
+                    selected = settings.liveVersionFailover,
+                )
+                Spacer(Modifier.weight(1f))
+                Spacer(Modifier.weight(1f))
+                Spacer(Modifier.weight(1f))
             }
 
             SettingsSectionTitle("Catalogue & affichage")

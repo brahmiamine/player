@@ -70,6 +70,8 @@ data class AppSettings(
     val vodSortOrder: VodSortOrder = VodSortOrder.Provider,
     val epgTimeOffsetHours: Int = 0,
     val autoPlayNextEpisode: Boolean = true,
+    /** Direct : bascule automatique sur une autre version de la chaîne quand elle coupe. */
+    val liveVersionFailover: Boolean = true,
     val subtitleSizeScale: Float = 1.0f,
     val subtitleBackgroundEnabled: Boolean = true,
     /** Un code est enregistré (voir [AppSettingsStore.setParentalPin]) et le verrouillage est actif. */
@@ -180,6 +182,7 @@ class AppSettingsStore(context: Context) {
         epgTimeOffsetHours = preferences.getInt(KEY_EPG_TIME_OFFSET_HOURS, 0)
             .takeIf { it in AppSettings.EPG_TIME_OFFSETS_HOURS } ?: 0,
         autoPlayNextEpisode = preferences.getBoolean(KEY_AUTO_PLAY_NEXT_EPISODE, true),
+        liveVersionFailover = preferences.getBoolean(KEY_LIVE_VERSION_FAILOVER, true),
         subtitleSizeScale = preferences.getFloat(KEY_SUBTITLE_SIZE_SCALE, 1.0f)
             .takeIf { it in AppSettings.SUBTITLE_SIZE_SCALES } ?: 1.0f,
         subtitleBackgroundEnabled = preferences.getBoolean(KEY_SUBTITLE_BACKGROUND_ENABLED, true),
@@ -216,6 +219,7 @@ class AppSettingsStore(context: Context) {
             .putString(KEY_VOD_SORT_ORDER, settings.vodSortOrder.name)
             .putInt(KEY_EPG_TIME_OFFSET_HOURS, settings.epgTimeOffsetHours)
             .putBoolean(KEY_AUTO_PLAY_NEXT_EPISODE, settings.autoPlayNextEpisode)
+            .putBoolean(KEY_LIVE_VERSION_FAILOVER, settings.liveVersionFailover)
             .putFloat(KEY_SUBTITLE_SIZE_SCALE, settings.subtitleSizeScale)
             .putBoolean(KEY_SUBTITLE_BACKGROUND_ENABLED, settings.subtitleBackgroundEnabled)
             .putBoolean(KEY_PARENTAL_ENABLED, settings.parentalControlEnabled)
@@ -315,6 +319,7 @@ class AppSettingsStore(context: Context) {
         const val KEY_VOD_SORT_ORDER = "vod_sort_order"
         const val KEY_EPG_TIME_OFFSET_HOURS = "epg_time_offset_hours"
         const val KEY_AUTO_PLAY_NEXT_EPISODE = "auto_play_next_episode"
+        const val KEY_LIVE_VERSION_FAILOVER = "live_version_failover"
         const val KEY_SUBTITLE_SIZE_SCALE = "subtitle_size_scale"
         const val KEY_SUBTITLE_BACKGROUND_ENABLED = "subtitle_background_enabled"
         const val KEY_PARENTAL_ENABLED = "parental_control_enabled"
@@ -390,6 +395,7 @@ fun AppSettings.toBackupJson(): JSONObject = JSONObject().apply {
     put("vodSortOrder", vodSortOrder.name)
     put("epgTimeOffsetHours", epgTimeOffsetHours)
     put("autoPlayNextEpisode", autoPlayNextEpisode)
+    put("liveVersionFailover", liveVersionFailover)
     put("subtitleSizeScale", subtitleSizeScale.toDouble())
     put("subtitleBackgroundEnabled", subtitleBackgroundEnabled)
     put("disabledHomeBlocks", JSONArray(disabledHomeBlocks.map { it.name }))
@@ -412,6 +418,7 @@ fun appSettingsFromBackupJson(json: JSONObject, fallback: AppSettings): AppSetti
     epgTimeOffsetHours = json.optInt("epgTimeOffsetHours", fallback.epgTimeOffsetHours)
         .takeIf { it in AppSettings.EPG_TIME_OFFSETS_HOURS } ?: fallback.epgTimeOffsetHours,
     autoPlayNextEpisode = json.optBoolean("autoPlayNextEpisode", fallback.autoPlayNextEpisode),
+    liveVersionFailover = json.optBoolean("liveVersionFailover", fallback.liveVersionFailover),
     subtitleSizeScale = json.optDouble("subtitleSizeScale", fallback.subtitleSizeScale.toDouble()).toFloat()
         .takeIf { it in AppSettings.SUBTITLE_SIZE_SCALES } ?: fallback.subtitleSizeScale,
     subtitleBackgroundEnabled = json.optBoolean("subtitleBackgroundEnabled", fallback.subtitleBackgroundEnabled),

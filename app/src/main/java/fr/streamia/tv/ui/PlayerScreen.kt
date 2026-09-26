@@ -31,6 +31,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -69,6 +70,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.media3.exoplayer.mediacodec.MediaCodecRenderer
 import fr.streamia.tv.data.DisplayModeSwitch
 import fr.streamia.tv.data.LiveVersionStatsStore
+import fr.streamia.tv.data.NetworkMonitor
 import fr.streamia.tv.player.unsupportedFormatMessage
 import fr.streamia.tv.player.isDecoderError
 import fr.streamia.tv.player.MAX_STREAM_RECOVERY_ATTEMPTS
@@ -84,7 +86,12 @@ import fr.streamia.tv.data.VideoAspectSetting
 import fr.streamia.tv.domain.Catalog
 import fr.streamia.tv.domain.EpgNowContext
 import fr.streamia.tv.domain.EpgProgram
+import fr.streamia.tv.domain.LiveCutCounter
+import fr.streamia.tv.domain.LiveFailoverChain
+import fr.streamia.tv.domain.LiveFailoverRules
 import fr.streamia.tv.domain.LiveVersionIndex
+import fr.streamia.tv.domain.decideLiveFailover
+import fr.streamia.tv.domain.hasFailoverCandidates
 import fr.streamia.tv.domain.LiveVersionStats
 import fr.streamia.tv.domain.qualityClassHeight
 import fr.streamia.tv.domain.qualityClassLabel
@@ -156,6 +163,9 @@ private const val LIVE_VERSION_WATCH_SAMPLE_MS = 60_000L
 
 /** Changement de version en attente de sa première image : [from] est relancée s'il échoue. */
 private data class LiveVersionSwitch(val from: MediaEntry, val targetKey: String)
+
+/** Début d'une coupure du Direct ; [afterPlayback] : l'image avait déjà été affichée. */
+private data class LiveOutageStart(val atMs: Long, val afterPlayback: Boolean)
 
 @androidx.annotation.OptIn(markerClass = [UnstableApi::class])
 @Composable
@@ -782,6 +792,73 @@ fun PlayerScreen(
         if (versionNotice == null) return@LaunchedEffect
         delay(4_000)
         versionNotice = null
+    }
+
+    // Secours automatique (Paramètres › Lecture & direct) : voir LiveFailoverRules. Actif seulement
+    // s'il existe une autre version de la même langue ; ni compteur ni minuterie sinon.
+    val online by remember(context) { NetworkMonitor.get(context.applicationContext).online }.collectAsState()
+    val failoverActive = appSettings.liveVersionFailover && sharedLivePlayer && hasFailoverCandidates(entry, liveVersions)
+    var failoverChain by remember { mutableStateOf<LiveFailoverChain?>(null) }
+    // Compteur de coupures propre à la version en cours : il repart de zéro sur la suivante.
+    val cutCounter = remember(entry.key) { LiveCutCounter() }
+    // Début de la coupure en cours (horloge elapsedRealtime) et si l'image avait déjà été affichée.
+    var outageStart by remember(entry.key) { mutableStateOf<LiveOutageStart?>(null) }
+    val outage = buffering || playbackError != null
+
+    fun runFailover(reason: String) {
+        if (!failoverActive) return
+        if (!streamHasPlayed) versionStatsStore.recordFailure(versionScope, entry.key)
+        // Version choisie à la main dans le panneau qui ne répond pas : retour sur la précédente.
+        val pending = versionSwitch
+        if (pending != null && pending.targetKey == entry.key) {
+            versionSwitch = null
+            versionNotice = "${entry.displayName} ne répond pas · retour sur ${pending.from.displayName}"
+            onSwitchVersion(pending.from)
+            return
+        }
+        val now = System.currentTimeMillis()
+        val ranked = rankLiveVersions(
+            entry, liveVersions, versionStatsStore.load(versionScope, liveVersions.map { it.key }), now, maxDisplayHeight,
+        )
+        val decision = decideLiveFailover(entry, ranked, failoverChain, now)
+        failoverChain = decision.chain
+        val target = decision.target
+        when {
+            target != null && decision.backToOrigin ->
+                versionNotice = "Aucune autre version ne fonctionne · retour sur ${target.displayName}"
+            target != null ->
+                versionNotice = "${entry.displayName} $reason · passage sur ${target.displayName}"
+            decision.justExhausted ->
+                versionNotice = "Aucune autre version disponible · nouvel essai sur ${entry.displayName}"
+        }
+        if (target != null) onSwitchVersion(target)
+    }
+
+    // Suivi des coupures : début quand l'image s'arrête, fin quand elle revient. Internet coupé chez
+    // l'utilisateur : rien n'est compté (toutes les versions seraient coupées), la minuterie repart
+    // au retour du réseau.
+    LaunchedEffect(entry.key, outage, online) {
+        val now = SystemClock.elapsedRealtime()
+        when {
+            outage && online -> if (outageStart == null) outageStart = LiveOutageStart(now, afterPlayback = streamHasPlayed)
+            outage -> outageStart = null
+            else -> {
+                val ended = outageStart ?: return@LaunchedEffect
+                outageStart = null
+                // Le chargement initial n'est pas une coupure ; seules comptent celles après l'image.
+                if (failoverActive && ended.afterPlayback && cutCounter.onCutEnded(now - ended.atMs, System.currentTimeMillis())) {
+                    runFailover("coupe souvent")
+                }
+            }
+        }
+    }
+    // Coupure (ou démarrage) qui dure : bascule au bout de 6 s.
+    LaunchedEffect(entry.key, outageStart, failoverActive) {
+        val start = outageStart ?: return@LaunchedEffect
+        if (!failoverActive) return@LaunchedEffect
+        val remaining = LiveFailoverRules.SWITCH_AFTER_OUTAGE_MS - (SystemClock.elapsedRealtime() - start.atMs)
+        if (remaining > 0) delay(remaining)
+        runFailover(if (start.afterPlayback) "coupe" else "ne démarre pas")
     }
 
     LaunchedEffect(seekFeedback) {

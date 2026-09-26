@@ -234,6 +234,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onCycleVodSortOrder = viewModel::cycleVodSortOrder,
                     onCycleEpgTimeOffset = viewModel::cycleEpgTimeOffset,
                     onToggleAutoPlayNextEpisode = viewModel::toggleAutoPlayNextEpisode,
+                    onToggleLiveVersionFailover = viewModel::toggleLiveVersionFailover,
                     onCycleSubtitleSizeScale = viewModel::cycleSubtitleSizeScale,
                     onToggleSubtitleBackground = viewModel::toggleSubtitleBackground,
                     onToggleHomeBlock = viewModel::toggleHomeBlock,

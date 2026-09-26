@@ -1010,6 +1010,10 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         updateAppSettings { it.copy(autoPlayNextEpisode = !it.autoPlayNextEpisode) }
     }
 
+    fun toggleLiveVersionFailover() {
+        updateAppSettings { it.copy(liveVersionFailover = !it.liveVersionFailover) }
+    }
+
     fun cycleSubtitleSizeScale() {
         updateAppSettings { it.copy(subtitleSizeScale = it.nextSubtitleSizeScale()) }
     }
