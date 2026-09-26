@@ -105,6 +105,8 @@ internal class RecommendationStore(context: Context) :
             )
             """.trimIndent(),
         )
+        // Recherche des recommandations TMDB par identifiant : sans index, parcours complet de la table.
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_recommendation_features_tmdb ON recommendation_features(profile_id, media_type, tmdb_id)")
     }
 
     fun saveTmdb(profileId: String, key: String, info: TmdbInfo?) {
@@ -393,16 +395,35 @@ internal class RecommendationStore(context: Context) :
 
     fun features(profileId: String): Map<String, StoredRecommendationFeatures> =
         readableDatabase.rawQuery(
-            """
-            SELECT f.media_type, f.media_id, COALESCE(t.overview, f.plot), COALESCE(NULLIF(t.genres, ''), f.genre),
-                   f.cast_members, f.director, f.release_date, f.country, f.rating, f.tmdb_id, f.updated_at, t.keywords
-            FROM recommendation_features f
-            LEFT JOIN recommendation_tmdb t
-              ON t.profile_id = f.profile_id AND t.media_type = f.media_type AND t.media_id = f.media_id
-            WHERE f.profile_id = ?
-            """.trimIndent(),
+            "$FEATURES_SELECT WHERE f.profile_id = ?",
             arrayOf(profileId),
-        ).use { cursor ->
+        ).use(::readFeatures)
+
+    /**
+     * Métadonnées des seules entrées demandées, par lots `media_id IN (…)` : une fiche ou les
+     * recommandations de l'accueil n'en utilisent que quelques centaines, alors que la table entière
+     * (des milliers de fiches enrichies avec résumés) était relue à chaque ouverture.
+     */
+    fun featuresFor(profileId: String, keys: Collection<String>): Map<String, StoredRecommendationFeatures> {
+        if (keys.isEmpty()) return emptyMap()
+        val byType = keys.mapNotNull { key ->
+            val type = key.substringBefore(':', "")
+            val id = key.substringAfter(':', "").toIntOrNull() ?: return@mapNotNull null
+            type to id
+        }.groupBy({ it.first }, { it.second })
+        val result = HashMap<String, StoredRecommendationFeatures>()
+        byType.forEach { (type, ids) ->
+            ids.distinct().chunked(KEYS_PER_QUERY).forEach { chunk ->
+                readableDatabase.rawQuery(
+                    "$FEATURES_SELECT WHERE f.profile_id = ? AND f.media_type = ? AND f.media_id IN (${chunk.joinToString(",") { "?" }})",
+                    arrayOf(profileId, type) + chunk.map(Int::toString),
+                ).use { result.putAll(readFeatures(it)) }
+            }
+        }
+        return result
+    }
+
+    private fun readFeatures(cursor: Cursor): Map<String, StoredRecommendationFeatures> =
             buildMap {
                 while (cursor.moveToNext()) {
                     val type = cursor.getString(0).toMediaType()
@@ -424,7 +445,6 @@ internal class RecommendationStore(context: Context) :
                     )
                 }
             }
-        }
 
     fun delete(profileId: String) {
         val db = writableDatabase
@@ -502,6 +522,14 @@ internal class RecommendationStore(context: Context) :
     private companion object {
         const val DATABASE_NAME = "recommendations-v1.db"
         const val DATABASE_VERSION = 1
+        const val KEYS_PER_QUERY = 500
+        const val FEATURES_SELECT = """
+            SELECT f.media_type, f.media_id, COALESCE(t.overview, f.plot), COALESCE(NULLIF(t.genres, ''), f.genre),
+                   f.cast_members, f.director, f.release_date, f.country, f.rating, f.tmdb_id, f.updated_at, t.keywords
+            FROM recommendation_features f
+            LEFT JOIN recommendation_tmdb t
+              ON t.profile_id = f.profile_id AND t.media_type = f.media_type AND t.media_id = f.media_id
+        """
     }
 }
 

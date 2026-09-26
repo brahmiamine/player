@@ -69,20 +69,35 @@ class LiveVersionStatsStore(context: Context) {
             it.copy(lastFailureAtMs = nowMs, consecutiveFailures = it.consecutiveFailures + 1)
         }
 
+    /**
+     * Mesure mise à jour tout de suite en mémoire ; la sérialisation JSON et l'écriture des
+     * préférences partent sur un fil d'écriture dédié (ordre conservé), hors du thread principal
+     * d'où le lecteur les enregistre.
+     */
     private fun update(scope: String, entryKey: String, nowMs: Long, change: (LiveVersionStats) -> LiveVersionStats) {
-        val updated = change(read(scope, entryKey) ?: LiveVersionStats()).copy(updatedAtMs = nowMs)
-        preferences.edit { putString(storageKey(scope, entryKey), updated.toJson().toString()) }
-        // Le nettoyage relit toutes les entrées : seulement de temps en temps, pas à chaque écriture.
-        if (++writesSinceEviction >= EVICTION_CHECK_EVERY) {
-            writesSinceEviction = 0
-            evictIfNeeded()
+        val key = storageKey(scope, entryKey)
+        val updated = synchronized(memory) {
+            change(read(scope, entryKey) ?: LiveVersionStats()).copy(updatedAtMs = nowMs).also { memory[key] = Cached(it) }
+        }
+        val evict = ++writesSinceEviction >= EVICTION_CHECK_EVERY
+        if (evict) writesSinceEviction = 0
+        writer.execute {
+            preferences.edit { putString(key, updated.toJson().toString()) }
+            // Le nettoyage relit toutes les entrées : seulement de temps en temps, pas à chaque écriture.
+            if (evict) evictIfNeeded()
         }
     }
 
-    private fun read(scope: String, entryKey: String): LiveVersionStats? =
-        preferences.getString(storageKey(scope, entryKey), null)?.let { raw ->
+    /** Lecture depuis la mémoire du processus ; les préférences ne sont lues qu'une fois par version. */
+    private fun read(scope: String, entryKey: String): LiveVersionStats? {
+        val key = storageKey(scope, entryKey)
+        memory[key]?.let { return it.stats }
+        val stats = preferences.getString(key, null)?.let { raw ->
             runCatching { JSONObject(raw).toStats() }.getOrNull()
         }
+        memory.putIfAbsent(key, Cached(stats))
+        return stats
+    }
 
     private fun evictIfNeeded() {
         val all = preferences.all
@@ -92,6 +107,7 @@ class LiveVersionStatsStore(context: Context) {
             .sortedBy { it.second }
             .take(all.size - MAX_ENTRIES + EVICTION_BATCH)
         preferences.edit { oldest.forEach { remove(it.first) } }
+        oldest.forEach { memory.remove(it.first) }
     }
 
     private fun storageKey(scope: String, entryKey: String) = "$scope|$entryKey"
@@ -138,7 +154,13 @@ class LiveVersionStatsStore(context: Context) {
 
     private fun JSONObject.optIntOrNull(name: String): Int? = if (has(name)) optInt(name) else null
 
+    private class Cached(val stats: LiveVersionStats?)
+
     companion object {
+        private val memory = java.util.concurrent.ConcurrentHashMap<String, Cached>()
+        private val writer = java.util.concurrent.Executors.newSingleThreadExecutor { task ->
+            Thread(task, "streamia-version-stats").apply { isDaemon = true; priority = Thread.MIN_PRIORITY }
+        }
         private const val PREFERENCES_NAME = "streamia-live-versions-v1"
         // Chaque écriture réécrit tout le fichier : borné pour rester une écriture minuscule.
         private const val MAX_ENTRIES = 400

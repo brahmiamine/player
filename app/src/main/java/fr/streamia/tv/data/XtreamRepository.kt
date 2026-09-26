@@ -466,7 +466,7 @@ class XtreamRepository private constructor(context: Context) {
         profileId: String,
         entries: Collection<MediaEntry>,
     ): Map<String, ContentFeatures> = withContext(Dispatchers.IO) {
-        val stored = recommendationStore.features(profileId)
+        val stored = recommendationStore.featuresFor(profileId, entries.map(MediaEntry::key))
         entries.associate { entry -> entry.key to (stored[entry.key]?.merge(entry) ?: ContentFeatures.from(entry)) }
     }
 
