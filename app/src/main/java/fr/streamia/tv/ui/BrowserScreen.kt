@@ -621,6 +621,9 @@ private fun LiveCatalogLayout(
     // Chaque incrément demande au rail de ramener le focus sur la catégorie sélectionnée, en la
     // refaisant défiler à l'écran si l'utilisateur a descendu la liste des catégories entre-temps.
     var categoryFocusRequest by remember { mutableIntStateOf(0) }
+    // Même principe dans l'autre sens : Droite depuis les catégories ramène le focus sur la chaîne
+    // sélectionnée, en refaisant défiler la liste des chaînes si elle a été descendue.
+    var channelFocusRequest by remember { mutableIntStateOf(0) }
     val channelFocus = remember { FocusRequester() }
     val hiddenOffset = with(LocalDensity.current) { (-620).dp.toPx() }
     val controlsOffset by animateFloatAsState(
@@ -695,7 +698,7 @@ private fun LiveCatalogLayout(
             onToggleFavorite = onToggleCategoryFavorite,
             requestInitialFocus = false,
             focusSelectedRequest = categoryFocusRequest,
-            onRight = { runCatching { channelFocus.requestFocus() } },
+            onRight = { channelFocusRequest++ },
             translucent = true,
             modifier = Modifier.width(250.dp).fillMaxHeight(),
         )
@@ -714,6 +717,7 @@ private fun LiveCatalogLayout(
                 fullscreenPending = fullscreenTarget != null,
                 initialListPosition = initialListPosition,
                 selectedFocusRequester = channelFocus,
+                focusSelectedRequest = channelFocusRequest,
                 autoFocus = initialChannelFocusPending,
                 onAutoFocusConsumed = { initialChannelFocusPending = false },
                 // Gauche : retour au rail sur la catégorie parcourue, sans basculer vers la catégorie
@@ -751,6 +755,9 @@ private fun LiveChannelList(
     fullscreenPending: Boolean,
     initialListPosition: NavigationListPosition,
     selectedFocusRequester: FocusRequester,
+    // Incrémenté par l'appelant (Droite depuis les catégories) pour ramener le focus sur la chaîne
+    // sélectionnée.
+    focusSelectedRequest: Int,
     autoFocus: Boolean,
     onAutoFocusConsumed: () -> Unit,
     onLeft: (MediaEntry) -> Unit,
@@ -807,6 +814,27 @@ private fun LiveChannelList(
                 .collect { pendingPosition = null; onListPositionChanged(it) }
         } finally {
             pendingPosition?.let(onListPositionChanged)
+        }
+    }
+
+    // Retour depuis les catégories : si la liste a été défilée, la chaîne sélectionnée n'est plus
+    // composée et requestFocus() échouait en silence (impossible de revenir sur les chaînes). On la
+    // refait d'abord défiler à l'écran. La liste étant recréée à chaque changement de catégorie, la
+    // valeur reçue à la création n'est pas une demande (sinon elle volerait le focus au rail).
+    val initialFocusRequest = remember { focusSelectedRequest }
+    LaunchedEffect(focusSelectedRequest) {
+        if (focusSelectedRequest == initialFocusRequest) return@LaunchedEffect
+        val index = focusTargetIndex
+        if (index < 0 || entries.isEmpty()) return@LaunchedEffect
+        if (listState.layoutInfo.visibleItemsInfo.none { it.index == index }) {
+            // Deux chaînes au-dessus restent visibles pour garder le contexte.
+            listState.scrollToItem((index - 2).coerceAtLeast(0))
+        }
+        yield()
+        val focused = runCatching { channelFocus.requestFocus(FocusDirection.Enter) }.getOrDefault(false)
+        if (!focused) {
+            withFrameNanos { }
+            runCatching { channelFocus.requestFocus(FocusDirection.Enter) }
         }
     }
 
