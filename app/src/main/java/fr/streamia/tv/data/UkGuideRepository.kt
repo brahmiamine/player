@@ -28,6 +28,12 @@ internal class UkGuideRepository(context: Context) {
         age in 0 until minOf(maxAgeMillis, FALLBACK_MAX_AGE_MS)
     }
 
+    /** Grille déjà sur disque encore exploitable (même limite que le repli) : affichée tout de suite. */
+    suspend fun cached(): UkGuideFetchResult? = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
+        cache.load()?.takeIf { now - it.fetchedAtEpochMillis in 0 until FALLBACK_MAX_AGE_MS }?.toFetchResult(fromCache = true)
+    }
+
     suspend fun loadGuide(
         forceRefresh: Boolean,
         maxAgeMillis: Long,

@@ -1,6 +1,8 @@
 package fr.streamia.tv.data
 
 import android.content.Context
+import fr.streamia.tv.beinsports.BeinChannelSchedule
+import fr.streamia.tv.beinsports.BeinGuideChannel
 import fr.streamia.tv.beinsports.BeinGuideRows
 import fr.streamia.tv.beinsports.BeinGuideSelector
 import fr.streamia.tv.beinsports.BeinSportsTvGuideParser
@@ -19,11 +21,49 @@ data class BeinSportsGuideFetchResult(
 internal class BeinSportsGuideRepository(context: Context) {
     private val client = BeinSportsClient()
     private val cache = BeinSportsGuideCache(context)
+    private val channelsFile = java.io.File(context.applicationContext.filesDir, CHANNELS_FILE_NAME)
+
+    /**
+     * Liste des chaînes beIN, qui ne change presque jamais : gardée [CHANNELS_MAX_AGE_MS] sur
+     * disque, elle évite une requête (un aller-retour complet avant même de demander la grille)
+     * à chaque actualisation de la grille, toutes les 30 minutes.
+     */
+    private fun cachedGuideChannels(): List<BeinGuideChannel>? = runCatching {
+        channelsFile.takeIf { it.exists() && System.currentTimeMillis() - it.lastModified() in 0 until CHANNELS_MAX_AGE_MS }
+            ?.readText()
+            ?.let(BeinSportsTvGuideParser::parseChannels)
+            ?.takeIf { it.isNotEmpty() }
+    }.getOrNull()
+
+    private fun fetchGuideChannels(): List<BeinGuideChannel> {
+        val json = client.fetchChannelsJson()
+        val channels = BeinSportsTvGuideParser.parseChannels(json)
+        if (channels.isEmpty()) throw IOException("Aucune chaîne beIN SPORTS n'a été trouvée.")
+        runCatching { channelsFile.writeText(json) }
+        return channels
+    }
+
+    private fun fetchSchedules(from: Instant): List<BeinChannelSchedule> {
+        fun schedulesFor(channels: List<BeinGuideChannel>) = BeinSportsTvGuideParser.parseEvents(
+            client.fetchEventsJson(channelIds = channels.map { it.id }, from = from, to = from.plus(GUIDE_WINDOW)),
+            channels,
+        )
+        // Grille vide avec la liste gardée sur disque (chaînes renommées ou renumérotées) :
+        // nouvel essai avec la liste relue sur le site.
+        cachedGuideChannels()?.let { cached -> schedulesFor(cached).takeIf { it.isNotEmpty() }?.let { return it } }
+        return schedulesFor(fetchGuideChannels())
+    }
 
     /** Cache assez récent pour que [loadGuide] ne contacte aucun site. */
     suspend fun hasFreshCache(maxAgeMillis: Long): Boolean = withContext(Dispatchers.IO) {
         val age = cache.load()?.let { System.currentTimeMillis() - it.fetchedAtEpochMillis } ?: return@withContext false
         age in 0 until minOf(maxAgeMillis, FALLBACK_MAX_AGE_MS)
+    }
+
+    /** Grille déjà sur disque encore exploitable (même limite que le repli) : affichée tout de suite. */
+    suspend fun cached(): BeinSportsGuideFetchResult? = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
+        cache.load()?.takeIf { now - it.fetchedAtEpochMillis in 0 until FALLBACK_MAX_AGE_MS }?.toFetchResult(fromCache = true)
     }
 
     suspend fun loadGuide(
@@ -39,15 +79,7 @@ internal class BeinSportsGuideRepository(context: Context) {
         }
 
         val refreshed = runCatching {
-            val channels = BeinSportsTvGuideParser.parseChannels(client.fetchChannelsJson())
-            if (channels.isEmpty()) throw IOException("Aucune chaîne beIN SPORTS n'a été trouvée.")
-            val from = Instant.ofEpochMilli(now)
-            val eventsJson = client.fetchEventsJson(
-                channelIds = channels.map { it.id },
-                from = from,
-                to = from.plus(GUIDE_WINDOW),
-            )
-            BeinSportsTvGuideParser.parseEvents(eventsJson, channels)
+            fetchSchedules(Instant.ofEpochMilli(now))
         }.mapCatching { schedules ->
             schedules.takeIf { it.isNotEmpty() }
                 ?: throw IOException("Aucun programme beIN SPORTS n'a été trouvé dans la grille.")
@@ -84,5 +116,8 @@ internal class BeinSportsGuideRepository(context: Context) {
 
         /** Au-delà, un cache ne couvre plus assez de la fenêtre pour servir de repli. */
         const val FALLBACK_MAX_AGE_MS = 12 * 60 * 60 * 1000L
+
+        const val CHANNELS_FILE_NAME = "bein-sports-channels.json"
+        const val CHANNELS_MAX_AGE_MS = 24 * 60 * 60 * 1000L
     }
 }

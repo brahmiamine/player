@@ -34,6 +34,11 @@ internal class TvProgrammeRepository(context: Context) {
     private fun isFresh(cached: CachedTvProgrammeData?, maxAgeMillis: Long) =
         cached != null && System.currentTimeMillis() - cached.fetchedAtEpochMillis < maxAgeMillis
 
+    /** Programme de ce soir déjà sur disque pour aujourd'hui, quel que soit son âge : affiché tout de suite. */
+    suspend fun cached(): TvProgrammeFetchResult? = withContext(Dispatchers.IO) {
+        todayCache()?.let { TvProgrammeFetchResult(it.programmes, it.fetchedAtEpochMillis, fromCache = true) }
+    }
+
     suspend fun loadTonight(forceRefresh: Boolean, maxAgeMillis: Long): TvProgrammeFetchResult =
         withContext(Dispatchers.IO) {
             val today = today()

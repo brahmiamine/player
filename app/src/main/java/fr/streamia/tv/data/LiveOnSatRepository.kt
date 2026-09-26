@@ -38,6 +38,11 @@ internal class LiveOnSatRepository(context: Context) {
      * Un nouveau scrape qui échoue retombe sur le cache existant plutôt que de faire échouer
      * l'écran — l'exception n'est propagée que si aucune donnée n'est disponible du tout.
      */
+    /** Matchs déjà sur disque, quel que soit leur âge (les matchs terminés sont masqués à l'affichage). */
+    suspend fun cached(): LiveOnSatFetchResult? = withContext(Dispatchers.IO) {
+        cache.load()?.let { LiveOnSatFetchResult(it.matches, it.fetchedAtEpochMillis, fromCache = true) }
+    }
+
     suspend fun loadMatches(forceRefresh: Boolean, maxAgeMillis: Long): LiveOnSatFetchResult =
         withContext(Dispatchers.IO) {
             val cached = cache.load()

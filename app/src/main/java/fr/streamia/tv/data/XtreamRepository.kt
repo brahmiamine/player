@@ -497,6 +497,17 @@ class XtreamRepository(context: Context) {
     suspend fun hasFreshBeinSportsGuideCache() = beinSportsGuideRepository.hasFreshCache(BEIN_SPORTS_GUIDE_CACHE_MAX_AGE_MS)
     suspend fun hasFreshUkGuideCache() = ukGuideRepository.hasFreshCache(UK_GUIDE_CACHE_MAX_AGE_MS)
 
+    // Données déjà sur disque, quel que soit leur âge : affichées immédiatement pendant que le
+    // chargement habituel (load*) les actualise, au lieu d'un squelette le temps du téléchargement.
+    suspend fun cachedLiveOnSatMatches() = liveOnSatRepository.cached()
+    suspend fun cachedTvProgrammeTonight() = tvProgrammeRepository.cached()
+    suspend fun cachedTvProgrammeNow() = tvProgrammeNowRepository.cached()
+    suspend fun cachedBeinSportsGuide() = beinSportsGuideRepository.cached()
+    suspend fun cachedUkGuide() = ukGuideRepository.cached()
+
+    /** Réseau revenu : les guides en attente après un échec peuvent réessayer tout de suite. */
+    fun clearGuideFailureBackoffs() = tvProgrammeNowRepository.clearFailureBackoff()
+
     /** Programmes TV français du soir scrapés depuis tv-programme.com avec cache local. */
     suspend fun loadTvProgrammeTonight(forceRefresh: Boolean = false): TvProgrammeFetchResult =
         tvProgrammeRepository.loadTonight(forceRefresh, maxAgeMillis = TV_PROGRAMME_CACHE_MAX_AGE_MS)

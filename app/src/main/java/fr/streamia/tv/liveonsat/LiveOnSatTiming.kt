@@ -16,15 +16,15 @@ fun ResolvedLiveOnSatMatch.withEpgTiming(guide: EpgGuide?): ResolvedLiveOnSatMat
     )
 
     val sourceStart = match.startEpochSeconds
+    // Mots des deux équipes préparés une fois par match, pas une fois par programme.
+    val participantATokens = participantTokens(match.participantA)
+    val participantBTokens = participantTokens(match.participantB)
     val best = matchedChannels.values
         .asSequence()
         .flatten()
         .distinctBy { it.key }
         .flatMap { channel -> guide.forEntry(channel).asSequence() }
         .mapNotNull { program ->
-            if (!programMatchesParticipants(program.title, program.description, match.participantA, match.participantB)) {
-                return@mapNotNull null
-            }
             val start = program.startEpochSeconds ?: return@mapNotNull null
             val end = program.endEpochSeconds ?: return@mapNotNull null
             val duration = end - start
@@ -35,6 +35,11 @@ fun ResolvedLiveOnSatMatch.withEpgTiming(guide: EpgGuide?): ResolvedLiveOnSatMat
                 drift > MAX_EPG_START_DRIFT_SECONDS ||
                 end <= sourceStart + MIN_REMAINING_AFTER_SOURCE_START_SECONDS
             ) {
+                return@mapNotNull null
+            }
+            // Test du texte en dernier : les critères d'horaire, immédiats, écartent déjà presque
+            // tous les programmes de la journée. Résultat identique (les deux conditions sont requises).
+            if (!programMatchesParticipants(program.title, program.description, participantATokens, participantBTokens)) {
                 return@mapNotNull null
             }
             Triple(drift, start, end)
@@ -51,19 +56,20 @@ fun ResolvedLiveOnSatMatch.withEpgTiming(guide: EpgGuide?): ResolvedLiveOnSatMat
 private fun programMatchesParticipants(
     title: String,
     description: String?,
-    participantA: String,
-    participantB: String,
+    participantATokens: List<String>,
+    participantBTokens: List<String>,
 ): Boolean {
-    val haystack = normalizeMatchText(title + " " + description.orEmpty())
-    return participantMatches(haystack, participantA) && participantMatches(haystack, participantB)
+    if (participantATokens.isEmpty() || participantBTokens.isEmpty()) return false
+    // Texte normalisé = mots séparés par une seule espace : « mot entier du texte » équivaut à
+    // l'ancienne recherche par expression régulière (^| )mot( |$), compilée à chaque programme.
+    val words = normalizeMatchText(title + " " + description.orEmpty()).split(' ').toHashSet()
+    return participantATokens.any(words::contains) && participantBTokens.any(words::contains)
 }
 
-private fun participantMatches(haystack: String, participant: String): Boolean =
+private fun participantTokens(participant: String): List<String> =
     normalizeMatchText(participant)
         .split(' ')
-        .asSequence()
         .filter { it.length >= MATCH_TOKEN_MIN_LENGTH && it !in MATCH_TOKEN_NOISE }
-        .any { token -> Regex("(^| )" + Regex.escape(token) + "( |$)").containsMatchIn(haystack) }
 
 private fun normalizeMatchText(value: String): String =
     Normalizer.normalize(value, Normalizer.Form.NFD)

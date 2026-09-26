@@ -42,6 +42,7 @@ import fr.streamia.tv.domain.ServerCredentials
 import fr.streamia.tv.domain.LiveZapIndex
 import fr.streamia.tv.domain.epgNowContextAt
 import fr.streamia.tv.domain.withTimeOffset
+import fr.streamia.tv.liveonsat.ChannelIndex
 import fr.streamia.tv.liveonsat.ChannelMatcher
 import fr.streamia.tv.data.LiveOnSatFetchResult
 import fr.streamia.tv.liveonsat.ResolvedLiveOnSatMatch
@@ -72,6 +73,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
@@ -99,6 +101,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     private var homeRecommendationLastBuiltProfileId: String? = null
     private var homeRecommendationLastBuiltAtMillis = 0L
     private val liveOnSatChannelMatcher = ChannelMatcher()
+    private var liveOnSatIndexCache: Triple<List<MediaEntry>, List<MediaCategory>, ChannelIndex>? = null
     private var liveOnSatLoadSequence = 0L
     private var liveOnSatLoadJob: Job? = null
     /** Échéance comptée depuis l'âge réel du cache ; après un échec, nouvel essai plus tôt. */
@@ -111,6 +114,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     private val tvProgrammeNowGuide = HomeGuide(
         blocks = setOf(HomeBlock.TvProgrammeNow),
         fetch = { repository.loadTvProgrammeNow(it) },
+        cached = { repository.cachedTvProgrammeNow() },
         isEmpty = { it.programmes.isEmpty() },
     ) { fetch, catalog, visible ->
         val resolved = tvProgrammeChannelMatcher.resolveNow(fetch.programmes, catalog).filter { visible(it.channel) }
@@ -119,6 +123,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     private val tvProgrammeTonightGuide = HomeGuide(
         blocks = setOf(HomeBlock.TvProgrammeTonight),
         fetch = { repository.loadTvProgrammeTonight(it) },
+        cached = { repository.cachedTvProgrammeTonight() },
         isEmpty = { it.programmes.isEmpty() },
     ) { fetch, catalog, visible ->
         val resolved = tvProgrammeChannelMatcher.resolve(fetch.programmes, catalog).filter { visible(it.channel) }
@@ -127,6 +132,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     private val beinSportsGuide = HomeGuide(
         blocks = setOf(HomeBlock.BeinSportsNow, HomeBlock.BeinSportsNext),
         fetch = { repository.loadBeinSportsGuide(it) },
+        cached = { repository.cachedBeinSportsGuide() },
         isEmpty = { it.rows.current.isEmpty() && it.rows.next.isEmpty() },
     ) { fetch, catalog, visible ->
         val current = beinSportsChannelMatcher.resolve(fetch.rows.current, catalog).filter { visible(it.channel) }
@@ -136,6 +142,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     private val ukGuide = HomeGuide(
         blocks = setOf(HomeBlock.UkGuideNow, HomeBlock.UkGuideNext),
         fetch = { repository.loadUkGuide(it) },
+        cached = { repository.cachedUkGuide() },
         isEmpty = { it.rows.current.isEmpty() && it.rows.next.isEmpty() },
     ) { fetch, catalog, visible ->
         val current = ukGuideChannelMatcher.resolve(fetch.rows.current, catalog).filter { visible(it.channel) }
@@ -2329,6 +2336,8 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         /** Blocs de l'accueil alimentés par ce guide : squelette tant que le premier chargement n'est pas fini. */
         private val blocks: Set<HomeBlock>,
         private val fetch: suspend (forceRefresh: Boolean) -> Raw,
+        /** Données déjà sur disque, même anciennes, affichées en attendant [fetch]. */
+        private val cached: suspend () -> Raw?,
         private val isEmpty: (Raw) -> Boolean,
         private val match: (Raw, Catalog, visible: (MediaEntry) -> Boolean) -> (StreamiaUiState) -> StreamiaUiState,
     ) {
@@ -2357,6 +2366,23 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 }.onFailure { error ->
                     if (error !is CancellationException && sequence == loadSequence) settleHomeBlocks(blocks)
                 }
+            }
+        }
+
+        /**
+         * Affiche tout de suite la grille déjà sur disque (même plus ancienne que la durée de
+         * fraîcheur) tant que rien n'est encore chargé : le bloc apparaît dès l'ouverture au lieu
+         * d'un squelette pendant le téléchargement et l'analyse du site, puis [load] le met à jour.
+         */
+        fun showCached() {
+            if (raw != null || _uiState.value.activeProfileId == null) return
+            if (blocks.all { it in _uiState.value.appSettings.disabledHomeBlocks }) return
+            viewModelScope.launch {
+                val stale = runCatching { cached() }.getOrNull()?.takeUnless(isEmpty) ?: return@launch
+                // Chargement réseau arrivé entre-temps : il a priorité.
+                if (raw != null) return@launch
+                raw = stale
+                resolve()
             }
         }
 
@@ -2418,6 +2444,48 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
      * liveonsat.com, puis résout leurs diffuseurs contre les chaînes Direct de ce profil. Le scrape
      * lui-même ne dépend d'aucun profil ; seule cette résolution en dépend.
      */
+    /** Version de rapprochement (scrape + playlist + EPG) et rapprochement déjà enregistré pour elle. */
+    private suspend fun liveOnSatSavedResolution(
+        profileId: String?,
+        fetch: LiveOnSatFetchResult,
+    ): Pair<String?, List<ResolvedLiveOnSatMatch>?> {
+        val version = profileId?.let { id -> runCatching { repository.liveOnSatResolutionVersion(id, fetch) }.getOrNull() }
+        val saved = if (profileId == null || version == null) null else {
+            runCatching { repository.cachedLiveOnSatResolution(profileId, version, fetch) }.getOrNull()
+        }?.let { resolved ->
+            val catalog = _uiState.value.catalog ?: return@let resolved
+            resolved.map { match ->
+                match.copy(matchedChannels = match.matchedChannels.mapValues { (_, channels) -> channels.map { catalog.entry(it.key) ?: it } })
+            }
+        }
+        return version to saved
+    }
+
+    /**
+     * Matchs déjà sur disque (et leurs chaînes, si ce scrape a déjà été rapproché pour cette liste)
+     * affichés tout de suite, même si le cache a dépassé 2 h : la page et le bloc de l'accueil ne
+     * restent plus vides pendant le scrape de liveonsat.com, qui les remplace ensuite.
+     */
+    private fun showCachedLiveOnSatMatches() {
+        if (_uiState.value.liveOnSatMatches.isNotEmpty()) return
+        if (HomeBlock.LiveMatches in _uiState.value.appSettings.disabledHomeBlocks) return
+        val sequence = liveOnSatLoadSequence
+        viewModelScope.launch {
+            val fetch = runCatching { repository.cachedLiveOnSatMatches() }.getOrNull() ?: return@launch
+            val profileId = _uiState.value.activeProfileId ?: return@launch
+            val (_, saved) = liveOnSatSavedResolution(profileId, fetch)
+            _uiState.update { state ->
+                // Un chargement plus récent a déjà publié : il a priorité.
+                if (state.activeProfileId != profileId || state.liveOnSatMatches.isNotEmpty() || sequence != liveOnSatLoadSequence) state
+                else state.copy(
+                    liveOnSatMatches = saved ?: fetch.matches.map { match -> ResolvedLiveOnSatMatch(match, emptyMap()) },
+                    liveOnSatFetchedAtEpochMillis = fetch.fetchedAtEpochMillis,
+                    liveOnSatPending = false,
+                )
+            }
+        }
+    }
+
     private fun loadLiveOnSatMatches(forceRefresh: Boolean) {
         // Appelé à chaque ouverture de l'app (openProfile/resumeStartup/showCatalog) : un chargement
         // déjà en vol pour la même raison ne doit pas en déclencher un second en parallèle. Un
@@ -2444,15 +2512,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 // Chaînes déjà rapprochées pour ce même scrape, cette même playlist et ce même EPG :
                 // réutilisées telles quelles, sinon rapprochement refait puis réenregistré.
                 val profileId = _uiState.value.activeProfileId
-                val version = profileId?.let { id -> runCatching { repository.liveOnSatResolutionVersion(id, fetch) }.getOrNull() }
-                val cachedResolution = if (profileId == null || version == null) null else {
-                    runCatching { repository.cachedLiveOnSatResolution(profileId, version, fetch) }.getOrNull()
-                }?.let { resolved ->
-                    val catalog = _uiState.value.catalog ?: return@let resolved
-                    resolved.map { match ->
-                        match.copy(matchedChannels = match.matchedChannels.mapValues { (_, channels) -> channels.map { catalog.entry(it.key) ?: it } })
-                    }
-                }
+                val (version, cachedResolution) = liveOnSatSavedResolution(profileId, fetch)
                 if (sequence != liveOnSatLoadSequence) return@launch
                 // Phase 1 : afficher immédiatement tous les matchs du jour, sans attendre la
                 // résolution des chaînes ni l'enrichissement EPG (les deux étapes coûteuses).
@@ -2461,7 +2521,11 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                         liveOnSatLoading = false,
                         liveOnSatMatches = cachedResolution
                             ?: it.liveOnSatMatchesFor(fetch)
-                            ?: fetch.matches.map { match -> ResolvedLiveOnSatMatch(match, emptyMap()) },
+                            // Nouveau scrape : les matchs déjà affichés gardent leurs chaînes en
+                            // attendant le rapprochement, au lieu de les perdre quelques instants.
+                            ?: it.liveOnSatMatches.associateBy(ResolvedLiveOnSatMatch::match).let { previous ->
+                                fetch.matches.map { match -> previous[match] ?: ResolvedLiveOnSatMatch(match, emptyMap()) }
+                            },
                         liveOnSatFetchedAtEpochMillis = fetch.fetchedAtEpochMillis,
                         liveOnSatError = if (forceRefresh && fetch.fromCache) {
                             "Actualisation impossible, affichage des données précédentes."
@@ -2509,11 +2573,23 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             }
             Catalog(categories = catalog?.categories.orEmpty(), entries = liveChannels)
         }
-        if (matcherCatalog.entriesFor(MediaType.Live).isEmpty()) return
+        val liveChannels = matcherCatalog.entriesFor(MediaType.Live)
+        if (liveChannels.isEmpty()) return
 
-        val todayGuide = todayEpgGuide(profileId, state.appSettings.epgTimeOffsetHours)
-
-        val index = withContext(Dispatchers.Default) { liveOnSatChannelMatcher.buildIndex(matcherCatalog) }
+        // Guide du jour (relu depuis SQLite s'il n'est pas en mémoire) chargé pendant la
+        // construction de l'index, au lieu de la retarder.
+        val (todayGuide, index) = coroutineScope {
+            val guide = async { todayEpgGuide(profileId, state.appSettings.epgTimeOffsetHours) }
+            // Index gardé tant que les chaînes Direct et les catégories sont les mêmes : il découpe
+            // chaque nom de chaîne (des dizaines de milliers) et mémorise les diffuseurs déjà
+            // résolus, réutilisés au scrape suivant.
+            val cached = liveOnSatIndexCache?.takeIf { (channels, categories, _) ->
+                channels === liveChannels && categories === matcherCatalog.categories
+            }?.third
+            val index = cached ?: withContext(Dispatchers.Default) { liveOnSatChannelMatcher.buildIndex(matcherCatalog) }
+                .also { liveOnSatIndexCache = Triple(liveChannels, matcherCatalog.categories, it) }
+            guide.await() to index
+        }
         // Recalcul des mêmes matchs (playlist ou EPG renouvelés) : l'ancien résultat reste affiché
         // pour les paquets pas encore refaits, au lieu de faire disparaître les chaînes.
         val resolved = (state.liveOnSatMatchesFor(fetch) ?: matches.map { ResolvedLiveOnSatMatch(it, emptyMap()) }).toMutableList()
@@ -2654,6 +2730,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         refreshWeatherIfStale()
         liveOnSatNextCheckAtMillis = 0L
         refreshLiveOnSatIfStale()
+        repository.clearGuideFailureBackoffs()
         homeGuides.forEach { it.load(forceRefresh = false) }
         reloadJustWatchRows()
         startEpgBackgroundSync()
@@ -2747,6 +2824,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         profileLoadJob = null
         catalogRetryJob?.cancel()
         catalogRetryJob = null
+        liveOnSatIndexCache = null
         liveZapList = null
         detailsTrail.clear()
         previousLiveEntry = null
@@ -2821,6 +2899,12 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 !fromPlayer && runCatching { hasFreshCache() }.getOrDefault(false)
             }
             cached.forEach { (_, load) -> load() }
+            // Blocs à retélécharger : leur dernière version sur disque s'affiche déjà, le
+            // téléchargement (étalé ci-dessous) la remplacera.
+            if (!fromPlayer) {
+                homeGuides.forEach { it.showCached() }
+                showCachedLiveOnSatMatches()
+            }
             delay(if (fromPlayer) STARTUP_SECONDARY_LOADS_PLAYER_DELAY_MS else STARTUP_SECONDARY_LOADS_HOME_DELAY_MS)
             scraped.forEach { (_, load) ->
                 load()
@@ -2973,7 +3057,7 @@ private const val HOME_RECOMMENDATION_RECENT_LIMIT = 240
 private const val HOME_RECOMMENDATION_TASTE_SOURCE_LIMIT = 4
 private const val HOME_RECOMMENDATION_PER_SOURCE_LIMIT = 80
 private const val HOME_RECOMMENDATION_REBUILD_INTERVAL_MS = 5 * 60_000L
-private const val LIVE_ONSAT_RESOLVE_BATCH = 20
+private const val LIVE_ONSAT_RESOLVE_BATCH = 50
 private const val LIVE_ONSAT_RETRY_MS = 15 * 60_000L
 private const val SIMILAR_CANDIDATE_LIMIT = 300
 private const val SIMILAR_RESULT_LIMIT = 12

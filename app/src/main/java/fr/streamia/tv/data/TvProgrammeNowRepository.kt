@@ -37,6 +37,22 @@ internal class TvProgrammeNowRepository(context: Context) {
         cached != null && now - cached.fetchedAtEpochMillis < maxAgeMillis &&
             TvProgrammeNowParser.onAir(cached.programmes, now).isNotEmpty()
 
+    /**
+     * Grille déjà sur disque, quel que soit son âge, si elle couvre l'heure actuelle : affichée
+     * tout de suite pendant que [loadNow] la retélécharge (le « en ce moment » est recalculé ici).
+     */
+    suspend fun cached(): TvProgrammeNowFetchResult? = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
+        val cached = cache.load() ?: return@withContext null
+        TvProgrammeNowParser.onAir(cached.programmes, now).takeIf { it.isNotEmpty() }
+            ?.let { TvProgrammeNowFetchResult(it, cached.fetchedAtEpochMillis, fromCache = true) }
+    }
+
+    /** Réseau revenu : l'attente après un échec n'a plus lieu d'être. */
+    fun clearFailureBackoff() {
+        lastFailureAtEpochMillis = 0L
+    }
+
     suspend fun loadNow(forceRefresh: Boolean, maxAgeMillis: Long): TvProgrammeNowFetchResult =
         withContext(Dispatchers.IO) {
             val now = System.currentTimeMillis()

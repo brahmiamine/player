@@ -12,13 +12,25 @@ import java.text.Normalizer
  * milliers d'entrées (même logique que [fr.streamia.tv.domain.EpgGuide.channelsByAlias]).
  */
 class ChannelIndex internal constructor(
-    internal val postings: Map<String, List<MediaEntry>>,
+    /** Chaînes Direct dans l'ordre du catalogue ; les listes de [postings] sont des positions ici. */
+    internal val channels: List<MediaEntry>,
+    /** Nombre de jetons de chaque chaîne (même position que [channels]). */
+    internal val tokenCounts: IntArray,
+    internal val postings: Map<String, IntArray>,
     /** Bouquet beIN arabe (catégorie ou nom "AR", voir [LiveChannelPrefix]). Un diffuseur beIN qui
      * précise la région Moyen-Orient/Afrique du Nord ("MENA", "Connect", "Arabia"...) est cherché
      * uniquement ici : sans ça, "beIN Sports MENA 3" matcherait n'importe quelle "BEIN SPORTS 3"
      * du profil au même score, y compris une chaîne FR ou AU sans rapport avec la diffusion réelle. */
     internal val arabicBeinChannels: List<MediaEntry>,
-)
+    internal val arabicBeinTokens: List<Set<String>>,
+) {
+    /**
+     * Résultat déjà calculé par nom de diffuseur : « beIN Sports 1 », « Canal+ Sport »… reviennent
+     * dans des dizaines de matchs de la journée. L'index est immuable, le résultat ne dépend que
+     * du nom : il est calculé une seule fois.
+     */
+    internal val resultsByBroadcaster = java.util.concurrent.ConcurrentHashMap<String, List<MediaEntry>>()
+}
 
 /**
  * Moteur métier pur et déterministe (même philosophie que
@@ -39,26 +51,56 @@ class ChannelIndex internal constructor(
  * par similarité de texte.
  */
 class ChannelMatcher {
+    /**
+     * Chaque nom de chaîne n'est découpé en jetons qu'une fois, ici. Avant, chaque comparaison
+     * redécoupait le nom de la chaîne candidate (normalisation Unicode + expressions régulières),
+     * pour chaque diffuseur de chaque match : des millions d'opérations sur un gros catalogue,
+     * puisqu'un jeton courant (« 1 », « sport ») est partagé par des milliers de chaînes.
+     */
     fun buildIndex(catalog: Catalog): ChannelIndex {
-        val postings = linkedMapOf<String, MutableList<MediaEntry>>()
-        catalog.entriesFor(MediaType.Live).forEach { entry ->
-            tokensOf(entry.displayName).forEach { token ->
-                postings.getOrPut(token) { mutableListOf() }.add(entry)
-            }
+        val channels = catalog.entriesFor(MediaType.Live)
+        val tokenCounts = IntArray(channels.size)
+        val postings = HashMap<String, IntList>()
+        channels.forEachIndexed { position, entry ->
+            val tokens = tokensOf(entry.displayName)
+            tokenCounts[position] = tokens.size
+            tokens.forEach { token -> postings.getOrPut(token) { IntList() }.add(position) }
         }
         val arabicBeinChannels = LiveChannelPrefix.AR.channels(catalog)
             .filter { "bein" in tokensOf(it.displayName) }
             .sortedBy(MediaEntry::number)
-        return ChannelIndex(postings, arabicBeinChannels)
+        return ChannelIndex(
+            channels = channels,
+            tokenCounts = tokenCounts,
+            postings = postings.mapValues { (_, positions) -> positions.toArray() },
+            arabicBeinChannels = arabicBeinChannels,
+            arabicBeinTokens = arabicBeinChannels.map { tokensOf(it.displayName) },
+        )
+    }
+
+    /** Liste d'entiers sans boîtage (des centaines de milliers de positions sur un gros catalogue). */
+    private class IntList {
+        private var values = IntArray(4)
+        private var size = 0
+        fun add(value: Int) {
+            if (size == values.size) values = values.copyOf(size * 2)
+            values[size++] = value
+        }
+        fun toArray(): IntArray = values.copyOf(size)
     }
 
     /** Meilleure(s) correspondance(s) pour un nom de diffuseur, triées par numéro de chaîne. */
-    fun matchAll(index: ChannelIndex, broadcasterName: String): List<MediaEntry> {
+    fun matchAll(index: ChannelIndex, broadcasterName: String): List<MediaEntry> =
+        index.resultsByBroadcaster.getOrPut(broadcasterName) { computeMatches(index, broadcasterName) }
+
+    private fun computeMatches(index: ChannelIndex, broadcasterName: String): List<MediaEntry> {
         val sourceTokens = tokensOf(broadcasterName)
         if (sourceTokens.isEmpty()) return emptyList()
 
         if (index.arabicBeinChannels.isNotEmpty() && isArabicBeinBroadcaster(sourceTokens)) {
-            val withinBouquet = bestMatches(sourceTokens, index.arabicBeinChannels)
+            val withinBouquet = bestMatches(
+                index.arabicBeinChannels.mapIndexed { i, entry -> entry to jaccard(sourceTokens, index.arabicBeinTokens[i]) },
+            )
             if (withinBouquet.isNotEmpty()) return withinBouquet
             // Diffuseur générique sans numéro ("beIN Connect MENA") : "connect"/"mena" ne
             // partagent presque aucun jeton avec un nom de chaîne numéroté, donc rien n'atteint le
@@ -71,11 +113,23 @@ class ChannelMatcher {
             return emptyList()
         }
 
-        val candidates = sourceTokens.asSequence()
-            .flatMap { index.postings[it].orEmpty().asSequence() }
-            .distinctBy(MediaEntry::key)
-            .toList()
-        return bestMatches(sourceTokens, candidates)
+        // Jetons communs comptés directement depuis l'index (sans redécouper le nom des chaînes) :
+        // Jaccard = communs / (jetons source + jetons chaîne − communs), exactement comme avant.
+        // Ordre des candidats identique à l'ancien parcours (jeton source puis ordre du catalogue,
+        // première occurrence d'une clé gardée), donc mêmes départages entre ex æquo.
+        val sharedCounts = LinkedHashMap<Int, Int>()
+        sourceTokens.forEach { token ->
+            index.postings[token]?.forEach { position -> sharedCounts[position] = (sharedCounts[position] ?: 0) + 1 }
+        }
+        val seenKeys = HashSet<String>()
+        val scored = ArrayList<Pair<MediaEntry, Double>>()
+        sharedCounts.forEach { (position, shared) ->
+            val entry = index.channels[position]
+            if (!seenKeys.add(entry.key)) return@forEach
+            val union = sourceTokens.size + index.tokenCounts[position] - shared
+            scored += entry to (if (union <= 0) 0.0 else shared.toDouble() / union)
+        }
+        return bestMatches(scored)
     }
 
     /** Meilleure correspondance unique, ou `null` sous le seuil minimal. */
@@ -99,11 +153,8 @@ class ChannelMatcher {
      * résolutions d'une même chaîne y sont groupées, alors que deux chaînes de régions différentes
      * portant le même numéro finissent dans des catégories distinctes et restent séparées.
      */
-    private fun bestMatches(sourceTokens: Set<String>, candidates: List<MediaEntry>): List<MediaEntry> {
-        val scored = candidates.asSequence()
-            .map { entry -> entry to jaccard(sourceTokens, tokensOf(entry.displayName)) }
-            .filter { (_, score) -> score >= MIN_MATCH_SCORE }
-            .toList()
+    private fun bestMatches(candidates: List<Pair<MediaEntry, Double>>): List<MediaEntry> {
+        val scored = candidates.filter { (_, score) -> score >= MIN_MATCH_SCORE }
         if (scored.isEmpty()) return emptyList()
 
         val bestScore = scored.maxOf { it.second }
@@ -122,8 +173,11 @@ class ChannelMatcher {
 
     internal fun tokensOf(name: String): Set<String> {
         val withoutAnnotations = name.replace(BRACKETED_ANNOTATION, " ")
-        val normalized = Normalizer.normalize(withoutAnnotations, Normalizer.Form.NFD)
-            .replace(COMBINING_MARKS, "")
+        // Nom déjà en ASCII (le cas de la grande majorité des chaînes) : la décomposition Unicode
+        // ne changerait rien et il n'y a aucun accent à retirer.
+        val withoutAccents = if (withoutAnnotations.all { it.code < 128 }) withoutAnnotations
+        else Normalizer.normalize(withoutAnnotations, Normalizer.Form.NFD).replace(COMBINING_MARKS, "")
+        val normalized = withoutAccents
             .lowercase()
             .replace(NON_WORD, " ")
         return normalized.split(' ')
