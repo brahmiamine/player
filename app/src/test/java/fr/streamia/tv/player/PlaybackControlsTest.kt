@@ -29,6 +29,12 @@ class PlaybackControlsTest {
     }
 
     @Test
+    fun `live right opens the channel versions while the settings key keeps the playback panel`() {
+        assertEquals(PlaybackRemoteAction.OpenVersions, playbackRemoteAction(MediaType.Live, PlaybackRemoteButton.Right))
+        assertEquals(PlaybackRemoteAction.OpenSettings, playbackRemoteAction(MediaType.Live, PlaybackRemoteButton.Settings))
+    }
+
+    @Test
     fun `live up zaps to next channel and down zaps to previous channel`() {
         assertEquals(PlaybackRemoteAction.ZapNext, playbackRemoteAction(MediaType.Live, PlaybackRemoteButton.Up))
         assertEquals(PlaybackRemoteAction.ZapPrevious, playbackRemoteAction(MediaType.Live, PlaybackRemoteButton.Down))

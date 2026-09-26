@@ -53,16 +53,11 @@ internal fun BoxScope.PlayerSettings(
     externalSubtitleError: String? = null,
     onPickExternalSubtitleFile: (() -> Unit)? = null,
     onLoadExternalSubtitleUrl: ((String) -> Unit)? = null,
-    /** Direct avec plusieurs versions de la chaîne : résumé affiché sur la ligne « Version ». */
-    versionLabel: String? = null,
-    onOpenVersions: (() -> Unit)? = null,
 ) {
     // Audio / sous-titres : choix dans une fenêtre à cases à cocher (sélection unique), au lieu
     // d'une liste déroulante dans le panneau. Le focus revient sur la ligne à la fermeture.
     var picker by remember { mutableStateOf<TrackPicker?>(null) }
     val subtitleFocus = remember { FocusRequester() }
-    val audioFocus = remember { FocusRequester() }
-    val hasVersions = versionLabel != null && onOpenVersions != null
     Column(
         Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(430.dp)
             .padding(vertical = 40.dp, horizontal = 24.dp)
@@ -81,16 +76,7 @@ internal fun BoxScope.PlayerSettings(
             }
         }
         Spacer(Modifier.height(8.dp))
-        // Ligne « Version » en tête : → ouvre ce panneau avec le focus dessus.
-        if (versionLabel != null && onOpenVersions != null) {
-            TrackRow("Version", versionLabel, onOpenVersions, Modifier.focusRequester(firstFocus), chevron = StreamiaIconGlyph.ArrowForward)
-        }
-        TrackRow(
-            "Piste audio",
-            audioTracks.getOrNull(audioIndex)?.label ?: "Auto",
-            { picker = TrackPicker.Audio },
-            Modifier.focusRequester(audioFocus).then(if (hasVersions) Modifier else Modifier.focusRequester(firstFocus)),
-        )
+        TrackRow("Piste audio", audioTracks.getOrNull(audioIndex)?.label ?: "Auto", { picker = TrackPicker.Audio }, Modifier.focusRequester(firstFocus))
         TrackRow("Sous-titres", subtitleTracks.getOrNull(subtitleIndex)?.label ?: "Désactivés", { picker = TrackPicker.Subtitle }, Modifier.focusRequester(subtitleFocus))
         SettingButton("Format vidéo", aspect.label, onNextAspect)
         val dolbyText = listOfNotNull(dolbyVisionLabel, dolbyAtmosLabel).joinToString(" · ")
@@ -110,7 +96,7 @@ internal fun BoxScope.PlayerSettings(
     }
     picker?.let { current ->
         val audio = current == TrackPicker.Audio
-        val rowFocus = if (audio) audioFocus else subtitleFocus
+        val rowFocus = if (audio) firstFocus else subtitleFocus
         fun close() {
             picker = null
             runCatching { rowFocus.requestFocus() }
@@ -197,13 +183,7 @@ private fun ExternalSubtitleSection(
 
 /** Ligne du panneau : titre, valeur en cours, chevron — OK ouvre la fenêtre de choix. */
 @Composable
-private fun TrackRow(
-    title: String,
-    value: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    chevron: StreamiaIconGlyph = StreamiaIconGlyph.ChevronDown,
-) {
+private fun TrackRow(title: String, value: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
     FocusableSurface(onClick = onClick, modifier = modifier.fillMaxWidth().height(74.dp)) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -211,7 +191,7 @@ private fun TrackRow(
                 Spacer(Modifier.height(4.dp))
                 Text(value, color = FocusBlueBright, fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            StreamiaIcon(chevron, size = 16.dp)
+            StreamiaIcon(StreamiaIconGlyph.ChevronDown, size = 16.dp)
         }
     }
 }

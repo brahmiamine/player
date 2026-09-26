@@ -2,6 +2,7 @@ package fr.streamia.tv.data
 
 import android.content.Context
 import androidx.core.content.edit
+import fr.streamia.tv.domain.LiveVersionCheck
 import fr.streamia.tv.domain.LiveVersionStats
 import fr.streamia.tv.domain.ServerCredentials
 import java.net.URI
@@ -17,6 +18,7 @@ import org.json.JSONObject
  */
 class LiveVersionStatsStore(context: Context) {
     private val preferences = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+    private var writesSinceEviction = EVICTION_CHECK_EVERY - 1
 
     fun load(scope: String, entryKeys: Collection<String>): Map<String, LiveVersionStats> =
         entryKeys.mapNotNull { key -> read(scope, key)?.let { key to it } }.toMap()
@@ -30,28 +32,25 @@ class LiveVersionStatsStore(context: Context) {
             )
         }
 
-    fun recordMeasurement(
-        scope: String,
-        entryKey: String,
-        width: Int,
-        height: Int,
-        frameRate: Float?,
-        codec: String?,
-        bitrate: Int?,
-        hdr: String?,
-        nowMs: Long = System.currentTimeMillis(),
-    ) = update(scope, entryKey, nowMs) {
-        it.copy(
-            width = width,
-            height = height,
-            frameRate = frameRate ?: it.frameRate,
-            codec = codec ?: it.codec,
-            bitrate = bitrate ?: it.bitrate,
-            hdr = hdr ?: it.hdr,
-            lastSuccessAtMs = nowMs,
-            consecutiveFailures = 0,
-        )
-    }
+    /** Contrôle réel de la version (image, fps réels, images perdues, son) pendant sa lecture. */
+    fun recordCheck(scope: String, entryKey: String, check: LiveVersionCheck, nowMs: Long = System.currentTimeMillis()) =
+        update(scope, entryKey, nowMs) {
+            val playing = !check.noPicture && !check.noSound
+            it.copy(
+                width = check.width ?: it.width,
+                height = check.height ?: it.height,
+                frameRate = check.declaredFrameRate ?: it.frameRate,
+                realFrameRate = check.realFrameRate ?: it.realFrameRate,
+                codec = check.codec ?: it.codec,
+                bitrate = check.bitrate ?: it.bitrate,
+                hdr = check.hdr ?: it.hdr,
+                droppedRatio = check.droppedRatio ?: it.droppedRatio,
+                noPicture = check.noPicture,
+                noSound = check.noSound,
+                lastSuccessAtMs = if (playing) nowMs else it.lastSuccessAtMs,
+                consecutiveFailures = if (playing) 0 else it.consecutiveFailures,
+            )
+        }
 
     /** Temps regardé et coupures depuis le dernier relevé ; les anciennes valeurs s'estompent. */
     fun recordWatch(scope: String, entryKey: String, watchedMs: Long, rebuffers: Int, nowMs: Long = System.currentTimeMillis()) =
@@ -73,7 +72,11 @@ class LiveVersionStatsStore(context: Context) {
     private fun update(scope: String, entryKey: String, nowMs: Long, change: (LiveVersionStats) -> LiveVersionStats) {
         val updated = change(read(scope, entryKey) ?: LiveVersionStats()).copy(updatedAtMs = nowMs)
         preferences.edit { putString(storageKey(scope, entryKey), updated.toJson().toString()) }
-        evictIfNeeded()
+        // Le nettoyage relit toutes les entrées : seulement de temps en temps, pas à chaque écriture.
+        if (++writesSinceEviction >= EVICTION_CHECK_EVERY) {
+            writesSinceEviction = 0
+            evictIfNeeded()
+        }
     }
 
     private fun read(scope: String, entryKey: String): LiveVersionStats? =
@@ -107,6 +110,10 @@ class LiveVersionStatsStore(context: Context) {
         put("lf", lastFailureAtMs)
         put("cf", consecutiveFailures)
         put("u", updatedAtMs)
+        realFrameRate?.let { put("rf", it.toDouble()) }
+        droppedRatio?.let { put("dr", it.toDouble()) }
+        if (noSound) put("ns", true)
+        if (noPicture) put("np", true)
     }
 
     private fun JSONObject.toStats() = LiveVersionStats(
@@ -123,6 +130,10 @@ class LiveVersionStatsStore(context: Context) {
         lastFailureAtMs = optLong("lf"),
         consecutiveFailures = optInt("cf"),
         updatedAtMs = optLong("u"),
+        realFrameRate = if (has("rf")) optDouble("rf").toFloat() else null,
+        droppedRatio = if (has("dr")) optDouble("dr").toFloat() else null,
+        noSound = optBoolean("ns"),
+        noPicture = optBoolean("np"),
     )
 
     private fun JSONObject.optIntOrNull(name: String): Int? = if (has(name)) optInt(name) else null
@@ -131,6 +142,7 @@ class LiveVersionStatsStore(context: Context) {
         private const val PREFERENCES_NAME = "streamia-live-versions-v1"
         private const val MAX_ENTRIES = 800
         private const val EVICTION_BATCH = 100
+        private const val EVICTION_CHECK_EVERY = 25
         private const val DECAY_AFTER_MS = 3 * 3_600_000L
 
         /** Portée d'un compte : condensat du serveur et de l'identifiant, sans le mot de passe. */

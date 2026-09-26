@@ -53,10 +53,10 @@ import fr.streamia.tv.ui.theme.WarmSignal
 import kotlinx.coroutines.yield
 
 /**
- * Panneau « Versions » du Direct : les autres versions de la chaîne en cours, classées sur la
- * qualité réellement mesurée par le lecteur, pas sur leur nom. Il remplace le panneau « Lecture »
- * au même endroit ; ← ou Retour y ramènent. Le panneau reste ouvert après un changement de
- * version pour pouvoir comparer.
+ * Panneau « Versions » du Direct, ouvert directement par → : les versions de la chaîne en cours,
+ * classées sur ce que le lecteur a réellement mesuré (image, fps, son), pas sur leur nom.
+ * Premier OK sur une version : elle est lancée et le panneau reste ouvert pour comparer ; OK sur la
+ * version en cours : le panneau se ferme. ← ou Retour le ferment aussi (Retour annule d'abord un test).
  */
 @Composable
 internal fun BoxScope.LiveVersionsPanel(
@@ -64,9 +64,18 @@ internal fun BoxScope.LiveVersionsPanel(
     options: List<LiveVersionOption>,
     currentLoading: Boolean,
     currentFailed: Boolean,
+    /** Problème constaté en direct sur la version en cours (« Pas d'image », « Pas de son… »). */
+    currentProblem: String?,
+    /** « Test 2 / 5 · TF1 HD » pendant « Tester toutes les versions », sinon `null`. */
+    scanProgress: String?,
+    scanCount: Int,
     onSelect: (MediaEntry) -> Unit,
-    onBack: () -> Unit,
+    onClose: () -> Unit,
+    onStartScan: () -> Unit,
+    onCancelScan: () -> Unit,
+    onOpenPlaybackSettings: () -> Unit,
 ) {
+    val scanning = scanProgress != null
     val listState = rememberLazyListState()
     val currentFocus = remember { FocusRequester() }
     val currentIndex = options.indexOfFirst { it.current }.coerceAtLeast(0)
@@ -89,7 +98,7 @@ internal fun BoxScope.LiveVersionsPanel(
             .padding(horizontal = 22.dp, vertical = 22.dp)
             .onPreviewKeyEvent { event ->
                 if (event.type == KeyEventType.KeyDown && event.nativeKeyEvent.keyCode == android.view.KeyEvent.KEYCODE_DPAD_LEFT) {
-                    onBack()
+                    if (scanning) onCancelScan() else onClose()
                     true
                 } else {
                     false
@@ -98,7 +107,7 @@ internal fun BoxScope.LiveVersionsPanel(
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(
-                "← Versions de $channelName",
+                "Versions de $channelName",
                 color = Ink,
                 fontSize = 22.sp,
                 fontWeight = HeadingWeight,
@@ -111,9 +120,10 @@ internal fun BoxScope.LiveVersionsPanel(
         }
         Spacer(Modifier.height(6.dp))
         Text(
-            "Qualité mesurée lors de vos visionnages ; « annoncée » = d'après le nom seulement.",
-            color = MutedInk,
+            scanProgress ?: "Qualité, fps et son réellement mesurés à l'écran ; « annoncée » = d'après le nom seulement.",
+            color = if (scanning) FocusBlueBright else MutedInk,
             fontSize = 12.sp,
+            fontWeight = if (scanning) FontWeight.Bold else FontWeight.Normal,
             lineHeight = 16.sp,
         )
         Spacer(Modifier.height(12.dp))
@@ -139,7 +149,14 @@ internal fun BoxScope.LiveVersionsPanel(
                         option = option,
                         loading = option.current && currentLoading,
                         failed = option.current && currentFailed,
-                        onClick = { if (!option.current) onSelect(option.entry) },
+                        problem = currentProblem.takeIf { option.current },
+                        onClick = {
+                            when {
+                                scanning -> Unit
+                                option.current -> onClose()
+                                else -> onSelect(option.entry)
+                            }
+                        },
                         onFocused = { focusedIndex = index },
                         modifier = if (index == currentIndex) Modifier.focusRequester(currentFocus) else Modifier,
                     )
@@ -147,7 +164,28 @@ internal fun BoxScope.LiveVersionsPanel(
             }
         }
         Spacer(Modifier.height(10.dp))
-        Text("OK : passer sur cette version · ← ou Retour : revenir", color = MutedInk, fontSize = 12.sp)
+        if (scanning) {
+            PanelAction("Annuler le test", onCancelScan)
+        } else {
+            // Une version à la fois, jamais deux connexions : environ 6 s par version.
+            PanelAction("Tester toutes les versions (≈ ${scanCount * 6} s)", onStartScan)
+            Spacer(Modifier.height(8.dp))
+            PanelAction("Audio, sous-titres, format…", onOpenPlaybackSettings)
+        }
+        Spacer(Modifier.height(10.dp))
+        Text(
+            if (scanning) "Chaque version s'affiche quelques secondes · Retour : annuler"
+            else "OK : lancer la version · OK sur la version en cours ou ← : fermer",
+            color = MutedInk,
+            fontSize = 12.sp,
+        )
+    }
+}
+
+@Composable
+private fun PanelAction(label: String, onClick: () -> Unit) {
+    FocusableSurface(onClick = onClick, focusScale = 1.02f, modifier = Modifier.fillMaxWidth().height(48.dp)) {
+        Text(label, color = Ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 16.dp))
     }
 }
 
@@ -156,11 +194,12 @@ private fun VersionRow(
     option: LiveVersionOption,
     loading: Boolean,
     failed: Boolean,
+    problem: String?,
     onClick: () -> Unit,
     onFocused: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val dimmed = option.health == LiveVersionHealth.Unavailable && !option.current
+    val dimmed = option.health.rank >= LiveVersionHealth.Unavailable.rank && !option.current
     FocusableSurface(
         onClick = onClick,
         onFocused = onFocused,
@@ -201,12 +240,13 @@ private fun VersionRow(
             val status = when {
                 failed -> "✕ Ne répond pas"
                 loading -> "… Chargement"
+                problem != null -> "✕ $problem"
                 option.health == LiveVersionHealth.Unavailable ->
                     "${option.health.symbol} ${option.health.label}${option.failureAgo?.let { " · $it" }.orEmpty()}"
                 else -> "${option.health.symbol} ${option.health.label}"
             }
             val statusColor = when {
-                failed || option.health == LiveVersionHealth.Unavailable -> Danger
+                failed || problem != null || option.health.rank >= LiveVersionHealth.Unavailable.rank -> Danger
                 loading -> MutedInk
                 option.health == LiveVersionHealth.Choppy -> WarmSignal
                 option.health == LiveVersionHealth.Stable -> FocusBlueBright

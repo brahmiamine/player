@@ -78,6 +78,11 @@ import fr.streamia.tv.player.StreamRecovery
 import fr.streamia.tv.player.isRecoverableStreamError
 import fr.streamia.tv.player.streamRecoveryDelayMs
 import fr.streamia.tv.player.DisplayModeSwitcher
+import fr.streamia.tv.player.LiveAudioIssue
+import fr.streamia.tv.player.VideoFrameMonitor
+import fr.streamia.tv.player.liveAudioIssue
+import androidx.media3.common.Format
+import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import fr.streamia.tv.data.AppSettings
@@ -89,12 +94,12 @@ import fr.streamia.tv.domain.EpgProgram
 import fr.streamia.tv.domain.LiveCutCounter
 import fr.streamia.tv.domain.LiveFailoverChain
 import fr.streamia.tv.domain.LiveFailoverRules
+import fr.streamia.tv.domain.LiveVersionCheck
+import fr.streamia.tv.domain.LiveVersionHealth
 import fr.streamia.tv.domain.LiveVersionIndex
 import fr.streamia.tv.domain.decideLiveFailover
 import fr.streamia.tv.domain.hasFailoverCandidates
 import fr.streamia.tv.domain.LiveVersionStats
-import fr.streamia.tv.domain.qualityClassHeight
-import fr.streamia.tv.domain.qualityClassLabel
 import fr.streamia.tv.domain.rankLiveVersions
 import fr.streamia.tv.domain.MediaCategory
 import fr.streamia.tv.domain.MediaEntry
@@ -158,14 +163,37 @@ internal data class TrackChoice(
 private const val EXTERNAL_SUBTITLE_LANGUAGE_TAG = "und"
 private const val NEXT_EPISODE_COUNTDOWN_SECONDS = 8
 private const val LIVE_EPG_PROGRESS_REFRESH_MS = 5_000L
-private const val LIVE_VERSION_MEASURE_DELAY_MS = 3_000L
 private const val LIVE_VERSION_WATCH_SAMPLE_MS = 60_000L
+/** Contrôle réel du Direct : un relevé par seconde, verdict après 2 s de lecture, mesure enregistrée à 4 s. */
+private const val LIVE_CHECK_INTERVAL_MS = 1_000L
+private const val LIVE_CHECK_SETTLE_MS = 2_000L
+private const val LIVE_CHECK_RECORD_AFTER_MS = 4_000L
+/** « Tester toutes les versions » : délai maximal par version, et nombre de versions testées. */
+private const val LIVE_SCAN_TIMEOUT_MS = 12_000L
+private const val MAX_SCANNED_VERSIONS = 12
 
 /** Changement de version en attente de sa première image : [from] est relancée s'il échoue. */
 private data class LiveVersionSwitch(val from: MediaEntry, val targetKey: String)
 
 /** Début d'une coupure du Direct ; [afterPlayback] : l'image avait déjà été affichée. */
 private data class LiveOutageStart(val atMs: Long, val afterPlayback: Boolean)
+
+/** Test de toutes les versions : [queue] est lancée à l'écran une version après l'autre. */
+private data class LiveVersionScan(val origin: MediaEntry, val queue: List<MediaEntry>, val index: Int)
+
+/** Résolution, fps annoncés, codec, débit et HDR du format vidéo en cours. */
+private fun liveTechnicalInfo(format: Format): StreamTechnicalInfo? {
+    if (format.width <= 0 || format.height <= 0) return null
+    val isDolbyVision = isDolbyVisionFormat(format.sampleMimeType, format.codecs)
+    return StreamTechnicalInfo(
+        width = format.width,
+        height = format.height,
+        frameRate = format.frameRate.takeIf { it > 0f },
+        codec = if (isDolbyVision) "Dolby Vision" else codecLabel(format.sampleMimeType, format.codecs),
+        bitrate = format.bitrate.takeIf { it > 0 },
+        hdr = if (isDolbyVision) "Dolby Vision" else hdrLabel(format.sampleMimeType, format.colorInfo?.colorTransfer),
+    )
+}
 
 @androidx.annotation.OptIn(markerClass = [UnstableApi::class])
 @Composable
@@ -585,17 +613,7 @@ fun PlayerScreen(
             livePlaybackSession.continuePlayback()
             // Flux déjà lancé par l'aperçu : ses pistes ne seront pas renotifiées, on relit le format
             // en cours (bandeau d'infos et mesure de la version pour le panneau « Versions »).
-            player.videoFormat?.takeIf { it.width > 0 && it.height > 0 }?.let { format ->
-                val isDolbyVision = isDolbyVisionFormat(format.sampleMimeType, format.codecs)
-                technicalInfo = StreamTechnicalInfo(
-                    width = format.width,
-                    height = format.height,
-                    frameRate = format.frameRate.takeIf { it > 0f },
-                    codec = if (isDolbyVision) "Dolby Vision" else codecLabel(format.sampleMimeType, format.codecs),
-                    bitrate = format.bitrate.takeIf { it > 0 },
-                    hdr = if (isDolbyVision) "Dolby Vision" else hdrLabel(format.sampleMimeType, format.colorInfo?.colorTransfer),
-                )
-            }
+            player.videoFormat?.let(::liveTechnicalInfo)?.let { technicalInfo = it }
         } else {
             val url = streamCandidates.firstOrNull() ?: baseUrl
             startCandidate(url, resumePositionMs)
@@ -733,23 +751,97 @@ fun PlayerScreen(
             rankLiveVersions(entry, liveVersions, merged, System.currentTimeMillis(), maxDisplayHeight)
         }
     }
-    val versionSummary = remember(entry.key, technicalInfo.width, technicalInfo.height, liveVersions.size) {
-        val quality = technicalInfo.width?.let { w -> technicalInfo.height?.let { h -> qualityClassLabel(qualityClassHeight(w, h)) } }
-        listOfNotNull(entry.displayName, quality, "${liveVersions.size} versions").joinToString(" · ")
-    }
+    // Contrôle réel du Direct, un relevé par seconde et seulement en plein écran Direct : images
+    // réellement affichées (fps réels, images perdues, image figée) et son. Enregistré 4 s après le
+    // début de la lecture puis chaque minute ; alimente le classement des versions et le secours.
+    val frameMonitor = remember(entry.key) { VideoFrameMonitor() }
+    // Des images ont été affichées (y compris une chaîne reprise de l'aperçu, sans onRenderedFirstFrame).
+    var liveFramesSeen by remember(entry.key) { mutableStateOf(false) }
+    // Première mesure réelle de cette version enregistrée.
+    var liveChecked by remember(entry.key) { mutableStateOf(false) }
+    var noPicture by remember(entry.key) { mutableStateOf(false) }
+    var audioIssue by remember(entry.key) { mutableStateOf<LiveAudioIssue?>(null) }
+    // Début réel du problème d'image ou de son (elapsedRealtime) : les 6 s du secours partent de là.
+    var mediaProblemSinceMs by remember(entry.key) { mutableStateOf<Long?>(null) }
+    // Erreurs audio de la session, comptées hors état Compose : aucune recomposition.
+    val audioErrors = remember(entry.key) { IntArray(1) }
+    DisposableEffect(player, entry.key, sharedLivePlayer) {
+        if (!sharedLivePlayer) return@DisposableEffect onDispose {}
+        val listener = object : AnalyticsListener {
+            override fun onAudioSinkError(eventTime: AnalyticsListener.EventTime, audioSinkError: Exception) {
+                audioErrors[0]++
+            }
 
-    // Mesure réelle de la version en cours, enregistrée une fois l'image stabilisée (et pas à
-    // chaque chaîne traversée pendant un zap rapide).
-    LaunchedEffect(entry.key, technicalInfo, buffering, playbackError) {
-        if (entry.type != MediaType.Live || buffering || playbackError != null) return@LaunchedEffect
-        val width = technicalInfo.width ?: return@LaunchedEffect
-        val height = technicalInfo.height ?: return@LaunchedEffect
-        delay(LIVE_VERSION_MEASURE_DELAY_MS)
-        versionStatsStore.recordMeasurement(
-            versionScope, entry.key, width, height,
-            technicalInfo.frameRate, technicalInfo.codec, technicalInfo.bitrate, technicalInfo.hdr,
-        )
-        versionStatsRevision++
+            override fun onAudioCodecError(eventTime: AnalyticsListener.EventTime, audioCodecError: Exception) {
+                audioErrors[0]++
+            }
+        }
+        player.addAnalyticsListener(listener)
+        onDispose { player.removeAnalyticsListener(listener) }
+    }
+    LaunchedEffect(entry.key, player, sharedLivePlayer) {
+        if (!sharedLivePlayer) return@LaunchedEffect
+        frameMonitor.reset(SystemClock.elapsedRealtime())
+        var playingSinceMs = -1L
+        var lastRecordAtMs = 0L
+        while (true) {
+            delay(LIVE_CHECK_INTERVAL_MS)
+            val now = SystemClock.elapsedRealtime()
+            val counters = player.videoDecoderCounters
+            counters?.ensureUpdated()
+            val rendered = counters?.renderedOutputBufferCount ?: 0
+            val playing = player.isPlaying && player.playbackState == Player.STATE_READY
+            val frozenMs = frameMonitor.sample(now, rendered, counters?.droppedBufferCount ?: 0, playing)
+            if (!playing) {
+                playingSinceMs = -1L
+                continue
+            }
+            if (playingSinceMs < 0L) playingSinceMs = now
+            if (!liveFramesSeen && rendered > 0) liveFramesSeen = true
+            if (now - playingSinceMs < LIVE_CHECK_SETTLE_MS) continue
+
+            val tracks = player.currentTracks
+            val hasVideoTrack = tracks.containsType(C.TRACK_TYPE_VIDEO)
+            // Mode tunnel : l'image va directement au matériel, les compteurs d'images ne bougent pas.
+            val pictureMissing = !hasVideoTrack || (!appSettings.tunnelingEnabled && frozenMs >= LIVE_CHECK_SETTLE_MS)
+            val audio = liveAudioIssue(
+                hasVideoTrack = hasVideoTrack,
+                audioTrackGroups = tracks.groups.count { it.type == C.TRACK_TYPE_AUDIO },
+                anyAudioSelected = tracks.isTypeSelected(C.TRACK_TYPE_AUDIO),
+                audioErrors = audioErrors[0],
+            )
+            if (pictureMissing != noPicture || audio != audioIssue) {
+                val problem = pictureMissing || audio != null
+                val since = if (pictureMissing && hasVideoTrack) now - frozenMs else playingSinceMs
+                mediaProblemSinceMs = if (problem) mediaProblemSinceMs ?: since else null
+                noPicture = pictureMissing
+                audioIssue = audio
+            }
+            if (now - playingSinceMs >= LIVE_CHECK_RECORD_AFTER_MS && (!liveChecked || now - lastRecordAtMs >= LIVE_VERSION_WATCH_SAMPLE_MS)) {
+                val info = player.videoFormat?.let(::liveTechnicalInfo)
+                versionStatsStore.recordCheck(
+                    versionScope,
+                    entry.key,
+                    LiveVersionCheck(
+                        width = info?.width,
+                        height = info?.height,
+                        declaredFrameRate = info?.frameRate,
+                        realFrameRate = frameMonitor.realFps,
+                        codec = info?.codec,
+                        bitrate = info?.bitrate,
+                        hdr = info?.hdr,
+                        droppedRatio = frameMonitor.droppedRatio,
+                        noPicture = pictureMissing,
+                        noSound = audio != null,
+                    ),
+                )
+                lastRecordAtMs = now
+                if (!liveChecked) {
+                    liveChecked = true
+                    versionStatsRevision++
+                }
+            }
+        }
     }
     // Stabilité : temps regardé et coupures, relevés chaque minute de lecture effective.
     LaunchedEffect(entry.key, player) {
@@ -797,17 +889,27 @@ fun PlayerScreen(
     // Secours automatique (Paramètres › Lecture & direct) : voir LiveFailoverRules. Actif seulement
     // s'il existe une autre version de la même langue ; ni compteur ni minuterie sinon.
     val online by remember(context) { NetworkMonitor.get(context.applicationContext).online }.collectAsState()
-    val failoverActive = appSettings.liveVersionFailover && sharedLivePlayer && hasFailoverCandidates(entry, liveVersions)
+    // « Tester toutes les versions » : chaque version est lancée à l'écran l'une après l'autre (une
+    // seule connexion à la fois) le temps d'un contrôle réel, puis la meilleure est gardée.
+    var versionScan by remember { mutableStateOf<LiveVersionScan?>(null) }
+    val failoverActive = appSettings.liveVersionFailover && sharedLivePlayer && versionScan == null &&
+        hasFailoverCandidates(entry, liveVersions)
     var failoverChain by remember { mutableStateOf<LiveFailoverChain?>(null) }
     // Compteur de coupures propre à la version en cours : il repart de zéro sur la suivante.
     val cutCounter = remember(entry.key) { LiveCutCounter() }
     // Début de la coupure en cours (horloge elapsedRealtime) et si l'image avait déjà été affichée.
     var outageStart by remember(entry.key) { mutableStateOf<LiveOutageStart?>(null) }
-    val outage = buffering || playbackError != null
+    val hasPlayed = streamHasPlayed || liveFramesSeen
+    // Coupure : chargement, erreur, image absente ou figée, ou son absent.
+    val outage = buffering || playbackError != null || noPicture || audioIssue != null
+
+    fun rankedVersionsNow() = rankLiveVersions(
+        entry, liveVersions, versionStatsStore.load(versionScope, liveVersions.map { it.key }), System.currentTimeMillis(), maxDisplayHeight,
+    )
 
     fun runFailover(reason: String) {
         if (!failoverActive) return
-        if (!streamHasPlayed) versionStatsStore.recordFailure(versionScope, entry.key)
+        if (!hasPlayed) versionStatsStore.recordFailure(versionScope, entry.key)
         // Version choisie à la main dans le panneau qui ne répond pas : retour sur la précédente.
         val pending = versionSwitch
         if (pending != null && pending.targetKey == entry.key) {
@@ -816,11 +918,7 @@ fun PlayerScreen(
             onSwitchVersion(pending.from)
             return
         }
-        val now = System.currentTimeMillis()
-        val ranked = rankLiveVersions(
-            entry, liveVersions, versionStatsStore.load(versionScope, liveVersions.map { it.key }), now, maxDisplayHeight,
-        )
-        val decision = decideLiveFailover(entry, ranked, failoverChain, now)
+        val decision = decideLiveFailover(entry, rankedVersionsNow(), failoverChain, System.currentTimeMillis())
         failoverChain = decision.chain
         val target = decision.target
         when {
@@ -840,7 +938,11 @@ fun PlayerScreen(
     LaunchedEffect(entry.key, outage, online) {
         val now = SystemClock.elapsedRealtime()
         when {
-            outage && online -> if (outageStart == null) outageStart = LiveOutageStart(now, afterPlayback = streamHasPlayed)
+            outage && online -> if (outageStart == null) {
+                // Image figée ou son absent : détectés après coup, la coupure date de leur vrai début.
+                val mediaOnly = !buffering && playbackError == null
+                outageStart = LiveOutageStart(mediaProblemSinceMs?.takeIf { mediaOnly } ?: now, afterPlayback = hasPlayed)
+            }
             outage -> outageStart = null
             else -> {
                 val ended = outageStart ?: return@LaunchedEffect
@@ -858,7 +960,62 @@ fun PlayerScreen(
         if (!failoverActive) return@LaunchedEffect
         val remaining = LiveFailoverRules.SWITCH_AFTER_OUTAGE_MS - (SystemClock.elapsedRealtime() - start.atMs)
         if (remaining > 0) delay(remaining)
-        runFailover(if (start.afterPlayback) "coupe" else "ne démarre pas")
+        runFailover(
+            when {
+                !start.afterPlayback -> "ne démarre pas"
+                noPicture -> "n'affiche pas d'image"
+                audioIssue != null -> "n'a pas de son"
+                else -> "coupe"
+            },
+        )
+    }
+
+    fun startVersionScan() {
+        if (!hasOtherVersions || versionScan != null) return
+        val others = rankedVersionsNow().map { it.entry }.filter { it.key != entry.key }
+        versionSwitch = null
+        versionScan = LiveVersionScan(origin = entry, queue = (listOf(entry) + others).take(MAX_SCANNED_VERSIONS), index = 0)
+    }
+
+    fun cancelVersionScan() {
+        val scan = versionScan ?: return
+        versionScan = null
+        versionNotice = "Test annulé"
+        if (entry.key != scan.origin.key) onSwitchVersion(scan.origin)
+    }
+
+    LaunchedEffect(versionScan?.index, entry.key) {
+        val scan = versionScan ?: return@LaunchedEffect
+        val target = scan.queue.getOrNull(scan.index) ?: return@LaunchedEffect
+        if (target.key != entry.key) {
+            onSwitchVersion(target)
+            return@LaunchedEffect
+        }
+        // Contrôle réel de cette version (image, fps, son), ou échec au bout du délai.
+        val deadline = SystemClock.elapsedRealtime() + LIVE_SCAN_TIMEOUT_MS
+        while (!liveChecked && playbackError == null && SystemClock.elapsedRealtime() < deadline) delay(250)
+        // Aucune image dans le délai : échec. Une image lente à se stabiliser n'est pas un échec.
+        if (!liveChecked && !liveFramesSeen && !streamHasPlayed) versionStatsStore.recordFailure(versionScope, entry.key)
+        versionStatsRevision++
+        if (scan.index + 1 < scan.queue.size) {
+            versionScan = scan.copy(index = scan.index + 1)
+            return@LaunchedEffect
+        }
+        versionScan = null
+        val best = rankedVersionsNow().firstOrNull {
+            it.sameLanguage && (it.health == LiveVersionHealth.Stable || it.health == LiveVersionHealth.Choppy)
+        }?.entry
+        when {
+            best == null -> {
+                versionNotice = "Test terminé · aucune version ne fonctionne correctement"
+                if (entry.key != scan.origin.key) onSwitchVersion(scan.origin)
+            }
+            best.key != entry.key -> {
+                versionNotice = "Test terminé · meilleure version : ${best.displayName}"
+                onSwitchVersion(best)
+            }
+            else -> versionNotice = "Test terminé · meilleure version : ${best.displayName}"
+        }
     }
 
     LaunchedEffect(seekFeedback) {
@@ -891,7 +1048,8 @@ fun PlayerScreen(
 
     BackHandler {
         when {
-            settingsOpen && versionsOpen -> versionsOpen = false
+            versionScan != null -> cancelVersionScan()
+            settingsOpen && versionsOpen -> { settingsOpen = false; versionsOpen = false; rootFocus.requestFocus() }
             settingsOpen -> { settingsOpen = false; rootFocus.requestFocus() }
             guideOpen -> { guideOpen = false; rootFocus.requestFocus() }
             // Passe par le même chemin que OK/gauche (PlayerOverlayController.requestReturnToBrowser) au
@@ -934,6 +1092,8 @@ fun PlayerScreen(
                         true
                     }
                     PlaybackRemoteAction.OpenSettings -> { versionsOpen = false; settingsOpen = true; hudVisible = true; true }
+                    // → en Direct : directement la liste des versions (réglages de lecture s'il n'y en a qu'une).
+                    PlaybackRemoteAction.OpenVersions -> { versionsOpen = hasOtherVersions; settingsOpen = true; hudVisible = true; true }
                     PlaybackRemoteAction.ToggleHud -> { hudVisible = true; true }
                     PlaybackRemoteAction.TogglePlayback -> {
                         if (player.isPlaying) player.pause() else player.play()
@@ -1142,11 +1302,18 @@ fun PlayerScreen(
                 options = versionOptions,
                 currentLoading = buffering && playbackError == null,
                 currentFailed = playbackError != null,
+                currentProblem = if (noPicture) "Pas d'image" else audioIssue?.label?.replaceFirstChar(Char::uppercase),
+                scanProgress = versionScan?.let { "Test ${it.index + 1} / ${it.queue.size} · ${it.queue[it.index].displayName}" },
+                scanCount = minOf(liveVersions.size, MAX_SCANNED_VERSIONS),
                 onSelect = { target ->
                     versionSwitch = LiveVersionSwitch(from = entry, targetKey = target.key)
                     onSwitchVersion(target)
                 },
-                onBack = { versionsOpen = false },
+                // Deuxième OK sur la version en cours : fermeture du panneau.
+                onClose = { settingsOpen = false; versionsOpen = false; rootFocus.requestFocus() },
+                onStartScan = ::startVersionScan,
+                onCancelScan = ::cancelVersionScan,
+                onOpenPlaybackSettings = { versionsOpen = false },
             )
         } else if (settingsOpen) {
             PlayerSettings(
@@ -1172,8 +1339,6 @@ fun PlayerScreen(
                 },
                 onNextAspect = onCycleVideoAspect,
                 onClose = { settingsOpen = false; versionsOpen = false; rootFocus.requestFocus() },
-                versionLabel = versionSummary.takeIf { hasOtherVersions },
-                onOpenVersions = { versionsOpen = true },
                 externalSubtitleAvailable = !sharedLivePlayer,
                 externalSubtitleLabel = externalSubtitle?.label,
                 externalSubtitleError = externalSubtitleError,

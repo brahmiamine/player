@@ -37,8 +37,8 @@ Streamia TV est un lecteur Android TV natif, rapide et entièrement pilotable à
 - décalage horaire EPG réglable si le guide du fournisseur est décalé ;
 - guides complémentaires : programme TV FR, beIN SPORTS et chaînes UK ;
 - zapping rapide, saisie directe du numéro de chaîne et retour à la dernière chaîne ;
-- panneau **Versions** : les autres versions d'une chaîne (HD, FHD, UHD, autres pays…), reconnues par leur nom nettoyé ou leur identifiant de guide TV, et classées sur la qualité **réellement mesurée** (résolution, fps, débit, coupures) plutôt que sur leur nom, avec les alertes « annoncée UHD, réellement 1080p » et « 4K douteuse » ;
-- **secours automatique** (activé par défaut, désactivable dans Paramètres › Lecture & direct) : passage sur une autre version de la même langue si l'image est coupée 6 secondes, ou après 3 coupures d'au moins 5 secondes en 5 minutes ; sans effet sur une chaîne qui n'a qu'une version ou quand Internet est coupé.
+- panneau **Versions** (touche `→`) : les autres versions d'une chaîne (HD, FHD, UHD, autres pays…), reconnues par leur nom nettoyé ou leur identifiant de guide TV, et classées sur ce que le lecteur **mesure réellement à l'écran** : résolution, fps réellement affichés, images perdues, image absente ou figée, son absent, coupures. Alertes « annoncée UHD, réellement 1080p », « annoncée 50 fps, réellement 25 », « 4K douteuse », « images perdues » ; bouton **Tester toutes les versions**, qui les affiche une par une (jamais deux connexions à la fois) puis garde la meilleure ;
+- **secours automatique** (activé par défaut, désactivable dans Paramètres › Lecture & direct) : passage sur une autre version de la même langue si l'image est coupée, figée ou sans son pendant 6 secondes, ou après 3 coupures d'au moins 5 secondes en 5 minutes ; sans effet sur une chaîne qui n'a qu'une version ou quand Internet est coupé.
 
 ### Lecteur
 
@@ -77,8 +77,9 @@ Streamia TV est un lecteur Android TV natif, rapide et entièrement pilotable à
 | Direct | `0`–`9` | Aller directement à un numéro de chaîne |
 | Direct | `⏪` / Dernière chaîne | Revenir à la chaîne précédemment regardée |
 | Direct | `←` / OK / Menu | Ouvrir la liste des catégories et chaînes |
-| Direct | `→` / Réglages | Ouvrir les réglages de lecture (version, audio, sous-titres, format) |
-| Direct | OK sur **Version** | Voir les autres versions de la chaîne et en choisir une |
+| Direct | `→` | Liste des versions de la chaîne (réglages de lecture s'il n'y en a qu'une) |
+| Versions | OK | Lancer la version ; OK sur la version en cours ferme le panneau |
+| Direct | Réglages | Ouvrir les réglages de lecture (audio, sous-titres, format) |
 | Direct | Info | Afficher les informations de la chaîne |
 | Film / épisode | OK / Lecture-Pause | Mettre en pause ou reprendre |
 | Film / épisode | `←` / `⏪` | Reculer du pas choisi (10 s par défaut) |

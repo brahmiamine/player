@@ -1,6 +1,7 @@
 package fr.streamia.tv.domain
 
 import java.text.Normalizer
+import kotlin.math.abs
 import java.util.Locale
 
 /**
@@ -149,6 +150,13 @@ data class LiveVersionStats(
     val lastFailureAtMs: Long = 0L,
     val consecutiveFailures: Int = 0,
     val updatedAtMs: Long = 0L,
+    /** Images par seconde réellement affichées (compteurs du décodeur), pas celles annoncées par le flux. */
+    val realFrameRate: Float? = null,
+    /** Part des images perdues (0–1) lors du dernier contrôle. */
+    val droppedRatio: Float? = null,
+    /** Dernier contrôle : le son manquait, ou l'image ne s'affichait pas / restait figée. */
+    val noSound: Boolean = false,
+    val noPicture: Boolean = false,
 ) {
     val measured: Boolean get() = height != null && width != null
 }
@@ -157,8 +165,24 @@ enum class LiveVersionHealth(val symbol: String, val label: String, val rank: In
     Stable("●", "Stable", 0),
     Untested("○", "Jamais testée", 1),
     Choppy("◐", "Quelques coupures", 2),
+    NoPicture("✕", "Pas d'image", 3),
+    NoSound("✕", "Pas de son", 3),
     Unavailable("✕", "Indisponible", 3),
 }
+
+/** Contrôle réel d'une version, relevé par le lecteur pendant sa lecture. */
+data class LiveVersionCheck(
+    val width: Int?,
+    val height: Int?,
+    val declaredFrameRate: Float?,
+    val realFrameRate: Float?,
+    val codec: String?,
+    val bitrate: Int?,
+    val hdr: String?,
+    val droppedRatio: Float?,
+    val noPicture: Boolean,
+    val noSound: Boolean,
+)
 
 data class LiveVersionOption(
     val entry: MediaEntry,
@@ -232,9 +256,17 @@ fun rankLiveVersions(
             if (announced != null && announced > measuredClass) {
                 warnings += "annoncée ${announcedLabel(announced)}, réellement ${qualityClassLabel(measuredClass)}"
             }
+            val real = stat.realFrameRate?.takeIf { it > 0f }
+            val declared = stat.frameRate?.takeIf { it > 0f }
+            if (real != null && declared != null && abs(real - declared) / declared > FPS_MISMATCH_RATIO) {
+                warnings += "annoncée ${Math.round(declared)} fps, réellement ${Math.round(real)}"
+            }
+            stat.droppedRatio?.takeIf { it >= DROPPED_WARNING_RATIO }?.let {
+                warnings += "images perdues (${Math.round(it * 100)} %)"
+            }
             qualityText = listOfNotNull(
                 qualityClassLabel(measuredClass),
-                stat.frameRate?.takeIf { it > 0f }?.let { "${Math.round(it)} fps" },
+                (real ?: declared)?.let { "${Math.round(it)} fps" },
                 stat.codec,
                 stat.bitrate?.takeIf { it > 0 }?.let { String.format(Locale.US, "%.1f Mb/s", it / 1_000_000.0) },
                 stat.hdr?.takeIf { it != "SDR" },
@@ -259,7 +291,7 @@ fun rankLiveVersions(
             ),
             rankHeight = rankHeight,
             overDisplay = maxDisplayHeight != null && effectiveHeight > maxDisplayHeight,
-            fps = stat?.frameRate ?: 0f,
+            fps = stat?.realFrameRate ?: stat?.frameRate ?: 0f,
             bitrate = stat?.bitrate ?: 0,
         )
     }
@@ -285,7 +317,10 @@ internal fun health(stat: LiveVersionStats?, nowMs: Long): LiveVersionHealth {
         stat.lastFailureAtMs > stat.lastSuccessAtMs &&
         nowMs - stat.lastFailureAtMs < UNAVAILABLE_WINDOW_MS
     if (recentFailure) return LiveVersionHealth.Unavailable
+    if (stat.noPicture) return LiveVersionHealth.NoPicture
+    if (stat.noSound) return LiveVersionHealth.NoSound
     if (stat.lastSuccessAtMs == 0L && !stat.measured) return LiveVersionHealth.Untested
+    if ((stat.droppedRatio ?: 0f) >= CHOPPY_DROPPED_RATIO) return LiveVersionHealth.Choppy
     val watchedHours = maxOf(stat.watchedMs, MIN_RATE_WINDOW_MS) / 3_600_000.0
     if (stat.rebufferCount >= 2 && stat.rebufferCount / watchedHours >= CHOPPY_REBUFFERS_PER_HOUR) return LiveVersionHealth.Choppy
     return LiveVersionHealth.Stable
@@ -303,3 +338,6 @@ private fun ago(elapsedMs: Long): String {
 private const val UNAVAILABLE_WINDOW_MS = 6 * 3_600_000L
 private const val MIN_RATE_WINDOW_MS = 10 * 60_000L
 private const val CHOPPY_REBUFFERS_PER_HOUR = 6.0
+private const val CHOPPY_DROPPED_RATIO = 0.10f
+private const val DROPPED_WARNING_RATIO = 0.05f
+private const val FPS_MISMATCH_RATIO = 0.2f

@@ -118,6 +118,29 @@ class LiveChannelVersionsTest {
         assertEquals(2, rankLiveVersions(current, listOf(current, uhd), stats, NOW, maxDisplayHeight = 2160).first().entry.id)
     }
 
+    @Test
+    fun realChecksBeatTheAnnouncedQuality() {
+        val current = live(1, "TF1 FHD")
+        val noSound = live(2, "TF1 UHD")
+        val noPicture = live(3, "TF1 4K")
+        val fakeFps = live(4, "TF1 HD")
+        val stats = mapOf(
+            current.key to stable(1920, 1080, fps = 50f).copy(realFrameRate = 50f),
+            noSound.key to stable(3840, 2160, fps = 50f).copy(noSound = true),
+            noPicture.key to stable(3840, 2160).copy(noPicture = true),
+            fakeFps.key to stable(1920, 1080, fps = 50f).copy(realFrameRate = 25f, droppedRatio = 0.12f),
+        )
+        val ranked = rankLiveVersions(current, listOf(noSound, noPicture, fakeFps, current), stats, NOW)
+        assertEquals(1, ranked.first().entry.id)
+        assertEquals(LiveVersionHealth.Choppy, ranked.first { it.entry.id == 4 }.health)
+        assertTrue(ranked.first { it.entry.id == 4 }.warnings.contains("annoncée 50 fps, réellement 25"))
+        assertTrue(ranked.first { it.entry.id == 4 }.warnings.contains("images perdues (12 %)"))
+        assertEquals("1080p · 25 fps", ranked.first { it.entry.id == 4 }.qualityText)
+        assertEquals(LiveVersionHealth.NoSound, ranked.first { it.entry.id == 2 }.health)
+        assertEquals(LiveVersionHealth.NoPicture, ranked.first { it.entry.id == 3 }.health)
+        assertEquals(setOf(2, 3), ranked.takeLast(2).map { it.entry.id }.toSet())
+    }
+
     private fun live(id: Int, name: String, tvgId: String? = null) =
         MediaEntry(id = id, name = name, type = MediaType.Live, categoryId = "1", iconUrl = null, number = id, tvgId = tvgId)
 
