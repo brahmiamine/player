@@ -22,7 +22,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.movableContentOf
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.MutableIntState
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.snapshots.SnapshotStateList
+import androidx.compose.ui.graphics.Color
+import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.sp
@@ -45,25 +52,13 @@ import androidx.media3.ui.PlayerView
 @Composable
 fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackSession) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    val liveVideoSurface = remember(livePlaybackSession) {
-        movableContentOf<LiveVideoSurfacePlacement> { placement ->
-            AndroidView(
-                factory = { viewContext ->
-                    PlayerView(viewContext).apply {
-                        useController = false
-                        keepScreenOn = true
-                        player = livePlaybackSession.player
-                    }
-                },
-                update = { view ->
-                    view.player = livePlaybackSession.player
-                    view.resizeMode = placement.resizeMode
-                    view.subtitleView?.applySubtitleStyle(state.appSettings.subtitleSizeScale, state.appSettings.subtitleBackgroundEnabled)
-                },
-                modifier = placement.modifier,
-            )
-        }
-    }
+    // Vidéo du Direct : une seule vue, posée une fois sous tous les écrans. Le lecteur plein écran et
+    // la liste catégories/chaînes ne font que la réclamer (liveVideoSurface). Avant, la vue passait
+    // d'un écran à l'autre ; ce déplacement la détachait de la fenêtre, sa surface était détruite
+    // puis recréée : petite coupure de l'image à chaque ouverture de la liste des chaînes.
+    val liveSurfaceClaims = remember { mutableStateListOf<Any>() }
+    val liveSurfaceResizeMode = remember { mutableIntStateOf(AspectRatioFrameLayout.RESIZE_MODE_FIT) }
+    val liveVideoSurface = remember { liveVideoSurfaceClaim(liveSurfaceClaims, liveSurfaceResizeMode) }
 
     // Seuls les masquages comptent : clé sur la bibliothèque entière, le filtrage (sur le thread
     // principal) était refait à chaque sauvegarde de progression ou chaîne ajoutée à l'historique.
@@ -93,6 +88,24 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
               if (state.screen !is StreamiaScreen.Player) {
                   val blobs = remember(screenKind) { glassBlobsFor(state.screen) }
                   GlassBackdrop(blobs)
+              }
+              // Toujours au même endroit de l'arbre tant qu'un écran la réclame : jamais déplacée.
+              if (liveSurfaceClaims.isNotEmpty()) {
+                  AndroidView(
+                      factory = { viewContext ->
+                          PlayerView(viewContext).apply {
+                              useController = false
+                              keepScreenOn = true
+                              player = livePlaybackSession.player
+                          }
+                      },
+                      update = { view ->
+                          view.player = livePlaybackSession.player
+                          view.resizeMode = liveSurfaceResizeMode.intValue
+                          view.subtitleView?.applySubtitleStyle(state.appSettings.subtitleSizeScale, state.appSettings.subtitleBackgroundEnabled)
+                      },
+                      modifier = Modifier.fillMaxSize().background(Color.Black),
+                  )
               }
               when {
                 // Texte selon ce qui charge réellement : l'ancien « Ouverture de votre dernière
@@ -486,3 +499,19 @@ private val RecommendationRowKind.homeBlock: HomeBlock
         RecommendationRowKind.JustWatchNewSeries -> HomeBlock.JustWatchNewSeries
         else -> HomeBlock.Recommendations
     }
+
+/**
+ * Ce que les écrans appellent à la place de la vidéo du Direct : ils la réclament le temps d'être
+ * affichés (et choisissent son cadrage), la vue elle-même reste posée par [StreamiaApp].
+ */
+private fun liveVideoSurfaceClaim(
+    claims: SnapshotStateList<Any>,
+    resizeMode: MutableIntState,
+): @Composable (LiveVideoSurfacePlacement) -> Unit = { placement ->
+    val claim = remember { Any() }
+    DisposableEffect(claim) {
+        claims += claim
+        onDispose { claims -= claim }
+    }
+    SideEffect { resizeMode.intValue = placement.resizeMode }
+}

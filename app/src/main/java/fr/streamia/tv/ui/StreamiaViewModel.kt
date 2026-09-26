@@ -291,6 +291,16 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         }
     }
 
+    /** Chaîne du Direct regardée à la fermeture : reprise directe au démarrage si elle n'est ni masquée ni verrouillée. */
+    fun canResumeLiveOnStartup(profileId: String, entry: MediaEntry): Boolean {
+        if (entry.type != MediaType.Live || repository.profile(profileId)?.credentialsOrNull() == null) return false
+        val library = repository.library(profileId)
+        val categoryKey = "${MediaType.Live.name}:${entry.categoryId}"
+        if (entry.key in library.hiddenEntries || categoryKey in library.hiddenCategories) return false
+        // Pas d'écran de code au démarrage : une catégorie verrouillée ne se rouvre pas toute seule.
+        return !(repository.appSettings().parentalControlEnabled && categoryKey in library.lockedCategories)
+    }
+
     fun signIn(profileId: String?, profileName: String, server: String, username: String, password: String) {
         if (_uiState.value.busy || _uiState.value.testingConnection) return
         val credentials = ServerCredentials(server.trim(), username.trim(), password)

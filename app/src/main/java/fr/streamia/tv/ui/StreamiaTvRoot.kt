@@ -116,8 +116,20 @@ fun StreamiaTvRoot(viewModel: StreamiaViewModel) {
             return@LaunchedEffect
         }
 
-        // Au démarrage on rouvre la dernière page de navigation, jamais directement le dernier
-        // contenu joué (la reprise directe reste réservée à la carte « Continuer à regarder »).
+        // Application fermée pendant une chaîne du Direct en plein écran : on y revient directement,
+        // sans repasser par la liste des catégories et chaînes (ni masquée ni verrouillée).
+        val liveToResume = validSession?.entry?.takeIf {
+            sessionStore.loadLastPage() == LIVE_PLAYER_PAGE &&
+                validSession.profileId == targetProfileId &&
+                viewModel.canResumeLiveOnStartup(targetProfileId, it)
+        }
+        if (liveToResume != null) {
+            viewModel.resumeStartup(targetProfileId, liveToResume, returnToSeries = false)
+            return@LaunchedEffect
+        }
+
+        // Sinon on rouvre la dernière page de navigation, jamais directement un film ou un épisode
+        // (leur reprise directe reste réservée à la carte « Continuer à regarder »).
         viewModel.openProfile(targetProfileId)
         val loaded = viewModel.uiState.first { candidate ->
             val profileReady = candidate.activeProfileId == targetProfileId &&
@@ -214,8 +226,10 @@ private data class PersistedNavigation(
 )
 
 private fun persistedNavigationOf(state: StreamiaUiState): PersistedNavigation {
-    // Fiches et lecteur ne comptent pas : on garde la page d'où ils ont été ouverts.
+    // Fiches et lecteur ne comptent pas : on garde la page d'où ils ont été ouverts. Seule
+    // exception, une chaîne du Direct en plein écran, rouverte telle quelle au démarrage.
     val lastPage = when (state.screen) {
+        is StreamiaScreen.Player -> LIVE_PLAYER_PAGE.takeIf { state.screen.entry.type == MediaType.Live }
         StreamiaScreen.Home -> "home"
         StreamiaScreen.Browser -> state.browserType?.let { "browser:${it.name}" }
         StreamiaScreen.Search -> "search"
@@ -242,3 +256,6 @@ private fun persistedNavigationOf(state: StreamiaUiState): PersistedNavigation {
 internal val LocalNetworkReconnections = compositionLocalOf { 0 }
 
 private const val OFFLINE_CATALOG_RETRY_MS = 5 * 60_000L
+
+/** Dernière page mémorisée quand l'application est quittée pendant une chaîne du Direct. */
+private const val LIVE_PLAYER_PAGE = "live_player"

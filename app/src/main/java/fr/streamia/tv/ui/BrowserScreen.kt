@@ -1113,8 +1113,10 @@ private fun LivePreview(
         if (player.isPlaying || player.playbackState == Player.STATE_READY) buffering = false
     }
 
-    Box(modifier.background(Color.Black)) {
-            if (entry != null && enabled) {
+    // Aperçu affiché : la vidéo est posée sous l'écran par StreamiaApp, un fond ici la masquerait.
+    val showingVideo = entry != null && enabled
+    Box(if (showingVideo) modifier else modifier.background(Color.Black)) {
+            if (showingVideo) {
                 liveVideoSurface(LiveVideoSurfacePlacement(Modifier.fillMaxSize()))
                 if (buffering) {
                     Text("Chargement…", color = Ink, fontSize = TypeBody, modifier = Modifier.align(Alignment.Center))

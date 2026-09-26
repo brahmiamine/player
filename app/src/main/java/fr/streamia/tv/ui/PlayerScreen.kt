@@ -1068,7 +1068,8 @@ fun PlayerScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black)
+            // Direct : la vidéo est posée sous l'écran par StreamiaApp, un fond ici la masquerait.
+            .then(if (sharedLivePlayer) Modifier else Modifier.background(Color.Black))
             .focusRequester(rootFocus)
             .focusable()
             .onPreviewKeyEvent { event ->
