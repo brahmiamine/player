@@ -6,6 +6,9 @@
 > **estimations** à confirmer par les mesures proposées en §13 (Perfetto, Macrobenchmark, JankStats).
 > Les références `fichier:ligne` sont relatives à `app/src/main/java/fr/streamia/tv/`.
 
+> **Suivi :** les corrections sont appliquées sur la branche ; l'état de chaque point est en fin de
+> document (§15).
+
 ---
 
 ## 0. Synthèse
@@ -562,3 +565,56 @@ avec requêtes conditionnelles (`ETag`, `If-Modified-Since`) pour XMLTV et M3U.
 - Caches disque des guides affichés immédiatement, puis actualisés.
 - Tri alphabétique avec clé calculée une fois par titre (`sortedAlphabetically`) et mémo des tris.
 - Crashlytics nettoyé des URL et identifiants.
+
+---
+
+## 15. Suivi des corrections (branche `claude/app-performance-analysis-yc74df`)
+
+Chaque lot a été compilé, testé (`testDebugUnitTest`) et vérifié par `lintDebug` avant d'être
+poussé. Le SQL du nouveau schéma catalogue a été rejoué sur un vrai SQLite : migration, comptes,
+recherche plein texte, et pagination par curseur identique au tri complet pour les 4 tris.
+**Rien n'a été mesuré sur un boîtier** : il faut valider sur TV avec les parcours Macrobenchmark
+ajoutés, puis régénérer le baseline profile (il faut un appareil connecté).
+
+### Fait
+
+| Point de l'audit | Correction |
+|---|---|
+| §3.2 Catalogue recopié / index perdus | `applyUserLibraryToCatalog` ne recopie que les entrées déplacées et garde les index des sections intactes ; les pages Films/Séries ne passent plus du tout par le catalogue global (listes autonomes par catégorie et tri). |
+| §3.1 / §3.3 État monolithique | État de l'accueil (guides, matchs, recommandations, JustWatch, météo) dans son propre flux, lu seulement par l'accueil, la page Matchs et Paramètres ; matchs filtrés et programmes en cours calculés hors du thread principal. |
+| §2 Démarrage | Keystore, réglages, session et bibliothèque lus hors du thread principal ; lien Google TV traité en arrière-plan ; `reportFullyDrawn`. |
+| §4.1 Base catalogue | Version 3 : `sort_key` / `rating_rank` / `added_rank` indexés, pagination par curseur, table `catalog_counts`, FTS4 tenu à jour ligne par ligne (plus de `rebuild` global), pages sans résumé, `synchronous=NORMAL`, vérification de migration en mémoire, code mort retiré. |
+| §4.2 EPG | Journées chargées sans descriptions (lues à la demande) ; programmes hors J-1…J+8 non écrits ; dates XMLTV analysées sans regex ni `SimpleDateFormat` ; requêtes conditionnelles ETag / Last-Modified. |
+| §4.3 Recommandations | Métadonnées lues par clés ; index sur l'identifiant TMDB. |
+| §4.4 Bibliothèque | SQLite (`library-v1.db`), une ligne par action, reprise automatique des anciennes préférences, format de sauvegarde inchangé. |
+| §5.1 Navigateur Direct | Tri lourd hors du thread principal ; plus d'index de toute la liste ; position lue une fois ; programme en cours pré-rapproché ; préchargement des logos. |
+| §5.2 Navigateur VOD | Plus d'écriture de préférence à chaque focus ; pages lues par curseur ; affiches préchargées. |
+| §5.3 Accueil | Clés et `contentType` sur toutes les rangées ; horloge lue par les cartes. |
+| §5.4 Guide TV | Formateur d'heure partagé ; description à la demande. |
+| §5.5 Lecteur | Position VOD lue par la timeline seulement ; « Continuer à regarder » publié à la sortie ou en arrière-plan ; mesures de versions en mémoire et écrites sur un fil dédié ; extracteur TS en mode démarrage rapide pour le Direct. |
+| §5.6 Fiches | Enrichissement « similaires » limité à 4 fiches. |
+| §5.7 Import M3U | Catalogue léger relu depuis la base après import. |
+| §6 Thème | Fond « verre » mis en cache ; halo de focus et du bouton principal dessinés au lieu d'ombres colorées. |
+| §7 Images | Cache des échecs, décodage à la taille exacte, bitmaps matérielles (Android 9+), préchargement, client partagé. |
+| §9 Tâches de fond | Enrichissement quotidien, plafonné, en pause pendant la navigation ou la lecture ; plus de passage à chaque lancement ; rapprochements FR/UK/beIN mis en cache par liste Direct ; section Direct lue une seule fois et partagée. |
+| §10 Réseau | Un seul client OkHttp pour toute l'app ; plus aucune `HttpURLConnection`. |
+| §13 Mesure | StrictMode (debug), JankStats par écran (journal Crashlytics), parcours Macrobenchmark Films / Guide / accueil, profil de démarrage séparé. |
+
+### Non fait, et pourquoi
+
+| Point | Raison |
+|---|---|
+| Agrégateur serveur (§10) | Il faut un hébergement (compte Cloudflare ou autre), une URL et une décision sur les CGU des sites scrapés : impossible à livrer depuis le dépôt seul. Le client unique et le cache des index réduisent déjà le coût côté boîtier. |
+| Identifiants entiers dans la base (§4.1) | La migration réécrirait toute la table et ses index sur le boîtier (long au premier lancement) pour un gain surtout de place disque. À faire avec un prochain changement de schéma lourd. |
+| Remplacement différentiel du catalogue (§4.1) | L'actualisation reste « tout supprimer puis réécrire » dans une transaction, mais sans la reconstruction globale de la recherche, qui était la plus coûteuse. |
+| `SaveableStateHolder` par écran (§1) | La restauration du focus existante est fine et fragile : à changer avec des tests d'interface sur appareil. |
+| File asynchrone MediaCodec forcée (§8) | Instable sur certains SoC TV avant Android 12 ; Media3 l'active déjà sur Android 12+. |
+| Préchauffage explicite de connexion (§8) | Aucune requête « à vide » vers le fournisseur (connexions limitées) ; le pool partagé garde déjà les connexions ouvertes. |
+| Coil 3 (§7) | Le chargeur existant a été complété (points 1 à 5) ; aucune nouvelle dépendance nécessaire. |
+| Couleurs opaques pré-composées (§6) | Changement visuel à valider à l'œil sur TV ; le fond et les halos sont déjà mis en cache. |
+| Organiseur par catégorie (§5.6) | Charge encore les sections entières ; écran rare, à revoir séparément. |
+| Scores football hors de l'UI, ordonnanceur unique de l'accueil (§5.3) | Passés sur le client partagé, mais toujours pilotés par l'écran ; gain faible depuis les caches. |
+| `versionCode` (§12) | Changer de schéma de numérotation peut bloquer les mises à jour déjà installées : à coordonner avec la CI et `UpdateChecker`. |
+| Jeton TMDB, trafic HTTP en clair (§12) | Dépendent de l'agrégateur et du choix de conserver les serveurs `http://`. |
+| Baseline profile régénéré | Il faut un appareil ou un émulateur TV connecté : `./gradlew :app:generateBaselineProfile`. |
+
