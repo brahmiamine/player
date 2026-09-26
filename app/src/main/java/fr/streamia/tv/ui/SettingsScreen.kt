@@ -110,6 +110,8 @@ fun SettingsScreen(
     onChangePlaylist: () -> Unit,
     onCheckForUpdate: () -> Unit,
     onDismissUpdateCheck: () -> Unit,
+    onInstallUpdate: () -> Unit = {},
+    onAllowUpdateInstall: () -> Unit = {},
     onExportBackup: suspend () -> String,
     onImportBackup: suspend (String) -> String,
     onAbout: () -> Unit,
@@ -128,6 +130,18 @@ fun SettingsScreen(
     var activeModal by remember { mutableStateOf<SettingsModalState?>(null) }
     var backupMessage by remember { mutableStateOf<String?>(null) }
     var homeBlocksModalOpen by remember { mutableStateOf(false) }
+    var updateDialogOpen by remember { mutableStateOf(false) }
+    // La fenêtre s'ouvre d'elle-même quand la mise à jour attend un geste ou change d'étape
+    // (retour du réglage d'autorisation, installation lancée, échec), pas à la simple arrivée.
+    val updateStateKey = updateCheck?.let { it::class.simpleName }
+    var lastUpdateStateKey by remember { mutableStateOf(updateStateKey) }
+    LaunchedEffect(updateStateKey) {
+        if (updateStateKey == lastUpdateStateKey) return@LaunchedEffect
+        lastUpdateStateKey = updateStateKey
+        if (updateCheck is UpdateCheckResult.Downloaded || updateCheck is UpdateCheckResult.AwaitingInstallPermission ||
+            updateCheck is UpdateCheckResult.Installing || updateCheck is UpdateCheckResult.Error
+        ) updateDialogOpen = true
+    }
     var citySearchOpen by remember { mutableStateOf(false) }
     val homeBlockRows = remember {
         listOf(
@@ -597,11 +611,18 @@ fun SettingsScreen(
             Row(Modifier.fillMaxWidth().height(88.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 SettingsTile(
                     StreamiaIconGlyph.Refresh,
-                    if (updateChecking) updateProgressLabel(updateCheck) else "Mises à jour",
-                    updateSubtitle(currentVersion, updateCheck),
-                    onCheckForUpdate,
+                    "Mises à jour",
+                    updateSubtitle(currentVersion, updateChecking, updateCheck),
+                    {
+                        updateDialogOpen = true
+                        // Rien en cours ni en attente : nouvelle vérification.
+                        if (!updateChecking && (updateCheck == null || updateCheck is UpdateCheckResult.UpToDate ||
+                                updateCheck is UpdateCheckResult.NoTaggedRelease || updateCheck is UpdateCheckResult.Error && updateCheck.release == null)
+                        ) onCheckForUpdate()
+                    },
                     Modifier.weight(1f),
-                    enabled = !updateChecking,
+                    selected = updateChecking || updateCheck is UpdateCheckResult.Downloaded ||
+                        updateCheck is UpdateCheckResult.AwaitingInstallPermission,
                 )
                 SettingsTile(
                     StreamiaIconGlyph.Settings,
@@ -627,15 +648,6 @@ fun SettingsScreen(
             }
         }
 
-        if (updateCheck != null) {
-            Spacer(Modifier.height(10.dp))
-            FocusableSurface(onClick = onDismissUpdateCheck, modifier = Modifier.fillMaxWidth().heightIn(min = 60.dp)) {
-                Column(Modifier.padding(horizontal = 18.dp, vertical = 8.dp)) {
-                    Text(updateResultTitle(updateCheck), color = Ink, fontSize = 14.sp, fontWeight = HeadingWeight)
-                    Text(updateResultSubtitle(updateCheck), color = MutedInk, fontSize = 12.sp, maxLines = 4)
-                }
-            }
-        }
 
         backupMessage?.let { message ->
             Spacer(Modifier.height(10.dp))
@@ -643,6 +655,29 @@ fun SettingsScreen(
                 Text(message + "  ·  OK pour fermer", color = Ink, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 18.dp))
             }
         }
+    }
+
+    if (updateDialogOpen) {
+        val content = updateDialogContent(updateChecking, updateCheck, currentVersion)
+        UpdateDialog(
+            content = content,
+            currentVersion = currentVersion,
+            onAction = { action ->
+                when (action) {
+                    UpdateDialogAction.Install, UpdateDialogAction.RetryInstall -> onInstallUpdate()
+                    UpdateDialogAction.OpenPermission -> onAllowUpdateInstall()
+                    UpdateDialogAction.RetryCheck -> onCheckForUpdate()
+                    UpdateDialogAction.Ok -> {
+                        updateDialogOpen = false
+                        onDismissUpdateCheck()
+                    }
+                }
+            },
+            onClose = {
+                updateDialogOpen = false
+                if (content.closeClearsState) onDismissUpdateCheck()
+            },
+        )
     }
 
     activeModal?.let { modal ->
@@ -982,34 +1017,14 @@ private fun backupFileName(): String {
     return "streamia-sauvegarde-" + stamp + ".json"
 }
 
-private const val INSTALL_HINT =
-    "Téléchargement puis installation : confirmez l'installation dans la fenêtre Android qui s'ouvre."
-
-private fun updateProgressLabel(result: UpdateCheckResult?): String =
-    if (result is UpdateCheckResult.UpdateAvailable) "Téléchargement…" else "Vérification…"
-
-private fun updateSubtitle(currentVersion: String, result: UpdateCheckResult?): String = when (result) {
-    is UpdateCheckResult.UpdateAvailable -> "Nouvelle version " + result.release.version + " disponible"
-    is UpdateCheckResult.UpToDate -> "À jour · version " + currentVersion
-    is UpdateCheckResult.NoTaggedRelease -> "Aucune version publiée"
-    is UpdateCheckResult.Error -> result.message
+private fun updateSubtitle(currentVersion: String, checking: Boolean, result: UpdateCheckResult?): String = when (result) {
+    null -> if (checking) "Recherche en cours…" else "Version actuelle : $currentVersion"
+    is UpdateCheckResult.UpdateAvailable -> "Nouvelle version " + result.release.version
+    is UpdateCheckResult.Downloading -> "Téléchargement" + (result.progress?.let { " " + (it * 100).toInt() + " %" } ?: "…")
+    is UpdateCheckResult.Downloaded -> "Prête à installer · " + result.release.version
     is UpdateCheckResult.AwaitingInstallPermission -> "Autorisation d'installation requise"
-    null -> "Version actuelle : " + currentVersion
-}
-
-private fun updateResultTitle(result: UpdateCheckResult): String = when (result) {
-    is UpdateCheckResult.UpdateAvailable -> "Nouvelle version disponible : " + result.release.version
-    is UpdateCheckResult.UpToDate -> "Vous avez la dernière version"
+    is UpdateCheckResult.Installing -> "Installation en cours…"
+    is UpdateCheckResult.UpToDate -> "À jour · version $currentVersion"
     is UpdateCheckResult.NoTaggedRelease -> "Aucune version publiée"
-    is UpdateCheckResult.Error -> "Mise à jour impossible"
-    is UpdateCheckResult.AwaitingInstallPermission -> "Autorisez Streamia à installer la version " + result.release.version
-}
-
-private fun updateResultSubtitle(result: UpdateCheckResult): String = when (result) {
-    is UpdateCheckResult.UpdateAvailable -> INSTALL_HINT
-    is UpdateCheckResult.UpToDate -> "OK pour fermer."
-    is UpdateCheckResult.NoTaggedRelease -> "Aucun build publié depuis main pour l'instant."
     is UpdateCheckResult.Error -> result.message
-    is UpdateCheckResult.AwaitingInstallPermission ->
-        "Activez « Installer des applis inconnues » pour Streamia puis revenez : l'installation reprendra automatiquement."
 }

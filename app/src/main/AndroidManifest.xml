@@ -5,6 +5,10 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Installation de la mise à jour téléchargée depuis GitHub (Paramètres > Mises à jour). -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Android 12+ : mise à jour de Streamia par elle-même sans fenêtre de confirmation. -->
+    <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
+    <!-- Android 14+ : Streamia reste propriétaire de ses mises à jour (setRequestUpdateOwnership). -->
+    <uses-permission android:name="android.permission.ENFORCE_UPDATE_OWNERSHIP" />
 
     <uses-feature android:name="android.software.leanback" android:required="true" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />

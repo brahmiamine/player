@@ -81,35 +81,62 @@ class XtreamRepository private constructor(context: Context) {
         withContext(Dispatchers.IO) { updateChecker.checkForUpdate(currentBuild) }
 
     private val updateApk get() = File(appContext.cacheDir, "updates/streamia-tv.apk")
+    private val pendingUpdateStore = PendingUpdateStore(appContext)
 
-    /**
-     * Télécharge l'APK de la release puis lance son installation. Renvoie false quand Streamia n'a
-     * pas encore l'autorisation « Installer des applis inconnues » : le réglage est alors ouvert et
-     * [installDownloadedUpdate] reprend l'installation au retour dans l'app.
-     */
-    suspend fun downloadAndInstallUpdate(release: ReleaseInfo): UpdateInstallStart {
-        withContext(Dispatchers.IO) { updateChecker.downloadApk(release, updateApk) }
-        return installDownloadedUpdate(openSettingsIfNeeded = true)
+    /** Télécharge l'APK de [release] et le garde comme mise à jour en attente (survit à un arrêt de l'app). */
+    suspend fun downloadUpdate(release: ReleaseInfo, onProgress: (Float?) -> Unit) {
+        withContext(Dispatchers.IO) {
+            pendingUpdateStore.clear()
+            updateChecker.downloadApk(release, updateApk, onProgress)
+            pendingUpdateStore.save(release)
+        }
     }
 
     /**
-     * Installe l'APK déjà téléchargé. Sans autorisation, le réglage n'est ouvert qu'une fois par
-     * session : si l'autorisation manque encore au retour, l'app l'explique au lieu de renvoyer
-     * indéfiniment vers un interrupteur qui paraît déjà activé.
+     * Mise à jour déjà téléchargée et encore plus récente que la version installée. Installée
+     * entre-temps (ou fichier disparu) : oubliée, et l'APK supprimé.
+     */
+    fun pendingUpdate(currentBuild: Int): ReleaseInfo? {
+        val release = pendingUpdateStore.load()
+        val build = release?.let { parseBuildNumber(it.version) }
+        if (release == null || build == null || build <= currentBuild || !updateApk.exists()) {
+            clearPendingUpdate()
+            return null
+        }
+        return release
+    }
+
+    fun clearPendingUpdate() {
+        pendingUpdateStore.clear()
+        updateApk.delete()
+    }
+
+    /** Vrai une seule fois après que Streamia a ouvert le réglage « applis inconnues ». */
+    fun consumeAwaitingInstallPermission(): Boolean =
+        pendingUpdateStore.isAwaitingPermission().also { if (it) pendingUpdateStore.markAwaitingPermission(false) }
+
+    fun openInstallPermissionSettings() {
+        pendingUpdateStore.markAwaitingPermission(true)
+        UpdateInstaller.openUnknownSourcesSettings(appContext)
+    }
+
+    /**
+     * Installe l'APK déjà téléchargé. Sans autorisation, ouvre le réglage si [openSettingsIfNeeded]
+     * (premier essai lancé par l'utilisateur) ; l'installation reprend au retour dans l'app, même
+     * si Android l'a arrêtée entre-temps (voir [PendingUpdateStore]).
      */
     suspend fun installDownloadedUpdate(openSettingsIfNeeded: Boolean = false): UpdateInstallStart {
         if (UpdateInstaller.blockedByAdmin(appContext)) return UpdateInstallStart.BlockedByAdmin
         if (!UpdateInstaller.canInstall(appContext)) {
-            if (!openSettingsIfNeeded || unknownSourcesSettingsOpened) return UpdateInstallStart.PermissionStillMissing
-            unknownSourcesSettingsOpened = true
-            UpdateInstaller.openUnknownSourcesSettings(appContext)
+            if (!openSettingsIfNeeded) return UpdateInstallStart.PermissionStillMissing
+            openInstallPermissionSettings()
             return UpdateInstallStart.PermissionRequested
         }
         withContext(Dispatchers.IO) { UpdateInstaller.install(appContext, updateApk) }
         return UpdateInstallStart.Started
     }
 
-    private var unknownSourcesSettingsOpened = false
+    val canInstallUpdateSilently: Boolean get() = UpdateInstaller.canInstallSilently
 
     suspend fun cacheSizeBytes(): Long = withContext(Dispatchers.IO) { cache.databaseFileSizeBytes() }
     suspend fun epgCacheSizeBytes(): Long = withContext(Dispatchers.IO) { epgCache.databaseFileSizeBytes() }

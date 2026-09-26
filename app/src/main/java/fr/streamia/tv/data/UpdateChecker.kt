@@ -20,9 +20,16 @@ sealed interface UpdateCheckResult {
     data class UpdateAvailable(val release: ReleaseInfo, val currentVersion: String) : UpdateCheckResult
     /** La release "latest" n'existe pas encore ou ne porte pas de numéro de build. */
     data object NoTaggedRelease : UpdateCheckResult
-    data class Error(val message: String) : UpdateCheckResult
+    /** [release] non nul : l'APK est déjà téléchargé, seule l'installation est à refaire. */
+    data class Error(val message: String, val release: ReleaseInfo? = null) : UpdateCheckResult
     /** APK téléchargé, en attente de l'autorisation « Installer des applis inconnues ». */
     data class AwaitingInstallPermission(val release: ReleaseInfo) : UpdateCheckResult
+    /** Téléchargement en cours ; [progress] entre 0 et 1, null si la taille est inconnue. */
+    data class Downloading(val release: ReleaseInfo, val progress: Float?) : UpdateCheckResult
+    /** APK téléchargé et prêt : l'installation attend un geste (annulée, ou reprise après relance). */
+    data class Downloaded(val release: ReleaseInfo) : UpdateCheckResult
+    /** Installation confiée à Android ; [silent] : sans fenêtre de confirmation (Android 12+). */
+    data class Installing(val release: ReleaseInfo, val silent: Boolean) : UpdateCheckResult
 }
 
 /**
@@ -55,7 +62,7 @@ class UpdateChecker(private val repository: String = "brahmiamine/player") {
     }
 
     /** Télécharge l'APK de [release] dans [target] (fichier temporaire puis renommage). */
-    fun downloadApk(release: ReleaseInfo, target: File) {
+    fun downloadApk(release: ReleaseInfo, target: File, onProgress: (Float?) -> Unit = {}) {
         val url = release.apkUrl ?: throw IOException("Aucun APK dans la release " + release.version + ".")
         // browser_download_url redirige vers le stockage GitHub (https → https : suivi automatiquement).
         val connection = (URL(url).openConnection() as HttpURLConnection).apply {
@@ -69,7 +76,28 @@ class UpdateChecker(private val repository: String = "brahmiamine/player") {
             if (code !in 200..299) throw IOException("GitHub a répondu avec le code $code.")
             target.parentFile?.mkdirs()
             val partial = File(target.path + ".part")
-            connection.inputStream.use { input -> partial.outputStream().use { input.copyTo(it) } }
+            val total = connection.getHeaderField("Content-Length")?.toLongOrNull()?.takeIf { it > 0 }
+            onProgress(if (total == null) null else 0f)
+            connection.inputStream.use { input ->
+                partial.outputStream().use { output ->
+                    val buffer = ByteArray(64 * 1024)
+                    var copied = 0L
+                    var lastPercent = -1
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read < 0) break
+                        output.write(buffer, 0, read)
+                        copied += read
+                        if (total != null) {
+                            val percent = (copied * 100 / total).toInt()
+                            if (percent != lastPercent) {
+                                lastPercent = percent
+                                onProgress((copied.toFloat() / total).coerceIn(0f, 1f))
+                            }
+                        }
+                    }
+                }
+            }
             if (partial.length() == 0L || !partial.renameTo(target)) throw IOException("APK téléchargé invalide.")
         } finally {
             connection.disconnect()
