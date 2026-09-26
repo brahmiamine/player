@@ -117,6 +117,7 @@ fun MovieDetailsScreen(
                     }
                 }
             }
+            TrailerButton(details?.youtubeTrailer, Modifier.padding(top = 10.dp))
         }
         Spacer(Modifier.width(34.dp))
         Column(
@@ -138,7 +139,7 @@ fun MovieDetailsScreen(
             if (!details?.plot.isNullOrBlank() || !movie.plot.isNullOrBlank()) {
                 Text(details?.plot ?: movie.plot.orEmpty(), color = Ink, fontSize = TypeBody, lineHeight = TypeBodyLineHeight)
             }
-            val hasDetailLines = listOf(details?.director, details?.cast, details?.country, details?.tmdbId, details?.youtubeTrailer)
+            val hasDetailLines = listOf(details?.director, details?.cast, details?.country, details?.tmdbId)
                 .any { !it.isNullOrBlank() }
             if (hasDetailLines) {
                 GlassSurface(modifier = Modifier.fillMaxWidth()) {
@@ -147,7 +148,6 @@ fun MovieDetailsScreen(
                         DetailLine("Distribution", details?.cast)
                         DetailLine("Pays", details?.country)
                         DetailLine("TMDB", details?.tmdbId)
-                        DetailLine("Bande-annonce", details?.youtubeTrailer)
                     }
                 }
             }

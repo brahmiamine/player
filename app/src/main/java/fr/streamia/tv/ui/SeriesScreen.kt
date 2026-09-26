@@ -176,7 +176,7 @@ fun SeriesScreen(
             SeriesInfoLine("Réalisateur", info?.director)
             SeriesInfoLine("Distribution", info?.cast)
             SeriesInfoLine("Pays", info?.country)
-            SeriesInfoLine("Bande-annonce", info?.youtubeTrailer)
+            TrailerButton(info?.youtubeTrailer, Modifier.padding(top = 14.dp))
             SimilarMediaRow(
                 title = "Séries similaires",
                 items = similarMedia,
