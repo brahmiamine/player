@@ -1554,7 +1554,13 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             val sourceDestination = it.contentReturnContext
                 ?.takeIf { context -> context.origin != ContentReturnOrigin.Browser }
                 ?.destinationScreen()
+            // Gauche/OK depuis une chaîne ouvre la liste catégories/chaînes du Direct. Le navigateur
+            // rouvrait sinon le dernier onglet visité (Films/Séries) quand la chaîne avait été lancée
+            // depuis l'accueil ; la catégorie est restaurée par BrowserScreen (LiveBrowserReturnState).
+            val openLiveBrowser = forceBrowser && player?.entry?.type == MediaType.Live
             it.copy(
+                browserType = if (openLiveBrowser) MediaType.Live else it.browserType,
+                browserCategoryId = if (openLiveBrowser && it.browserType != MediaType.Live) null else it.browserCategoryId,
                 screen = when {
                     forceBrowser -> StreamiaScreen.Browser
                     player?.returnToSeries == true && it.seriesDetails != null -> StreamiaScreen.Series(it.seriesDetails.series)
