@@ -65,7 +65,12 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
         }
     }
 
-    val liveOnSatMatches = remember(state.liveOnSatMatches, state.catalog, state.library, state.appSettings.parentalControlEnabled, state.parentalUnlocked) {
+    // Seuls les masquages comptent : clé sur la bibliothèque entière, le filtrage (sur le thread
+    // principal) était refait à chaque sauvegarde de progression ou chaîne ajoutée à l'historique.
+    val liveOnSatMatches = remember(
+        state.liveOnSatMatches, state.catalog, state.library.hiddenEntries, state.library.hiddenCategories,
+        state.library.lockedCategories, state.appSettings.parentalControlEnabled, state.parentalUnlocked,
+    ) {
         state.liveOnSatMatches.withoutHiddenChannels(state.catalog, state.library, state.appSettings.parentalControlEnabled && !state.parentalUnlocked)
     }
 

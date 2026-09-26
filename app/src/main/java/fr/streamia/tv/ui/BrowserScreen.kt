@@ -248,7 +248,7 @@ fun BrowserScreen(
             }
             .toList()
     }
-    val categories = remember(baseCategories, favoriteEntriesForType.size, historyForType.size, selectedType, library.favoriteCategories) {
+    val categories = remember(baseCategories, favoriteEntriesForType.isNotEmpty(), historyForType.isNotEmpty(), selectedType, library.favoriteCategories) {
         buildBrowserCategories(
             type = selectedType,
             providerCategories = baseCategories,
@@ -296,8 +296,13 @@ fun BrowserScreen(
     val location = selectedType to selectedCategoryId
     var computedEntries by remember(credentials) { mutableStateOf(location to computeEntries()) }
     if (computedEntries.first != location) computedEntries = location to computeEntries()
+    // Favoris/historique ne comptent que pour leur propre catégorie : une chaîne regardée en aperçu
+    // (ajoutée à l'historique) relançait sinon le tri de toute la liste affichée (« Tout » : des
+    // dizaines de milliers de chaînes) à chaque aperçu de plus de 20 s.
+    val favoritesKey = favoriteEntriesForType.takeIf { selectedCategoryId == FAVORITES_CATEGORY_ID }
+    val historyKey = historyForType.takeIf { selectedCategoryId == HISTORY_CATEGORY_ID }
     LaunchedEffect(
-        catalog, favoriteEntriesForType, historyForType, excludedCategoryIds, library.hiddenEntries, vodPageKeys, categorySortOrder,
+        catalog, favoritesKey, historyKey, excludedCategoryIds, library.hiddenEntries, vodPageKeys, categorySortOrder,
         appSettings.liveChannelSortOrder, appSettings.vodSortOrder,
     ) {
         val target = location

@@ -74,6 +74,10 @@ import fr.streamia.tv.ui.theme.RadiusTile
 import fr.streamia.tv.ui.theme.RaisedSurface
 import fr.streamia.tv.ui.theme.TypeSectionTitle
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import okhttp3.Cache
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -425,7 +429,40 @@ private object ArtworkLoader {
 
     fun get(url: String?, maxPx: Int): ImageBitmap? = url?.takeIf(String::isNotBlank)?.let { cache.get(cacheKey(it, maxPx)) }
 
-    suspend fun load(context: Context, url: String, maxPx: Int, opaque: Boolean): ImageBitmap? =
+    /** Chargements en cours par image : les demandes identiques attendent le même résultat. */
+    private val inFlight = java.util.concurrent.ConcurrentHashMap<String, CompletableDeferred<ImageBitmap?>>()
+
+    /**
+     * Même logo demandé par plusieurs éléments à l'écran (chaînes d'un même bouquet, logo de
+     * catégorie) : un seul téléchargement et un seul décodage, partagés. Si l'élément qui charge
+     * quitte l'écran, ceux qui attendaient relancent le chargement eux-mêmes.
+     */
+    suspend fun load(context: Context, url: String, maxPx: Int, opaque: Boolean): ImageBitmap? {
+        get(url, maxPx)?.let { return it }
+        val key = cacheKey(url, maxPx)
+        val mine = CompletableDeferred<ImageBitmap?>()
+        val pending = inFlight.putIfAbsent(key, mine)
+        if (pending != null) {
+            val shared = try {
+                pending.await()
+            } catch (cancelled: CancellationException) {
+                // Annulation du chargement partagé (et non de cette attente) : on charge soi-même.
+                currentCoroutineContext().ensureActive()
+                null
+            }
+            return shared ?: get(url, maxPx) ?: loadNow(context, url, maxPx, opaque)
+        }
+        return try {
+            loadNow(context, url, maxPx, opaque).also { mine.complete(it) }
+        } catch (error: Throwable) {
+            mine.completeExceptionally(error)
+            throw error
+        } finally {
+            inFlight.remove(key, mine)
+        }
+    }
+
+    private suspend fun loadNow(context: Context, url: String, maxPx: Int, opaque: Boolean): ImageBitmap? =
         permits.withPermit {
             get(url, maxPx)?.let { return@withPermit it }
             withContext(Dispatchers.IO) {

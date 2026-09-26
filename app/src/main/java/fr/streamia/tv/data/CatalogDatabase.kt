@@ -470,24 +470,38 @@ internal class CatalogDatabase(context: Context) :
         ).use(::readEntries)
     }
 
+    /**
+     * Entrées demandées, dans l'ordre des clés. Lues par lots (`media_id IN (…)`, [KEYS_PER_QUERY]
+     * par requête) et non plus une requête par clé : l'index de recommandations en demande des
+     * dizaines de milliers (fiches enrichies, dont le nombre grandit chaque jour), l'ouverture
+     * d'une liste des centaines (favoris, historique).
+     */
     fun loadEntriesByKeys(profileId: String, keys: Set<String>): List<MediaEntry> {
         if (keys.isEmpty()) return emptyList()
-        val result = LinkedHashMap<String, MediaEntry>()
-        keys.forEach { key ->
+        val requested = keys.mapNotNull { key ->
             val separator = key.indexOf(':')
-            if (separator <= 0) return@forEach
-            val type = MediaType.entries.firstOrNull { it.name == key.substring(0, separator) } ?: return@forEach
-            val id = key.substring(separator + 1).toIntOrNull() ?: return@forEach
-            readableDatabase.rawQuery(
-                """
-                SELECT ${ENTRY_COLUMNS.joinToString()} FROM catalog_entries
-                WHERE profile_id = ? AND media_type = ? AND media_id = ? AND navigable = 1 LIMIT 1
-                """.trimIndent(),
-                arrayOf(profileId, type.name, id.toString()),
-            ).use { cursor ->
-                if (cursor.moveToFirst()) readEntry(cursor).let { result[it.key] = it }
+            if (separator <= 0) return@mapNotNull null
+            val type = MediaType.entries.firstOrNull { it.name == key.substring(0, separator) } ?: return@mapNotNull null
+            val id = key.substring(separator + 1).toIntOrNull() ?: return@mapNotNull null
+            type to id
+        }
+        val found = HashMap<Pair<MediaType, Int>, MediaEntry>(requested.size * 2)
+        requested.groupBy({ it.first }, { it.second }).forEach { (type, ids) ->
+            ids.distinct().chunked(KEYS_PER_QUERY).forEach { chunk ->
+                readableDatabase.rawQuery(
+                    """
+                    SELECT ${ENTRY_COLUMNS.joinToString()} FROM catalog_entries
+                    WHERE profile_id = ? AND media_type = ? AND navigable = 1
+                      AND media_id IN (${chunk.joinToString(",") { "?" }})
+                    """.trimIndent(),
+                    arrayOf(profileId, type.name) + chunk.map(Int::toString),
+                ).use { cursor ->
+                    while (cursor.moveToNext()) readEntry(cursor).let { found[it.type to it.id] = it }
+                }
             }
         }
+        val result = LinkedHashMap<String, MediaEntry>()
+        requested.forEach { key -> found[key]?.let { result[it.key] = it } }
         return result.values.toList()
     }
 
@@ -687,6 +701,8 @@ internal class CatalogDatabase(context: Context) :
         const val DEFAULT_RECENT_PER_TYPE = 8
         const val MAX_PAGE_SIZE = 500
         const val MAX_SEARCH_RESULTS = 1_000
+        /** Sous la limite historique de 999 paramètres par requête SQLite (2 déjà pris). */
+        const val KEYS_PER_QUERY = 500
         val ENTRY_COLUMNS = listOf(
             "media_id",
             "name",

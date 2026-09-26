@@ -17,7 +17,7 @@ import fr.streamia.tv.domain.MediaType
 class EpgSyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
         val profileId = PlaybackSessionStore(applicationContext).loadActiveProfileId() ?: return Result.success()
-        val repository = XtreamRepository(applicationContext)
+        val repository = XtreamRepository.get(applicationContext)
         val profile = repository.profile(profileId) ?: return Result.success()
         val credentials = profile.credentialsOrNull() ?: return Result.success()
         // Cas le plus fréquent (toutes les heures) : EPG encore frais. On sort avant de charger toute

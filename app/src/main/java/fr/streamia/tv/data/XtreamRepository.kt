@@ -50,7 +50,7 @@ enum class UpdateInstallStart { Started, PermissionRequested, PermissionStillMis
 /** Rangée JustWatch lue sur disque ; [fresh] faux quand elle doit être recalculée. */
 data class CachedJustWatchRow(val entries: List<MediaEntry>, val fresh: Boolean)
 
-class XtreamRepository(context: Context) {
+class XtreamRepository private constructor(context: Context) {
     private val appContext = context.applicationContext
     private val client = XtreamClient()
     private val cache = CatalogCache(context)
@@ -249,11 +249,17 @@ class XtreamRepository(context: Context) {
     }
 
     /** Interroge TMDB pour un lot de contenus enrichis jamais vus. Renvoie le nombre traité (0 = fini). */
-    suspend fun fetchTmdbBatch(profileId: String, batchSize: Int, pauseMs: Long): Int = withContext(Dispatchers.IO) {
+    suspend fun fetchTmdbBatch(
+        profileId: String,
+        batchSize: Int,
+        pauseMs: Long,
+        shouldStop: () -> Boolean = { false },
+    ): Int = withContext(Dispatchers.IO) {
         if (!tmdb.enabled) return@withContext 0
         val pending = recommendationStore.missingTmdbLookups(profileId, batchSize)
         var failures = 0
         for ((key, tmdbId) in pending) {
+            if (shouldStop()) break
             val type = MediaType.entries.first { it.name == key.substringBefore(':') }
             // Échec réseau : non mémorisé, retenté au prochain passage ; plusieurs de suite = TMDB injoignable.
             runCatching { tmdb.info(type, tmdbId) }
@@ -619,7 +625,7 @@ class XtreamRepository(context: Context) {
         return LoadedCatalog(catalog, credentials, CatalogSource.Network, id)
     }
 
-    suspend fun refreshProfile(profileId: String): LoadedCatalog = withContext(Dispatchers.IO) {
+    suspend fun refreshProfile(profileId: String): LoadedCatalog = withContext(BackgroundWork.dispatcher) {
         val profile = playlistStore.find(profileId) ?: throw XtreamException("Cette liste n'existe plus.")
         when (profile.kind) {
             PlaylistKind.Xtream -> {
@@ -773,7 +779,7 @@ class XtreamRepository(context: Context) {
         credentials: ServerCredentials,
         liveEntries: List<MediaEntry>,
         force: Boolean = false,
-    ): Boolean = withContext(Dispatchers.IO) {
+    ): Boolean = withContext(BackgroundWork.dispatcher) {
         if (liveEntries.isEmpty()) return@withContext false
         epgSyncMutexFor(profileId).withLock {
             val profile = playlistStore.find(profileId)
@@ -879,7 +885,7 @@ class XtreamRepository(context: Context) {
      * ne peut ni migrer de thread ni être interrompu par une annulation de coroutine au milieu.
      */
     private suspend fun fetchAndStoreXtreamCatalog(profileId: String, credentials: ServerCredentials): Catalog =
-        withContext(Dispatchers.IO) {
+        withContext(BackgroundWork.dispatcher) {
             val job = coroutineContext.job
             val session = cache.beginReplaceOnIo(profileId)
             val result = try {
@@ -1024,6 +1030,18 @@ class XtreamRepository(context: Context) {
     private fun Catalog.hasPlayableContent(): Boolean = MediaType.entries.any { count(it) > 0 }
 
     companion object {
+        @Volatile private var instance: XtreamRepository? = null
+
+        /**
+         * Une seule instance par processus, partagée par l'interface et les tâches planifiées
+         * (EPG, enrichissement) : mêmes caches (profils, bibliothèque, index de recommandations)
+         * et mêmes connexions SQLite. Une instance par activité et par passage de tâche ouvrait
+         * les bases en double, avec des caches distincts et des écritures concurrentes.
+         */
+        fun get(context: Context): XtreamRepository = instance ?: synchronized(this) {
+            instance ?: XtreamRepository(context.applicationContext).also { instance = it }
+        }
+
         const val DEFAULT_CATEGORY_PAGE_SIZE = 500
         private const val TMDB_RELATED_CACHE_SIZE = 64
 

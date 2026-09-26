@@ -37,7 +37,7 @@ class MainActivity : ComponentActivity() {
 
         viewModel = ViewModelProvider(
             this,
-            StreamiaViewModelFactory(XtreamRepository(applicationContext)),
+            StreamiaViewModelFactory(XtreamRepository.get(applicationContext)),
         )[StreamiaViewModel::class.java]
 
         // Lancement depuis une carte « Continuer à regarder » de Google TV : la reprise passe avant

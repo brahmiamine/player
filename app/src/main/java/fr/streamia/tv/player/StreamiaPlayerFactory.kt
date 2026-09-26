@@ -11,6 +11,7 @@ import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
@@ -116,6 +117,17 @@ object StreamiaPlayerFactory {
             readyLoggedForUrl = ""
             CrashReporter.playerAttempt(mediaType, url)
         }
+
+        val playerId = System.identityHashCode(player)
+        player.addAnalyticsListener(
+            object : AnalyticsListener {
+                override fun onIsPlayingChanged(eventTime: AnalyticsListener.EventTime, isPlaying: Boolean) =
+                    PlaybackActivity.update(playerId, isPlaying)
+
+                override fun onPlayerReleased(eventTime: AnalyticsListener.EventTime) =
+                    PlaybackActivity.update(playerId, isPlaying = false)
+            },
+        )
 
         player.addListener(
             object : Player.Listener {
