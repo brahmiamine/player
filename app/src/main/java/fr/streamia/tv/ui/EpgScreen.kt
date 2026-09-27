@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -27,6 +28,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -98,8 +101,20 @@ fun EpgScreen(
     loadDescription: suspend (EpgProgram) -> String? = { it.description },
 ) {
     val zone = remember { ZoneId.systemDefault() }
-    var categoryId by remember { mutableStateOf(Catalog.ALL_CATEGORY_ID) }
+    // Retour du lecteur après « Regarder la chaîne » : même catégorie, créneau, défilement, et focus
+    // sur le programme d'où la chaîne a été lancée.
+    val restore = remember { EpgReturnState.consume() }
+    var categoryId by remember { mutableStateOf(restore?.categoryId ?: Catalog.ALL_CATEGORY_ID) }
+    var focusRestoreKey by remember { mutableStateOf(restore?.blockKey) }
+    val gridState = rememberLazyListState(restore?.listIndex ?: 0, restore?.listOffset ?: 0)
     var selected by remember { mutableStateOf<SelectedProgram?>(null) }
+    // OK sur un programme envoie le focus sur « Regarder la chaîne » (sinon ↓ reste coincé dans la
+    // grille) ; Fermer/Retour le ramène sur le programme avant de replier le panneau.
+    val selectedBlockFocus = remember { FocusRequester() }
+    fun closeDetails() {
+        runCatching { selectedBlockFocus.requestFocus() }
+        selected = null
+    }
     var nowEpoch by remember { mutableStateOf(System.currentTimeMillis() / 1000) }
 
     LaunchedEffect(Unit) {
@@ -152,11 +167,14 @@ fun EpgScreen(
     // pour voir ce qui vient de commencer.
     var windowStart by remember(dayStart) {
         val secondsIntoDay = (System.currentTimeMillis() / 1000 - LocalDate.now(zone).atStartOfDay(zone).toEpochSecond())
-        mutableStateOf(clampWindow(dayStart + secondsIntoDay / HALF_HOUR * HALF_HOUR - HALF_HOUR, dayStart, dayEnd))
+        mutableStateOf(
+            restore?.windowStart?.takeIf { it in dayStart until dayEnd }
+                ?: clampWindow(dayStart + secondsIntoDay / HALF_HOUR * HALF_HOUR - HALF_HOUR, dayStart, dayEnd),
+        )
     }
 
     BackHandler {
-        if (selected != null) selected = null else onBack()
+        if (selected != null) closeDetails() else onBack()
     }
 
     Column(Modifier.fillMaxSize().padding(24.dp)) {
@@ -229,7 +247,7 @@ fun EpgScreen(
                         else -> Column(Modifier.fillMaxSize()) {
                             TimeRuler(windowStart = windowStart, nowEpoch = nowEpoch)
                             Spacer(Modifier.height(6.dp))
-                            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            LazyColumn(state = gridState, verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 items(channels, key = MediaEntry::key) { channel ->
                                     ChannelGridRow(
                                         channel = channel,
@@ -237,6 +255,9 @@ fun EpgScreen(
                                         windowStart = windowStart,
                                         nowEpoch = nowEpoch,
                                         selectedKey = selected?.let { if (it.channel.key == channel.key) it.program.blockKey(channel) else null },
+                                        selectedFocusRequester = selectedBlockFocus,
+                                        restoreFocusKey = focusRestoreKey,
+                                        onFocusRestored = { focusRestoreKey = null },
                                         onSelectProgram = { program -> selected = SelectedProgram(channel, program) },
                                         onShiftWindow = { direction ->
                                             val next = clampWindow(windowStart + direction * WINDOW_STEP_SECONDS, dayStart, dayEnd)
@@ -254,8 +275,18 @@ fun EpgScreen(
                     Spacer(Modifier.height(12.dp))
                     ProgramDetailsPanel(
                         selected = selected!!,
-                        onWatch = { onOpenChannel(selected!!.channel) },
-                        onClose = { selected = null },
+                        onWatch = {
+                            val current = selected!!
+                            EpgReturnState.pending = EpgReturnSnapshot(
+                                categoryId = categoryId,
+                                windowStart = windowStart,
+                                blockKey = current.program.blockKey(current.channel),
+                                listIndex = gridState.firstVisibleItemIndex,
+                                listOffset = gridState.firstVisibleItemScrollOffset,
+                            )
+                            onOpenChannel(current.channel)
+                        },
+                        onClose = ::closeDetails,
                         loadDescription = loadDescription,
                     )
                 }
@@ -265,6 +296,22 @@ fun EpgScreen(
 }
 
 private data class SelectedProgram(val channel: MediaEntry, val program: EpgProgram)
+
+private data class EpgReturnSnapshot(
+    val categoryId: String,
+    val windowStart: Long,
+    val blockKey: String,
+    val listIndex: Int,
+    val listOffset: Int,
+)
+
+/** Position du guide au lancement d'une chaîne, relue une seule fois au retour du lecteur. */
+private object EpgReturnState {
+    @Volatile
+    var pending: EpgReturnSnapshot? = null
+
+    fun consume(): EpgReturnSnapshot? = pending.also { pending = null }
+}
 
 @Composable
 private fun DayNavigator(
@@ -354,6 +401,9 @@ private fun ChannelGridRow(
     windowStart: Long,
     nowEpoch: Long,
     selectedKey: String?,
+    selectedFocusRequester: FocusRequester,
+    restoreFocusKey: String?,
+    onFocusRestored: () -> Unit,
     onSelectProgram: (EpgProgram) -> Unit,
     /** Décale la fenêtre d'un pas (-1 / +1) ; `false` si elle est déjà en butée du jour. */
     onShiftWindow: (Int) -> Boolean,
@@ -404,13 +454,22 @@ private fun ChannelGridRow(
             blocks.forEachIndexed { index, block ->
                 key(block.program.blockKey(channel)) {
                     val isLive = block.program.isLiveAt(nowEpoch)
+                    val isSelected = selectedKey == block.program.blockKey(channel)
+                    val restoresFocus = restoreFocusKey == block.program.blockKey(channel)
+                    if (restoresFocus) {
+                        LaunchedEffect(Unit) {
+                            runCatching { selectedFocusRequester.requestFocus() }
+                            onFocusRestored()
+                        }
+                    }
                     ProgramBlock(
                         program = block.program,
                         isLive = isLive,
                         liveFraction = if (isLive) block.program.elapsedFraction(nowEpoch) else 0f,
-                        selected = selectedKey == block.program.blockKey(channel),
+                        selected = isSelected,
                         onClick = { onSelectProgram(block.program) },
                         modifier = Modifier
+                            .then(if (isSelected || restoresFocus) Modifier.focusRequester(selectedFocusRequester) else Modifier)
                             .offset(x = perSecond * (block.clippedStart - windowStart).toFloat())
                             .width((perSecond * (block.clippedEnd - block.clippedStart).toFloat() - 4.dp).coerceAtLeast(12.dp))
                             .windowEdgeKeys(isFirst = index == 0, isLast = index == blocks.lastIndex, onShiftWindow),
@@ -492,6 +551,8 @@ private fun ProgramDetailsPanel(
     val description by produceState(selected.program.description, selected.program) {
         if (value == null) value = loadDescription(selected.program)
     }
+    val watchFocus = remember { FocusRequester() }
+    LaunchedEffect(selected) { runCatching { watchFocus.requestFocus() } }
     GlassSurface(modifier = Modifier.fillMaxWidth()) {
       Column(Modifier.fillMaxWidth().padding(18.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -504,7 +565,7 @@ private fun ProgramDetailsPanel(
                 )
             }
             Spacer(Modifier.width(12.dp))
-            FocusableSurface(onClick = onWatch, accent = true, modifier = Modifier.width(190.dp).height(50.dp)) {
+            FocusableSurface(onClick = onWatch, accent = true, modifier = Modifier.width(190.dp).height(50.dp).focusRequester(watchFocus)) {
                 Text("▶ Regarder la chaîne", color = Ink, fontSize = TypeLabel, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 14.dp))
             }
             Spacer(Modifier.width(10.dp))

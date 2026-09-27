@@ -1,7 +1,10 @@
 package fr.streamia.tv.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -319,6 +322,14 @@ fun BrowserScreen(
     // est donc posé en premier (plein écran) dans ce Box, et le bandeau + le message flottent
     // ensuite par-dessus, translucides, plutôt que de réserver leur propre bande opaque en haut
     // comme le fait la disposition Column classique utilisée par les autres écrans (VOD compris).
+    // Panneaux catégories/chaînes du Direct : le bandeau du haut apparaît avec eux (même fondu, y
+    // compris au retour du plein écran) et disparaît aussitôt quand une chaîne passe en plein écran.
+    var liveControlsVisible by remember(isLive) { mutableStateOf(false) }
+    val liveControlsAlpha by animateFloatAsState(
+        if (liveControlsVisible) 1f else 0f,
+        animationSpec = tween(160),
+        label = "live-header-alpha",
+    )
     Box(Modifier.fillMaxSize()) {
         if (isLive) {
             LiveCatalogLayout(
@@ -352,11 +363,14 @@ fun BrowserScreen(
                 onToggleEntryFavorite = onToggleEntryFavorite,
                 onLoadMore = { onLoadMoreInCategory(MediaType.Live, selectedCategoryId, VodSortOrder.Provider) },
                 onLivePreviewWatched = onLivePreviewWatched,
+                controlsVisible = liveControlsVisible,
+                onControlsVisibleChange = { liveControlsVisible = it },
                 modifier = Modifier.fillMaxSize(),
             )
         }
 
         Column(Modifier.fillMaxSize()) {
+            Box(Modifier.graphicsLayer { if (isLive) alpha = if (liveControlsVisible) liveControlsAlpha else 0f }) {
             BrowserHeader(
                 catalog = catalog,
                 selectedType = selectedType,
@@ -373,6 +387,7 @@ fun BrowserScreen(
                 onEpg = onEpg,
                 onSettings = onSettings,
             )
+            }
 
             if (message != null) {
                 FocusableSurface(

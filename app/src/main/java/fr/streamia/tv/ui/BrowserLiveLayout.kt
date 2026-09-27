@@ -118,12 +118,14 @@ internal fun LiveCatalogLayout(
     onToggleEntryFavorite: (MediaEntry) -> Unit,
     onLoadMore: () -> Unit,
     onLivePreviewWatched: (MediaEntry) -> Unit,
+    // Hissé dans BrowserScreen : le bandeau du haut suit le même fondu que les panneaux.
+    controlsVisible: Boolean,
+    onControlsVisibleChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var previewEntry by remember(catalog, initialPreviewKey) {
         mutableStateOf(entries.firstOrNull { it.key == initialPreviewKey } ?: entries.firstOrNull())
     }
-    var controlsVisible by remember { mutableStateOf(false) }
     var fullscreenTarget by remember { mutableStateOf<MediaEntry?>(null) }
     var channelsFocused by remember { mutableStateOf(false) }
     var initialChannelFocusPending by remember { mutableStateOf(true) }
@@ -148,12 +150,11 @@ internal fun LiveCatalogLayout(
 
     LaunchedEffect(Unit) {
         yield()
-        controlsVisible = true
+        onControlsVisibleChange(true)
     }
     LaunchedEffect(previewEntry?.key) { previewEntry?.let(onPreviewChanged) }
     LaunchedEffect(fullscreenTarget) {
         val target = fullscreenTarget ?: return@LaunchedEffect
-        controlsVisible = false
         delay(220)
         onEntrySelected(target)
     }
@@ -179,6 +180,9 @@ internal fun LiveCatalogLayout(
             previewDelayMs = appSettings.livePreviewDelayMs,
             liveStreamFormat = appSettings.liveStreamFormat,
             onWatched = onLivePreviewWatched,
+            // Apparaît avec les panneaux (même fondu) et disparaît aussitôt au passage en plein écran,
+            // sans attendre l'ouverture du lecteur (qui affiche le sien).
+            infoBannerAlpha = { if (controlsVisible) controlsAlpha else 0f },
             // Bord à bord, y compris sous le bandeau du haut (qui flotte par-dessus, translucide) :
             // seuls les panneaux catégories/chaînes ci-dessous en tiennent compte, via leur propre
             // padding, pour ne pas se faire recouvrir par ce bandeau.
@@ -247,7 +251,10 @@ internal fun LiveCatalogLayout(
                         )
                     ) {
                         LiveChannelConfirmAction.Preview -> previewEntry = channel
-                        LiveChannelConfirmAction.Fullscreen -> fullscreenTarget = channel
+                        LiveChannelConfirmAction.Fullscreen -> {
+                            fullscreenTarget = channel
+                            onControlsVisibleChange(false)
+                        }
                         LiveChannelConfirmAction.Ignore -> Unit
                     }
                 },
@@ -500,6 +507,7 @@ private fun LivePreview(
     previewDelayMs: Int,
     liveStreamFormat: LiveStreamFormat,
     onWatched: (MediaEntry) -> Unit,
+    infoBannerAlpha: () -> Float,
     modifier: Modifier = Modifier,
 ) {
     val player = livePlaybackSession.player
@@ -655,6 +663,7 @@ private fun LivePreview(
                 Row(
                     Modifier
                         .align(Alignment.BottomStart)
+                        .graphicsLayer { alpha = infoBannerAlpha() }
                         .fillMaxWidth()
                         .background(Night.copy(alpha = 0.72f))
                         .padding(horizontal = 14.dp, vertical = 10.dp),

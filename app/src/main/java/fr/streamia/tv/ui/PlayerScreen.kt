@@ -981,9 +981,14 @@ fun PlayerScreen(
             return@LaunchedEffect
         }
         versionScan = null
-        val best = rankedVersionsNow().firstOrNull {
-            it.sameLanguage && (it.health == LiveVersionHealth.Stable || it.health == LiveVersionHealth.Choppy)
-        }?.entry
+        val ranked = rankedVersionsNow()
+        // Version retenue = celle marquée « RECOMMANDÉE » dans le panneau (même langue, stable ou
+        // jamais testée). À défaut, on retombe sur la meilleure qui fonctionne (stable ou avec
+        // quelques coupures) pour ne pas renvoyer vers l'origine quand tout est jouable mais instable.
+        val best = ranked.firstOrNull { it.recommended }?.entry
+            ?: ranked.firstOrNull {
+                it.sameLanguage && (it.health == LiveVersionHealth.Stable || it.health == LiveVersionHealth.Choppy)
+            }?.entry
         when {
             best == null -> {
                 versionNotice = "Test terminé · aucune version ne fonctionne correctement"
