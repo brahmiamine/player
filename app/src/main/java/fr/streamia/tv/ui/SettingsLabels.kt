@@ -24,6 +24,7 @@ internal fun prayerMethodLabel(method: PrayerMethod): String = when (method) {
     PrayerMethod.NorthAmerica -> "Amérique du Nord (ISNA)"
 }
 
+/** Date d'expiration d'un compte fournisseur (Paramètres et message de test de connexion). */
 internal fun formatExpiry(epochSeconds: Long): String =
     SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date(epochSeconds * 1000L))
 

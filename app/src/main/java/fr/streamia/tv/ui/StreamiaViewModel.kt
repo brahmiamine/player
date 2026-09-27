@@ -42,10 +42,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import java.text.SimpleDateFormat
 import java.time.LocalDate
-import java.util.Date
-import java.util.Locale
 
 class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() {
     /** État partagé avec les contrôleurs de domaine ci-dessous. */
@@ -1339,9 +1336,6 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         append("Connexion réussie · compte $status")
         expiresAtEpochSeconds?.let { append(", expire le ${formatExpiry(it)}") }
     }
-
-    private fun formatExpiry(epochSeconds: Long): String =
-        SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date(epochSeconds * 1000L))
 }
 
 /** Fiches empilées au plus pour Retour (contenus similaires enchaînés). */

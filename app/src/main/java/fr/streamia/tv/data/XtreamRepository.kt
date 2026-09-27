@@ -647,9 +647,8 @@ class XtreamRepository private constructor(context: Context) {
 
         const val DEFAULT_CATEGORY_PAGE_SIZE = 500
 
-        // Partagé par toutes les instances de XtreamRepository du process : le worker EPG en
-        // arrière-plan (EpgSyncWorker) et le ViewModel créent chacun leur propre instance, mais
-        // toutes deux visent le même fichier SQLite pour un profil donné. Sans ce verrou, un
+        // Un verrou par profil : le worker EPG en arrière-plan (EpgSyncWorker) et le ViewModel
+        // partagent l'instance unique ([get]) et visent le même fichier SQLite. Sans ce verrou, un
         // premier passage du worker au tout premier lancement de l'app (WorkManager exécute une
         // périodique sans délai initial dès que le réseau est disponible) peut chevaucher la
         // synchronisation au premier accès à l'écran EPG : les deux beginReplace() se marchent

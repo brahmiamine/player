@@ -27,6 +27,7 @@ import fr.streamia.tv.ui.theme.MutedInk
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.time.LocalTime
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Date
 import java.util.Locale
@@ -87,7 +88,7 @@ internal fun WeatherAndPrayers(place: HomePlace?, weather: CurrentWeather?, meth
             prayers.forEachIndexed { index, (name, time) ->
                 if (index > 0) append(" · ")
                 val style = if (name == next) SpanStyle(color = Ink, fontWeight = FontWeight.Bold) else SpanStyle(color = MutedInk)
-                withStyle(style) { append(name + " " + PrayerTimeFormatter.format(time)) }
+                withStyle(style) { append(name + " " + time.toInstant().atZone(ZoneId.systemDefault()).format(PrayerTimeFormatter)) }
             }
         },
         fontSize = 13.sp,
@@ -96,4 +97,6 @@ internal fun WeatherAndPrayers(place: HomePlace?, weather: CurrentWeather?, meth
     )
 }
 
-private val PrayerTimeFormatter = SimpleDateFormat("HH:mm", Locale.getDefault())
+// DateTimeFormatter + fuseau lu à chaque affichage : un SimpleDateFormat global figeait le fuseau
+// de sa création (changement d'heure ou de fuseau de la TV ignoré jusqu'au redémarrage de l'app).
+private val PrayerTimeFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm", Locale.getDefault())

@@ -2,7 +2,6 @@ package fr.streamia.tv.data
 
 import android.content.ContentValues
 import android.content.Context
-import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import fr.streamia.tv.domain.EpgChannel
@@ -424,16 +423,6 @@ internal class EpgDatabase(context: Context) :
         if (value == null) putNull(key) else put(key, value)
     }
 
-    private fun android.database.sqlite.SQLiteStatement.bindNullableString(index: Int, value: String?) {
-        if (value == null) bindNull(index) else bindString(index, value)
-    }
-
-    private fun android.database.sqlite.SQLiteStatement.bindNullableLong(index: Int, value: Long?) {
-        if (value == null) bindNull(index) else bindLong(index, value)
-    }
-
-    private fun Cursor.nullableString(index: Int): String? = if (isNull(index)) null else getString(index)
-    private fun Cursor.nullableLong(index: Int): Long? = if (isNull(index)) null else getLong(index)
 
     private companion object {
         const val DATABASE_NAME = "epg-v1.db"
