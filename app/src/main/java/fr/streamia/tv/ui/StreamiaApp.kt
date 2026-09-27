@@ -41,6 +41,7 @@ import fr.streamia.tv.ui.theme.MutedInk
 import fr.streamia.tv.ui.theme.Night
 import fr.streamia.tv.ui.theme.StreamiaTheme
 import fr.streamia.tv.player.LivePlaybackSession
+import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.recommendation.RecommendedMedia
 import fr.streamia.tv.recommendation.RecommendationRowKind
@@ -363,6 +364,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     val movie = (state.screen as StreamiaScreen.MovieDetails).movie
                     // Film terminé (ou presque) : pas de « Reprendre à 1:52:00 », comme la rangée Reprendre.
                     val resume = state.library.history.firstOrNull { it.entry.key == movie.key }?.takeIf { it.isResumable() }?.positionMs ?: 0L
+                    val otherVersions = rememberOtherVersions(viewModel, movie)
                     MovieDetailsScreen(
                         movie = movie,
                         details = state.mediaDetails,
@@ -372,11 +374,9 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                         watched = movie.key in state.library.watchedEntries,
                         resumePositionMs = resume,
                         similarMedia = state.similarMedia,
-                        // Recherche en base (tout le catalogue), pas seulement les catégories déjà chargées.
-                        otherVersions = produceState(emptyList<RecommendedMedia>(), movie.key) {
-                            val query = versionSearchQuery(movie)
-                            if (query.isNotBlank()) value = otherVersionsOf(movie, viewModel.searchCatalog(query, movie.type))
-                        }.value,
+                        similarLoading = state.similarLoading,
+                        otherVersions = otherVersions.orEmpty(),
+                        otherVersionsLoading = otherVersions == null,
                         onPlay = { viewModel.playMovie(movie) },
                         onPlayFromStart = { viewModel.playMovie(movie, fromStart = true) },
                         onToggleFavorite = { viewModel.toggleEntryFavorite(movie) },
@@ -388,6 +388,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
 
                 state.screen is StreamiaScreen.Series && state.credentials != null -> {
                     val series = (state.screen as StreamiaScreen.Series).series
+                    val otherVersions = rememberOtherVersions(viewModel, series)
                     SeriesScreen(
                         series = series,
                         details = state.seriesDetails,
@@ -396,11 +397,10 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                         favorite = series.key in state.library.favoriteEntries,
                         watched = series.key in state.library.watchedEntries,
                         similarMedia = state.similarMedia,
+                        similarLoading = state.similarLoading,
+                        otherVersions = otherVersions.orEmpty(),
+                        otherVersionsLoading = otherVersions == null,
                         episodeHistory = state.library.history,
-                        otherVersions = produceState(emptyList<RecommendedMedia>(), series.key) {
-                            val query = versionSearchQuery(series)
-                            if (query.isNotBlank()) value = otherVersionsOf(series, viewModel.searchCatalog(query, series.type))
-                        }.value,
                         onToggleFavorite = { viewModel.toggleEntryFavorite(series) },
                         onToggleWatched = { viewModel.toggleEntryWatched(series) },
                         onEpisodeSelected = { episode -> viewModel.playEpisode(series, episode) },
@@ -529,3 +529,15 @@ private fun liveVideoSurfaceClaim(
     }
     SideEffect { resizeMode.intValue = placement.resizeMode }
 }
+
+/**
+ * « Autres versions » de la fiche ouverte, recherchées en base (tout le catalogue, pas seulement les
+ * catégories déjà chargées). `null` tant que la recherche est en cours : la rangée montre ses cartes fantômes.
+ */
+@Composable
+private fun rememberOtherVersions(viewModel: StreamiaViewModel, entry: MediaEntry): List<RecommendedMedia>? =
+    produceState<List<RecommendedMedia>?>(null, entry.key) {
+        value = null
+        val query = versionSearchQuery(entry)
+        value = if (query.isBlank()) emptyList() else otherVersionsOf(entry, viewModel.searchCatalog(query, entry.type))
+    }.value

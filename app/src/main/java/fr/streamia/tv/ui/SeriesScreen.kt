@@ -68,7 +68,9 @@ fun SeriesScreen(
     favorite: Boolean,
     watched: Boolean,
     similarMedia: List<RecommendedMedia> = emptyList(),
+    similarLoading: Boolean = false,
     otherVersions: List<RecommendedMedia> = emptyList(),
+    otherVersionsLoading: Boolean = false,
     /** Historique de lecture des épisodes, du plus récent au plus ancien. */
     episodeHistory: List<PlaybackHistoryItem> = emptyList(),
     onToggleFavorite: () -> Unit,
@@ -177,17 +179,20 @@ fun SeriesScreen(
             SeriesInfoLine("Distribution", info?.cast)
             SeriesInfoLine("Pays", info?.country)
             TrailerButton(info?.youtubeTrailer, Modifier.padding(top = 14.dp))
-            SimilarMediaRow(
-                title = "Séries similaires",
-                items = similarMedia,
-                onOpenSimilar = onOpenSimilar,
-                modifier = Modifier.padding(top = 18.dp),
-            )
+            // Autres versions d'abord : même titre, autre langue/qualité — le choix le plus direct.
             SimilarMediaRow(
                 title = "Autres versions",
                 items = otherVersions,
                 onOpenSimilar = onOpenSimilar,
                 modifier = Modifier.padding(top = 18.dp),
+                loading = otherVersionsLoading,
+            )
+            SimilarMediaRow(
+                title = "Séries similaires",
+                items = similarMedia,
+                onOpenSimilar = onOpenSimilar,
+                modifier = Modifier.padding(top = 18.dp),
+                loading = similarLoading,
             )
             Spacer(Modifier.height(28.dp))
         }

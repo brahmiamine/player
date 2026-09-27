@@ -54,6 +54,8 @@ data class StreamiaUiState(
     val epgSelectedDate: LocalDate? = null,
     val epgLoading: Boolean = false,
     val similarMedia: List<RecommendedMedia> = emptyList(),
+    /** Premier calcul de « Films/Séries similaires » en cours pour la fiche ouverte (cartes fantômes). */
+    val similarLoading: Boolean = false,
     val resumePositionMs: Long = 0,
     val browserType: MediaType? = null,
     val browserCategoryId: String? = null,

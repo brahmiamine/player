@@ -135,7 +135,7 @@ internal fun PosterCardSkeleton() = SkeletonSurface(HomeCardWidth, HomeCardHeigh
 
 /** Même surface verre au repos que FocusableSurface (fond, bordure, arrondi), sans focus. */
 @Composable
-private fun SkeletonSurface(width: Dp, height: Dp, padding: Dp, content: @Composable ColumnScope.() -> Unit) {
+internal fun SkeletonSurface(width: Dp, height: Dp, padding: Dp, content: @Composable ColumnScope.() -> Unit) {
     val shape = RoundedCornerShape(RadiusTile)
     Column(
         Modifier

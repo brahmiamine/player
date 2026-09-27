@@ -50,7 +50,9 @@ fun MovieDetailsScreen(
     watched: Boolean,
     resumePositionMs: Long,
     similarMedia: List<RecommendedMedia> = emptyList(),
+    similarLoading: Boolean = false,
     otherVersions: List<RecommendedMedia> = emptyList(),
+    otherVersionsLoading: Boolean = false,
     onPlay: () -> Unit,
     onPlayFromStart: () -> Unit = onPlay,
     onToggleFavorite: () -> Unit,
@@ -157,17 +159,20 @@ fun MovieDetailsScreen(
                 Spacer(Modifier.height(8.dp))
                 Text(message, color = MutedInk, fontSize = TypeLabel, maxLines = 4, overflow = TextOverflow.Ellipsis)
             }
-            SimilarMediaRow(
-                title = "Films similaires",
-                items = similarMedia,
-                onOpenSimilar = onOpenSimilar,
-                modifier = Modifier.padding(top = 18.dp),
-            )
+            // Autres versions d'abord : même titre, autre langue/qualité — le choix le plus direct.
             SimilarMediaRow(
                 title = "Autres versions",
                 items = otherVersions,
                 onOpenSimilar = onOpenSimilar,
                 modifier = Modifier.padding(top = 18.dp),
+                loading = otherVersionsLoading,
+            )
+            SimilarMediaRow(
+                title = "Films similaires",
+                items = similarMedia,
+                onOpenSimilar = onOpenSimilar,
+                modifier = Modifier.padding(top = 18.dp),
+                loading = similarLoading,
             )
             Spacer(Modifier.height(30.dp))
         }

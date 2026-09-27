@@ -987,6 +987,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 screen = it.contentReturnContext?.destinationScreen() ?: StreamiaScreen.Browser,
                 mediaDetails = null,
                 similarMedia = emptyList(),
+                similarLoading = false,
                 message = null,
             )
         }
@@ -994,7 +995,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     /** Fiche ouverte depuis une autre fiche (contenu similaire) : Retour rouvre la précédente. */
     private fun reopenPreviousDetails(): Boolean {
         val previous = detailsTrail.removeLastOrNull() ?: return false
-        _uiState.update { it.copy(mediaDetails = null, seriesDetails = null, similarMedia = emptyList(), message = null) }
+        _uiState.update { it.copy(mediaDetails = null, seriesDetails = null, similarMedia = emptyList(), similarLoading = false, message = null) }
         openEntryInternal(previous)
         return true
     }
@@ -1006,6 +1007,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 screen = it.contentReturnContext?.destinationScreen() ?: StreamiaScreen.Browser,
                 seriesDetails = null,
                 similarMedia = emptyList(),
+                similarLoading = false,
                 message = null,
             )
         }
@@ -1087,7 +1089,16 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     private fun loadMovie(movie: MediaEntry) {
         val credentials = _uiState.value.credentials ?: return
         val profileId = _uiState.value.activeProfileId
-        _uiState.update { it.copy(busy = true, mediaDetails = null, similarMedia = emptyList(), screen = StreamiaScreen.MovieDetails(movie), message = null) }
+        _uiState.update {
+            it.copy(
+                busy = true,
+                mediaDetails = null,
+                similarMedia = emptyList(),
+                similarLoading = profileId != null,
+                screen = StreamiaScreen.MovieDetails(movie),
+                message = null,
+            )
+        }
         viewModelScope.launch {
             val details = runCatching { repository.movieDetails(credentials, movie) }
                 .onSuccess { details -> _uiState.update { it.copy(busy = false, mediaDetails = details) } }
@@ -1105,6 +1116,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 val resolvedDetails = details ?: _uiState.value.mediaDetails
                 resolvedDetails?.let { runCatching { repository.cacheRecommendationDetails(profileId, it) } }
                 recommendations.loadSimilarMedia(profileId, movie, resolvedDetails)
+                endSimilarLoading(movie)
             }
         }
     }
@@ -1112,7 +1124,16 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     private fun loadSeries(series: MediaEntry) {
         val credentials = _uiState.value.credentials ?: return
         val profileId = _uiState.value.activeProfileId
-        _uiState.update { it.copy(busy = true, message = null, seriesDetails = null, similarMedia = emptyList(), screen = StreamiaScreen.Series(series)) }
+        _uiState.update {
+            it.copy(
+                busy = true,
+                message = null,
+                seriesDetails = null,
+                similarMedia = emptyList(),
+                similarLoading = profileId != null,
+                screen = StreamiaScreen.Series(series),
+            )
+        }
         viewModelScope.launch {
             runCatching { repository.seriesDetails(credentials, series) }
                 .onSuccess { details ->
@@ -1123,6 +1144,22 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                     }
                 }
                 .onFailure { error -> _uiState.update { it.copy(busy = false, message = error.safeMessage()) } }
+            endSimilarLoading(series)
+        }
+    }
+
+    /**
+     * Calcul des similaires terminé (ou abandonné) sans rien publier : les cartes fantômes
+     * disparaissent. Sans effet si une autre fiche a été ouverte entre-temps (son propre calcul court).
+     */
+    private fun endSimilarLoading(entry: MediaEntry) {
+        _uiState.update { state ->
+            val onSameScreen = when (val screen = state.screen) {
+                is StreamiaScreen.MovieDetails -> screen.movie.key == entry.key
+                is StreamiaScreen.Series -> screen.series.key == entry.key
+                else -> false
+            }
+            if (onSameScreen && state.similarLoading) state.copy(similarLoading = false) else state
         }
     }
 

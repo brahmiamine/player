@@ -290,7 +290,7 @@ internal class RecommendationsController(host: StreamiaStateHolder) : StreamiaCo
                     is StreamiaScreen.Series -> screen.series.key == entry.key
                     else -> false
                 }
-                if (onSameScreen) state.copy(similarMedia = items) else state
+                if (onSameScreen) state.copy(similarMedia = items, similarLoading = false) else state
             }
         }
 
