@@ -618,3 +618,55 @@ ajoutés, puis régénérer le baseline profile (il faut un appareil connecté).
 | Jeton TMDB, trafic HTTP en clair (§12) | Dépendent de l'agrégateur et du choix de conserver les serveurs `http://`. |
 | Baseline profile régénéré | Il faut un appareil ou un émulateur TV connecté : `./gradlew :app:generateBaselineProfile`. |
 
+## 16. Découpage du code et seconde analyse (même branche)
+
+Objectif : des fichiers courts, un rôle par fichier, sans changer le comportement. Tout le code
+déplacé l'a été tel quel (vérifié ligne à ligne par script : aucune ligne perdue ni ajoutée hors
+en-têtes) ; seules les fonctions privées appelées depuis un autre fichier passent en `internal`.
+Chaque étape : `compileDebugKotlin`, `testDebugUnitTest` (329 tests), `lintDebug`, et un build
+R8 `assembleOptimized` à la fin.
+
+### Taille des fichiers
+
+| Fichier | Avant | Après | Ce qui en est sorti |
+|---|---:|---:|---|
+| `StreamiaViewModel.kt` | 3 387 | 1 355 | 11 contrôleurs (`ui/*Controller.kt`) partageant un `StreamiaStateHolder` ; états UI et flux dérivés dans leurs fichiers |
+| `PlayerScreen.kt` | 1 915 | 1 359 | `PlayerHud.kt` (bandeau, timelines, mini-guide, `PlayerToast`), `PlayerTracks.kt`, `PlayerDiagnostics.kt` |
+| `BrowserScreen.kt` | 1 762 | 446 | `BrowserHeader`, `BrowserLiveLayout`, `BrowserVodLayout`, `BrowserCategoryRail`, `BrowserSorting` |
+| `HomeScreen.kt` | 1 412 | 709 | `HomeActionGrid`, `HomeCards`, `HomeGuideRows`, `HomeHeader` |
+| `SettingsScreen.kt` | 1 052 | 711 | `SettingsModals`, `SettingsLabels` |
+| `RemoteComponents.kt` | 594 | 320 | `Artwork.kt` (chargeur d'images, cache, préchargement) |
+| `XtreamRepository.kt` | 1 176 | 718 | façade exposant `updates`, `similarity`, `trending`, `guides` (un dépôt par domaine) |
+| `CatalogDatabase.kt` | 847 | 646 | `CatalogSchema` (création, migrations), `CatalogRows` (lecture/écriture des lignes) |
+
+Contrôleurs du ViewModel : pagination du catalogue, EPG, matchs du jour, guides tiers de
+l'accueil, recommandations, météo, mises à jour, bibliothèque, index des versions Direct, zapping.
+Ils ne se connaissent pas : les dépendances croisées passent par des lambdas câblées dans le
+ViewModel, dont l'API publique (celle qu'utilisent `StreamiaApp` et `MainActivity`) est inchangée.
+
+### Trouvé pendant l'analyse, et corrigé
+
+| Constat | Correction |
+|---|---|
+| `canonicalIdentityTitle` (appelé pour **chaque candidat** du classement des recommandations) compilait 3 `Regex` et un `Set` à chaque appel, plus une `Regex` **par mot** | Expressions et liste constantes |
+| Import M3U : une `Regex` compilée **par entrée** de playlist pour valider l'extension ; idem à chaque URL de flux | `STREAM_EXTENSION` partagée |
+| Recherche (à chaque frappe), clé de bibliothèque : `Regex` recompilées | Hissées en constantes |
+| Matchs du jour, mini-guide du lecteur : un formateur d'heure créé par ligne affichée | `DateTimeFormatter` partagé |
+| `formatDuration` (chaque seconde pendant la lecture) passait par `String.format` | Concaténation simple ; test ajouté |
+| Nom de catégorie du bandeau du lecteur recherché à chaque recomposition | Mémorisé par chaîne |
+| Heures de prière : `SimpleDateFormat` global, qui fige le fuseau de sa création | Fuseau courant lu à chaque affichage |
+| Rapprochement des chaînes FR et UK : ~100 lignes identiques | `PrefixedChannelIndex` paramétré par préfixe |
+| Clé AES du Keystore, aides SQLite de l'EPG, `formatExpiry`, 5 pastilles du lecteur : copies | Une seule version chacune |
+| KDoc détachés de leur déclaration (déjà présents avant le découpage) | Rattachés |
+| Imports inutiles dans le paquet `ui` | Supprimés |
+| Profils de base générés nommant encore les anciens fichiers : le code déplacé perdait sa précompilation AOT | Règles à jokers dans `src/main/baselineProfiles`, vérifiées dans le profil fusionné puis réécrit par R8 |
+
+### Laissé en l'état, et pourquoi
+
+| Point | Raison |
+|---|---|
+| Le composable `PlayerScreen` (≈1 200 lignes) | Une machine d'état : plus de 40 états locaux lus et écrits par les effets (reprise réseau, secours de version, contrôle d'image). Le découper demande des tests d'interface sur appareil ; seules les parties sans état (HUD, pastilles, pistes, diagnostics) sont sorties. |
+| Réglages dans le ViewModel | Des bascules d'une ligne : les déléguer ajouterait autant de lignes qu'on en retire. |
+| `RecommendationStore.readEntry` | Pas une copie : un type inconnu y retombe sur Film (Direct dans le catalogue). |
+| Caches disque beIN / UK presque identiques | Formats de fichier propres à chaque source ; un parent commun toucherait la sérialisation sans gain mesurable. |
+| Profils de base régénérés | Toujours besoin d'un appareil : `./gradlew :app:generateBaselineProfile` rendra les règles manuelles redondantes. |
