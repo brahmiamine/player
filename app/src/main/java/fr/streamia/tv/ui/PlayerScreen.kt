@@ -8,9 +8,7 @@ import android.view.KeyEvent as AndroidKeyEvent
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,7 +31,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
@@ -116,11 +113,8 @@ import fr.streamia.tv.player.resolveSeekPosition
 import fr.streamia.tv.player.shouldPersistVodProgress
 import fr.streamia.tv.player.LivePlaybackSession
 import fr.streamia.tv.ui.theme.FocusBlueBright
-import fr.streamia.tv.ui.theme.GlassBorder
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
-import fr.streamia.tv.ui.theme.Night
-import fr.streamia.tv.ui.theme.RadiusTile
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.yield
 
@@ -1193,74 +1187,35 @@ fun PlayerScreen(
         }
 
         pendingZapEntry?.let { target ->
-            Row(
-                Modifier
-                    .align(Alignment.TopStart)
-                    .padding(34.dp)
-                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(RadiusTile))
-                    .background(Night.copy(alpha = 0.86f))
-                    .border(BorderStroke(1.dp, GlassBorder), androidx.compose.foundation.shape.RoundedCornerShape(RadiusTile))
-                    .padding(horizontal = 18.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(target.number.toString(), color = FocusBlueBright, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.width(14.dp))
-                ChannelLogo(target.iconUrl, target.displayName, Modifier.size(52.dp))
-                Spacer(Modifier.width(14.dp))
-                Text(target.displayName, color = Ink, fontSize = 22.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+            PlayerToast(Modifier.align(Alignment.TopStart).padding(34.dp), alpha = 0.86f, horizontalPadding = 18.dp, verticalPadding = 12.dp) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(target.number.toString(), color = FocusBlueBright, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.width(14.dp))
+                    ChannelLogo(target.iconUrl, target.displayName, Modifier.size(52.dp))
+                    Spacer(Modifier.width(14.dp))
+                    Text(target.displayName, color = Ink, fontSize = 22.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                }
             }
         }
 
         if (numberBuffer.isNotBlank()) {
-            Box(
-                Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(34.dp)
-                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(RadiusTile))
-                    .background(Night.copy(alpha = 0.82f))
-                    .border(BorderStroke(1.dp, GlassBorder), androidx.compose.foundation.shape.RoundedCornerShape(RadiusTile))
-                    .padding(horizontal = 22.dp, vertical = 14.dp),
-            ) {
+            PlayerToast(Modifier.align(Alignment.TopEnd).padding(34.dp)) {
                 Text(numberBuffer, color = FocusBlueBright, fontSize = 32.sp, fontWeight = FontWeight.Bold)
             }
         }
         versionNotice?.let { notice ->
-            Box(
-                Modifier
-                    .align(Alignment.TopStart)
-                    .padding(34.dp)
-                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(RadiusTile))
-                    .background(Night.copy(alpha = 0.86f))
-                    .border(BorderStroke(1.dp, GlassBorder), androidx.compose.foundation.shape.RoundedCornerShape(RadiusTile))
-                    .padding(horizontal = 22.dp, vertical = 14.dp),
-            ) {
+            PlayerToast(Modifier.align(Alignment.TopStart).padding(34.dp), alpha = 0.86f) {
                 Text(notice, color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold, maxLines = 2)
             }
         }
         missingChannelNumber?.let { number ->
-            Box(
-                Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(34.dp)
-                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(RadiusTile))
-                    .background(Night.copy(alpha = 0.82f))
-                    .border(BorderStroke(1.dp, GlassBorder), androidx.compose.foundation.shape.RoundedCornerShape(RadiusTile))
-                    .padding(horizontal = 22.dp, vertical = 14.dp),
-            ) {
+            PlayerToast(Modifier.align(Alignment.TopEnd).padding(34.dp)) {
                 Text("Chaîne $number introuvable", color = Ink, fontSize = 20.sp, fontWeight = FontWeight.Bold)
             }
         }
 
         seekFeedback?.let { feedback ->
-            Box(
-                Modifier
-                    .align(Alignment.Center)
-                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(RadiusTile))
-                    .background(Night.copy(alpha = 0.8f))
-                    .border(BorderStroke(1.dp, GlassBorder), androidx.compose.foundation.shape.RoundedCornerShape(RadiusTile))
-                    .padding(horizontal = 22.dp, vertical = 14.dp),
-                contentAlignment = Alignment.Center,
-            ) {
+            PlayerToast(Modifier.align(Alignment.Center), alpha = 0.8f) {
                 SeekFeedbackText(feedback) { positionState.longValue }
             }
         }

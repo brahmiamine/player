@@ -34,6 +34,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
@@ -51,6 +52,7 @@ import fr.streamia.tv.ui.theme.HeadingWeight
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
 import fr.streamia.tv.ui.theme.Night
+import fr.streamia.tv.ui.theme.RadiusTile
 import fr.streamia.tv.ui.theme.RadiusCard
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.yield
@@ -432,4 +434,29 @@ internal fun formatDuration(positionMs: Long): String {
     val minutes = (totalSeconds % 3600L) / 60L
     val seconds = totalSeconds % 60L
     return if (hours > 0) "%d:%02d:%02d".format(hours, minutes, seconds) else "%02d:%02d".format(minutes, seconds)
+}
+
+/**
+ * Pastille de verre sombre des messages courts du lecteur : chaîne annoncée par un zap, numéro en
+ * cours de saisie, version changée, numéro introuvable, saut dans la lecture.
+ */
+@Composable
+internal fun PlayerToast(
+    modifier: Modifier = Modifier,
+    alpha: Float = 0.82f,
+    horizontalPadding: Dp = 22.dp,
+    verticalPadding: Dp = 14.dp,
+    content: @Composable () -> Unit,
+) {
+    val shape = androidx.compose.foundation.shape.RoundedCornerShape(RadiusTile)
+    Box(
+        modifier
+            .clip(shape)
+            .background(Night.copy(alpha = alpha))
+            .border(BorderStroke(1.dp, GlassBorder), shape)
+            .padding(horizontal = horizontalPadding, vertical = verticalPadding),
+        contentAlignment = Alignment.Center,
+    ) {
+        content()
+    }
 }
