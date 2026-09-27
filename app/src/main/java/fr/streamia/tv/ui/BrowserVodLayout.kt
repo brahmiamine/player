@@ -36,6 +36,8 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -137,6 +139,9 @@ internal fun VodCatalogLayout(
             onLoadMore = onLoadMore,
             sortOrder = sortOrder,
             onSortSelected = onSortSelected,
+            // Gauche depuis la première colonne : retour sur la catégorie sélectionnée (comme Retour),
+            // et non sur la catégorie voisine à l'écran que choisirait la recherche de focus.
+            onLeftEdge = { railFocusRequest++ },
             modifier = Modifier.weight(1f).fillMaxHeight().onFocusChanged { gridFocused = it.hasFocus },
         ) }
     }
@@ -160,6 +165,7 @@ private fun PosterGrid(
     onLoadMore: () -> Unit,
     sortOrder: VodSortOrder? = null,
     onSortSelected: (VodSortOrder) -> Unit = {},
+    onLeftEdge: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     // Nouveau tri : la grille repart du début de la liste triée.
@@ -277,7 +283,18 @@ private fun PosterGrid(
                         onClick = { onEntrySelected(entry) },
                         onFocused = { onEntryFocused(entry) },
                         onLongClick = { onToggleFavorite(entry) },
-                        modifier = if (entry.key == restoreEntryKey) Modifier.focusRequester(restoreFocus) else Modifier,
+                        modifier = Modifier
+                            .onPreviewKeyEvent { event ->
+                                if (
+                                    event.type == KeyEventType.KeyDown &&
+                                    event.nativeKeyEvent.keyCode == android.view.KeyEvent.KEYCODE_DPAD_LEFT &&
+                                    gridState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == entry.key }?.column == 0
+                                ) {
+                                    onLeftEdge()
+                                    true
+                                } else false
+                            }
+                            .then(if (entry.key == restoreEntryKey) Modifier.focusRequester(restoreFocus) else Modifier),
                     )
                 }
                 // Pied de grille : page suivante en cours, ou en échec avec nouvel essai.
