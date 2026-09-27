@@ -61,24 +61,11 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
     val liveSurfaceResizeMode = remember { mutableIntStateOf(AspectRatioFrameLayout.RESIZE_MODE_FIT) }
     val liveVideoSurface = remember { liveVideoSurfaceClaim(liveSurfaceClaims, liveSurfaceResizeMode) }
 
-    // Seuls les masquages comptent : clé sur la bibliothèque entière, le filtrage (sur le thread
-    // principal) était refait à chaque sauvegarde de progression ou chaîne ajoutée à l'historique.
-    val liveOnSatMatches = remember(
-        state.liveOnSatMatches, state.catalog, state.library.hiddenEntries, state.library.hiddenCategories,
-        state.library.lockedCategories, state.appSettings.parentalControlEnabled, state.parentalUnlocked,
-    ) {
-        state.liveOnSatMatches.withoutHiddenChannels(state.catalog, state.library, state.appSettings.parentalControlEnabled && !state.parentalUnlocked)
-    }
-
-    // Mêmes instances tant que leurs sources ne changent pas : recréées à chaque émission de l'état,
-    // elles faisaient recomposer tout l'accueil (et relancer sa restauration de défilement) à chaque
-    // chargement de guide, de page ou d'historique, même sans aucun changement pour l'accueil.
-    val homeRecommendationRows = remember(state.homeRecommendationRows, state.homeJustWatchRows, state.appSettings.disabledHomeBlocks) {
-        (state.homeRecommendationRows + state.homeJustWatchRows).filter { it.kind.homeBlock !in state.appSettings.disabledHomeBlocks }
-    }
-    val homePendingBlocks = remember(state.homePendingBlocks, state.appSettings.disabledHomeBlocks) {
-        state.homePendingBlocks - state.appSettings.disabledHomeBlocks
-    }
+    // État de l'accueil (guides, matchs, recommandations, météo) : flux séparé, lu (.value)
+    // seulement dans les écrans qui l'affichent — ses mises à jour ne recomposent pas les autres.
+    val homeStateHolder = viewModel.homeState.collectAsStateWithLifecycle()
+    val liveOnSatMatchesHolder = viewModel.visibleLiveOnSatMatches.collectAsStateWithLifecycle()
+    val liveEpgProgramsHolder = viewModel.liveEpgPrograms.collectAsStateWithLifecycle()
 
     StreamiaTheme {
         ResponsiveTvViewport {
@@ -131,10 +118,21 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onReturnToList = if (state.returnProfileId != null) viewModel::returnToPreviousList else null,
                 )
 
-                state.screen is StreamiaScreen.Home && state.catalog != null -> HomeScreen(
+                state.screen is StreamiaScreen.Home && state.catalog != null -> {
+                  val homeState = homeStateHolder.value
+                  val liveOnSatMatches = liveOnSatMatchesHolder.value
+                  // Mêmes instances tant que leurs sources ne changent pas : recréées à chaque
+                  // émission, elles faisaient recomposer tout l'accueil et relancer sa restauration.
+                  val homeRecommendationRows = remember(homeState.homeRecommendationRows, homeState.homeJustWatchRows, state.appSettings.disabledHomeBlocks) {
+                      (homeState.homeRecommendationRows + homeState.homeJustWatchRows).filter { it.kind.homeBlock !in state.appSettings.disabledHomeBlocks }
+                  }
+                  val homePendingBlocks = remember(homeState.homePendingBlocks, state.appSettings.disabledHomeBlocks) {
+                      homeState.homePendingBlocks - state.appSettings.disabledHomeBlocks
+                  }
+                  HomeScreen(
                     catalog = state.catalog!!,
-                    weatherPlace = state.weatherPlace,
-                    weather = state.weather,
+                    weatherPlace = homeState.weatherPlace,
+                    weather = homeState.weather,
                     prayerMethod = state.appSettings.prayerMethod,
                     offline = state.offline,
                     busy = state.busy,
@@ -147,16 +145,16 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     footballScoresEnabled = HomeBlock.FootballScores !in state.appSettings.disabledHomeBlocks,
                     recentChannelsEnabled = HomeBlock.RecentChannels !in state.appSettings.disabledHomeBlocks,
                     recommendationRows = homeRecommendationRows,
-                    tvProgrammeNow = state.homeTvProgrammeNow.ifDisabled(HomeBlock.TvProgrammeNow, state.appSettings),
-                    tvProgrammeTonight = state.homeTvProgrammeTonight.ifDisabled(HomeBlock.TvProgrammeTonight, state.appSettings),
-                    beinSportsNow = state.homeBeinSportsNow.ifDisabled(HomeBlock.BeinSportsNow, state.appSettings),
-                    beinSportsNext = state.homeBeinSportsNext.ifDisabled(HomeBlock.BeinSportsNext, state.appSettings),
-                    ukGuideNow = state.homeUkGuideNow.ifDisabled(HomeBlock.UkGuideNow, state.appSettings),
-                    ukGuideNext = state.homeUkGuideNext.ifDisabled(HomeBlock.UkGuideNext, state.appSettings),
+                    tvProgrammeNow = homeState.homeTvProgrammeNow.ifDisabled(HomeBlock.TvProgrammeNow, state.appSettings),
+                    tvProgrammeTonight = homeState.homeTvProgrammeTonight.ifDisabled(HomeBlock.TvProgrammeTonight, state.appSettings),
+                    beinSportsNow = homeState.homeBeinSportsNow.ifDisabled(HomeBlock.BeinSportsNow, state.appSettings),
+                    beinSportsNext = homeState.homeBeinSportsNext.ifDisabled(HomeBlock.BeinSportsNext, state.appSettings),
+                    ukGuideNow = homeState.homeUkGuideNow.ifDisabled(HomeBlock.UkGuideNow, state.appSettings),
+                    ukGuideNext = homeState.homeUkGuideNext.ifDisabled(HomeBlock.UkGuideNext, state.appSettings),
                     liveMatches = liveOnSatMatches.ifDisabled(HomeBlock.LiveMatches, state.appSettings),
                     pendingBlocks = homePendingBlocks,
-                    liveMatchesPending = state.liveOnSatPending && HomeBlock.LiveMatches !in state.appSettings.disabledHomeBlocks,
-                    liveMatchesResolving = state.liveOnSatResolving,
+                    liveMatchesPending = homeState.liveOnSatPending && HomeBlock.LiveMatches !in state.appSettings.disabledHomeBlocks,
+                    liveMatchesResolving = homeState.liveOnSatResolving,
                     restoreContext = state.contentReturnContext,
                     focusTarget = state.homeFocusTarget,
                     onFocusConsumed = viewModel::consumeHomeFocusTarget,
@@ -176,17 +174,18 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onRefreshLiveMatches = viewModel::refreshLiveOnSatIfStale,
                     onRefreshWeather = viewModel::refreshWeatherIfStale,
                 )
+                }
 
                 state.screen is StreamiaScreen.Browser && state.catalog != null && state.credentials != null -> BrowserScreen(
                     catalog = state.catalog!!,
                     credentials = state.credentials!!,
                     livePlaybackSession = livePlaybackSession,
                     liveVideoSurface = liveVideoSurface,
-                    todayEpgGuide = state.todayEpgGuide,
+                    epgPrograms = liveEpgProgramsHolder.value,
                     library = state.library,
                     appSettings = state.appSettings,
                     loadingCategoryKeys = state.loadingCategoryKeys,
-                    vodPageKeys = state.vodPageKeys,
+                    vodPages = state.vodPages,
                     categoryLoadErrors = state.categoryLoadErrors,
                     parentalUnlocked = state.parentalUnlocked,
                     offline = state.offline,
@@ -228,7 +227,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     settings = state.appSettings,
                     playlistName = state.profiles.firstOrNull { it.id == state.activeProfileId }?.name,
                     accountExpiresAtEpochSeconds = state.catalog?.account?.expiresAtEpochSeconds,
-                    detectedPlaceName = state.weatherPlace?.name,
+                    detectedPlaceName = homeStateHolder.value.weatherPlace?.name,
                     busy = state.busy,
                     liveHistoryCount = state.library.history.count { it.entry.type == MediaType.Live },
                     movieHistoryCount = state.library.history.count { it.entry.type == MediaType.Movie },
@@ -305,12 +304,14 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onBack = viewModel::backFromMenu,
                 )
 
-                state.screen is StreamiaScreen.LiveMatches -> LiveOnSatScreen(
-                    matches = liveOnSatMatches,
-                    loading = state.liveOnSatLoading,
-                    resolvingChannels = state.liveOnSatResolving,
-                    error = state.liveOnSatError,
-                    fetchedAtEpochMillis = state.liveOnSatFetchedAtEpochMillis,
+                state.screen is StreamiaScreen.LiveMatches -> {
+                  val homeState = homeStateHolder.value
+                  LiveOnSatScreen(
+                    matches = liveOnSatMatchesHolder.value,
+                    loading = homeState.liveOnSatLoading,
+                    resolvingChannels = homeState.liveOnSatResolving,
+                    error = homeState.liveOnSatError,
+                    fetchedAtEpochMillis = homeState.liveOnSatFetchedAtEpochMillis,
                     restoreMatchKey = state.contentReturnContext
                         ?.takeIf { it.origin == ContentReturnOrigin.LiveMatches }
                         ?.liveMatchKey,
@@ -321,7 +322,8 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onRefresh = viewModel::refreshLiveOnSatMatches,
                     onRefreshIfStale = viewModel::refreshLiveOnSatIfStale,
                     onBack = viewModel::backFromMenu,
-                )
+                  )
+                }
 
                 state.screen is StreamiaScreen.Epg && state.catalog != null -> EpgScreen(
                     catalog = state.catalog!!,
@@ -338,6 +340,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onOpenChannel = viewModel::openEntry,
                     onSelectDate = viewModel::selectEpgDate,
                     onReload = viewModel::reloadEpg,
+                    loadDescription = viewModel::epgDescription,
                     onBack = viewModel::backFromMenu,
                 )
 

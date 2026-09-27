@@ -12,8 +12,22 @@ class BaselineProfileGenerator {
     @get:Rule
     val rule = BaselineProfileRule()
 
+    /**
+     * Profil de démarrage : seulement ce qui s'exécute jusqu'au premier écran. Il guide la
+     * disposition du DEX ; y mettre tous les parcours (comme avant) annulait cette optimisation.
+     */
     @Test
-    fun generate() = rule.collect(packageName = TARGET_PACKAGE, includeInStartupProfile = true) {
+    fun startup() = rule.collect(packageName = TARGET_PACKAGE, includeInStartupProfile = true) {
+        pressHome()
+        startActivityAndWait()
+    }
+
+    /** Baseline profile : parcours Direct, Films, Guide TV et accueil (compilés à l'avance). */
+    @Test
+    fun navigation() = rule.collect(packageName = TARGET_PACKAGE, includeInStartupProfile = false) {
         openLiveAndZap(zaps = 5)
+        browseMovies()
+        openGuide()
+        scrollHome()
     }
 }

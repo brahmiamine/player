@@ -1,14 +1,10 @@
 package fr.streamia.tv.data
 
 import android.content.Context
-import android.security.keystore.KeyGenParameterSpec
-import android.security.keystore.KeyProperties
 import android.util.Base64
 import org.json.JSONArray
 import org.json.JSONObject
-import java.security.KeyStore
 import javax.crypto.Cipher
-import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
@@ -153,22 +149,7 @@ class PlaylistStore(context: Context) {
             .apply()
     }
 
-    private fun getOrCreateKey(): SecretKey {
-        val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        (keyStore.getKey(KEY_ALIAS, null) as? SecretKey)?.let { return it }
-        return KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore").run {
-            init(
-                KeyGenParameterSpec.Builder(
-                    KEY_ALIAS,
-                    KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT,
-                )
-                    .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-                    .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                    .build(),
-            )
-            generateKey()
-        }
-    }
+    private fun getOrCreateKey(): SecretKey = androidKeyStoreAesKey(KEY_ALIAS)
 
     private fun JSONObject.optNullableString(key: String): String? =
         if (isNull(key)) null else optString(key).takeIf(String::isNotBlank)

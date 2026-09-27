@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -55,11 +56,9 @@ import fr.streamia.tv.ui.theme.TypeLabel
 import fr.streamia.tv.ui.theme.TypeSectionTitle
 import fr.streamia.tv.ui.theme.TypeScreenTitle
 import kotlinx.coroutines.delay
-import java.text.SimpleDateFormat
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import java.util.Date
 import java.util.Locale
 
 private const val CLOCK_REFRESH_MS = 30_000L
@@ -95,6 +94,8 @@ fun EpgScreen(
     onSelectDate: (LocalDate) -> Unit,
     onReload: () -> Unit,
     onBack: () -> Unit,
+    /** Description d'un programme, lue à la demande (le guide est chargé sans descriptions). */
+    loadDescription: suspend (EpgProgram) -> String? = { it.description },
 ) {
     val zone = remember { ZoneId.systemDefault() }
     var categoryId by remember { mutableStateOf(Catalog.ALL_CATEGORY_ID) }
@@ -255,6 +256,7 @@ fun EpgScreen(
                         selected = selected!!,
                         onWatch = { onOpenChannel(selected!!.channel) },
                         onClose = { selected = null },
+                        loadDescription = loadDescription,
                     )
                 }
             }
@@ -485,7 +487,11 @@ private fun ProgramDetailsPanel(
     selected: SelectedProgram,
     onWatch: () -> Unit,
     onClose: () -> Unit,
+    loadDescription: suspend (EpgProgram) -> String?,
 ) {
+    val description by produceState(selected.program.description, selected.program) {
+        if (value == null) value = loadDescription(selected.program)
+    }
     GlassSurface(modifier = Modifier.fillMaxWidth()) {
       Column(Modifier.fillMaxWidth().padding(18.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -506,9 +512,9 @@ private fun ProgramDetailsPanel(
                 Text("Fermer", color = Ink, fontSize = TypeLabel, modifier = Modifier.padding(horizontal = 14.dp))
             }
         }
-        if (!selected.program.description.isNullOrBlank()) {
+        description?.takeIf(String::isNotBlank)?.let { text ->
             Spacer(Modifier.height(9.dp))
-            Text(selected.program.description, color = MutedInk, fontSize = 14.sp, maxLines = 4, overflow = TextOverflow.Ellipsis)
+            Text(text, color = MutedInk, fontSize = 14.sp, maxLines = 4, overflow = TextOverflow.Ellipsis)
         }
         if (!selected.program.category.isNullOrBlank()) {
             Spacer(Modifier.height(5.dp))
@@ -551,14 +557,17 @@ private fun EpgProgram.elapsedFraction(epoch: Long): Float {
     return ((epoch - start).toFloat() / (end - start).toFloat()).coerceIn(0f, 1f)
 }
 
+// Formateur partagé (DateTimeFormatter est sûr entre threads) : un SimpleDateFormat était créé
+// pour chaque bloc de programme affiché dans la grille.
+private val ClockFormatter: java.time.format.DateTimeFormatter = java.time.format.DateTimeFormatter.ofPattern("HH:mm", Locale.getDefault())
+
 private fun EpgProgram.timeRange(): String {
-    val formatter = SimpleDateFormat("HH:mm", Locale.getDefault())
-    fun format(epoch: Long?): String = epoch?.let { formatter.format(Date(it * 1000)) } ?: "--:--"
+    fun format(epoch: Long?): String = epoch?.let(::formatClock) ?: "--:--"
     return "${format(startEpochSeconds)} – ${format(endEpochSeconds)}"
 }
 
 private fun formatClock(epochSeconds: Long): String =
-    SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(epochSeconds * 1000))
+    java.time.Instant.ofEpochSecond(epochSeconds).atZone(java.time.ZoneId.systemDefault()).format(ClockFormatter)
 
 private fun dayLabel(date: LocalDate): String =
     date.format(DayLabelFormatter).replaceFirstChar { it.titlecase(Locale.FRENCH) }

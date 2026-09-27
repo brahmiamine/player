@@ -2,6 +2,7 @@ package fr.streamia.tv
 
 import android.content.Intent
 import android.os.Bundle
+import android.os.StrictMode
 import androidx.activity.ComponentActivity
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
@@ -23,10 +24,21 @@ import fr.streamia.tv.work.MetadataEnrichmentWorker
 
 class MainActivity : ComponentActivity() {
     private lateinit var viewModel: StreamiaViewModel
+    private var jankReporter: fr.streamia.tv.logging.JankReporter? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
+        // Debug : chaque accès disque ou réseau sur le thread principal est signalé dans logcat
+        // (tag StrictMode), pour ne pas réintroduire de gel de l'interface.
+        if (BuildConfig.DEBUG) {
+            StrictMode.setThreadPolicy(
+                StrictMode.ThreadPolicy.Builder().detectDiskReads().detectDiskWrites().detectNetwork().detectCustomSlowCalls().penaltyLog().build(),
+            )
+            StrictMode.setVmPolicy(
+                StrictMode.VmPolicy.Builder().detectLeakedClosableObjects().detectLeakedSqlLiteObjects().penaltyLog().build(),
+            )
+        }
 
         CrashReporter.initialize(applicationContext)
         // WorkManager crée et ouvre sa base à la première utilisation : hors du thread principal,
@@ -51,10 +63,28 @@ class MainActivity : ComponentActivity() {
         // la restauration de session habituelle (StreamiaTvRoot l'ignore dès qu'un profil est actif).
         viewModel.openResumeLink(intent?.data)
         setContent { StreamiaTvRoot(viewModel) }
+
+        // Saccades mesurées par écran en usage réel (journal Crashlytics).
+        jankReporter = runCatching { fr.streamia.tv.logging.JankReporter.attach(window) }.getOrNull()
+        lifecycleScope.launch {
+            viewModel.uiState.collect { state -> jankReporter?.onScreen(state.screen::class.simpleName ?: "screen") }
+        }
+    }
+
+    // Chaque appui télécommande : les tâches de fond lourdes attendent que la navigation se calme.
+    override fun onUserInteraction() {
+        super.onUserInteraction()
+        fr.streamia.tv.player.UserActivity.onInteraction()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        jankReporter?.setTracking(false)
     }
 
     override fun onResume() {
         super.onResume()
+        jankReporter?.setTracking(true)
         // Retour du réglage « Installer des applis inconnues » : l'installation de la mise à jour reprend.
         if (::viewModel.isInitialized) viewModel.resumePendingUpdateInstall()
     }

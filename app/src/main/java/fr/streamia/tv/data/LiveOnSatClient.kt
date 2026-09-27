@@ -1,8 +1,7 @@
 package fr.streamia.tv.data
 
+import fr.streamia.tv.net.HttpClients
 import java.io.IOException
-import java.net.HttpURLConnection
-import java.net.URL
 import java.nio.charset.StandardCharsets
 
 /**
@@ -12,23 +11,13 @@ import java.nio.charset.StandardCharsets
  */
 internal class LiveOnSatClient {
     @Throws(IOException::class)
-    fun fetchTodayHtml(): String {
-        val connection = (URL(TODAY_URL).openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            connectTimeout = 15_000
-            readTimeout = 20_000
-            instanceFollowRedirects = true
-            setRequestProperty("User-Agent", USER_AGENT)
-            setRequestProperty("Accept", "text/html")
-        }
-        try {
-            val code = connection.responseCode
-            if (code !in 200..299) throw IOException("liveonsat.com a répondu avec le code $code.")
-            return connection.inputStream.use { input -> input.reader(StandardCharsets.UTF_8).readText() }
-        } finally {
-            connection.disconnect()
-        }
-    }
+    fun fetchTodayHtml(): String = HttpClients.getText(
+        TODAY_URL,
+        headers = mapOf("User-Agent" to USER_AGENT, "Accept" to "text/html"),
+        connectTimeoutMs = 15_000,
+        readTimeoutMs = 20_000,
+        errorMessage = { code -> "liveonsat.com a répondu avec le code $code." },
+    )
 
     private companion object {
         const val TODAY_URL = "https://liveonsat.com/2day.php"

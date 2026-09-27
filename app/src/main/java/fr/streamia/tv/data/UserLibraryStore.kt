@@ -11,76 +11,69 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * Persistance locale des préférences de navigation. Aucune donnée sensible n'est stockée ici.
- * Les clés sont isolées par profil de playlist afin qu'un abonnement n'influence jamais un autre.
+ * Préférences de navigation par profil (favoris, masqués, verrouillés, vus, ordre des catégories,
+ * déplacements, historique). Aucune donnée sensible n'est stockée ici. Les données sont isolées par
+ * profil de playlist afin qu'un abonnement n'influence jamais un autre.
+ *
+ * Stockage en SQLite ([LibraryDatabase]) : chaque action écrit **une ligne**. Avant, tout le JSON
+ * du profil (historique de 200 contenus compris) était relu, réécrit et le fichier de préférences
+ * de tous les profils réenregistré à chaque zap, toutes les 15 s d'un film et à chaque favori. Les
+ * anciennes données SharedPreferences sont reprises une fois, au premier accès au profil.
  */
 class UserLibraryStore(context: Context) {
-    private val preferences = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+    private val appContext = context.applicationContext
+    private val preferences by lazy { appContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE) }
+    private val database get() = LibraryDatabase.get(appContext)
+
     /**
-     * Instantané déjà parsé, partagé par tout le processus : relire et reparser le JSON complet
-     * (historique compris) à chaque appel coûtait sur le thread principal (reprise d'un film,
-     * ouverture de profil…). Invalidé à chaque écriture.
+     * Instantané partagé par tout le processus, tenu à jour à chaque écriture (sans relecture).
      */
     fun snapshot(profileId: String): UserLibrarySnapshot =
         snapshots[profileId] ?: synchronized(mutationLock) {
-            snapshots.getOrPut(profileId) { parseSnapshot(profileId) }
+            snapshots.getOrPut(profileId) { loadSnapshot(profileId) }
         }
 
-    private fun parseSnapshot(profileId: String): UserLibrarySnapshot {
-        val root = loadRoot(profileId)
-        return UserLibrarySnapshot(
-            favoriteEntries = root.optJSONArray("favorite_entries").stringSet(),
-            favoriteCategories = root.optJSONArray("favorite_categories").stringSet(),
-            hiddenEntries = root.optJSONArray("hidden_entries").stringSet(),
-            hiddenCategories = root.optJSONArray("hidden_categories").stringSet(),
-            lockedCategories = root.optJSONArray("locked_categories").stringSet(),
-            watchedEntries = root.optJSONArray("watched_entries").stringSet(),
-            categoryOrder = root.optJSONObject("category_order").stringListMap(),
-            movedEntries = root.optJSONObject("moved_entries").stringMap(),
-            history = root.optJSONArray("history").historyList(),
-        )
+    private fun loadSnapshot(profileId: String): UserLibrarySnapshot {
+        if (!database.isMigrated(profileId)) {
+            // Reprise unique des anciennes préférences JSON (laissées en place : un retour à une
+            // version précédente de l'app les retrouve).
+            database.replaceAll(profileId, parseLegacySnapshot(loadLegacyRoot(profileId)))
+        }
+        return database.read(profileId)
     }
 
-    fun toggleEntryFavorite(profileId: String, entry: MediaEntry): Boolean = mutate(profileId) { root ->
-        val set = root.optJSONArray("favorite_entries").stringSet().toMutableSet()
-        val added = if (entry.key in set) { set.remove(entry.key); false } else { set.add(entry.key); true }
-        root.put("favorite_entries", JSONArray(set.toList()))
+    fun toggleEntryFavorite(profileId: String, entry: MediaEntry): Boolean =
+        toggle(profileId, LibraryDatabase.FAVORITE_ENTRY, entry.key, { it.favoriteEntries }) { snapshot, set -> snapshot.copy(favoriteEntries = set) }
+
+    fun toggleCategoryFavorite(profileId: String, category: MediaCategory): Boolean =
+        toggle(profileId, LibraryDatabase.FAVORITE_CATEGORY, category.key, { it.favoriteCategories }) { snapshot, set -> snapshot.copy(favoriteCategories = set) }
+
+    fun toggleEntryHidden(profileId: String, entry: MediaEntry): Boolean =
+        toggle(profileId, LibraryDatabase.HIDDEN_ENTRY, entry.key, { it.hiddenEntries }) { snapshot, set -> snapshot.copy(hiddenEntries = set) }
+
+    fun toggleCategoryHidden(profileId: String, category: MediaCategory): Boolean =
+        toggle(profileId, LibraryDatabase.HIDDEN_CATEGORY, category.key, { it.hiddenCategories }) { snapshot, set -> snapshot.copy(hiddenCategories = set) }
+
+    fun toggleCategoryLocked(profileId: String, category: MediaCategory): Boolean =
+        toggle(profileId, LibraryDatabase.LOCKED_CATEGORY, category.key, { it.lockedCategories }) { snapshot, set -> snapshot.copy(lockedCategories = set) }
+
+    fun toggleEntryWatched(profileId: String, entry: MediaEntry): Boolean =
+        toggle(profileId, LibraryDatabase.WATCHED_ENTRY, entry.key, { it.watchedEntries }) { snapshot, set -> snapshot.copy(watchedEntries = set) }
+
+    private fun toggle(
+        profileId: String,
+        kind: String,
+        key: String,
+        read: (UserLibrarySnapshot) -> Set<String>,
+        write: (UserLibrarySnapshot, Set<String>) -> UserLibrarySnapshot,
+    ): Boolean = synchronized(mutationLock) {
+        val current = snapshot(profileId)
+        val set = LinkedHashSet(read(current))
+        val added = set.add(key)
+        if (!added) set.remove(key)
+        database.setFlag(profileId, kind, key, added)
+        snapshots[profileId] = write(current, set)
         added
-    }
-
-    fun toggleCategoryFavorite(profileId: String, category: MediaCategory): Boolean = mutate(profileId) { root ->
-        val set = root.optJSONArray("favorite_categories").stringSet().toMutableSet()
-        val added = if (category.key in set) { set.remove(category.key); false } else { set.add(category.key); true }
-        root.put("favorite_categories", JSONArray(set.toList()))
-        added
-    }
-
-    fun toggleEntryHidden(profileId: String, entry: MediaEntry): Boolean = mutate(profileId) { root ->
-        val set = root.optJSONArray("hidden_entries").stringSet().toMutableSet()
-        val hidden = if (entry.key in set) { set.remove(entry.key); false } else { set.add(entry.key); true }
-        root.put("hidden_entries", JSONArray(set.toList()))
-        hidden
-    }
-
-    fun toggleCategoryHidden(profileId: String, category: MediaCategory): Boolean = mutate(profileId) { root ->
-        val set = root.optJSONArray("hidden_categories").stringSet().toMutableSet()
-        val hidden = if (category.key in set) { set.remove(category.key); false } else { set.add(category.key); true }
-        root.put("hidden_categories", JSONArray(set.toList()))
-        hidden
-    }
-
-    fun toggleCategoryLocked(profileId: String, category: MediaCategory): Boolean = mutate(profileId) { root ->
-        val set = root.optJSONArray("locked_categories").stringSet().toMutableSet()
-        val locked = if (category.key in set) { set.remove(category.key); false } else { set.add(category.key); true }
-        root.put("locked_categories", JSONArray(set.toList()))
-        locked
-    }
-
-    fun toggleEntryWatched(profileId: String, entry: MediaEntry): Boolean = mutate(profileId) { root ->
-        val set = root.optJSONArray("watched_entries").stringSet().toMutableSet()
-        val watched = if (entry.key in set) { set.remove(entry.key); false } else { set.add(entry.key); true }
-        root.put("watched_entries", JSONArray(set.toList()))
-        watched
     }
 
     fun recordPlayback(
@@ -90,27 +83,27 @@ class UserLibraryStore(context: Context) {
         durationMs: Long,
     ) {
         if (!shouldRecordPlaybackInHistory(entry.type, positionMs)) return
-        mutate<Unit>(profileId) { root ->
-            val history = root.optJSONArray("history").historyList().toMutableList()
-            history.removeAll { it.entry.key == entry.key }
-            history.add(
-                0,
-                PlaybackHistoryItem(
-                    entry = entry,
-                    positionMs = positionMs.coerceAtLeast(0),
-                    durationMs = durationMs.coerceAtLeast(0),
-                    updatedAt = System.currentTimeMillis(),
-                ),
+        synchronized(mutationLock) {
+            val current = snapshot(profileId)
+            val item = PlaybackHistoryItem(
+                entry = entry,
+                positionMs = positionMs.coerceAtLeast(0),
+                durationMs = durationMs.coerceAtLeast(0),
+                updatedAt = System.currentTimeMillis(),
             )
-            val trimmed = history.take(MAX_HISTORY)
-            root.put("history", JSONArray().apply { trimmed.forEach { put(it.toJson()) } })
+            val history = (listOf(item) + current.history.filterNot { it.entry.key == entry.key })
+            val kept = history.take(MAX_HISTORY)
+            val dropped = history.drop(MAX_HISTORY).map { it.entry.key }
+            database.recordHistory(profileId, item, item.toJson().toString(), dropped)
+            snapshots[profileId] = current.copy(history = kept)
         }
     }
 
     fun clearHistory(profileId: String, type: MediaType? = null) {
-        mutate<Unit>(profileId) { root ->
-            val kept = historyAfterClearingType(root.optJSONArray("history").historyList(), type)
-            root.put("history", JSONArray().apply { kept.forEach { put(it.toJson()) } })
+        synchronized(mutationLock) {
+            val current = snapshot(profileId)
+            database.clearHistory(profileId, type)
+            snapshots[profileId] = current.copy(history = historyAfterClearingType(current.history, type))
         }
     }
 
@@ -120,27 +113,28 @@ class UserLibraryStore(context: Context) {
     }
 
     fun setCategoryOrder(profileId: String, type: MediaType, categoryKeys: List<String>) {
-        mutate<Unit>(profileId) { root ->
-            val order = root.optJSONObject("category_order") ?: JSONObject()
-            order.put(type.name, JSONArray(categoryKeys.distinct()))
-            root.put("category_order", order)
+        synchronized(mutationLock) {
+            val current = snapshot(profileId)
+            val keys = categoryKeys.distinct()
+            database.setCategoryOrder(profileId, type.name, JSONArray(keys).toString())
+            snapshots[profileId] = current.copy(categoryOrder = current.categoryOrder + (type.name to keys))
         }
     }
 
     fun moveEntries(profileId: String, entryKeys: Set<String>, targetCategoryId: String) {
         if (entryKeys.isEmpty()) return
-        mutate<Unit>(profileId) { root ->
-            val moved = root.optJSONObject("moved_entries") ?: JSONObject()
-            entryKeys.forEach { moved.put(it, targetCategoryId) }
-            root.put("moved_entries", moved)
+        synchronized(mutationLock) {
+            val current = snapshot(profileId)
+            database.moveEntries(profileId, entryKeys, targetCategoryId)
+            snapshots[profileId] = current.copy(movedEntries = current.movedEntries + entryKeys.associateWith { targetCategoryId })
         }
     }
 
     fun resetEntryMoves(profileId: String, entryKeys: Set<String>) {
-        mutate<Unit>(profileId) { root ->
-            val moved = root.optJSONObject("moved_entries") ?: JSONObject()
-            entryKeys.forEach(moved::remove)
-            root.put("moved_entries", moved)
+        synchronized(mutationLock) {
+            val current = snapshot(profileId)
+            database.resetEntryMoves(profileId, entryKeys)
+            snapshots[profileId] = current.copy(movedEntries = current.movedEntries - entryKeys)
         }
     }
 
@@ -152,99 +146,25 @@ class UserLibraryStore(context: Context) {
         applyUserLibraryToCatalog(catalog, snapshot)
 
     /**
-     * Bloc JSON brut d'un profil (favoris, catégories masquées/verrouillées, ordre, historique…)
-     * pour une sauvegarde — jamais d'identifiant de connexion ici, ce store n'en contient pas.
+     * Bloc JSON d'un profil (favoris, catégories masquées/verrouillées, ordre, historique…), au
+     * format historique, pour une sauvegarde — jamais d'identifiant de connexion ici.
      */
-    fun exportRaw(profileId: String): JSONObject = loadRoot(profileId)
+    fun exportRaw(profileId: String): JSONObject = snapshot(profileId).toLegacyJson()
 
     /** Remplace entièrement les préférences d'un profil par un bloc exporté via [exportRaw]. */
     fun importRaw(profileId: String, raw: JSONObject) {
         synchronized(mutationLock) {
-            preferences.edit().putString(key(profileId), raw.toString()).apply()
-            snapshots.remove(profileId)
+            val imported = parseLegacySnapshot(raw)
+            database.replaceAll(profileId, imported)
+            snapshots[profileId] = database.read(profileId)
         }
     }
 
-    private fun loadRoot(profileId: String): JSONObject = runCatching {
+    private fun loadLegacyRoot(profileId: String): JSONObject = runCatching {
         JSONObject(preferences.getString(key(profileId), null) ?: "{}")
     }.getOrDefault(JSONObject())
 
-    private inline fun <T> mutate(profileId: String, block: (JSONObject) -> T): T {
-        return synchronized(mutationLock) {
-            val root = loadRoot(profileId)
-            val result = block(root)
-            preferences.edit().putString(key(profileId), root.toString()).apply()
-            snapshots.remove(profileId)
-            result
-        }
-    }
-
-    private fun key(profileId: String): String = "profile_${profileId.replace(Regex("[^A-Za-z0-9._-]"), "_")}" 
-
-    private fun JSONArray?.stringSet(): Set<String> = buildSet {
-        val array = this@stringSet ?: return@buildSet
-        for (index in 0 until array.length()) array.optString(index).takeIf(String::isNotBlank)?.let(::add)
-    }
-
-    private fun JSONObject?.stringMap(): Map<String, String> = buildMap {
-        val json = this@stringMap ?: return@buildMap
-        json.keys().forEach { key -> json.optString(key).takeIf(String::isNotBlank)?.let { put(key, it) } }
-    }
-
-    private fun JSONObject?.stringListMap(): Map<String, List<String>> = buildMap {
-        val json = this@stringListMap ?: return@buildMap
-        json.keys().forEach { key -> put(key, json.optJSONArray(key).stringSet().toList()) }
-    }
-
-    private fun JSONArray?.historyList(): List<PlaybackHistoryItem> = buildList {
-        val array = this@historyList ?: return@buildList
-        for (index in 0 until array.length()) {
-            val json = array.optJSONObject(index) ?: continue
-            val type = runCatching { MediaType.valueOf(json.optString("type")) }.getOrNull() ?: continue
-            val id = json.optInt("id", -1)
-            val name = json.optString("name")
-            if (id <= 0 || name.isBlank()) continue
-            add(
-                PlaybackHistoryItem(
-                    entry = MediaEntry(
-                        id = id,
-                        name = name,
-                        displayName = json.optString("display_name").ifBlank { name },
-                        type = type,
-                        categoryId = json.optString("category_id", "0"),
-                        iconUrl = json.optString("icon").takeIf(String::isNotBlank),
-                        number = json.optInt("number", 0),
-                        extension = json.optString("extension", type.defaultExtension),
-                        tvgId = json.optString("tvg_id").takeIf(String::isNotBlank),
-                        plot = json.optString("plot").takeIf(String::isNotBlank),
-                        rating = json.optString("rating").toDoubleOrNull(),
-                        playable = json.optBoolean("playable", type != MediaType.Series),
-                    ),
-                    positionMs = json.optLong("position_ms", 0),
-                    durationMs = json.optLong("duration_ms", 0),
-                    updatedAt = json.optLong("updated_at", 0),
-                ),
-            )
-        }
-    }
-
-    private fun PlaybackHistoryItem.toJson(): JSONObject = JSONObject().apply {
-        put("id", entry.id)
-        put("name", entry.name)
-        put("display_name", entry.displayName)
-        put("type", entry.type.name)
-        put("category_id", entry.categoryId)
-        put("icon", entry.iconUrl ?: "")
-        put("number", entry.number)
-        put("extension", entry.extension)
-        put("tvg_id", entry.tvgId ?: "")
-        put("plot", entry.plot ?: "")
-        put("rating", entry.rating?.toString() ?: "")
-        put("playable", entry.playable)
-        put("position_ms", positionMs)
-        put("duration_ms", durationMs)
-        put("updated_at", updatedAt)
-    }
+    private fun key(profileId: String): String = "profile_${profileId.replace(UNSAFE_KEY_CHARS, "_")}"
 
     private companion object {
         val mutationLock = Any()
@@ -252,6 +172,98 @@ class UserLibraryStore(context: Context) {
         const val PREFERENCES_NAME = "streamia-user-library-v1"
         const val MAX_HISTORY = 200
     }
+}
+
+/** Instantané lu depuis l'ancien format JSON (préférences, sauvegardes). */
+internal fun parseLegacySnapshot(root: JSONObject): UserLibrarySnapshot = UserLibrarySnapshot(
+    favoriteEntries = root.optJSONArray("favorite_entries").stringSet(),
+    favoriteCategories = root.optJSONArray("favorite_categories").stringSet(),
+    hiddenEntries = root.optJSONArray("hidden_entries").stringSet(),
+    hiddenCategories = root.optJSONArray("hidden_categories").stringSet(),
+    lockedCategories = root.optJSONArray("locked_categories").stringSet(),
+    watchedEntries = root.optJSONArray("watched_entries").stringSet(),
+    categoryOrder = root.optJSONObject("category_order").stringListMap(),
+    movedEntries = root.optJSONObject("moved_entries").stringMap(),
+    history = root.optJSONArray("history").historyList(),
+)
+
+internal fun UserLibrarySnapshot.toLegacyJson(): JSONObject = JSONObject().apply {
+    put("favorite_entries", JSONArray(favoriteEntries.toList()))
+    put("favorite_categories", JSONArray(favoriteCategories.toList()))
+    put("hidden_entries", JSONArray(hiddenEntries.toList()))
+    put("hidden_categories", JSONArray(hiddenCategories.toList()))
+    put("locked_categories", JSONArray(lockedCategories.toList()))
+    put("watched_entries", JSONArray(watchedEntries.toList()))
+    put("category_order", JSONObject().apply { categoryOrder.forEach { (type, keys) -> put(type, JSONArray(keys)) } })
+    put("moved_entries", JSONObject().apply { movedEntries.forEach { (key, category) -> put(key, category) } })
+    put("history", JSONArray().apply { history.forEach { put(it.toJson()) } })
+}
+
+internal fun JSONArray?.stringSet(): Set<String> = buildSet {
+    val array = this@stringSet ?: return@buildSet
+    for (index in 0 until array.length()) array.optString(index).takeIf(String::isNotBlank)?.let(::add)
+}
+
+private fun JSONObject?.stringMap(): Map<String, String> = buildMap {
+    val json = this@stringMap ?: return@buildMap
+    json.keys().forEach { key -> json.optString(key).takeIf(String::isNotBlank)?.let { put(key, it) } }
+}
+
+private fun JSONObject?.stringListMap(): Map<String, List<String>> = buildMap {
+    val json = this@stringListMap ?: return@buildMap
+    json.keys().forEach { key -> put(key, json.optJSONArray(key).stringSet().toList()) }
+}
+
+private fun JSONArray?.historyList(): List<PlaybackHistoryItem> = buildList {
+    val array = this@historyList ?: return@buildList
+    for (index in 0 until array.length()) {
+        array.optJSONObject(index)?.let(::historyItemFromJson)?.let(::add)
+    }
+}
+
+/** Un élément d'historique au format JSON (colonne `entry_json` en base, sauvegardes). */
+internal fun historyItemFromJson(json: JSONObject): PlaybackHistoryItem? {
+    val type = runCatching { MediaType.valueOf(json.optString("type")) }.getOrNull() ?: return null
+    val id = json.optInt("id", -1)
+    val name = json.optString("name")
+    if (id <= 0 || name.isBlank()) return null
+    return PlaybackHistoryItem(
+        entry = MediaEntry(
+            id = id,
+            name = name,
+            displayName = json.optString("display_name").ifBlank { name },
+            type = type,
+            categoryId = json.optString("category_id", "0"),
+            iconUrl = json.optString("icon").takeIf(String::isNotBlank),
+            number = json.optInt("number", 0),
+            extension = json.optString("extension", type.defaultExtension),
+            tvgId = json.optString("tvg_id").takeIf(String::isNotBlank),
+            plot = json.optString("plot").takeIf(String::isNotBlank),
+            rating = json.optString("rating").toDoubleOrNull(),
+            playable = json.optBoolean("playable", type != MediaType.Series),
+        ),
+        positionMs = json.optLong("position_ms", 0),
+        durationMs = json.optLong("duration_ms", 0),
+        updatedAt = json.optLong("updated_at", 0),
+    )
+}
+
+internal fun PlaybackHistoryItem.toJson(): JSONObject = JSONObject().apply {
+    put("id", entry.id)
+    put("name", entry.name)
+    put("display_name", entry.displayName)
+    put("type", entry.type.name)
+    put("category_id", entry.categoryId)
+    put("icon", entry.iconUrl ?: "")
+    put("number", entry.number)
+    put("extension", entry.extension)
+    put("tvg_id", entry.tvgId ?: "")
+    put("plot", entry.plot ?: "")
+    put("rating", entry.rating?.toString() ?: "")
+    put("playable", entry.playable)
+    put("position_ms", positionMs)
+    put("duration_ms", durationMs)
+    put("updated_at", updatedAt)
 }
 
 data class UserLibrarySnapshot(
@@ -290,26 +302,39 @@ fun applyUserLibraryToCatalog(catalog: Catalog, snapshot: UserLibrarySnapshot): 
     // quand ni le tri des catégories ni le déplacement d'entrées n'ont été utilisés.
     if (snapshot.movedEntries.isEmpty() && snapshot.categoryOrder.isEmpty()) return catalog
 
-    val movedEntries = if (snapshot.movedEntries.isEmpty()) {
-        catalog.entries
-    } else {
-        catalog.entries.map { entry ->
-            snapshot.movedEntries[entry.key]?.let { destination -> entry.copy(categoryId = destination) } ?: entry
-        }
-    }
-    val orderedCategories = MediaType.entries.flatMap { type ->
-        val categories = catalog.categoriesFor(type)
-        val preferred = snapshot.categoryOrder[type.name].orEmpty()
-        if (preferred.isEmpty()) categories
-        else {
-            val byKey = categories.associateBy(MediaCategory::key)
-            buildList {
-                preferred.forEach { byKey[it]?.let(::add) }
-                categories.filterNot { it.key in preferred }.forEach(::add)
+    // Seules les entrées réellement déplacées sont recopiées, et seules leurs sections perdent leurs
+    // index : les autres (des dizaines de milliers de chaînes Direct) gardent ceux du catalogue
+    // d'origine au lieu d'être réindexées, souvent sur le thread principal, à chaque page chargée.
+    val changedTypes = HashSet<MediaType>()
+    var movedEntries: MutableList<MediaEntry>? = null
+    if (snapshot.movedEntries.isNotEmpty()) {
+        catalog.entries.forEachIndexed { index, entry ->
+            val destination = snapshot.movedEntries[entry.key]
+            if (destination != null && destination != entry.categoryId) {
+                val target = movedEntries ?: catalog.entries.toMutableList().also { movedEntries = it }
+                target[index] = entry.copy(categoryId = destination)
+                changedTypes += entry.type
             }
         }
     }
-    val adjustedCategoryCounts = if (catalog.categoryCounts.isEmpty() || snapshot.movedEntries.isEmpty()) {
+    val orderedCategories = if (snapshot.categoryOrder.values.all { it.isEmpty() }) {
+        catalog.categories
+    } else {
+        MediaType.entries.flatMap { type ->
+            val categories = catalog.categoriesFor(type)
+            val preferred = snapshot.categoryOrder[type.name].orEmpty()
+            if (preferred.isEmpty()) categories
+            else {
+                val byKey = categories.associateBy(MediaCategory::key)
+                val preferredSet = preferred.toHashSet()
+                buildList {
+                    preferred.forEach { byKey[it]?.let(::add) }
+                    categories.filterNot { it.key in preferredSet }.forEach(::add)
+                }
+            }
+        }
+    }
+    val adjustedCategoryCounts = if (catalog.categoryCounts.isEmpty() || changedTypes.isEmpty()) {
         catalog.categoryCounts
     } else {
         catalog.categoryCounts.toMutableMap().apply {
@@ -323,13 +348,12 @@ fun applyUserLibraryToCatalog(catalog: Catalog, snapshot: UserLibrarySnapshot): 
             }
         }
     }
-    return Catalog(
+    if (movedEntries == null && orderedCategories == catalog.categories) return catalog
+    return catalog.withCustomLayout(
         categories = orderedCategories,
-        entries = movedEntries,
-        account = catalog.account,
-        totalCounts = catalog.totalCounts,
+        entries = movedEntries ?: catalog.entries,
         categoryCounts = adjustedCategoryCounts,
-        loadedCategoryKeys = catalog.loadedCategoryKeys,
+        changedTypes = changedTypes,
     )
 }
 
@@ -358,3 +382,5 @@ fun PlaybackHistoryItem.isResumable(): Boolean {
     if (durationMs > 0 && positionMs >= durationMs - 30_000) return false
     return positionMs >= MIN_VOD_HISTORY_POSITION_MS
 }
+
+private val UNSAFE_KEY_CHARS = Regex("[^A-Za-z0-9._-]")

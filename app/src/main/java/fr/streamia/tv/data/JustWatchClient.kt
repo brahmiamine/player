@@ -1,9 +1,8 @@
 package fr.streamia.tv.data
 
+import fr.streamia.tv.net.HttpClients
 import fr.streamia.tv.domain.MediaType
 import org.json.JSONObject
-import java.net.HttpURLConnection
-import java.net.URL
 import java.time.LocalDate
 
 internal data class TrendingTitle(val type: MediaType, val title: String, val originalTitle: String?, val year: Int?)
@@ -51,18 +50,13 @@ internal class JustWatchClient {
     }
 
     private fun edges(query: String, field: String, type: MediaType): List<TrendingTitle> {
-        val connection = URL(ENDPOINT).openConnection() as HttpURLConnection
-        connection.requestMethod = "POST"
-        connection.doOutput = true
-        connection.connectTimeout = 15_000
-        connection.readTimeout = 30_000
-        connection.setRequestProperty("Content-Type", "application/json")
-        val body = try {
-            connection.outputStream.use { it.write(JSONObject().put("query", "{$query}").toString().toByteArray()) }
-            connection.inputStream.bufferedReader().use { it.readText() }
-        } finally {
-            connection.disconnect()
-        }
+        val body = HttpClients.getText(
+            ENDPOINT,
+            connectTimeoutMs = 15_000,
+            readTimeoutMs = 30_000,
+            body = "application/json" to JSONObject().put("query", "{$query}").toString(),
+            errorMessage = { code -> "JustWatch a répondu avec le code $code." },
+        )
         val edges = JSONObject(body).getJSONObject("data").getJSONObject(field).getJSONArray("edges")
         return (0 until edges.length()).mapNotNull { i ->
             val node = edges.getJSONObject(i).optJSONObject("node") ?: return@mapNotNull null

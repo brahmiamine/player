@@ -478,16 +478,21 @@ internal fun splitProviderPrefix(name: String): Pair<String?, String> {
     return prefix to rest.replace(COUNTRY_SUFFIX, "")
 }
 
+// Appelé pour chaque candidat du classement : expressions et liste compilées une seule fois.
+private val IDENTITY_MARKS = Regex("\\p{M}+")
+private val IDENTITY_TOKEN = Regex("[\\p{L}\\p{N}]+")
+private val IDENTITY_YEAR = Regex("(?:19|20)\\d{2}")
+private val IDENTITY_NOISE = setOf(
+    "multi", "fhd", "uhd", "hdr", "vostfr", "vost", "truefrench", "french",
+    "webrip", "webdl", "bluray", "bdrip", "remux", "x264", "x265", "hevc",
+)
+
 private fun canonicalIdentityTitle(value: String): String {
     val normalized = Normalizer.normalize(splitProviderPrefix(value).second, Normalizer.Form.NFD)
-        .replace(Regex("\\p{M}+"), "")
+        .replace(IDENTITY_MARKS, "")
         .lowercase(Locale.ROOT)
-    val noise = setOf(
-        "multi", "fhd", "uhd", "hdr", "vostfr", "vost", "truefrench", "french",
-        "webrip", "webdl", "bluray", "bdrip", "remux", "x264", "x265", "hevc",
-    )
-    return Regex("[\\p{L}\\p{N}]+").findAll(normalized)
+    return IDENTITY_TOKEN.findAll(normalized)
         .map { it.value }
-        .filter { it.length >= 2 && it !in noise && !Regex("(?:19|20)\\d{2}").matches(it) }
+        .filter { it.length >= 2 && it !in IDENTITY_NOISE && !IDENTITY_YEAR.matches(it) }
         .joinToString(" ")
 }

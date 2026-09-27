@@ -167,6 +167,8 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
     implementation("androidx.work:work-runtime-ktx:2.10.0")
+    // Images saccadées mesurées en usage réel, par écran (voir logging/JankReporter).
+    implementation("androidx.metrics:metrics-performance:1.0.0-beta02")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.animation:animation")

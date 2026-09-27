@@ -1,5 +1,6 @@
 package fr.streamia.tv.data
 
+import fr.streamia.tv.net.HttpClients
 import android.util.Base64
 import android.util.JsonReader
 import android.util.JsonToken
@@ -20,8 +21,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
 import java.io.InputStreamReader
-import java.net.HttpURLConnection
-import java.net.URL
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.Callable
 import java.util.concurrent.ExecutionException
@@ -282,15 +281,13 @@ class XtreamClient {
 
     @Throws(IOException::class)
     private fun fetchEntriesStreamingOnce(url: String, type: MediaType, sink: CatalogWriteSink): Int {
-        val connection = openConnection(url, "application/json")
-        return try {
-            val code = connection.responseCode
-            if (code !in 200..299) throw XtreamException("Le serveur a répondu avec le code $code.")
-            JsonReader(InputStreamReader(connection.inputStream, StandardCharsets.UTF_8)).use { reader ->
+        return openConnection(url, "application/json").use { response ->
+            val code = response.code
+            if (!response.isSuccessful) throw XtreamException("Le serveur a répondu avec le code $code.")
+            val body = response.body ?: throw IOException("Réponse vide.")
+            JsonReader(InputStreamReader(body.byteStream(), StandardCharsets.UTF_8)).use { reader ->
                 parseEntriesStreaming(reader, type, sink)
             }
-        } finally {
-            connection.disconnect()
         }
     }
 
@@ -302,15 +299,13 @@ class XtreamClient {
     }
 
     private fun fetchM3uFallbackOnce(url: String, includeTypes: Set<MediaType>): M3uImport {
-        val connection = openConnection(url, "audio/x-mpegurl, application/vnd.apple.mpegurl, text/plain, */*")
-        return try {
-            val code = connection.responseCode
-            if (code !in 200..299) throw XtreamException("Le serveur a répondu avec le code $code pour la playlist de secours.")
-            connection.inputStream.use { input ->
+        return openConnection(url, "audio/x-mpegurl, application/vnd.apple.mpegurl, text/plain, */*").use { response ->
+            val code = response.code
+            if (!response.isSuccessful) throw XtreamException("Le serveur a répondu avec le code $code pour la playlist de secours.")
+            val body = response.body ?: throw IOException("Réponse vide.")
+            body.byteStream().use { input ->
                 M3uParser().parse(InputStreamReader(input, StandardCharsets.UTF_8), includeTypes)
             }
-        } finally {
-            connection.disconnect()
         }
     }
 
@@ -449,27 +444,22 @@ class XtreamClient {
 
     @Throws(IOException::class)
     private fun fetchOnce(url: String): String {
-        val connection = openConnection(url, "application/json")
-        return try {
-            val code = connection.responseCode
-            if (code !in 200..299) throw XtreamException("Le serveur a répondu avec le code $code.")
-            connection.inputStream.bufferedReader(StandardCharsets.UTF_8).use { it.readText() }
-        } finally {
-            connection.disconnect()
+        return openConnection(url, "application/json").use { response ->
+            val code = response.code
+            if (!response.isSuccessful) throw XtreamException("Le serveur a répondu avec le code $code.")
+            response.body?.bytes()?.toString(StandardCharsets.UTF_8).orEmpty()
         }
     }
 
-    private fun openConnection(url: String, accept: String): HttpURLConnection =
-        (URL(url).openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            connectTimeout = 12_000
-            readTimeout = 30_000
-            useCaches = false
-            instanceFollowRedirects = true
-            setRequestProperty("Accept", accept)
-            setRequestProperty("Accept-Charset", "utf-8")
-            setRequestProperty("User-Agent", "Streamia-TV/1.5")
-        }
+    /** Client HTTP partagé (connexions réutilisées avec les images et le lecteur). */
+    @Throws(IOException::class)
+    private fun openConnection(url: String, accept: String): okhttp3.Response =
+        HttpClients.execute(
+            url,
+            mapOf("Accept" to accept, "Accept-Charset" to "utf-8"),
+            connectTimeoutMs = 12_000,
+            readTimeoutMs = 30_000,
+        )
 
     private fun parseAccount(root: JSONObject): AccountInfo {
         val user = root.optJSONObject("user_info")

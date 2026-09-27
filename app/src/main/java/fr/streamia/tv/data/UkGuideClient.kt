@@ -1,8 +1,7 @@
 package fr.streamia.tv.data
 
+import fr.streamia.tv.net.HttpClients
 import java.io.IOException
-import java.net.HttpURLConnection
-import java.net.URL
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 
@@ -25,26 +24,19 @@ internal class UkGuideClient {
     private fun encode(value: String): String = URLEncoder.encode(value, "UTF-8")
 
     @Throws(IOException::class)
-    private fun fetch(url: String): String {
-        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            connectTimeout = 15_000
-            readTimeout = 20_000
-            instanceFollowRedirects = true
-            setRequestProperty("User-Agent", USER_AGENT)
-            setRequestProperty("Accept", "text/html,application/xhtml+xml,application/json")
-            setRequestProperty("Accept-Language", "en-GB,en;q=0.9")
-            setRequestProperty("X-Requested-With", "XMLHttpRequest")
-            setRequestProperty("Referer", GUIDE_URL)
-        }
-        try {
-            val code = connection.responseCode
-            if (code !in 200..299) throw IOException("tvguideuk.com a répondu avec le code $code.")
-            return connection.inputStream.use { input -> input.reader(StandardCharsets.UTF_8).readText() }
-        } finally {
-            connection.disconnect()
-        }
-    }
+    private fun fetch(url: String): String = HttpClients.getText(
+        url,
+        headers = mapOf(
+            "User-Agent" to USER_AGENT,
+            "Accept" to "text/html,application/xhtml+xml,application/json",
+            "Accept-Language" to "en-GB,en;q=0.9",
+            "X-Requested-With" to "XMLHttpRequest",
+            "Referer" to GUIDE_URL,
+        ),
+        connectTimeoutMs = 15_000,
+        readTimeoutMs = 20_000,
+        errorMessage = { code -> "tvguideuk.com a répondu avec le code $code." },
+    )
 
     private companion object {
         const val GUIDE_URL = "https://tvguideuk.com/"

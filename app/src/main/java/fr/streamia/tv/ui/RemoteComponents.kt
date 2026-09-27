@@ -1,13 +1,5 @@
 package fr.streamia.tv.ui
 
-import android.graphics.Bitmap
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.sync.withPermit
-import kotlinx.coroutines.sync.Semaphore
-import android.graphics.BitmapFactory
-import android.content.Context
-import android.content.ComponentCallbacks2
-import android.util.LruCache
 import android.view.KeyEvent as AndroidKeyEvent
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -30,22 +22,17 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asAndroidBitmap
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.Role
@@ -69,20 +56,9 @@ import fr.streamia.tv.ui.theme.HeadingWeight
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.KickerLetterSpacing
 import fr.streamia.tv.ui.theme.MutedInk
-import fr.streamia.tv.ui.theme.Night
 import fr.streamia.tv.ui.theme.RadiusTile
 import fr.streamia.tv.ui.theme.RaisedSurface
 import fr.streamia.tv.ui.theme.TypeSectionTitle
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CompletableDeferred
-import okhttp3.Cache
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import java.io.File
-import java.util.concurrent.TimeUnit
 
 @Composable
 fun FocusableSurface(
@@ -195,10 +171,9 @@ fun FocusableSurface(
                     scaleX = scale.value
                     scaleY = scale.value
                 }
-                .then(
-                    if (elevation > 0.dp) Modifier.shadow(elevation, shape, clip = false, ambientColor = glowColor, spotColor = glowColor)
-                    else Modifier,
-                )
+                // Halo dessiné (anneaux translucides mis en cache) plutôt qu'une ombre colorée :
+                // l'ombre était recalculée par le GPU à chaque déplacement du focus.
+                .then(if (elevation > 0.dp) Modifier.focusHalo(glowColor, elevation, RadiusTile) else Modifier)
                 .clip(shape)
                 .then(
                     if (accent) {
@@ -214,6 +189,33 @@ fun FocusableSurface(
         }
     }
 }
+
+/**
+ * Lueur autour d'une surface : quelques anneaux arrondis d'opacité décroissante, dessinés hors des
+ * bords (la couche de l'échelle n'est pas rognée). Géométrie mise en cache par taille.
+ */
+internal fun Modifier.focusHalo(color: Color, spread: androidx.compose.ui.unit.Dp, radius: androidx.compose.ui.unit.Dp): Modifier =
+    drawWithCache {
+        val spreadPx = spread.toPx() * HALO_SPREAD_RATIO
+        val radiusPx = radius.toPx()
+        val ringWidth = spreadPx / HALO_RINGS
+        onDrawBehind {
+            for (ring in 0 until HALO_RINGS) {
+                val inset = ring * ringWidth + ringWidth / 2
+                drawRoundRect(
+                    color = color.copy(alpha = color.alpha * (1f - ring.toFloat() / HALO_RINGS) * 0.6f),
+                    topLeft = androidx.compose.ui.geometry.Offset(-inset, -inset),
+                    size = androidx.compose.ui.geometry.Size(size.width + inset * 2, size.height + inset * 2),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(radiusPx + inset),
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = ringWidth),
+                )
+            }
+        }
+    }
+
+private const val HALO_RINGS = 4
+
+private const val HALO_SPREAD_RATIO = 0.6f
 
 private fun AndroidKeyEvent.isTvSelectKey(): Boolean = when (keyCode) {
     AndroidKeyEvent.KEYCODE_DPAD_CENTER,
@@ -316,190 +318,3 @@ fun SectionLabel(text: String, modifier: Modifier = Modifier, fontSize: androidx
 // getDefault() : l'app n'affiche que du texte français (androidResources.localeFilters = "fr"),
 // donc la casse ne doit pas dépendre de la locale système de l'appareil.
 private fun String.asKickerLabel(): String = uppercase(java.util.Locale.FRENCH)
-
-@Composable
-fun ChannelLogo(
-    url: String?,
-    channelName: String,
-    modifier: Modifier = Modifier,
-    imagePadding: Int = 8,
-) {
-    RemoteArtwork(
-        url = url,
-        name = channelName,
-        modifier = modifier,
-        contentScale = ContentScale.Fit,
-        imagePadding = imagePadding,
-        maxDecodePx = LOGO_DECODE_PX,
-        opaque = false,
-    )
-}
-
-@Composable
-fun MediaArtwork(url: String?, name: String, modifier: Modifier = Modifier) {
-    RemoteArtwork(
-        url = url,
-        name = name,
-        modifier = modifier,
-        contentScale = ContentScale.Crop,
-        imagePadding = 0,
-        maxDecodePx = ARTWORK_DECODE_PX,
-        opaque = true,
-    )
-}
-
-// Tailles de décodage selon l'usage : un logo affiché autour de 42–60 dp n'a pas besoin d'une
-// bitmap de 640 px (jusqu'à 1,6 Mo chacune), ce qui vidait le cache mémoire en quelques dizaines
-// d'images et forçait des redécodages permanents en défilement.
-private const val LOGO_DECODE_PX = 160
-private const val ARTWORK_DECODE_PX = 480
-
-@Composable
-private fun RemoteArtwork(
-    url: String?,
-    name: String,
-    modifier: Modifier,
-    contentScale: ContentScale,
-    imagePadding: Int,
-    maxDecodePx: Int,
-    opaque: Boolean,
-) {
-    val context = LocalContext.current.applicationContext
-    // Retour du réseau : les images restées vides pendant la coupure sont redemandées (celles déjà
-    // en cache ressortent tout de suite, sans requête).
-    val networkReconnections = LocalNetworkReconnections.current
-    // produceState est annulé quand l'élément quitte l'écran : un élément dépassé pendant un
-    // défilement rapide abandonne sa place dans la file au lieu de retarder les logos visibles.
-    val bitmap by produceState<ImageBitmap?>(initialValue = ArtworkLoader.get(url, maxDecodePx), key1 = url, key2 = networkReconnections) {
-        // produceState garde la valeur précédente quand l'URL change : sans cette remise à zéro,
-        // l'image de l'ancien contenu restait affichée et la nouvelle n'était jamais chargée.
-        value = ArtworkLoader.get(url, maxDecodePx)
-        if (url.isNullOrBlank() || value != null) return@produceState
-        value = ArtworkLoader.load(context, url, maxDecodePx, opaque)
-    }
-    Box(
-        modifier = modifier
-            .clip(RoundedCornerShape(9.dp))
-            .background(Night.copy(alpha = 0.72f)),
-        contentAlignment = Alignment.Center,
-    ) {
-        if (bitmap != null) {
-            Image(
-                bitmap = bitmap!!,
-                contentDescription = "Illustration de $name",
-                modifier = Modifier.fillMaxSize().padding(imagePadding.dp),
-                contentScale = contentScale,
-            )
-        } else {
-            Text(
-                text = name.trim().take(2).uppercase().ifBlank { "TV" },
-                color = FocusBlueBright,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
-            )
-        }
-    }
-}
-
-/**
- * Mémoire demandée par le système (boîtier à peu de RAM, lecture 4K, app passée en arrière-plan) :
- * les affiches déjà décodées sont libérées plutôt que de laisser Android tuer l'app ou le lecteur.
- * Le cache disque HTTP reste : les réafficher ne coûte qu'un décodage.
- */
-internal fun trimArtworkCache(level: Int) = ArtworkLoader.trim(level)
-
-private object ArtworkLoader {
-    // Dimensionné en octets réels (⅛ du tas max) plutôt qu'en nombre d'entrées.
-    private val cache = object : LruCache<String, ImageBitmap>(cacheSizeBytes()) {
-        override fun sizeOf(key: String, value: ImageBitmap): Int = value.asAndroidBitmap().byteCount
-    }
-    // Au plus 6 téléchargements/décodages simultanés (au lieu de jusqu'à 64 threads IO vers le même
-    // fournisseur) : les éléments visibles passent avant, les autres attendent ou sont annulés.
-    private val permits = Semaphore(6)
-    @Volatile private var client: OkHttpClient? = null
-
-    private fun cacheKey(url: String, maxPx: Int) = "$maxPx|$url"
-
-    fun trim(level: Int) {
-        when {
-            level >= ComponentCallbacks2.TRIM_MEMORY_BACKGROUND || level == ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL -> cache.evictAll()
-            level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW -> cache.trimToSize(cache.maxSize() / 2)
-        }
-    }
-
-    fun get(url: String?, maxPx: Int): ImageBitmap? = url?.takeIf(String::isNotBlank)?.let { cache.get(cacheKey(it, maxPx)) }
-
-    /** Chargements en cours par image : les demandes identiques attendent le même résultat. */
-    private val inFlight = java.util.concurrent.ConcurrentHashMap<String, CompletableDeferred<ImageBitmap?>>()
-
-    /**
-     * Même logo demandé par plusieurs éléments à l'écran (chaînes d'un même bouquet, logo de
-     * catégorie) : un seul téléchargement et un seul décodage, partagés. Si l'élément qui charge
-     * quitte l'écran, ceux qui attendaient relancent le chargement eux-mêmes.
-     */
-    suspend fun load(context: Context, url: String, maxPx: Int, opaque: Boolean): ImageBitmap? {
-        get(url, maxPx)?.let { return it }
-        val key = cacheKey(url, maxPx)
-        val mine = CompletableDeferred<ImageBitmap?>()
-        val pending = inFlight.putIfAbsent(key, mine)
-        if (pending != null) {
-            val shared = try {
-                pending.await()
-            } catch (cancelled: CancellationException) {
-                // Annulation du chargement partagé (et non de cette attente) : on charge soi-même.
-                currentCoroutineContext().ensureActive()
-                null
-            }
-            return shared ?: get(url, maxPx) ?: loadNow(context, url, maxPx, opaque)
-        }
-        return try {
-            loadNow(context, url, maxPx, opaque).also { mine.complete(it) }
-        } catch (error: Throwable) {
-            mine.completeExceptionally(error)
-            throw error
-        } finally {
-            inFlight.remove(key, mine)
-        }
-    }
-
-    private suspend fun loadNow(context: Context, url: String, maxPx: Int, opaque: Boolean): ImageBitmap? =
-        permits.withPermit {
-            get(url, maxPx)?.let { return@withPermit it }
-            withContext(Dispatchers.IO) {
-                download(client(context), url, maxPx, opaque)?.also { cache.put(cacheKey(url, maxPx), it) }
-            }
-        }
-
-    @Synchronized
-    private fun client(context: Context): OkHttpClient = client ?: OkHttpClient.Builder()
-        .cache(Cache(File(context.cacheDir, "artwork-http"), 64L * 1024L * 1024L))
-        .connectTimeout(5, TimeUnit.SECONDS)
-        .readTimeout(8, TimeUnit.SECONDS)
-        .retryOnConnectionFailure(true)
-        .build()
-        .also { client = it }
-
-    private fun download(client: OkHttpClient, url: String, maxPx: Int, opaque: Boolean): ImageBitmap? = runCatching {
-        val request = Request.Builder().url(url).header("User-Agent", "Streamia-TV/1.5").build()
-        client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) return@runCatching null
-            val bytes = response.body?.bytes() ?: return@runCatching null
-            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-            var sample = 1
-            while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= maxPx) sample *= 2
-            BitmapFactory.decodeByteArray(
-                bytes,
-                0,
-                bytes.size,
-                BitmapFactory.Options().apply {
-                    inSampleSize = sample
-                    // Affiches/vignettes recadrées : pas de transparence utile, moitié de mémoire.
-                    if (opaque) inPreferredConfig = Bitmap.Config.RGB_565
-                },
-            )?.asImageBitmap()
-        }
-    }.getOrNull()
-
-    private fun cacheSizeBytes(): Int = (Runtime.getRuntime().maxMemory() / 8).coerceIn(4L * 1024 * 1024, Int.MAX_VALUE.toLong()).toInt()
-}

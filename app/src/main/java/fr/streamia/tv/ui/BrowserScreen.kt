@@ -1,128 +1,64 @@
 package fr.streamia.tv.ui
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.lazy.grid.GridCells
-import fr.streamia.tv.player.isDecoderError
-import fr.streamia.tv.player.MAX_STREAM_RECOVERY_ATTEMPTS
-import fr.streamia.tv.player.StreamRecovery
-import fr.streamia.tv.player.isRecoverableStreamError
-import fr.streamia.tv.player.streamRecoveryDelayMs
-import androidx.compose.foundation.lazy.grid.GridItemSpan
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.ui.draw.clip
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.key
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.runtime.snapshotFlow
-import androidx.compose.runtime.withFrameNanos
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusDirection
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.media3.common.PlaybackException
-import androidx.media3.common.Player
-import androidx.media3.common.util.UnstableApi
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import fr.streamia.tv.data.AppSettings
 import fr.streamia.tv.data.LiveChannelSortOrder
-import fr.streamia.tv.data.LiveStreamFormat
-import fr.streamia.tv.data.PlaybackHistoryItem
 import fr.streamia.tv.data.VodSortOrder
 import fr.streamia.tv.data.BrowserNavigationStore
-import fr.streamia.tv.data.NavigationListPosition
 import fr.streamia.tv.data.UserLibrarySnapshot
 import fr.streamia.tv.domain.Catalog
 import fr.streamia.tv.domain.MediaCategory
-import fr.streamia.tv.domain.EpgGuide
 import fr.streamia.tv.domain.EpgProgram
-import fr.streamia.tv.domain.epgNowContextAt
 import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.domain.ServerCredentials
-import fr.streamia.tv.domain.XtreamUrlBuilder
 import fr.streamia.tv.player.LivePlaybackSession
-import fr.streamia.tv.player.PlaybackTransportStore
-import fr.streamia.tv.player.PlaybackUrlStrategy
-import fr.streamia.tv.ui.theme.DeepSurface
 import fr.streamia.tv.ui.theme.FocusBlueBright
-import fr.streamia.tv.ui.theme.GlassBorder
-import fr.streamia.tv.ui.theme.HeadingWeight
-import fr.streamia.tv.ui.theme.Ink
-import fr.streamia.tv.ui.theme.MutedInk
-import fr.streamia.tv.ui.theme.Night
-import fr.streamia.tv.ui.theme.RadiusCard
-import fr.streamia.tv.ui.theme.RadiusPill
-import fr.streamia.tv.ui.theme.TypeBody
-import fr.streamia.tv.ui.theme.TypeSectionTitle
-import fr.streamia.tv.ui.theme.WarmSignal
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.debounce
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.onEach
-import kotlinx.coroutines.yield
 
-private const val FAVORITES_CATEGORY_ID = "__favorites__"
-private const val HISTORY_CATEGORY_ID = "__history__"
+internal const val FAVORITES_CATEGORY_ID = "__favorites__"
+
+internal const val HISTORY_CATEGORY_ID = "__history__"
 
 /** Distance (en éléments) à la fin de la liste/grille matérialisée à partir de laquelle la page suivante est demandée. */
-private const val LOAD_MORE_THRESHOLD = 20
+internal const val LOAD_MORE_THRESHOLD = 20
 
-/**
- * Hauteur du bandeau haut, partagée entre [BrowserHeader] (qui l'utilise comme hauteur réelle) et
- * [LiveCatalogLayout] (qui décale ses panneaux catégories/chaînes de cette même valeur quand le
- * bandeau flotte en transparence par-dessus la vidéo plein écran, pour ne pas se faire recouvrir).
- */
-private val BROWSER_HEADER_HEIGHT = 74.dp
+/** Au-delà, un tri pas encore en mémoire est fait hors du thread principal (liste « Chargement… » d'ici là). */
+private const val HEAVY_SORT_THRESHOLD = 2_000
+
+/** Images préchargées après la dernière ligne/carte visible. */
+internal const val ARTWORK_PREFETCH_COUNT = 12
+
+/** Délai sans déplacement du focus avant de mémoriser le contenu focalisé. */
+private const val FOCUSED_ENTRY_SAVE_DELAY_MS = 1_000L
 
 /** Laisse à la grille le temps de se composer après le défilement avant de réclamer le focus. */
-private const val BROWSER_RESTORE_FOCUS_DELAY_MS = 60L
+internal const val BROWSER_RESTORE_FOCUS_DELAY_MS = 60L
 
 @Composable
 fun BrowserScreen(
@@ -130,11 +66,12 @@ fun BrowserScreen(
     credentials: ServerCredentials,
     livePlaybackSession: LivePlaybackSession,
     liveVideoSurface: @Composable (LiveVideoSurfacePlacement) -> Unit,
-    todayEpgGuide: EpgGuide? = null,
+    /** Programmes du jour par chaîne Direct, pré-rapprochés hors du thread principal (voir StreamiaViewModel.liveEpgPrograms). */
+    epgPrograms: Map<String, List<EpgProgram>> = emptyMap(),
     library: UserLibrarySnapshot,
     appSettings: AppSettings,
     loadingCategoryKeys: Set<String> = emptySet(),
-    vodPageKeys: Map<String, List<String>> = emptyMap(),
+    vodPages: Map<String, List<MediaEntry>> = emptyMap(),
     categoryLoadErrors: Set<String> = emptySet(),
     parentalUnlocked: Boolean,
     offline: Boolean,
@@ -169,6 +106,18 @@ fun BrowserScreen(
     BackHandler(onBack = ::leaveBrowserForHome)
     val context = LocalContext.current.applicationContext
     val navigationStore = remember(credentials) { BrowserNavigationStore(context, credentials) }
+    // Contenu focalisé dans la grille : gardé en mémoire et écrit seulement quand le focus se pose
+    // (1 s sans mouvement) ou à la sortie de l'écran. L'écrire en préférences à chaque appui sur
+    // une flèche faisait une écriture disque par déplacement du focus.
+    val focusedEntry = remember(credentials) { mutableStateOf<Pair<MediaType, String>?>(null) }
+    LaunchedEffect(navigationStore) {
+        snapshotFlow { focusedEntry.value }
+            .debounce(FOCUSED_ENTRY_SAVE_DELAY_MS)
+            .collect { saved -> saved?.let { (type, key) -> navigationStore.saveEntry(type, key) } }
+    }
+    DisposableEffect(navigationStore) {
+        onDispose { focusedEntry.value?.let { (type, key) -> navigationStore.saveEntry(type, key) } }
+    }
     val restoredLiveSelection = remember(credentials) {
         val stored = navigationStore.liveSelection()
         val returnedEntryKey = LiveBrowserReturnState.consume()
@@ -260,19 +209,24 @@ fun BrowserScreen(
             hasHistory = historyForType.isNotEmpty(),
         )
     }
-    fun computeEntries(): List<MediaEntry> = when (selectedCategoryId) {
+    /**
+     * [allowHeavySort] faux (changement de catégorie, sur le thread principal) : `null` si la liste
+     * doit d'abord être triée alors que ce tri n'est pas encore en mémoire et porte sur beaucoup de
+     * chaînes. Elle est alors triée hors du thread principal (effet plus bas), sans geler la navigation.
+     */
+    fun computeEntries(allowHeavySort: Boolean = true): List<MediaEntry>? = when (selectedCategoryId) {
         FAVORITES_CATEGORY_ID -> favoriteEntriesForType
         HISTORY_CATEGORY_ID -> historyForType.map { it.second }
         else -> {
-            // Films/Séries paginés : ordre des pages lues en base, déjà triées (voir vodPageKeys).
+            // Films/Séries paginés : ordre des pages lues en base, déjà triées (voir vodPages).
             // Rien tant que la première page au tri courant n'est pas là, plutôt qu'un ordre
             // provisoire qui se réorganiserait sous les yeux de l'utilisateur.
             val paged = selectedType != MediaType.Live && catalog.isPaged
-            val pageKeys = vodPageKeys[vodPageKey(selectedType, selectedCategoryId, categorySortOrder)]
+            val pageEntries = vodPages[vodPageKey(selectedType, selectedCategoryId, categorySortOrder)]
             val source = when {
                 !paged -> catalog.entriesIn(selectedType, selectedCategoryId)
-                pageKeys == null -> emptyList()
-                else -> pageKeys.mapNotNull(catalog::entry).filter {
+                pageEntries == null -> emptyList()
+                else -> pageEntries.filter {
                     // Contenu déplacé ailleurs dans l'organisateur : n'appartient plus à cette catégorie.
                     selectedCategoryId == Catalog.ALL_CATEGORY_ID || it.categoryId == selectedCategoryId
                 }
@@ -283,7 +237,9 @@ fun BrowserScreen(
                 paged -> null
                 else -> categorySortOrder.takeIf { it != VodSortOrder.Provider }
             }
-            sortOrder?.let { BrowserSortMemo.get(source, library.hiddenEntries, excludedCategoryIds, it) } ?: run {
+            val memo = sortOrder?.let { BrowserSortMemo.get(source, library.hiddenEntries, excludedCategoryIds, it) }
+            if (memo == null && sortOrder != null && !allowHeavySort && source.size > HEAVY_SORT_THRESHOLD) return null
+            memo ?: run {
                 val filtered = source.filterNot {
                     it.key in library.hiddenEntries || it.categoryId in excludedCategoryIds
                 }
@@ -306,22 +262,25 @@ fun BrowserScreen(
     // courante affichée d'ici là : trier des milliers de chaînes à chaque page fusionnée faisait
     // saccader la navigation pendant l'hydratation du catalogue.
     val location = selectedType to selectedCategoryId
-    var computedEntries by remember(credentials) { mutableStateOf(location to computeEntries()) }
-    if (computedEntries.first != location) computedEntries = location to computeEntries()
+    var computedEntries by remember(credentials) { mutableStateOf(location to computeEntries(allowHeavySort = false)) }
+    if (computedEntries.first != location) computedEntries = location to computeEntries(allowHeavySort = false)
     // Favoris/historique ne comptent que pour leur propre catégorie : une chaîne regardée en aperçu
     // (ajoutée à l'historique) relançait sinon le tri de toute la liste affichée (« Tout » : des
     // dizaines de milliers de chaînes) à chaque aperçu de plus de 20 s.
     val favoritesKey = favoriteEntriesForType.takeIf { selectedCategoryId == FAVORITES_CATEGORY_ID }
     val historyKey = historyForType.takeIf { selectedCategoryId == HISTORY_CATEGORY_ID }
+    // Liste en attente de tri (grande catégorie) : clé supplémentaire pour la calculer tout de suite.
+    val pendingLocation = location.takeIf { computedEntries.second == null }
     LaunchedEffect(
-        catalog, favoritesKey, historyKey, excludedCategoryIds, library.hiddenEntries, vodPageKeys, categorySortOrder,
-        appSettings.liveChannelSortOrder, appSettings.vodSortOrder,
+        catalog, favoritesKey, historyKey, excludedCategoryIds, library.hiddenEntries, vodPages, categorySortOrder,
+        appSettings.liveChannelSortOrder, appSettings.vodSortOrder, pendingLocation,
     ) {
         val target = location
         val result = withContext(Dispatchers.Default) { computeEntries() }
         if (computedEntries.first == target) computedEntries = target to result
     }
-    val entries = computedEntries.second
+    val entries = computedEntries.second.orEmpty()
+    val entriesPending = computedEntries.second == null
     val historyByKey = remember(historyForType) { historyForType.associate { it.second.key to it.first } }
 
     var pendingLockedCategory by remember { mutableStateOf<MediaCategory?>(null) }
@@ -338,7 +297,7 @@ fun BrowserScreen(
     val currentCategoryKey = Catalog.categoryKey(selectedType, selectedCategoryId)
     // Pages absentes au tri courant (tri changé, liste actualisée) : relues sans quitter l'écran.
     val pagesMissing = selectedType != MediaType.Live && catalog.isPaged &&
-        vodPageKey(selectedType, selectedCategoryId, categorySortOrder) !in vodPageKeys
+        vodPageKey(selectedType, selectedCategoryId, categorySortOrder) !in vodPages
     androidx.compose.runtime.LaunchedEffect(selectedType, selectedCategoryId, pagesMissing) {
         onLocationChanged(selectedType, selectedCategoryId)
         if (selectedType != MediaType.Live) {
@@ -350,6 +309,11 @@ fun BrowserScreen(
     }
 
     val isLive = selectedType == MediaType.Live
+    // Lue une fois par catégorie (la liste des chaînes est recréée à chaque catégorie) et non plus
+    // à chaque recomposition de l'écran.
+    val liveListPosition = remember(navigationStore, selectedCategoryId) {
+        navigationStore.listPosition(MediaType.Live, selectedCategoryId)
+    }
 
     // En Direct, la vidéo doit remplir tout l'écran, bandeau du haut compris : LiveCatalogLayout
     // est donc posé en premier (plein écran) dans ce Box, et le bandeau + le message flottent
@@ -359,7 +323,7 @@ fun BrowserScreen(
         if (isLive) {
             LiveCatalogLayout(
                 catalog = catalog,
-                todayEpgGuide = todayEpgGuide,
+                epgPrograms = epgPrograms,
                 credentials = credentials,
                 livePlaybackSession = livePlaybackSession,
                 liveVideoSurface = liveVideoSurface,
@@ -367,8 +331,9 @@ fun BrowserScreen(
                 categories = categories,
                 selectedCategoryId = selectedCategoryId,
                 entries = entries,
+                entriesPending = entriesPending,
                 initialPreviewKey = lastLiveEntryKey,
-                initialListPosition = navigationStore.listPosition(MediaType.Live, selectedCategoryId),
+                initialListPosition = liveListPosition,
                 favoriteCategories = library.favoriteCategories,
                 favoriteEntries = library.favoriteEntries,
                 lockedCategories = library.lockedCategories,
@@ -432,7 +397,7 @@ fun BrowserScreen(
                     categories = categories,
                     selectedCategoryId = selectedCategoryId,
                     entries = entries,
-                    loading = currentCategoryKey in loadingCategoryKeys || (pagesMissing && currentCategoryKey !in categoryLoadErrors),
+                    loading = entriesPending || currentCategoryKey in loadingCategoryKeys || (pagesMissing && currentCategoryKey !in categoryLoadErrors),
                     loadError = currentCategoryKey in categoryLoadErrors,
                     favoriteCategories = library.favoriteCategories,
                     favoriteEntries = library.favoriteEntries,
@@ -444,7 +409,7 @@ fun BrowserScreen(
                     onCategorySelected = ::selectCategory,
                     onToggleCategoryFavorite = onToggleCategoryFavorite,
                     onEntrySelected = onEntrySelected,
-                    onEntryFocused = { navigationStore.saveEntry(selectedType, it.key) },
+                    onEntryFocused = { focusedEntry.value = selectedType to it.key },
                     onToggleEntryFavorite = onToggleEntryFavorite,
                     onLoadMore = { onLoadMoreInCategory(selectedType, selectedCategoryId, categorySortOrder) },
                     // Favoris/Historique ont leur propre ordre (ajout, dernière lecture) : pas de tri.
@@ -476,1222 +441,6 @@ fun BrowserScreen(
     }
 }
 
-@Composable
-private fun BrowserHeader(
-    catalog: Catalog,
-    selectedType: MediaType,
-    offline: Boolean,
-    busy: Boolean,
-    // Le Direct affiche ce bandeau flottant par-dessus la vidéo plein écran plutôt que dans sa
-    // propre bande opaque : il porte alors son propre fond assombri (même valeur que les panneaux
-    // catégories/chaînes) et ses boutons au repos deviennent transparents. VOD garde le bandeau
-    // opaque habituel, posé sur le fond plein de son écran.
-    translucent: Boolean = false,
-    onHome: () -> Unit,
-    onTypeSelected: (MediaType) -> Unit,
-    onSearch: () -> Unit,
-    onEpg: () -> Unit,
-    onSettings: () -> Unit,
-) {
-    val idleBackground = if (translucent) Color.Transparent else DeepSurface
-    val row: @Composable () -> Unit = {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(BROWSER_HEADER_HEIGHT)
-                .padding(horizontal = 20.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            StreamiaLogo(compact = true)
-            Spacer(Modifier.width(16.dp))
-            HeaderAction("Accueil", 100.dp, onHome, idleBackground = idleBackground)
-            Spacer(Modifier.width(6.dp))
-
-            for (type in MediaType.entries) {
-                FocusableSurface(
-                    onClick = { onTypeSelected(type) },
-                    selected = selectedType == type,
-                    enabled = catalog.count(type) > 0,
-                    accent = selectedType == type,
-                    idleBackground = idleBackground,
-                    modifier = Modifier.width(116.dp).height(48.dp),
-                ) {
-                    Column(
-                        Modifier.fillMaxSize().padding(horizontal = 10.dp),
-                        verticalArrangement = Arrangement.Center,
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        Text(
-                            type.displayName,
-                            color = Ink,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            textAlign = TextAlign.Center,
-                        )
-                        Text(
-                            catalog.count(type).toString(),
-                            color = MutedInk,
-                            fontSize = 12.sp,
-                            textAlign = TextAlign.Center,
-                        )
-                    }
-                }
-                Spacer(Modifier.width(6.dp))
-            }
-
-            Spacer(Modifier.weight(1f))
-            HeaderAction("Recherche", 56.dp, onSearch, glyph = StreamiaIconGlyph.Search, idleBackground = idleBackground)
-            Spacer(Modifier.width(6.dp))
-            HeaderAction("EPG", 76.dp, onEpg, catalog.count(MediaType.Live) > 0, idleBackground = idleBackground)
-            Spacer(Modifier.width(6.dp))
-            HeaderAction("Paramètres", 56.dp, onSettings, glyph = StreamiaIconGlyph.Settings, idleBackground = idleBackground)
-            if (busy || offline) {
-                Spacer(Modifier.width(10.dp))
-                Text(
-                    if (busy) "Chargement…" else "Cache",
-                    color = if (offline) WarmSignal else MutedInk,
-                    fontSize = 14.sp,
-                )
-            }
-        }
-    }
-    if (translucent) {
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(RadiusPill))
-                .background(Night.copy(alpha = 0.72f))
-                .border(BorderStroke(1.dp, GlassBorder), RoundedCornerShape(RadiusPill)),
-        ) { row() }
-    } else {
-        GlassSurface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(RadiusPill)) { row() }
-    }
-}
-
-@Composable
-private fun HeaderAction(
-    label: String,
-    width: androidx.compose.ui.unit.Dp,
-    onClick: () -> Unit,
-    enabled: Boolean = true,
-    glyph: StreamiaIconGlyph? = null,
-    idleBackground: Color = DeepSurface,
-) {
-    FocusableSurface(
-        onClick = onClick,
-        enabled = enabled,
-        idleBackground = idleBackground,
-        modifier = Modifier.width(width).height(48.dp),
-        contentDescription = if (glyph != null) label else null,
-    ) {
-        if (glyph != null) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { StreamiaIcon(glyph, size = 22.dp) }
-        } else {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(label, color = Ink, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-            }
-        }
-    }
-}
-
-@Composable
-private fun LiveCatalogLayout(
-    catalog: Catalog,
-    todayEpgGuide: EpgGuide?,
-    credentials: ServerCredentials,
-    livePlaybackSession: LivePlaybackSession,
-    liveVideoSurface: @Composable (LiveVideoSurfacePlacement) -> Unit,
-    appSettings: AppSettings,
-    categories: List<MediaCategory>,
-    selectedCategoryId: String,
-    entries: List<MediaEntry>,
-    initialPreviewKey: String?,
-    initialListPosition: NavigationListPosition,
-    favoriteCategories: Set<String>,
-    favoriteEntries: Set<String>,
-    lockedCategories: Set<String>,
-    historyCount: Int,
-    onCategorySelected: (MediaCategory) -> Unit,
-    onPreviewChanged: (MediaEntry) -> Unit,
-    onListPositionChanged: (String, NavigationListPosition) -> Unit,
-    onToggleCategoryFavorite: (MediaCategory) -> Unit,
-    onEntrySelected: (MediaEntry) -> Unit,
-    onToggleEntryFavorite: (MediaEntry) -> Unit,
-    onLoadMore: () -> Unit,
-    onLivePreviewWatched: (MediaEntry) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    var previewEntry by remember(catalog, initialPreviewKey) {
-        mutableStateOf(entries.firstOrNull { it.key == initialPreviewKey } ?: entries.firstOrNull())
-    }
-    var controlsVisible by remember { mutableStateOf(false) }
-    var fullscreenTarget by remember { mutableStateOf<MediaEntry?>(null) }
-    var channelsFocused by remember { mutableStateOf(false) }
-    var initialChannelFocusPending by remember { mutableStateOf(true) }
-    // Chaque incrément demande au rail de ramener le focus sur la catégorie sélectionnée, en la
-    // refaisant défiler à l'écran si l'utilisateur a descendu la liste des catégories entre-temps.
-    var categoryFocusRequest by remember { mutableIntStateOf(0) }
-    // Même principe dans l'autre sens : Droite depuis les catégories ramène le focus sur la chaîne
-    // sélectionnée, en refaisant défiler la liste des chaînes si elle a été descendue.
-    var channelFocusRequest by remember { mutableIntStateOf(0) }
-    val channelFocus = remember { FocusRequester() }
-    val hiddenOffset = with(LocalDensity.current) { (-620).dp.toPx() }
-    val controlsOffset by animateFloatAsState(
-        if (controlsVisible) 0f else hiddenOffset,
-        animationSpec = tween(220),
-        label = "live-controls-offset",
-    )
-    val controlsAlpha by animateFloatAsState(
-        if (controlsVisible) 1f else 0f,
-        animationSpec = tween(160),
-        label = "live-controls-alpha",
-    )
-
-    LaunchedEffect(Unit) {
-        yield()
-        controlsVisible = true
-    }
-    LaunchedEffect(previewEntry?.key) { previewEntry?.let(onPreviewChanged) }
-    LaunchedEffect(fullscreenTarget) {
-        val target = fullscreenTarget ?: return@LaunchedEffect
-        controlsVisible = false
-        delay(220)
-        onEntrySelected(target)
-    }
-    // Retour depuis la liste des chaînes : remonte d'abord au rail des catégories (convention TV),
-    // un second Retour quitte vers l'accueil.
-    BackHandler(enabled = channelsFocused) { categoryFocusRequest++ }
-    if (previewEntry != null && catalog.entry(previewEntry!!.key) == null) {
-        previewEntry = entries.firstOrNull()
-    }
-
-    Box(modifier) {
-        LivePreview(
-            credentials = credentials,
-            livePlaybackSession = livePlaybackSession,
-            liveVideoSurface = liveVideoSurface,
-            entry = previewEntry,
-            favorite = previewEntry?.key in favoriteEntries,
-            enabled = appSettings.livePreviewEnabled,
-            previewDelayMs = appSettings.livePreviewDelayMs,
-            liveStreamFormat = appSettings.liveStreamFormat,
-            onWatched = onLivePreviewWatched,
-            // Bord à bord, y compris sous le bandeau du haut (qui flotte par-dessus, translucide) :
-            // seuls les panneaux catégories/chaînes ci-dessous en tiennent compte, via leur propre
-            // padding, pour ne pas se faire recouvrir par ce bandeau.
-            modifier = Modifier.fillMaxSize(),
-        )
-        Row(
-            Modifier
-                .fillMaxHeight()
-                .padding(start = 18.dp, end = 18.dp, top = BROWSER_HEADER_HEIGHT + 8.dp, bottom = 18.dp)
-                .graphicsLayer {
-                    translationX = controlsOffset
-                    alpha = controlsAlpha
-                },
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-          CategoryRail(
-            type = MediaType.Live,
-            categories = categories,
-            selectedCategoryId = selectedCategoryId,
-            favoriteCategories = favoriteCategories,
-            lockedCategories = lockedCategories,
-            countFor = { category ->
-                when (category.id) {
-                    FAVORITES_CATEGORY_ID -> favoriteEntries.count { it.startsWith("${MediaType.Live.name}:") }
-                    HISTORY_CATEGORY_ID -> historyCount
-                    else -> catalog.countIn(MediaType.Live, category.id)
-                }
-            },
-            onSelected = onCategorySelected,
-            onToggleFavorite = onToggleCategoryFavorite,
-            requestInitialFocus = false,
-            focusSelectedRequest = categoryFocusRequest,
-            onRight = { channelFocusRequest++ },
-            translucent = true,
-            modifier = Modifier.width(250.dp).fillMaxHeight(),
-        )
-
-        key(selectedCategoryId) {
-            // Fige la catégorie associée à cette instance de LiveChannelList : le flush de
-            // position en fin de debounce peut s'exécuter après que selectedCategoryId ait déjà
-            // changé (catégorie suivante sélectionnée pendant la fenêtre de 300 ms), et lire l'état
-            // mutable à ce moment-là sauverait la position de l'ancienne catégorie sous la nouvelle.
-            val categoryIdForPosition = selectedCategoryId
-            LiveChannelList(
-                entries = entries,
-                todayEpgGuide = todayEpgGuide,
-                previewKey = previewEntry?.key,
-                favoriteEntries = favoriteEntries,
-                fullscreenPending = fullscreenTarget != null,
-                initialListPosition = initialListPosition,
-                selectedFocusRequester = channelFocus,
-                focusSelectedRequest = channelFocusRequest,
-                autoFocus = initialChannelFocusPending,
-                onAutoFocusConsumed = { initialChannelFocusPending = false },
-                // Gauche : retour au rail sur la catégorie parcourue, sans basculer vers la catégorie
-                // d'origine de la chaîne (depuis Favoris/Tout/Historique, la liste était perdue).
-                onLeft = { categoryFocusRequest++ },
-                onListPositionChanged = { onListPositionChanged(categoryIdForPosition, it) },
-                onConfirm = { channel ->
-                    when (
-                        liveChannelConfirmAction(
-                            previewKey = previewEntry?.key,
-                            channelKey = channel.key,
-                            fullscreenPending = fullscreenTarget != null,
-                        )
-                    ) {
-                        LiveChannelConfirmAction.Preview -> previewEntry = channel
-                        LiveChannelConfirmAction.Fullscreen -> fullscreenTarget = channel
-                        LiveChannelConfirmAction.Ignore -> Unit
-                    }
-                },
-                onToggleFavorite = onToggleEntryFavorite,
-                onLoadMore = onLoadMore,
-                modifier = Modifier.width(340.dp).fillMaxHeight().onFocusChanged { channelsFocused = it.hasFocus },
-            )
-        }
-        }
-    }
-}
-
-@Composable
-private fun LiveChannelList(
-    entries: List<MediaEntry>,
-    todayEpgGuide: EpgGuide?,
-    previewKey: String?,
-    favoriteEntries: Set<String>,
-    fullscreenPending: Boolean,
-    initialListPosition: NavigationListPosition,
-    selectedFocusRequester: FocusRequester,
-    // Incrémenté par l'appelant (Droite depuis les catégories) pour ramener le focus sur la chaîne
-    // sélectionnée.
-    focusSelectedRequest: Int,
-    autoFocus: Boolean,
-    onAutoFocusConsumed: () -> Unit,
-    onLeft: (MediaEntry) -> Unit,
-    onListPositionChanged: (NavigationListPosition) -> Unit,
-    onConfirm: (MediaEntry) -> Unit,
-    onToggleFavorite: (MediaEntry) -> Unit,
-    onLoadMore: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    // Heure de référence du programme en cours, rafraîchie chaque minute (une seule horloge pour
-    // toute la liste, pas une par ligne).
-    var nowEpochSeconds by remember { mutableStateOf(System.currentTimeMillis() / 1000) }
-    LaunchedEffect(todayEpgGuide != null) {
-        if (todayEpgGuide == null) return@LaunchedEffect
-        while (true) {
-            nowEpochSeconds = System.currentTimeMillis() / 1000
-            delay(60_000L - System.currentTimeMillis() % 60_000L)
-        }
-    }
-    val lastIndex = entries.lastIndex.coerceAtLeast(0)
-    val listState = rememberLazyListState(
-        initialFirstVisibleItemIndex = initialListPosition.index.coerceIn(0, lastIndex),
-        initialFirstVisibleItemScrollOffset = initialListPosition.offset.coerceAtLeast(0),
-    )
-
-    LaunchedEffect(listState, entries.size) {
-        snapshotFlow { listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1 }
-            .distinctUntilChanged()
-            .collect { lastVisible -> if (lastVisible >= entries.size - LOAD_MORE_THRESHOLD) onLoadMore() }
-    }
-    val channelFocus = selectedFocusRequester
-    val entryIndexByKey = remember(entries) { entries.withIndex().associate { (index, entry) -> entry.key to index } }
-    // Colonne des numéros assez large pour le plus long de la liste : à largeur fixe (38 dp), un
-    // numéro à 5 chiffres (17055) passait sur deux lignes.
-    val numberColumnWidth = remember(entries) { channelNumberColumnWidth(entries.maxOfOrNull { it.number } ?: 0) }
-    val previewIndex = previewKey?.let { entryIndexByKey[it] } ?: -1
-    val focusTargetIndex = previewIndex.takeIf { it >= 0 }
-        ?: listState.firstVisibleItemIndex.coerceIn(0, lastIndex)
-    val focusTargetKey = entries.getOrNull(focusTargetIndex)?.key
-
-    LaunchedEffect(listState) {
-        // Le debounce évite d'écrire en préférences à chaque frame pendant un défilement rapide,
-        // mais ne doit jamais faire perdre la position atteinte si l'écran est quitté avant la fin
-        // de la fenêtre de 300 ms : on garde la dernière valeur brute non encore sauvegardée et on
-        // la vide explicitement si la coroutine est annulée pendant qu'elle est en attente.
-        var pendingPosition: NavigationListPosition? = null
-        try {
-            snapshotFlow {
-                NavigationListPosition(listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
-            }
-                .onEach { pendingPosition = it }
-                .debounce(300)
-                .distinctUntilChanged()
-                .collect { pendingPosition = null; onListPositionChanged(it) }
-        } finally {
-            pendingPosition?.let(onListPositionChanged)
-        }
-    }
-
-    // Retour depuis les catégories : si la liste a été défilée, la chaîne sélectionnée n'est plus
-    // composée et requestFocus() échouait en silence (impossible de revenir sur les chaînes). On la
-    // refait d'abord défiler à l'écran. La liste étant recréée à chaque changement de catégorie, la
-    // valeur reçue à la création n'est pas une demande (sinon elle volerait le focus au rail).
-    val initialFocusRequest = remember { focusSelectedRequest }
-    LaunchedEffect(focusSelectedRequest) {
-        if (focusSelectedRequest == initialFocusRequest) return@LaunchedEffect
-        val index = focusTargetIndex
-        if (index < 0 || entries.isEmpty()) return@LaunchedEffect
-        if (listState.layoutInfo.visibleItemsInfo.none { it.index == index }) {
-            // Deux chaînes au-dessus restent visibles pour garder le contexte.
-            listState.scrollToItem((index - 2).coerceAtLeast(0))
-        }
-        yield()
-        val focused = runCatching { channelFocus.requestFocus(FocusDirection.Enter) }.getOrDefault(false)
-        if (!focused) {
-            withFrameNanos { }
-            runCatching { channelFocus.requestFocus(FocusDirection.Enter) }
-        }
-    }
-
-    androidx.compose.runtime.LaunchedEffect(entries, focusTargetKey, fullscreenPending, autoFocus) {
-        if (fullscreenPending) return@LaunchedEffect
-        val index = focusTargetIndex
-        if (index >= 0) {
-            yield()
-            if (listState.layoutInfo.visibleItemsInfo.none { it.index == index }) {
-                listState.scrollToItem(index)
-                yield()
-            }
-            if (autoFocus) {
-                runCatching { channelFocus.requestFocus() }
-                onAutoFocusConsumed()
-            }
-        }
-    }
-
-    Column(
-        modifier
-            .clip(RoundedCornerShape(RadiusCard))
-            .background(Night.copy(alpha = 0.72f))
-            .border(BorderStroke(1.dp, GlassBorder), RoundedCornerShape(RadiusCard))
-            .padding(14.dp),
-    ) {
-        Row(Modifier.fillMaxWidth().padding(start = 3.dp, bottom = 7.dp), verticalAlignment = Alignment.CenterVertically) {
-            SectionLabel("Chaînes")
-        }
-        if (entries.isEmpty()) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("Aucune chaîne", color = MutedInk, fontSize = TypeBody)
-            }
-        } else {
-            LazyColumn(
-                state = listState,
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                items(entries, key = MediaEntry::key) { entry ->
-                    FocusableSurface(
-                        onClick = { onConfirm(entry) },
-                        onLongClick = { onToggleFavorite(entry) },
-                        selected = previewKey == entry.key,
-                        enabled = !fullscreenPending,
-                        idleBackground = Color.Transparent,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(66.dp)
-                            .onPreviewKeyEvent { event ->
-                                if (
-                                    event.type == KeyEventType.KeyDown &&
-                                    event.nativeKeyEvent.keyCode == android.view.KeyEvent.KEYCODE_DPAD_LEFT
-                                ) {
-                                    onLeft(entry)
-                                    true
-                                } else false
-                            }
-                            .then(if (focusTargetKey == entry.key) Modifier.focusRequester(channelFocus) else Modifier),
-                    ) {
-                        Row(
-                            Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                entry.number.toString(),
-                                color = MutedInk,
-                                fontSize = 13.sp,
-                                maxLines = 1,
-                                softWrap = false,
-                                modifier = Modifier.width(numberColumnWidth),
-                            )
-                            ChannelLogo(entry.iconUrl, entry.displayName, Modifier.size(42.dp))
-                            Spacer(Modifier.width(8.dp))
-                            val nowProgram = remember(todayEpgGuide, entry.key, nowEpochSeconds) {
-                                todayEpgGuide?.forEntry(entry)?.epgNowContextAt(nowEpochSeconds)?.current
-                            }
-                            Column(Modifier.weight(1f)) {
-                                Text(
-                                    entry.displayName,
-                                    color = Ink,
-                                    fontSize = 15.sp,
-                                    fontWeight = if (previewKey == entry.key) FontWeight.Bold else FontWeight.Medium,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                if (nowProgram != null) {
-                                    Text(
-                                        nowProgram.title,
-                                        color = MutedInk,
-                                        fontSize = 12.sp,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                    liveProgramProgress(nowProgram, nowEpochSeconds)?.let { progress ->
-                                        Spacer(Modifier.height(3.dp))
-                                        Box(
-                                            Modifier
-                                                .fillMaxWidth()
-                                                .height(3.dp)
-                                                .clip(RoundedCornerShape(2.dp))
-                                                .background(MutedInk.copy(alpha = 0.24f)),
-                                        ) {
-                                            Box(Modifier.fillMaxWidth(progress).height(3.dp).background(FocusBlueBright))
-                                        }
-                                    }
-                                }
-                            }
-                            if (entry.key in favoriteEntries) {
-                                Spacer(Modifier.width(5.dp))
-                                StreamiaIcon(StreamiaIconGlyph.Star, size = 18.dp)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-private const val LIVE_PREVIEW_WATCHED_MS = 20_000L
-
-/** ≈ 8 dp par chiffre à 13 sp (marge comprise pour l'agrandissement du texte), jamais moins que l'ancienne colonne. */
-internal fun channelNumberColumnWidth(maxNumber: Int): Dp =
-    maxOf(38, maxNumber.coerceAtLeast(0).toString().length * 8 + 6).dp
-
-@androidx.annotation.OptIn(markerClass = [UnstableApi::class])
-@Composable
-private fun LivePreview(
-    credentials: ServerCredentials,
-    livePlaybackSession: LivePlaybackSession,
-    liveVideoSurface: @Composable (LiveVideoSurfacePlacement) -> Unit,
-    entry: MediaEntry?,
-    favorite: Boolean,
-    enabled: Boolean,
-    previewDelayMs: Int,
-    liveStreamFormat: LiveStreamFormat,
-    onWatched: (MediaEntry) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val player = livePlaybackSession.player
-    val context = LocalContext.current.applicationContext
-    val transportStore = remember { PlaybackTransportStore(context) }
-    var buffering by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf(false) }
-    var unsupportedFormat by remember { mutableStateOf(false) }
-    var activeUrl by remember { mutableStateOf("") }
-    var streamCandidates by remember { mutableStateOf(emptyList<String>()) }
-    var candidateIndex by remember { mutableStateOf(0) }
-    // Aperçu déjà affiché : une coupure réseau ensuite relance la même URL (voir PlayerScreen).
-    var streamHasPlayed by remember(entry?.key) { mutableStateOf(false) }
-    var recoveryAttempt by remember(entry?.key) { mutableIntStateOf(0) }
-    var pendingRecovery by remember(entry?.key) { mutableStateOf<StreamRecovery?>(null) }
-
-    DisposableEffect(player, entry?.key) {
-        val listener = object : Player.Listener {
-            override fun onPlaybackStateChanged(playbackState: Int) {
-                if (entry?.key != livePlaybackSession.entryKey) return
-                buffering = playbackState == Player.STATE_BUFFERING
-            }
-
-            override fun onRenderedFirstFrame() {
-                if (entry?.key == livePlaybackSession.entryKey) {
-                    buffering = false
-                    error = false
-                    streamHasPlayed = true
-                    recoveryAttempt = 0
-                    transportStore.recordSuccess(activeUrl, MediaType.Live)
-                }
-            }
-
-            override fun onPlayerError(playbackException: PlaybackException) {
-                if (entry?.key != livePlaybackSession.entryKey) return
-                // Format non décodable par le boîtier : inutile d'essayer les autres URL.
-                if (isDecoderError(playbackException.errorCode)) {
-                    unsupportedFormat = true
-                    error = true
-                    buffering = false
-                    return
-                }
-                if (streamHasPlayed && isRecoverableStreamError(playbackException.errorCode) && recoveryAttempt < MAX_STREAM_RECOVERY_ATTEMPTS) {
-                    recoveryAttempt += 1
-                    buffering = true
-                    pendingRecovery = StreamRecovery(activeUrl, 0L, recoveryAttempt)
-                    return
-                }
-                val next = candidateIndex + 1
-                if (next < streamCandidates.size) {
-                    candidateIndex = next
-                    activeUrl = streamCandidates[next]
-                    error = false
-                    buffering = true
-                    entry?.let { livePlaybackSession.playUrl(it, activeUrl) }
-                    return
-                }
-                error = true
-                buffering = false
-            }
-
-            override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
-                livePlaybackSession.recoverAudio(tracks)
-            }
-        }
-        player.addListener(listener)
-        onDispose {
-            player.removeListener(listener)
-        }
-    }
-
-    androidx.compose.runtime.LaunchedEffect(entry?.key, credentials, enabled, previewDelayMs, liveStreamFormat) {
-        val target = entry
-        if (!enabled || target == null) {
-            livePlaybackSession.stop(clearSession = true)
-            buffering = false
-            error = false
-            return@LaunchedEffect
-        }
-        if (previewDelayMs > 0) delay(previewDelayMs.toLong())
-        error = false
-        unsupportedFormat = false
-        buffering = true
-        val baseUrl = XtreamUrlBuilder(credentials).stream(target)
-        val storedPreference = transportStore.preferenceFor(baseUrl)
-        val preferredExtension = when (liveStreamFormat) {
-            LiveStreamFormat.Auto -> storedPreference.liveExtension
-            LiveStreamFormat.Ts -> "ts"
-            LiveStreamFormat.Hls -> "m3u8"
-        }
-        streamCandidates = PlaybackUrlStrategy.candidates(
-            initialUrl = baseUrl,
-            type = MediaType.Live,
-            preference = storedPreference.copy(liveExtension = preferredExtension),
-        )
-        candidateIndex = 0
-        activeUrl = streamCandidates.firstOrNull() ?: baseUrl
-        if (
-            shouldRestartLivePreview(
-                currentEntryKey = livePlaybackSession.entryKey,
-                currentMediaItemCount = player.mediaItemCount,
-                targetEntryKey = target.key,
-            )
-        ) {
-            livePlaybackSession.playUrl(target, activeUrl)
-        } else {
-            activeUrl = livePlaybackSession.activeUrl
-            streamCandidates = prioritizeActiveLiveCandidate(streamCandidates, activeUrl)
-            candidateIndex = 0
-            buffering = player.playbackState != Player.STATE_READY
-            livePlaybackSession.continuePlayback()
-        }
-        // Chaîne restée à l'écran en aperçu : comptée comme regardée (« Dernières chaînes » de
-        // l'accueil). Le délai évite d'enregistrer chaque chaîne survolée en zappant.
-        delay(LIVE_PREVIEW_WATCHED_MS)
-        onWatched(target)
-    }
-
-    // Aperçu tombé en erreur pendant une coupure : relancé dès le retour du réseau.
-    val networkReconnections = LocalNetworkReconnections.current
-    LaunchedEffect(networkReconnections) {
-        if (!error || unsupportedFormat || !enabled || entry == null || activeUrl.isBlank()) return@LaunchedEffect
-        error = false
-        buffering = true
-        recoveryAttempt = 0
-        livePlaybackSession.playUrl(entry, activeUrl)
-    }
-
-    LaunchedEffect(pendingRecovery) {
-        val recovery = pendingRecovery ?: return@LaunchedEffect
-        delay(streamRecoveryDelayMs(recovery.attempt))
-        if (enabled && entry != null && livePlaybackSession.entryKey == entry.key) livePlaybackSession.playUrl(entry, recovery.url)
-        pendingRecovery = null
-    }
-
-    LaunchedEffect(entry?.key, buffering) {
-        if (!buffering) return@LaunchedEffect
-        delay(12_000)
-        if (player.isPlaying || player.playbackState == Player.STATE_READY) buffering = false
-    }
-
-    // Aperçu affiché : la vidéo est posée sous l'écran par StreamiaApp, un fond ici la masquerait.
-    val showingVideo = entry != null && enabled
-    Box(if (showingVideo) modifier else modifier.background(Color.Black)) {
-            if (showingVideo) {
-                liveVideoSurface(LiveVideoSurfacePlacement(Modifier.fillMaxSize()))
-                if (buffering) {
-                    Text("Chargement…", color = Ink, fontSize = TypeBody, modifier = Modifier.align(Alignment.Center))
-                }
-                if (error) {
-                    Text(if (unsupportedFormat) "Format non supporté par ce boîtier" else "Aperçu indisponible", color = MutedInk, fontSize = TypeBody, modifier = Modifier.align(Alignment.Center))
-                }
-                Row(
-                    Modifier
-                        .align(Alignment.BottomStart)
-                        .fillMaxWidth()
-                        .background(Night.copy(alpha = 0.72f))
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                    horizontalArrangement = Arrangement.End,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    ChannelLogo(entry.iconUrl, entry.displayName, Modifier.size(64.dp))
-                    Spacer(Modifier.width(10.dp))
-                    Text(
-                        entry.displayName + if (favorite) " ★" else "",
-                        color = Ink,
-                        fontSize = TypeBody,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            } else {
-                Text(
-                    if (entry != null && !enabled) "Aperçu désactivé dans les paramètres" else "Sélectionnez une chaîne puis appuyez sur OK",
-                    color = MutedInk,
-                    fontSize = TypeBody,
-                    modifier = Modifier.align(Alignment.Center),
-                )
-            }
-    }
-}
-
-@Composable
-private fun VodCatalogLayout(
-    type: MediaType,
-    catalog: Catalog,
-    categories: List<MediaCategory>,
-    selectedCategoryId: String,
-    entries: List<MediaEntry>,
-    loading: Boolean,
-    loadError: Boolean,
-    favoriteCategories: Set<String>,
-    favoriteEntries: Set<String>,
-    lockedCategories: Set<String>,
-    historyCount: Int,
-    historyByKey: Map<String, PlaybackHistoryItem>,
-    restoreEntryKey: String?,
-    onRestoreConsumed: () -> Unit,
-    onCategorySelected: (MediaCategory) -> Unit,
-    onToggleCategoryFavorite: (MediaCategory) -> Unit,
-    onEntrySelected: (MediaEntry) -> Unit,
-    onEntryFocused: (MediaEntry) -> Unit,
-    onToggleEntryFavorite: (MediaEntry) -> Unit,
-    onLoadMore: () -> Unit,
-    sortOrder: VodSortOrder?,
-    onSortSelected: (VodSortOrder) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    // Retour depuis la grille : remonte d'abord au rail des catégories, comme en Direct.
-    var gridFocused by remember { mutableStateOf(false) }
-    var railFocusRequest by remember { mutableIntStateOf(0) }
-    BackHandler(enabled = gridFocused) { railFocusRequest++ }
-    Row(modifier, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-        CategoryRail(
-            type = type,
-            categories = categories,
-            selectedCategoryId = selectedCategoryId,
-            favoriteCategories = favoriteCategories,
-            lockedCategories = lockedCategories,
-            countFor = { category ->
-                when (category.id) {
-                    FAVORITES_CATEGORY_ID -> favoriteEntries.count { it.startsWith("${type.name}:") }
-                    HISTORY_CATEGORY_ID -> historyCount
-                    else -> catalog.countIn(type, category.id)
-                }
-            },
-            onSelected = onCategorySelected,
-            onToggleFavorite = onToggleCategoryFavorite,
-            focusSelectedRequest = railFocusRequest,
-            modifier = Modifier.width(250.dp).fillMaxHeight(),
-        )
-
-        // Une grille neuve par catégorie : la nouvelle liste repart en haut au lieu de garder le
-        // défilement de la précédente (le retour depuis une fiche repositionne via restoreEntryKey).
-        key(type, selectedCategoryId) { PosterGrid(
-            type = type,
-            categoryName = categories.firstOrNull { it.id == selectedCategoryId }?.name.orEmpty(),
-            // Favoris/Historique sont déjà entièrement matérialisés (dérivés de library.*), à la
-            // différence d'une vraie catégorie fournisseur dont le compte vient des métadonnées SQL.
-            totalCount = when (selectedCategoryId) {
-                FAVORITES_CATEGORY_ID, HISTORY_CATEGORY_ID -> entries.size
-                else -> catalog.countIn(type, selectedCategoryId)
-            },
-            entries = entries,
-            favoriteEntries = favoriteEntries,
-            historyByKey = historyByKey,
-            loading = loading,
-            loadError = loadError,
-            restoreEntryKey = restoreEntryKey,
-            onRestoreConsumed = onRestoreConsumed,
-            onEntrySelected = onEntrySelected,
-            onEntryFocused = onEntryFocused,
-            onToggleFavorite = onToggleEntryFavorite,
-            onLoadMore = onLoadMore,
-            sortOrder = sortOrder,
-            onSortSelected = onSortSelected,
-            modifier = Modifier.weight(1f).fillMaxHeight().onFocusChanged { gridFocused = it.hasFocus },
-        ) }
-    }
-}
-
-@Composable
-private fun CategoryRail(
-    type: MediaType,
-    categories: List<MediaCategory>,
-    selectedCategoryId: String,
-    favoriteCategories: Set<String>,
-    lockedCategories: Set<String>,
-    countFor: (MediaCategory) -> Int,
-    onSelected: (MediaCategory) -> Unit,
-    onToggleFavorite: (MediaCategory) -> Unit,
-    requestInitialFocus: Boolean = true,
-    // Incrémenté par l'appelant pour ramener le focus sur la catégorie sélectionnée (Gauche/Retour
-    // depuis les chaînes ou la grille). 0 = aucune demande.
-    focusSelectedRequest: Int = 0,
-    onRight: (() -> Unit)? = null,
-    // Le Direct affiche ce panneau par-dessus la vidéo plein écran déjà en cours de lecture : les
-    // lignes au repos passent en transparent (le fond assombri du Column suffit à garder le texte
-    // lisible) plutôt que de masquer la vidéo derrière un aplat opaque. VOD (l'autre appelant) garde
-    // le panneau opaque par défaut, puisqu'il n'y a rien à voir derrière.
-    translucent: Boolean = false,
-    modifier: Modifier = Modifier,
-) {
-    val listState = rememberLazyListState()
-    val selectedFocus = remember(selectedCategoryId, type) { FocusRequester() }
-
-    // Catégorie mise en favori (remontée en tête) ou retirée (revenue à sa place) : la liste la
-    // suit jusqu'à sa nouvelle position et lui garde le focus, au lieu de la laisser hors écran.
-    var movedCategoryKey by remember { mutableStateOf<String?>(null) }
-    val movedFocus = remember { FocusRequester() }
-    androidx.compose.runtime.LaunchedEffect(categories) {
-        val key = movedCategoryKey ?: return@LaunchedEffect
-        val index = categories.indexOfFirst { it.key == key }
-        if (index >= 0) {
-            if (listState.layoutInfo.visibleItemsInfo.none { it.index == index }) {
-                // Deux catégories au-dessus restent visibles pour garder le contexte.
-                listState.scrollToItem((index - 2).coerceAtLeast(0))
-            }
-            yield()
-            runCatching { movedFocus.requestFocus() }
-        }
-        movedCategoryKey = null
-    }
-
-    // Retour au rail : si la liste a été défilée et que la catégorie sélectionnée n'est plus
-    // composée, son FocusRequester n'est rattaché à rien et requestFocus() échouait en silence
-    // (impossible de revenir sur les catégories). On la refait d'abord défiler à l'écran.
-    androidx.compose.runtime.LaunchedEffect(focusSelectedRequest) {
-        if (focusSelectedRequest == 0) return@LaunchedEffect
-        val index = categories.indexOfFirst { it.id == selectedCategoryId }
-        if (index < 0) return@LaunchedEffect
-        if (listState.layoutInfo.visibleItemsInfo.none { it.index == index }) {
-            // Deux catégories au-dessus restent visibles pour garder le contexte.
-            listState.scrollToItem((index - 2).coerceAtLeast(0))
-        }
-        yield()
-        // requestFocus(Enter) renvoie false (sans lever) tant que la ligne n'est pas rattachée :
-        // on retente alors à la frame suivante, une fois le défilement appliqué.
-        val focused = runCatching { selectedFocus.requestFocus(FocusDirection.Enter) }.getOrDefault(false)
-        if (!focused) {
-            withFrameNanos { }
-            runCatching { selectedFocus.requestFocus(FocusDirection.Enter) }
-        }
-    }
-
-    androidx.compose.runtime.LaunchedEffect(type, categories.size, selectedCategoryId, requestInitialFocus) {
-        val index = categories.indexOfFirst { it.id == selectedCategoryId }
-        if (index >= 0) {
-            yield()
-            if (listState.layoutInfo.visibleItemsInfo.none { it.index == index }) {
-                listState.scrollToItem(index)
-                yield()
-            }
-            if (requestInitialFocus) {
-                runCatching { selectedFocus.requestFocus() }
-            }
-        }
-    }
-
-    val railContent: @Composable () -> Unit = {
-      Column(Modifier.fillMaxSize().padding(14.dp)) {
-        Row(Modifier.fillMaxWidth().padding(start = 3.dp, bottom = 7.dp), verticalAlignment = Alignment.CenterVertically) {
-            SectionLabel("Catégories")
-        }
-        LazyColumn(
-            state = listState,
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            items(categories, key = MediaCategory::key) { category ->
-                val virtual = category.id in setOf(Catalog.ALL_CATEGORY_ID, FAVORITES_CATEGORY_ID, HISTORY_CATEGORY_ID)
-                FocusableSurface(
-                    onClick = { onSelected(category) },
-                    onLongClick = if (virtual || type != MediaType.Live) null else ({
-                        movedCategoryKey = category.key
-                        onToggleFavorite(category)
-                    }),
-                    selected = selectedCategoryId == category.id,
-                    idleBackground = if (translucent) Color.Transparent else DeepSurface,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp)
-                        .onPreviewKeyEvent { event ->
-                            if (
-                                onRight != null &&
-                                event.type == KeyEventType.KeyDown &&
-                                event.nativeKeyEvent.keyCode == android.view.KeyEvent.KEYCODE_DPAD_RIGHT
-                            ) {
-                                onRight()
-                                true
-                            } else false
-                        }
-                        .then(if (category.id == selectedCategoryId) Modifier.focusRequester(selectedFocus) else Modifier)
-                        .then(if (category.key == movedCategoryKey) Modifier.focusRequester(movedFocus) else Modifier),
-                ) {
-                    Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                        if (!virtual && type == MediaType.Live && category.key in favoriteCategories) {
-                            StreamiaIcon(StreamiaIconGlyph.Star, size = 18.dp)
-                            Spacer(Modifier.width(5.dp))
-                        }
-                        if (!virtual && category.key in lockedCategories) {
-                            StreamiaIcon(StreamiaIconGlyph.Lock, tint = FocusBlueBright, size = 12.dp)
-                            Spacer(Modifier.width(5.dp))
-                        }
-                        Text(
-                            category.name,
-                            color = Ink,
-                            fontSize = 15.sp,
-                            fontWeight = if (selectedCategoryId == category.id) FontWeight.Bold else FontWeight.Medium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f),
-                        )
-                        Text(countFor(category).toString(), color = MutedInk, fontSize = 13.sp)
-                    }
-                }
-            }
-        }
-      }
-    }
-    if (translucent) {
-        Box(
-            modifier
-                .clip(RoundedCornerShape(RadiusCard))
-                .background(Night.copy(alpha = 0.72f))
-                .border(BorderStroke(1.dp, GlassBorder), RoundedCornerShape(RadiusCard)),
-        ) { railContent() }
-    } else {
-        GlassSurface(modifier = modifier) { railContent() }
-    }
-}
-
-@Composable
-private fun PosterGrid(
-    type: MediaType,
-    categoryName: String,
-    totalCount: Int,
-    entries: List<MediaEntry>,
-    loading: Boolean,
-    loadError: Boolean,
-    favoriteEntries: Set<String>,
-    historyByKey: Map<String, PlaybackHistoryItem>,
-    restoreEntryKey: String?,
-    onRestoreConsumed: () -> Unit,
-    onEntrySelected: (MediaEntry) -> Unit,
-    onEntryFocused: (MediaEntry) -> Unit,
-    onToggleFavorite: (MediaEntry) -> Unit,
-    onLoadMore: () -> Unit,
-    sortOrder: VodSortOrder? = null,
-    onSortSelected: (VodSortOrder) -> Unit = {},
-    modifier: Modifier = Modifier,
-) {
-    // Nouveau tri : la grille repart du début de la liste triée.
-    val gridState = remember(sortOrder) { androidx.compose.foundation.lazy.grid.LazyGridState() }
-    var sortDialogOpen by remember { mutableStateOf(false) }
-    val sortButtonFocus = remember { FocusRequester() }
-    LaunchedEffect(gridState, entries.size) {
-        snapshotFlow { gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1 }
-            .distinctUntilChanged()
-            .collect { lastVisible -> if (lastVisible >= entries.size - LOAD_MORE_THRESHOLD) onLoadMore() }
-    }
-
-    // Retour depuis une fiche : on refait défiler jusqu'au contenu ouvert et on y repose le focus,
-    // pour ne pas renvoyer l'utilisateur sur une liste qui repart du début.
-    val restoreFocus = remember { FocusRequester() }
-    LaunchedEffect(restoreEntryKey, entries) {
-        if (restoreEntryKey == null || entries.isEmpty()) return@LaunchedEffect
-        val index = entries.indexOfFirst { it.key == restoreEntryKey }
-        if (index < 0) {
-            onRestoreConsumed()
-            return@LaunchedEffect
-        }
-        gridState.scrollToItem(index)
-        delay(BROWSER_RESTORE_FOCUS_DELAY_MS)
-        runCatching { restoreFocus.requestFocus() }
-        onRestoreConsumed()
-    }
-
-    Column(modifier) {
-        Row(
-            Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(categoryName.ifBlank { type.displayName }, color = Ink, fontSize = TypeSectionTitle, fontWeight = HeadingWeight, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Spacer(Modifier.width(10.dp))
-            Text("$totalCount ${type.pluralName}", color = MutedInk, fontSize = 14.sp)
-            Spacer(Modifier.weight(1f))
-            Text("OK ouvrir · OK long ajouter/retirer favori", color = MutedInk, fontSize = 14.sp)
-            if (sortOrder != null) {
-                Spacer(Modifier.width(14.dp))
-                FocusableSurface(onClick = { sortDialogOpen = true }, modifier = Modifier.width(290.dp).height(44.dp).focusRequester(sortButtonFocus)) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text(
-                            "Trier : " + vodSortLabel(sortOrder),
-                            color = Ink,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                }
-            }
-        }
-        if (sortDialogOpen && sortOrder != null) {
-            val orders = VodSortOrder.entries
-            ChoiceDialog(
-                title = "Trier « " + categoryName.ifBlank { type.displayName } + " »",
-                options = orders.map(::vodSortLabel),
-                selectedIndex = orders.indexOf(sortOrder),
-                onSelect = { index ->
-                    sortDialogOpen = false
-                    onSortSelected(orders[index])
-                    runCatching { sortButtonFocus.requestFocus() }
-                },
-                onDismiss = {
-                    sortDialogOpen = false
-                    runCatching { sortButtonFocus.requestFocus() }
-                },
-            )
-        }
-
-        if (entries.isEmpty()) {
-            Box(
-                Modifier.fillMaxSize().clip(RoundedCornerShape(RadiusCard)).background(DeepSurface),
-                contentAlignment = Alignment.Center,
-            ) {
-                if (loadError) {
-                    PageLoadRetry(onRetry = onLoadMore)
-                } else {
-                    Text(
-                        // Distinguer « la page arrive » de « la catégorie est vide » : une lecture SQLite
-                        // sur une catégorie jamais ouverte n'est pas un catalogue vide.
-                        if (loading) "Chargement…" else "Aucun contenu dans cette catégorie",
-                        color = MutedInk,
-                        fontSize = TypeBody,
-                    )
-                }
-            }
-        } else {
-            LazyVerticalGrid(
-                state = gridState,
-                columns = GridCells.Adaptive(155.dp),
-                // Marge pour la carte focalisée (agrandie + bordure) : sinon rognée en haut, en bas et sur les côtés.
-                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                items(entries, key = MediaEntry::key) { entry ->
-                    PosterCard(
-                        entry = entry,
-                        favorite = entry.key in favoriteEntries,
-                        history = historyByKey[entry.key],
-                        onClick = { onEntrySelected(entry) },
-                        onFocused = { onEntryFocused(entry) },
-                        onLongClick = { onToggleFavorite(entry) },
-                        modifier = if (entry.key == restoreEntryKey) Modifier.focusRequester(restoreFocus) else Modifier,
-                    )
-                }
-                // Pied de grille : page suivante en cours, ou en échec avec nouvel essai.
-                if (loadError || loading) {
-                    item(span = { GridItemSpan(maxLineSpan) }, key = "page-status") {
-                        Box(Modifier.fillMaxWidth().padding(vertical = 10.dp), contentAlignment = Alignment.Center) {
-                            if (loadError) PageLoadRetry(onRetry = onLoadMore)
-                            else Text("Chargement…", color = MutedInk, fontSize = TypeBody)
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun PageLoadRetry(onRetry: () -> Unit) {
-    FocusableSurface(onClick = onRetry, modifier = Modifier.width(420.dp).height(54.dp)) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("Chargement impossible · OK pour réessayer", color = Ink, fontSize = TypeBody)
-        }
-    }
-}
-
-@Composable
-private fun PosterCard(
-    entry: MediaEntry,
-    favorite: Boolean,
-    history: PlaybackHistoryItem?,
-    onClick: () -> Unit,
-    onFocused: () -> Unit,
-    onLongClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    FocusableSurface(
-        onClick = onClick,
-        onFocused = onFocused,
-        onLongClick = onLongClick,
-        // Pas d'état « sélectionné » pour un favori : il ressemblait au focus. L'étoile suffit.
-        modifier = modifier.fillMaxWidth().height(252.dp),
-    ) {
-        Column(Modifier.fillMaxSize().padding(8.dp)) {
-            Box(Modifier.fillMaxWidth().height(175.dp)) {
-                MediaArtwork(entry.iconUrl, entry.displayName, Modifier.fillMaxSize())
-                // Favori : étoile en coin d'affiche, visible même quand la progression occupe le bas.
-                if (favorite) {
-                    StreamiaIcon(StreamiaIconGlyph.Star, size = 20.dp, modifier = Modifier.align(Alignment.TopEnd).padding(5.dp))
-                }
-                if (history != null && history.progress > 0.02f) {
-                    Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(4.dp).background(Color.Black.copy(alpha = 0.45f))) {
-                        Box(Modifier.fillMaxHeight().fillMaxWidth(history.progress).background(FocusBlueBright))
-                    }
-                }
-            }
-            Spacer(Modifier.height(7.dp))
-            Text(
-                entry.displayName,
-                color = Ink,
-                fontSize = 15.sp,
-                lineHeight = 16.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Spacer(Modifier.weight(1f))
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                // Note en « x/10 », sans étoile : l'étoile est réservée aux favoris.
-                val ratingText = entry.rating?.let(::formatRating)
-                if (ratingText != null) {
-                    Text(ratingText, color = FocusBlueBright, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                } else {
-                    val label = if (entry.type == MediaType.Series && entry.playable) "Épisode" else entry.type.displayName
-                    Text(label, color = FocusBlueBright, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                }
-                Spacer(Modifier.weight(1f))
-                if (history != null && history.progress > 0.02f) {
-                    Text("${history.progressPercent()}%", color = MutedInk, fontSize = 14.sp)
-                }
-            }
-        }
-    }
-}
-
 private fun defaultCategoryId(catalog: Catalog, type: MediaType): String =
     catalog.categoriesFor(type).firstOrNull { catalog.countIn(type, it.id) > 0 }?.id
         ?: Catalog.ALL_CATEGORY_ID
-
-/** Note affichée partout sous la forme « 7.5/10 » (l'étoile désigne les favoris) ; null si hors échelle. */
-internal fun formatRating(rating: Double): String? = rating.takeIf { it in 0.0..10.0 }?.let { "%.1f/10".format(it) }
-
-private fun PlaybackHistoryItem.progressPercent(): Int = (progress * 100).toInt().coerceIn(0, 100)
-
-/**
- * Ordre d'affichage des chaînes Direct au sein d'une catégorie, choisi dans Paramètres. `Provider`
- * conserve l'ordre déjà renvoyé par le fournisseur/SQLite (aucun tri, coût nul) ; `Alphabetical`
- * ignore les accents français plutôt que trier par point de code Unicode (voir [sortedAlphabetically]).
- */
-internal fun sortedForLiveDisplay(entries: List<MediaEntry>, order: LiveChannelSortOrder): List<MediaEntry> = when (order) {
-    LiveChannelSortOrder.Provider -> entries
-    LiveChannelSortOrder.Number -> entries.sortedBy(MediaEntry::number)
-    LiveChannelSortOrder.Alphabetical -> sortedAlphabetically(entries)
-}
-
-/**
- * Tri alphabétique à la française (accents ignorés, puis casse) : une clé calculée **une fois par
- * titre**, puis de simples comparaisons de chaînes. `Collator.compare` à chaque comparaison
- * coûtait des centaines de milliers d'appels lents sur le thread principal pour « Tout » (des
- * dizaines de milliers de chaînes) : plusieurs secondes de gel à l'ouverture de la liste.
- */
-internal fun sortedAlphabetically(entries: List<MediaEntry>): List<MediaEntry> {
-    if (entries.size < 2) return entries
-    val keys = HashMap<String, String>(entries.size * 2)
-    fun key(name: String) = keys.getOrPut(name) {
-        java.text.Normalizer.normalize(name, java.text.Normalizer.Form.NFD)
-            .replace(COMBINING_MARKS, "")
-            .replace("œ", "oe").replace("æ", "ae").replace("Œ", "OE").replace("Æ", "AE")
-            .lowercase(java.util.Locale.FRENCH)
-    }
-    return entries.sortedWith(compareBy<MediaEntry> { key(it.displayName) }.thenBy { it.displayName })
-}
-
-private val COMBINING_MARKS = Regex("\\p{M}+")
-
-/**
- * Dernières listes triées du navigateur, pour la même source (même instance), les mêmes masquages
- * et le même tri : rouvrir la liste (retour du plein écran, aller-retour de catégorie) ne refait
- * pas le tri. Utilisé depuis le thread principal et depuis Dispatchers.Default.
- */
-internal object BrowserSortMemo {
-    private class Entry(
-        val source: List<MediaEntry>,
-        val hiddenEntries: Set<String>,
-        val excludedCategoryIds: Set<String>,
-        val order: Any,
-        val result: List<MediaEntry>,
-    )
-
-    private val recent = ArrayDeque<Entry>()
-
-    @Synchronized
-    fun get(source: List<MediaEntry>, hiddenEntries: Set<String>, excludedCategoryIds: Set<String>, order: Any): List<MediaEntry>? =
-        recent.firstOrNull {
-            it.source === source && it.hiddenEntries === hiddenEntries && it.order == order && it.excludedCategoryIds == excludedCategoryIds
-        }?.result
-
-    @Synchronized
-    fun put(source: List<MediaEntry>, hiddenEntries: Set<String>, excludedCategoryIds: Set<String>, order: Any, result: List<MediaEntry>) {
-        recent.addFirst(Entry(source, hiddenEntries, excludedCategoryIds, order, result))
-        while (recent.size > MAX_ENTRIES) recent.removeLast()
-    }
-
-    private const val MAX_ENTRIES = 6
-}
-
-/**
- * `RecentlyAdded`/`Rating` retombent en fin de liste pour une entrée sans date d'ajout / note (le
- * fournisseur ne les fournit pas toujours) plutôt que de les faire remonter en tête par accident :
- * `sortedByDescending` traite `null` comme la plus petite valeur, donc toujours en dernier ici.
- * Pas d'option « année » : cette donnée vient de [fr.streamia.tv.domain.MediaDetails], récupérée
- * à la demande pour un seul contenu, jamais en bloc pour toute une catégorie du catalogue léger.
- */
-internal fun sortedForVodDisplay(entries: List<MediaEntry>, order: VodSortOrder): List<MediaEntry> = when (order) {
-    VodSortOrder.Provider -> entries
-    VodSortOrder.Alphabetical -> sortedAlphabetically(entries)
-    VodSortOrder.RecentlyAdded -> entries.sortedByDescending(MediaEntry::addedAtEpochSeconds)
-    VodSortOrder.Rating -> entries.sortedByDescending { entry -> entry.rating?.takeIf { it in 0.0..10.0 } }
-}
-
-/** Avancement (0..1) d'un programme à l'instant donné, `null` sans horaires exploitables. */
-internal fun liveProgramProgress(program: EpgProgram, nowEpochSeconds: Long): Float? {
-    val start = program.startEpochSeconds ?: return null
-    val end = program.endEpochSeconds ?: return null
-    if (end <= start) return null
-    return ((nowEpochSeconds - start).toFloat() / (end - start)).coerceIn(0f, 1f)
-}

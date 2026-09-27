@@ -58,11 +58,9 @@ import fr.streamia.tv.ui.theme.TypeLabel
 import fr.streamia.tv.ui.theme.TypeScreenTitle
 import fr.streamia.tv.ui.theme.TypeSectionTitle
 import kotlinx.coroutines.delay
-import java.text.SimpleDateFormat
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import java.util.Date
 import java.util.Locale
 
 /**
@@ -404,13 +402,16 @@ private fun ChannelChip(
     }
 }
 
+// Formateur partagé (immuable, sûr entre threads) : un seul par processus au lieu d'un par ligne affichée.
+private val MatchTimeFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm", Locale.getDefault())
+
 private fun formatMatchTime(startEpochSeconds: Long): String =
     Instant.ofEpochSecond(startEpochSeconds)
         .atZone(ZoneId.systemDefault())
-        .format(DateTimeFormatter.ofPattern("HH:mm", Locale.getDefault()))
+        .format(MatchTimeFormatter)
 
 private fun formatClockTime(epochMillis: Long): String =
-    SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(epochMillis))
+    Instant.ofEpochMilli(epochMillis).atZone(ZoneId.systemDefault()).format(MatchTimeFormatter)
 
 internal fun liveOnSatMatchKey(resolved: ResolvedLiveOnSatMatch): String =
     with(resolved.match) { "$competition|$participantA|$participantB|$startEpochSeconds" }

@@ -2,7 +2,6 @@ package fr.streamia.tv.data
 
 import android.content.ContentValues
 import android.content.Context
-import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import fr.streamia.tv.domain.EpgChannel
@@ -280,7 +279,7 @@ internal class EpgDatabase(context: Context) :
                 c.display_name,
                 c.icon_url,
                 p.title,
-                p.description,
+                NULL AS description,
                 p.start_time,
                 p.end_time,
                 p.category
@@ -325,6 +324,21 @@ internal class EpgDatabase(context: Context) :
                 )
             },
         )
+    }
+
+    /**
+     * Description d'un programme, lue à la demande (fiche du programme dans le Guide TV) : les
+     * journées du guide sont chargées sans les descriptions, qui en faisaient l'essentiel du poids.
+     */
+    fun loadDescription(profileId: String, channelId: String, sourceStartEpochSeconds: Long): String? =
+        readableDatabase.rawQuery(
+            "SELECT description FROM epg_programs WHERE profile_id = ? AND channel_id = ? AND start_time = ? LIMIT 1",
+            arrayOf(profileId, channelId, sourceStartEpochSeconds.toString()),
+        ).use { cursor -> if (cursor.moveToFirst()) cursor.nullableString(0) else null }
+
+    /** Guide inchangé côté serveur (304) : la synchronisation compte comme faite maintenant. */
+    fun touch(profileId: String, nowMillis: Long = System.currentTimeMillis()) {
+        writableDatabase.execSQL("UPDATE epg_profiles SET synced_at = ? WHERE profile_id = ?", arrayOf<Any>(nowMillis, profileId))
     }
 
     fun delete(profileId: String) {
@@ -409,16 +423,6 @@ internal class EpgDatabase(context: Context) :
         if (value == null) putNull(key) else put(key, value)
     }
 
-    private fun android.database.sqlite.SQLiteStatement.bindNullableString(index: Int, value: String?) {
-        if (value == null) bindNull(index) else bindString(index, value)
-    }
-
-    private fun android.database.sqlite.SQLiteStatement.bindNullableLong(index: Int, value: Long?) {
-        if (value == null) bindNull(index) else bindLong(index, value)
-    }
-
-    private fun Cursor.nullableString(index: Int): String? = if (isNull(index)) null else getString(index)
-    private fun Cursor.nullableLong(index: Int): Long? = if (isNull(index)) null else getLong(index)
 
     private companion object {
         const val DATABASE_NAME = "epg-v1.db"

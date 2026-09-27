@@ -362,32 +362,26 @@ data class Catalog(
     }
 
     /**
-     * Libère les entrées Films/Séries matérialisées par des pages qui ne sont plus retenues.
-     *
-     * Sans éviction, chaque catégorie ouverte (plus ses deux voisines préchargées, 500 entrées par
-     * page) restait en mémoire jusqu'à la fermeture du processus : après un ou deux jours sans
-     * redémarrage de l'app, des dizaines de milliers d'entrées étaient recopiées et réindexées à
-     * chaque nouvelle page, et toute la navigation ralentissait. Le Direct et les sections chargées
-     * en entier ([fullSections]) ne sont jamais touchés ; une catégorie évincée est simplement
-     * relue depuis SQLite à sa prochaine ouverture.
+     * Ajoute quelques entrées isolées (favori ajouté depuis une page Films/Séries) sans marquer leur
+     * catégorie comme chargée. Seule leur section perd ses index.
      */
-    fun retainingVodEntries(retainedKeys: Set<String>, retainedCategoryKeys: Set<String>): Catalog {
-        if (!isPaged) return this
-        fun evictable(type: MediaType) = type != MediaType.Live && type !in fullSections
-        val evictedTypes = HashSet<MediaType>()
-        val keptEntries = entries.filter { entry ->
-            val keep = !evictable(entry.type) || entry.key in retainedKeys
-            if (!keep) evictedTypes += entry.type
-            keep
-        }
-        val keptCategoryKeys = loadedCategoryKeys.filterTo(HashSet()) { key ->
-            val type = MediaType.entries.firstOrNull { key.startsWith("${it.name}:") }
-            type == null || !evictable(type) || key in retainedCategoryKeys
-        }
-        if (evictedTypes.isEmpty() && keptCategoryKeys.size == loadedCategoryKeys.size) return this
-        return copy(entries = keptEntries, loadedCategoryKeys = keptCategoryKeys)
-            .inheritSections(this, except = evictedTypes)
+    fun withExtraEntries(newEntries: List<MediaEntry>): Catalog {
+        val missing = newEntries.filter { entry(it.key) == null }
+        if (missing.isEmpty()) return this
+        return copy(entries = entries + missing).inheritSections(this, except = missing.mapTo(HashSet()) { it.type })
     }
+
+    /**
+     * Catalogue réorganisé par l'utilisateur (ordre des catégories, entrées déplacées). Les sections
+     * dont aucune entrée n'a changé de catégorie reprennent les index déjà construits de ce catalogue.
+     */
+    fun withCustomLayout(
+        categories: List<MediaCategory>,
+        entries: List<MediaEntry>,
+        categoryCounts: Map<String, Int>,
+        changedTypes: Set<MediaType>,
+    ): Catalog = copy(categories = categories, entries = entries, categoryCounts = categoryCounts)
+        .inheritSections(this, except = changedTypes)
 
     fun search(query: String, type: MediaType? = null, limit: Int = 500): List<MediaEntry> {
         val needle = query.trim().lowercase()

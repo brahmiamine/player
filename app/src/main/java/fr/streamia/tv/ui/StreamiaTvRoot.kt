@@ -21,7 +21,10 @@ import fr.streamia.tv.data.resolveStartupProfileId
 import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.player.LivePlaybackSession
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
@@ -97,31 +100,41 @@ fun StreamiaTvRoot(viewModel: StreamiaViewModel) {
     }
 
     LaunchedEffect(Unit) {
+        // Listes et réglages lus hors du thread principal par le ViewModel : on les attend ici.
+        viewModel.awaitStartupData()
         val initialState = viewModel.uiState.value
-        if (initialState.activeProfileId != null || initialState.screen !is StreamiaScreen.Login) return@LaunchedEffect
+        if (viewModel.resumeLinkPending || initialState.activeProfileId != null || initialState.screen !is StreamiaScreen.Login) return@LaunchedEffect
 
         val availableIds = initialState.profiles.map { it.id }
-        val storedSession = sessionStore.load()
-        val validSession = storedSession?.takeIf { it.profileId in availableIds }
-        if (storedSession != null && validSession == null) sessionStore.clearPlayback()
-
-        val targetProfileId = resolveStartupProfileId(
-            availableProfileIds = availableIds,
-            playbackProfileId = validSession?.profileId,
-            activeProfileId = sessionStore.loadActiveProfileId(),
-            autoOpenDisabled = sessionStore.isAutoOpenDisabled(),
-        )
+        // Préférences de session (JSON) lues hors du thread principal.
+        class StartupPlan(val session: fr.streamia.tv.data.LastPlaybackSession?, val target: String?, val lastPage: String?)
+        val plan = withContext(Dispatchers.IO) {
+            val storedSession = sessionStore.load()
+            val validSession = storedSession?.takeIf { it.profileId in availableIds }
+            if (storedSession != null && validSession == null) sessionStore.clearPlayback()
+            val target = resolveStartupProfileId(
+                availableProfileIds = availableIds,
+                playbackProfileId = validSession?.profileId,
+                activeProfileId = sessionStore.loadActiveProfileId(),
+                autoOpenDisabled = sessionStore.isAutoOpenDisabled(),
+            )
+            StartupPlan(validSession, target, sessionStore.loadLastPage())
+        }
+        if (viewModel.resumeLinkPending || viewModel.uiState.value.activeProfileId != null) return@LaunchedEffect
+        val validSession = plan.session
+        val targetProfileId = plan.target
         if (targetProfileId == null) {
             viewModel.finishStartup()
             return@LaunchedEffect
         }
+        viewModel.prewarmProfile(targetProfileId)
 
         // Application fermée pendant une chaîne du Direct en plein écran : on y revient directement,
         // sans repasser par la liste des catégories et chaînes (ni masquée ni verrouillée).
         val liveToResume = validSession?.entry?.takeIf {
-            sessionStore.loadLastPage() == LIVE_PLAYER_PAGE &&
+            plan.lastPage == LIVE_PLAYER_PAGE &&
                 validSession.profileId == targetProfileId &&
-                viewModel.canResumeLiveOnStartup(targetProfileId, it)
+                viewModel.canResumeLiveOnStartupAsync(targetProfileId, it)
         }
         if (liveToResume != null) {
             viewModel.resumeStartup(targetProfileId, liveToResume, returnToSeries = false)
@@ -142,7 +155,7 @@ fun StreamiaTvRoot(viewModel: StreamiaViewModel) {
         }
 
         if (loaded.activeProfileId != targetProfileId || loaded.catalog == null) return@LaunchedEffect
-        when (val page = sessionStore.loadLastPage()) {
+        when (val page = plan.lastPage) {
             "search" -> viewModel.showSearch()
             "live_matches" -> viewModel.showLiveMatches()
             "epg" -> viewModel.showEpg()
@@ -161,7 +174,9 @@ fun StreamiaTvRoot(viewModel: StreamiaViewModel) {
         viewModel.uiState
             .map(::persistedNavigationOf)
             .distinctUntilChanged()
-            .collect { current ->
+            // Relecture/écriture des préférences de session hors du thread principal.
+            .flowOn(Dispatchers.Default)
+            .collect { current -> withContext(Dispatchers.IO) {
                 val activeProfileId = current.activeProfileId
                 if (activeProfileId != null) {
                     val savedPlayback = sessionStore.load()
@@ -178,7 +193,7 @@ fun StreamiaTvRoot(viewModel: StreamiaViewModel) {
                     sessionStore.disableAutoOpen()
                     previouslyActiveProfileId = null
                 }
-            }
+            } }
     }
 
     LaunchedEffect(Unit) {
@@ -209,6 +224,15 @@ fun StreamiaTvRoot(viewModel: StreamiaViewModel) {
             LiveBrowserReturnState.remember(playerScreen.entry.key)
             viewModel.closePlayer(forceBrowser = true)
         }
+    }
+
+    // Premier écran réellement utilisable (accueil avec son catalogue, lecteur, ou gestionnaire de
+    // listes) : signalé à Android pour les mesures de démarrage « jusqu'à l'affichage complet ».
+    LaunchedEffect(Unit) {
+        viewModel.uiState.first { candidate ->
+            !candidate.booting && !candidate.busy && (candidate.catalog != null || candidate.screen is StreamiaScreen.Login)
+        }
+        (context as? android.app.Activity)?.reportFullyDrawn()
     }
 
     CompositionLocalProvider(LocalNetworkReconnections provides networkReconnections) {

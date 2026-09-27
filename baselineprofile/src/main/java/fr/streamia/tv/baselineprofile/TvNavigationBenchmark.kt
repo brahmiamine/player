@@ -36,8 +36,26 @@ class TvNavigationBenchmark {
         openLiveAndZap()
     }
 
+    @Test
+    fun moviesGridScroll() = frames { browseMovies() }
+
+    @Test
+    fun guideScroll() = frames { openGuide() }
+
+    @Test
+    fun homeScroll() = frames { scrollHome() }
+
+    private fun frames(journey: androidx.benchmark.macro.MacrobenchmarkScope.() -> Unit) = rule.measureRepeated(
+        packageName = TARGET_PACKAGE,
+        metrics = listOf(FrameTimingMetric()),
+        compilationMode = CompilationMode.Partial(),
+        startupMode = StartupMode.WARM,
+        iterations = 5,
+    ) { journey() }
+
     private fun startup(mode: CompilationMode) = rule.measureRepeated(
         packageName = TARGET_PACKAGE,
+        // Temps jusqu'au premier écran et jusqu'à l'affichage complet (reportFullyDrawn).
         metrics = listOf(StartupTimingMetric()),
         compilationMode = mode,
         startupMode = StartupMode.COLD,

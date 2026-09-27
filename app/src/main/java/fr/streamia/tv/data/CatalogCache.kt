@@ -63,37 +63,12 @@ class CatalogCache(context: Context) {
         session.abort()
     }
 
-    /**
-     * The user layout already lives as lightweight deltas in [UserLibraryStore]. Keeping a second
-     * resolved copy of every provider row doubled disk usage and could force a second full parse on
-     * startup, so resolved catalogue snapshots are intentionally no longer persisted.
-     */
-    suspend fun saveResolved(profileId: String, catalog: Catalog, layoutFingerprint: String) =
-        withContext(Dispatchers.IO) {
-            // Keep parameters in the API while callers migrate; deleting the old file is the work.
-            @Suppress("UNUSED_VARIABLE") val ignoredCatalog = catalog
-            @Suppress("UNUSED_VARIABLE") val ignoredFingerprint = layoutFingerprint
-            resolvedFileFor(profileId).delete()
-        }
-
-    suspend fun loadResolved(profileId: String, expectedLayoutFingerprint: String): Catalog? =
-        withContext(Dispatchers.IO) {
-            @Suppress("UNUSED_VARIABLE") val ignoredFingerprint = expectedLayoutFingerprint
-            resolvedFileFor(profileId).delete()
-            null
-        }
-
     suspend fun load(profileId: String, extraEntryKeys: Set<String> = emptySet()): Catalog? =
         withContext(Dispatchers.IO) {
             ensureMigrated(profileId)
             val contextKeys = persistedContextKeys(profileId) + extraEntryKeys
             database.loadLightweight(profileId, contextKeys)
         }
-
-    suspend fun loadFull(profileId: String): Catalog? = withContext(Dispatchers.IO) {
-        ensureMigrated(profileId)
-        database.loadFull(profileId)
-    }
 
     suspend fun loadCategoryPage(
         profileId: String,
@@ -102,27 +77,18 @@ class CatalogCache(context: Context) {
         offset: Int,
         limit: Int,
         order: VodSortOrder = VodSortOrder.Provider,
+        afterKey: String? = null,
     ): CatalogPage = withContext(Dispatchers.IO) {
         ensureMigrated(profileId)
         if (limit <= 0) return@withContext CatalogPage(emptyList(), offset.coerceAtLeast(0), false)
         val boundedLimit = limit.coerceAtMost(MAX_PAGE_SIZE)
         val safeOffset = offset.coerceAtLeast(0)
-        val entries = database.loadCategoryPage(profileId, type, categoryId, safeOffset, boundedLimit, order)
+        val entries = database.loadCategoryPage(profileId, type, categoryId, safeOffset, boundedLimit, order, afterKey)
         CatalogPage(
             entries = entries,
             nextOffset = safeOffset + entries.size,
             hasMore = entries.size == boundedLimit,
         )
-    }
-
-    suspend fun loadAdjacent(
-        profileId: String,
-        current: MediaEntry,
-        categoryId: String,
-        delta: Int,
-    ): MediaEntry? = withContext(Dispatchers.IO) {
-        ensureMigrated(profileId)
-        database.loadAdjacent(profileId, current, categoryId, delta)
     }
 
     suspend fun loadType(profileId: String, type: MediaType): List<MediaEntry> = withContext(Dispatchers.IO) {
@@ -186,7 +152,19 @@ class CatalogCache(context: Context) {
         }
     }
 
+    /**
+     * Profils dont la migration de l'ancien cache JSON est déjà vérifiée : chaque lecture (page,
+     * recherche, recommandations…) refaisait sinon une requête `hasProfile` avant la vraie requête.
+     */
+    private val migrationChecked = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
     private fun ensureMigrated(profileId: String) {
+        if (profileId in migrationChecked) return
+        migrateLegacy(profileId)
+        migrationChecked += profileId
+    }
+
+    private fun migrateLegacy(profileId: String) {
         if (database.hasProfile(profileId)) return
         val source = fileFor(profileId)
         if (!source.exists()) return
@@ -217,6 +195,7 @@ class CatalogCache(context: Context) {
 
     private fun deleteJsonCopies(profileId: String) {
         fileFor(profileId).delete()
+        // Ancienne copie « résolue » du catalogue, plus écrite depuis la version SQLite.
         resolvedFileFor(profileId).delete()
     }
 

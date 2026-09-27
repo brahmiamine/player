@@ -29,7 +29,7 @@ class XtreamUrlBuilder(private val credentials: ServerCredentials) {
 
     fun stream(type: MediaType, streamId: Int, extension: String = type.defaultExtension): String {
         val safeExtension = extension.trim().removePrefix(".").takeIf {
-            it.matches(Regex("[A-Za-z0-9]{1,8}"))
+            it.matches(STREAM_EXTENSION)
         } ?: type.defaultExtension
         return "$baseUrl/${type.pathSegment}/${path(credentials.username)}/${path(credentials.password)}/$streamId.$safeExtension"
     }
@@ -82,3 +82,6 @@ class XtreamUrlBuilder(private val credentials: ServerCredentials) {
         }
     }
 }
+
+/** Extension de flux acceptée dans une URL (« ts », « m3u8 », « mkv »…), compilée une fois : sert à chaque entrée d'une playlist. */
+internal val STREAM_EXTENSION = Regex("[A-Za-z0-9]{1,8}")

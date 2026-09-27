@@ -1,5 +1,6 @@
 package fr.streamia.tv.ui
 
+import fr.streamia.tv.net.HttpClients
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -39,8 +40,6 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
-import java.net.HttpURLConnection
-import java.net.URL
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -85,17 +84,8 @@ internal fun sortFootballMatches(matches: List<FootballMatch>): List<FootballMat
             .thenBy { if (it.state == "post") -it.kickoff.epochSecond else it.kickoff.epochSecond },
     )
 
-private fun httpGet(url: String): String {
-    val connection = URL(url).openConnection() as HttpURLConnection
-    connection.connectTimeout = 8_000
-    connection.readTimeout = 8_000
-    connection.setRequestProperty("User-Agent", "Mozilla/5.0")
-    return try {
-        connection.inputStream.bufferedReader().use { it.readText() }
-    } finally {
-        connection.disconnect()
-    }
-}
+private fun httpGet(url: String): String =
+    HttpClients.getText(url, headers = mapOf("User-Agent" to "Mozilla/5.0"), connectTimeoutMs = 8_000, readTimeoutMs = 8_000)
 
 private fun bbcState(status: String): String? = when (status) {
     "PreEvent" -> "pre"
