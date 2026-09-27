@@ -164,7 +164,7 @@ class UserLibraryStore(context: Context) {
         JSONObject(preferences.getString(key(profileId), null) ?: "{}")
     }.getOrDefault(JSONObject())
 
-    private fun key(profileId: String): String = "profile_${profileId.replace(Regex("[^A-Za-z0-9._-]"), "_")}"
+    private fun key(profileId: String): String = "profile_${profileId.replace(UNSAFE_KEY_CHARS, "_")}"
 
     private companion object {
         val mutationLock = Any()
@@ -382,3 +382,5 @@ fun PlaybackHistoryItem.isResumable(): Boolean {
     if (durationMs > 0 && positionMs >= durationMs - 30_000) return false
     return positionMs >= MIN_VOD_HISTORY_POSITION_MS
 }
+
+private val UNSAFE_KEY_CHARS = Regex("[^A-Za-z0-9._-]")

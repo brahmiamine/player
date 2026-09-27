@@ -4,6 +4,7 @@ import fr.streamia.tv.domain.Catalog
 import fr.streamia.tv.domain.MediaCategory
 import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.MediaType
+import fr.streamia.tv.domain.STREAM_EXTENSION
 import fr.streamia.tv.domain.ServerCredentials
 import java.io.BufferedReader
 import java.io.Reader
@@ -167,7 +168,7 @@ class M3uParser {
             ?: fileName.toIntOrNull()
             ?: return null
         val extension = fileName.substringAfterLast('.', type.defaultExtension)
-            .takeIf { it.matches(Regex("[A-Za-z0-9]{1,8}")) }
+            .takeIf { it.matches(STREAM_EXTENSION) }
             ?: type.defaultExtension
         val prefix = rawSegments.take(typeIndex).joinToString("/")
         val authority = buildString {

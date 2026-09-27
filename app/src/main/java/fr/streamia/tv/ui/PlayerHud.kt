@@ -419,9 +419,14 @@ internal fun PlayerGuide(
 private fun EpgProgram.timeRange(): String? {
     val start = startEpochSeconds ?: return null
     val end = endEpochSeconds ?: return null
-    val format = SimpleDateFormat("HH:mm", Locale.getDefault())
-    return "${format.format(Date(start * 1000L))}–${format.format(Date(end * 1000L))}"
+    val zone = java.time.ZoneId.systemDefault()
+    fun clock(epochSeconds: Long) = java.time.Instant.ofEpochSecond(epochSeconds).atZone(zone).format(ProgramClockFormatter)
+    return "${clock(start)}–${clock(end)}"
 }
+
+/** Partagé (immuable) : la plage horaire est recalculée à chaque recomposition du guide. */
+private val ProgramClockFormatter: java.time.format.DateTimeFormatter =
+    java.time.format.DateTimeFormatter.ofPattern("HH:mm", Locale.getDefault())
 
 @Composable
 internal fun SeekFeedbackText(feedback: String, position: () -> Long) {
@@ -433,7 +438,9 @@ internal fun formatDuration(positionMs: Long): String {
     val hours = totalSeconds / 3600L
     val minutes = (totalSeconds % 3600L) / 60L
     val seconds = totalSeconds % 60L
-    return if (hours > 0) "%d:%02d:%02d".format(hours, minutes, seconds) else "%02d:%02d".format(minutes, seconds)
+    // Appelé chaque seconde par la timeline : pas de String.format (analyse du motif à chaque appel).
+    fun Long.twoDigits() = if (this < 10) "0$this" else toString()
+    return if (hours > 0) "$hours:${minutes.twoDigits()}:${seconds.twoDigits()}" else "${minutes.twoDigits()}:${seconds.twoDigits()}"
 }
 
 /**

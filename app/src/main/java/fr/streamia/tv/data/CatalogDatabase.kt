@@ -637,7 +637,10 @@ internal class CatalogDatabase(context: Context) :
  */
 internal fun ftsMatchQuery(query: String): String? =
     query.lowercase()
-        .split(Regex("[^\\p{L}\\p{N}]+"))
+        .split(FTS_WORD_SEPARATOR)
         .filter(String::isNotBlank)
         .takeIf { it.isNotEmpty() }
         ?.joinToString(" ") { "$it*" }
+
+/** Séparateur de mots de la recherche, compilé une fois (appelé à chaque frappe). */
+private val FTS_WORD_SEPARATOR = Regex("[^\\p{L}\\p{N}]+")

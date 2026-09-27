@@ -1024,6 +1024,11 @@ fun PlayerScreen(
         }
     }
 
+    // Nom de catégorie du bandeau : recherché une fois par chaîne, pas à chaque recomposition du HUD.
+    val categoryName = remember(catalog, entry.type, entry.categoryId) {
+        catalog.categoriesFor(entry.type).firstOrNull { it.id == entry.categoryId }?.name
+    }
+
     BackHandler {
         when {
             versionScan != null -> cancelVersionScan()
@@ -1167,7 +1172,7 @@ fun PlayerScreen(
         if (hudVisible && !guideOpen && !settingsOpen && !returningToBrowser) {
             PlayerInfoBand(
                 entry = entry,
-                categoryName = catalog.categoriesFor(entry.type).firstOrNull { it.id == entry.categoryId }?.name,
+                categoryName = categoryName,
                 epg = epg,
                 isPlaying = player.isPlaying,
                 numberBuffer = numberBuffer,
