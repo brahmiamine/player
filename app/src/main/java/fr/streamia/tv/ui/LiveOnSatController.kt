@@ -3,7 +3,7 @@ package fr.streamia.tv.ui
 import fr.streamia.tv.data.BackgroundWork
 import androidx.lifecycle.viewModelScope
 import fr.streamia.tv.data.HomeBlock
-import fr.streamia.tv.data.XtreamRepository
+import fr.streamia.tv.data.HomeGuidesRepository
 import fr.streamia.tv.domain.Catalog
 import fr.streamia.tv.domain.EpgGuide
 import fr.streamia.tv.domain.MediaCategory
@@ -68,9 +68,9 @@ internal class LiveOnSatController(
         profileId: String?,
         fetch: LiveOnSatFetchResult,
     ): Pair<String?, List<ResolvedLiveOnSatMatch>?> {
-        val version = profileId?.let { id -> runCatching { repository.liveOnSatResolutionVersion(id, fetch) }.getOrNull() }
+        val version = profileId?.let { id -> runCatching { repository.guides.liveOnSatResolutionVersion(id, fetch) }.getOrNull() }
         val saved = if (profileId == null || version == null) null else {
-            runCatching { repository.cachedLiveOnSatResolution(profileId, version, fetch) }.getOrNull()
+            runCatching { repository.guides.cachedLiveOnSatResolution(profileId, version, fetch) }.getOrNull()
         }?.let { resolved ->
             val catalog = _uiState.value.catalog ?: return@let resolved
             resolved.map { match ->
@@ -90,7 +90,7 @@ internal class LiveOnSatController(
         if (HomeBlock.LiveMatches in _uiState.value.appSettings.disabledHomeBlocks) return
         val sequence = liveOnSatLoadSequence
         viewModelScope.launch {
-            val fetch = runCatching { repository.cachedLiveOnSatMatches() }.getOrNull() ?: return@launch
+            val fetch = runCatching { repository.guides.cachedLiveOnSatMatches() }.getOrNull() ?: return@launch
             val profileId = _uiState.value.activeProfileId ?: return@launch
             val (_, saved) = liveOnSatSavedResolution(profileId, fetch)
             if (_uiState.value.activeProfileId != profileId) return@launch
@@ -126,13 +126,13 @@ internal class LiveOnSatController(
             coroutineContext.job.invokeOnCompletion {
                 if (sequence == liveOnSatLoadSequence) _homeState.update { it.copy(liveOnSatPending = false, liveOnSatResolving = false) }
             }
-            val result = runCatching { repository.loadLiveOnSatMatches(forceRefresh) }
+            val result = runCatching { repository.guides.loadLiveOnSatMatches(forceRefresh) }
             if (sequence != liveOnSatLoadSequence) return@launch
 
             result.onSuccess { fetch ->
                 // Cache encore valable : prochain rechargement quand il atteint 2 h. Cache expiré
                 // renvoyé quand même (scrape en échec) : nouvel essai dans LIVE_ONSAT_RETRY_MS.
-                val expiresAt = fetch.fetchedAtEpochMillis + XtreamRepository.LIVE_ONSAT_CACHE_MAX_AGE_MS
+                val expiresAt = fetch.fetchedAtEpochMillis + HomeGuidesRepository.LIVE_ONSAT_CACHE_MAX_AGE_MS
                 if (expiresAt > System.currentTimeMillis()) liveOnSatNextCheckAtMillis = expiresAt
                 // Chaînes déjà rapprochées pour ce même scrape, cette même playlist et ce même EPG :
                 // réutilisées telles quelles, sinon rapprochement refait puis réenregistré.
@@ -242,7 +242,7 @@ internal class LiveOnSatController(
             offset = end
         }
         // Gardé jusqu'au prochain scrape : les prochaines ouvertures sautent tout ce calcul.
-        repository.saveLiveOnSatResolution(profileId, version, resolved)
+        repository.guides.saveLiveOnSatResolution(profileId, version, resolved)
     }
 
     /** Matchs affichés s'ils proviennent déjà de ce même scrape. */

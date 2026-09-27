@@ -14,18 +14,11 @@ import fr.streamia.tv.domain.EpgProgram
 import fr.streamia.tv.domain.MediaCategory
 import fr.streamia.tv.domain.MediaDetails
 import fr.streamia.tv.domain.MediaEntry
-import fr.streamia.tv.liveonsat.ResolvedLiveOnSatMatch
 import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.domain.SeriesDetails
 import fr.streamia.tv.domain.ServerCredentials
 import fr.streamia.tv.domain.XtreamUrlBuilder
-import fr.streamia.tv.recommendation.ContentCandidateIndex
 import fr.streamia.tv.recommendation.ContentFeatures
-import fr.streamia.tv.recommendation.IndexedContent
-import fr.streamia.tv.recommendation.MetadataSimilarityEngine
-import fr.streamia.tv.recommendation.MovieLensNeighbors
-import fr.streamia.tv.recommendation.SimilarityBoost
-import fr.streamia.tv.recommendation.releaseYear
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -35,15 +28,13 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
-import org.json.JSONObject
-import org.json.JSONArray
 import java.io.IOException
 import java.io.InputStreamReader
 import java.nio.charset.StandardCharsets
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
-/** Issue d'une demande d'installation de mise à jour (voir [XtreamRepository.installDownloadedUpdate]). */
+/** Issue d'une demande d'installation de mise à jour (voir [AppUpdateRepository.installDownloadedUpdate]). */
 enum class UpdateInstallStart { Started, PermissionRequested, PermissionStillMissing, BlockedByAdmin }
 
 /** Rangée JustWatch lue sur disque ; [fresh] faux quand elle doit être recalculée. */
@@ -59,16 +50,22 @@ class XtreamRepository private constructor(context: Context) {
     private val libraryStore = UserLibraryStore(context)
     private val appSettingsStore = AppSettingsStore(context)
     private val recommendationStore = RecommendationStore(context)
-    private val liveOnSatRepository = LiveOnSatRepository(context)
-    private val tvProgrammeRepository = TvProgrammeRepository(context)
-    private val tvProgrammeNowRepository = TvProgrammeNowRepository(context)
-    private val beinSportsGuideRepository = BeinSportsGuideRepository(context)
-    private val ukGuideRepository = UkGuideRepository(context)
     private val xmlTvRepository = XmlTvRepository()
     private val epgValidators = EpgHttpValidatorsStore(context)
     private val m3uParser = M3uParser()
-    private val updateChecker = UpdateChecker()
     private val backupManager = BackupManager(context)
+
+    /** Mises à jour de l'application : vérification, téléchargement et installation de l'APK. */
+    val updates = AppUpdateRepository(appContext)
+
+    /** Contenus similaires : index enrichi, liens TMDB, sagas Wikidata et voisins MovieLens. */
+    val similarity = SimilarityRepository(context, cache, recommendationStore)
+
+    /** Guides tiers de l'accueil (matchs du jour, programmes FR, beIN, UK) et leurs caches disque. */
+    val guides = HomeGuidesRepository(context, cache, playlistStore, epgCache)
+
+    /** Rangées « tendances » JustWatch rapprochées de la playlist. */
+    val trending = TrendingRepository(appContext, cache)
 
     fun profiles(): List<PlaylistProfile> = playlistStore.loadAll()
     fun profile(profileId: String): PlaylistProfile? = playlistStore.find(profileId)
@@ -76,67 +73,6 @@ class XtreamRepository private constructor(context: Context) {
     fun appSettings(): AppSettings = appSettingsStore.load()
     fun updateAppSettings(transform: (AppSettings) -> AppSettings): AppSettings = appSettingsStore.update(transform)
     fun customizedCatalog(profileId: String, catalog: Catalog): Catalog = libraryStore.applyToCatalog(profileId, catalog)
-
-    suspend fun checkForUpdate(currentBuild: Int): UpdateCheckResult =
-        withContext(Dispatchers.IO) { updateChecker.checkForUpdate(currentBuild) }
-
-    private val updateApk get() = File(appContext.cacheDir, "updates/streamia-tv.apk")
-    private val pendingUpdateStore = PendingUpdateStore(appContext)
-
-    /** Télécharge l'APK de [release] et le garde comme mise à jour en attente (survit à un arrêt de l'app). */
-    suspend fun downloadUpdate(release: ReleaseInfo, onProgress: (Float?) -> Unit) {
-        withContext(Dispatchers.IO) {
-            pendingUpdateStore.clear()
-            updateChecker.downloadApk(release, updateApk, onProgress)
-            pendingUpdateStore.save(release)
-        }
-    }
-
-    /**
-     * Mise à jour déjà téléchargée et encore plus récente que la version installée. Installée
-     * entre-temps (ou fichier disparu) : oubliée, et l'APK supprimé.
-     */
-    fun pendingUpdate(currentBuild: Int): ReleaseInfo? {
-        val release = pendingUpdateStore.load()
-        val build = release?.let { parseBuildNumber(it.version) }
-        if (release == null || build == null || build <= currentBuild || !updateApk.exists()) {
-            clearPendingUpdate()
-            return null
-        }
-        return release
-    }
-
-    fun clearPendingUpdate() {
-        pendingUpdateStore.clear()
-        updateApk.delete()
-    }
-
-    /** Vrai une seule fois après que Streamia a ouvert le réglage « applis inconnues ». */
-    fun consumeAwaitingInstallPermission(): Boolean =
-        pendingUpdateStore.isAwaitingPermission().also { if (it) pendingUpdateStore.markAwaitingPermission(false) }
-
-    fun openInstallPermissionSettings() {
-        pendingUpdateStore.markAwaitingPermission(true)
-        UpdateInstaller.openUnknownSourcesSettings(appContext)
-    }
-
-    /**
-     * Installe l'APK déjà téléchargé. Sans autorisation, ouvre le réglage si [openSettingsIfNeeded]
-     * (premier essai lancé par l'utilisateur) ; l'installation reprend au retour dans l'app, même
-     * si Android l'a arrêtée entre-temps (voir [PendingUpdateStore]).
-     */
-    suspend fun installDownloadedUpdate(openSettingsIfNeeded: Boolean = false): UpdateInstallStart {
-        if (UpdateInstaller.blockedByAdmin(appContext)) return UpdateInstallStart.BlockedByAdmin
-        if (!UpdateInstaller.canInstall(appContext)) {
-            if (!openSettingsIfNeeded) return UpdateInstallStart.PermissionStillMissing
-            openInstallPermissionSettings()
-            return UpdateInstallStart.PermissionRequested
-        }
-        withContext(Dispatchers.IO) { UpdateInstaller.install(appContext, updateApk) }
-        return UpdateInstallStart.Started
-    }
-
-    val canInstallUpdateSilently: Boolean get() = UpdateInstaller.canInstallSilently
 
     suspend fun cacheSizeBytes(): Long = withContext(Dispatchers.IO) { cache.databaseFileSizeBytes() }
     suspend fun epgCacheSizeBytes(): Long = withContext(Dispatchers.IO) { epgCache.databaseFileSizeBytes() }
@@ -184,271 +120,6 @@ class XtreamRepository private constructor(context: Context) {
     suspend fun homeRecommendationCandidates(profileId: String, type: MediaType, limit: Int): List<MediaEntry> =
         cache.loadHomeRecommendationCandidates(profileId, type, limit)
 
-    /**
-     * Candidats « similaires » : d'abord les plus proches dans TOUT le catalogue enrichi (genre,
-     * intrigue, personnes, saga — voir [ContentCandidateIndex]), puis les voisins de catégorie.
-     * Sert la fiche détail et les rangées « Parce que vous avez regardé » de l'accueil.
-     */
-    suspend fun similarityCandidates(
-        profileId: String,
-        source: MediaEntry,
-        limit: Int,
-        sourceFeatures: ContentFeatures? = null,
-    ): List<MediaEntry> {
-        val neighbours = cache.loadSimilarityCandidates(profileId, source, limit)
-        val tmdbKeys = tmdbRelated(profileId, source).keys
-        val index = runCatching { candidateIndex(profileId) }.getOrNull()
-            ?: return (cache.loadEntriesByKeys(profileId, LinkedHashSet(tmdbKeys)) + neighbours).distinctBy(MediaEntry::key).take(limit)
-        val indexed = indexedSource(source, sourceFeatures)
-        val matchedKeys = withContext(BackgroundWork.light) {
-            // Liens forts (saga, MovieLens, TMDB) d'abord, puis proximité genre / intrigue / mots-clés / personnes.
-            (index.related(indexed, movieLens.of(indexed.tmdbId)).keys + tmdbKeys + index.topMatches(indexed, limit = (limit / 2).coerceAtLeast(1)))
-                .distinct()
-                .take(limit)
-        }
-        if (matchedKeys.isEmpty()) return neighbours
-        val matched = cache.loadEntriesByKeys(profileId, LinkedHashSet(matchedKeys))
-        return (matched + neighbours).distinctBy(MediaEntry::key).take(limit)
-    }
-
-    /** Liens forts (même saga Wikidata, voisins MovieLens) à faire remonter dans le classement. */
-    suspend fun similarityBoosts(
-        profileId: String,
-        source: MediaEntry,
-        sourceFeatures: ContentFeatures? = null,
-    ): Map<String, SimilarityBoost> {
-        val tmdb = tmdbRelated(profileId, source)
-        val index = runCatching { candidateIndex(profileId) }.getOrNull() ?: return tmdb
-        val indexed = indexedSource(source, sourceFeatures)
-        val related = withContext(BackgroundWork.light) { index.related(indexed, movieLens.of(indexed.tmdbId)) }
-        // Saga / MovieLens gardent la priorité quand ils sont plus sûrs que la recommandation TMDB.
-        return tmdb + related.filter { (key, boost) -> (tmdb[key]?.score ?: 0.0) < boost.score }
-    }
-
-    private val tmdb = TmdbClient()
-    // LRU borné : une entrée par fiche ouverte, la session pouvant durer des jours sur une TV.
-    private val tmdbRelatedCache = android.util.LruCache<String, Map<String, SimilarityBoost>>(TMDB_RELATED_CACHE_SIZE)
-
-    /**
-     * Données TMDB d'un contenu (résumé anglais, genres, mots-clés) substituées aux métadonnées du
-     * fournisseur pour la comparaison ; interroge TMDB une fois si le contenu n'a jamais été vu.
-     */
-    suspend fun withTmdb(profileId: String, features: ContentFeatures): ContentFeatures = withContext(Dispatchers.IO) {
-        val key = features.entry.key
-        val info = recommendationStore.tmdb(profileId, key) ?: run {
-            val tmdbId = features.tmdbId?.trim()?.takeIf { it.isNotEmpty() && it.all(Char::isDigit) && it != "0" }
-            if (!tmdb.enabled || tmdbId == null) return@withContext features
-            val fetched = runCatching { tmdb.info(features.entry.type, tmdbId) }.getOrElse { return@withContext features }
-            recommendationStore.saveTmdb(profileId, key, fetched)
-            fetched
-        } ?: return@withContext features
-        features.copy(
-            plot = info.overview ?: features.plot,
-            genre = info.genres.takeIf { it.isNotEmpty() }?.joinToString(", ") ?: features.genre,
-            keywords = info.keywords,
-        )
-    }
-
-    /**
-     * Recommandations TMDB retrouvées dans le catalogue : par TMDB ID pour les contenus enrichis,
-     * sinon par titre + année (recherche en base, comme « Autres versions »). Bonus modéré : elles
-     * amènent des candidats, mais la ressemblance de contenu reste décisive dans le classement.
-     */
-    private suspend fun tmdbRelated(profileId: String, source: MediaEntry): Map<String, SimilarityBoost> {
-        val cacheKey = "$profileId|${source.key}"
-        tmdbRelatedCache.get(cacheKey)?.let { return it }
-        val info = withContext(Dispatchers.IO) { recommendationStore.tmdb(profileId, source.key) } ?: return emptyMap()
-        val titles = info.recommendations.take(TMDB_RELATED_LIMIT)
-        val byId = withContext(Dispatchers.IO) { recommendationStore.keysByTmdbId(profileId, source.type, titles.map { it.id }) }
-        val tokenizer = MetadataSimilarityEngine()
-        val result = LinkedHashMap<String, SimilarityBoost>()
-        titles.forEachIndexed { rank, title ->
-            val key = byId[title.id] ?: listOfNotNull(title.title, title.originalTitle).firstNotNullOfOrNull { name ->
-                val wanted = tokenizer.titleTokens(name).takeIf { it.isNotEmpty() } ?: return@firstNotNullOfOrNull null
-                search(profileId, wanted.joinToString(" "), source.type, TMDB_SEARCH_LIMIT).firstOrNull { entry ->
-                    val year = ContentFeatures(entry).releaseYear()
-                    tokenizer.titleTokens(entry.displayName) == wanted && (year == null || title.year == null || year == title.year)
-                }?.key
-            } ?: return@forEachIndexed
-            if (key != source.key) result.putIfAbsent(key, SimilarityBoost(TMDB_TOP_SCORE - rank * TMDB_RANK_STEP, "Recommandé par TMDB"))
-        }
-        tmdbRelatedCache.put(cacheKey, result)
-        return result
-    }
-
-    /** Interroge TMDB pour un lot de contenus enrichis jamais vus. Renvoie le nombre traité (0 = fini). */
-    suspend fun fetchTmdbBatch(
-        profileId: String,
-        batchSize: Int,
-        pauseMs: Long,
-        shouldStop: () -> Boolean = { false },
-    ): Int = withContext(Dispatchers.IO) {
-        if (!tmdb.enabled) return@withContext 0
-        val pending = recommendationStore.missingTmdbLookups(profileId, batchSize)
-        var failures = 0
-        for ((key, tmdbId) in pending) {
-            if (shouldStop()) break
-            val type = MediaType.entries.first { it.name == key.substringBefore(':') }
-            // Échec réseau : non mémorisé, retenté au prochain passage ; plusieurs de suite = TMDB injoignable.
-            runCatching { tmdb.info(type, tmdbId) }
-                .onSuccess { recommendationStore.saveTmdb(profileId, key, it); failures = 0 }
-                .onFailure { if (++failures >= TMDB_MAX_FAILURES) throw it }
-            kotlinx.coroutines.delay(pauseMs)
-        }
-        pending.size
-    }
-
-    private fun indexedSource(source: MediaEntry, features: ContentFeatures?) = IndexedContent(
-        source.key,
-        source.displayName,
-        features?.plot ?: source.plot,
-        features?.genre,
-        features?.cast,
-        features?.director,
-        tmdbId = features?.tmdbId,
-        keywords = features?.keywords.orEmpty(),
-    )
-
-    private val movieLens = MovieLensNeighbors.fromAssets(context)
-
-    private val candidateIndexLock = Mutex()
-    @Volatile private var candidateIndexState: CandidateIndexState? = null
-    private class CandidateIndexState(val profileId: String, val sourceCount: Int, val index: ContentCandidateIndex)
-
-    /**
-     * Index reconstruit seulement quand l'enrichissement a nettement progressé (+5 %, au moins 200
-     * fiches) : l'enrichissement en arrière-plan ajoute des fiches en continu, reconstruire à chaque
-     * ouverture de fiche coûterait une seconde de CPU sur un petit boîtier.
-     */
-    private suspend fun candidateIndex(profileId: String): ContentCandidateIndex? {
-        val count = withContext(Dispatchers.IO) { recommendationStore.featureCount(profileId) + recommendationStore.sagaCount(profileId) }
-        if (count == 0) return null
-        fun fresh() = candidateIndexState?.takeIf {
-            it.profileId == profileId && count - it.sourceCount < maxOf(INDEX_REBUILD_MIN_DELTA, it.sourceCount / 20)
-        }?.index
-        fresh()?.let { return it }
-        return candidateIndexLock.withLock {
-            fresh() ?: run {
-                val features = withContext(Dispatchers.IO) { recommendationStore.features(profileId) }
-                val sagas = withContext(Dispatchers.IO) { recommendationStore.sagas(profileId) }
-                // Seulement les contenus enrichis : charger tout Films + Séries (plus de 200 000
-                // entrées avec résumés) saturait la mémoire et faisait planter l'app (OOM).
-                val entries = cache.loadEntriesByKeys(profileId, features.keys).associateBy(MediaEntry::key)
-                val index = withContext(BackgroundWork.light) {
-                    ContentCandidateIndex(
-                        features.mapNotNull { (key, stored) ->
-                            val entry = entries[key] ?: return@mapNotNull null
-                            IndexedContent(
-                                key,
-                                entry.displayName,
-                                stored.plot ?: entry.plot,
-                                stored.genre,
-                                stored.cast,
-                                stored.director,
-                                tmdbId = stored.tmdbId,
-                                sagas = sagas[key].orEmpty(),
-                                keywords = stored.keywords,
-                            )
-                        },
-                    )
-                }
-                candidateIndexState = CandidateIndexState(profileId, count, index)
-                index
-            }
-        }
-    }
-
-    private val wikidata = WikidataClient()
-    private val justWatch = JustWatchClient()
-    private val justWatchCache = ConcurrentHashMap<JustWatchSection, Pair<Long, List<TrendingTitle>>>()
-
-    /** Section JustWatch (cache mémoire 6 h) réduite aux titres présents dans le catalogue, ordre JustWatch. */
-    /**
-     * Dernier rapprochement JustWatch ↔ playlist de cette rangée, gardé sur disque : l'accueil
-     * l'affiche dès l'ouverture, sans réseau ni recherche. [CachedJustWatchRow.fresh] faux au-delà
-     * de [JUSTWATCH_TTL_MS] : à recalculer (l'ancienne rangée reste affichée en attendant).
-     */
-    suspend fun cachedJustWatch(profileId: String, section: JustWatchSection): CachedJustWatchRow? = withContext(Dispatchers.IO) {
-        runCatching {
-            val root = JSONObject(justWatchFile(profileId, section).readText())
-            val keys = root.getJSONArray("keys").let { array -> (0 until array.length()).map(array::getString) }
-            val byKey = entriesByKeys(profileId, keys.toSet()).associateBy(MediaEntry::key)
-            CachedJustWatchRow(keys.mapNotNull(byKey::get), fresh = System.currentTimeMillis() - root.getLong("at") < JUSTWATCH_TTL_MS)
-        }.getOrNull()
-    }
-
-    private fun justWatchTitlesFile(section: JustWatchSection) = File(appContext.filesDir, "justwatch-titles-${section.name}.json")
-
-    /** Titres encore frais sur disque (horodatage d'origine gardé), sinon null. */
-    private fun loadJustWatchTitles(section: JustWatchSection, now: Long): Pair<Long, List<TrendingTitle>>? = runCatching {
-        val root = JSONObject(justWatchTitlesFile(section).readText())
-        val at = root.getLong("at").takeIf { now - it < JUSTWATCH_TTL_MS } ?: return@runCatching null
-        val array = root.getJSONArray("titles")
-        at to (0 until array.length()).map { i ->
-            val item = array.getJSONObject(i)
-            TrendingTitle(
-                type = section.type,
-                title = item.getString("title"),
-                originalTitle = item.optString("originalTitle").ifBlank { null },
-                year = item.optInt("year").takeIf { it > 0 },
-            )
-        }
-    }.getOrNull()
-
-    private fun fetchJustWatchTitles(section: JustWatchSection, now: Long): Pair<Long, List<TrendingTitle>> {
-        val titles = justWatch.titles(section)
-        runCatching {
-            val array = JSONArray(titles.map { JSONObject().put("title", it.title).put("originalTitle", it.originalTitle).put("year", it.year) })
-            justWatchTitlesFile(section).writeText(JSONObject().put("at", now).put("titles", array).toString())
-        }
-        return now to titles
-    }
-
-    private fun justWatchFile(profileId: String, section: JustWatchSection) =
-        File(appContext.filesDir, "justwatch-$profileId-${section.name}.json")
-
-    suspend fun justWatch(profileId: String, section: JustWatchSection, limit: Int): List<MediaEntry> {
-        val now = System.currentTimeMillis()
-        // Titres JustWatch communs à toutes les listes : mémoire, puis disque, puis réseau.
-        val titles = justWatchCache[section]?.takeIf { now - it.first < JUSTWATCH_TTL_MS }?.second
-            ?: withContext(Dispatchers.IO) { loadJustWatchTitles(section, now) ?: fetchJustWatchTitles(section, now) }
-                .also { justWatchCache[section] = it }.second
-        val result = LinkedHashMap<String, MediaEntry>()
-        for (title in titles) {
-            if (result.size >= limit) break
-            val match = search(profileId, title.title, title.type, JUSTWATCH_SEARCH_LIMIT).firstOrNull { matchesTrending(it, title) }
-                ?: title.originalTitle?.let { original ->
-                    search(profileId, original, title.type, JUSTWATCH_SEARCH_LIMIT).firstOrNull { matchesTrending(it, title) }
-                }
-            match?.let { result.putIfAbsent(titleKey(it.displayName), it) }
-        }
-        withContext(Dispatchers.IO) {
-            runCatching {
-                justWatchFile(profileId, section).writeText(
-                    JSONObject().put("at", now).put("keys", JSONArray(result.values.map(MediaEntry::key))).toString(),
-                )
-            }
-        }
-        return result.values.toList()
-    }
-
-    /**
-     * Interroge Wikidata pour un lot de contenus enrichis jamais vérifiés. Renvoie le nombre traité
-     * (0 = plus rien à faire). Les contenus sans saga sont mémorisés vides pour ne pas redemander.
-     */
-    suspend fun fetchSagaBatch(profileId: String, batchSize: Int): Int = withContext(Dispatchers.IO) {
-        val pending = recommendationStore.missingSagaLookups(profileId, batchSize)
-        if (pending.isEmpty()) return@withContext 0
-        val found = pending.entries.groupBy { MediaType.entries.first { t -> t.name == it.key.substringBefore(':') } }
-            .flatMap { (type, rows) ->
-                val byTmdb = wikidata.sagas(type, rows.map { it.value }.distinct())
-                rows.map { it.key to byTmdb[it.value].orEmpty() }
-            }
-            .toMap()
-        recommendationStore.saveSagas(profileId, found)
-        pending.size
-    }
-
     /** Clés déjà enrichies, pour l'enrichissement en arrière-plan. */
     suspend fun enrichedRecommendationKeys(profileId: String): Set<String> =
         withContext(Dispatchers.IO) { recommendationStore.enrichedKeys(profileId) }
@@ -473,90 +144,6 @@ class XtreamRepository private constructor(context: Context) {
     /** Enrichit le moteur de recommandation dès qu'une fiche film/série est réellement consultée. */
     suspend fun cacheRecommendationDetails(profileId: String, details: MediaDetails) =
         withContext(Dispatchers.IO) { recommendationStore.saveDetails(profileId, details) }
-
-    /**
-     * Matchs du jour scrapés depuis liveonsat.com, sans lien avec un profil Xtream/M3U particulier
-     * (seule leur mise en correspondance avec les chaînes, faite par l'appelant, en dépend).
-     */
-    suspend fun loadLiveOnSatMatches(forceRefresh: Boolean = false): LiveOnSatFetchResult =
-        liveOnSatRepository.loadMatches(forceRefresh, maxAgeMillis = LIVE_ONSAT_CACHE_MAX_AGE_MS)
-
-    /**
-     * Les trois sources du rapprochement liveonsat : scrape, actualisation de la playlist (chaînes)
-     * et synchronisation EPG (horaires). À calculer avant le rapprochement et à réutiliser pour
-     * l'enregistrer, pour qu'une synchronisation survenue pendant le calcul le fasse refaire.
-     */
-    suspend fun liveOnSatResolutionVersion(profileId: String, fetch: LiveOnSatFetchResult): String {
-        val catalogRefreshedAt = playlistStore.find(profileId)?.lastRefreshAt ?: 0L
-        val epgSyncedAt = epgCache.metadata(profileId)?.syncedAtMillis ?: 0L
-        return "${fetch.fetchedAtEpochMillis}|$catalogRefreshedAt|$epgSyncedAt"
-    }
-
-    /** Rapprochement chaînes/EPG déjà calculé pour cette [version], ou null s'il faut le refaire. */
-    suspend fun cachedLiveOnSatResolution(profileId: String, version: String, fetch: LiveOnSatFetchResult): List<ResolvedLiveOnSatMatch>? {
-        val saved = liveOnSatRepository.loadResolution(profileId, version)
-            ?.takeIf { it.size == fetch.matches.size }
-            ?: return null
-        val keys = saved.flatMapTo(mutableSetOf()) { it.channelKeys.values.flatten() }
-        val entries = entriesByKeys(profileId, keys).associateBy(MediaEntry::key)
-        return fetch.matches.zip(saved) { match, resolution ->
-            ResolvedLiveOnSatMatch(
-                match = match,
-                matchedChannels = resolution.channelKeys
-                    .mapValues { (_, channelKeys) -> channelKeys.mapNotNull(entries::get) }
-                    .filterValues { it.isNotEmpty() },
-                epgStartEpochSeconds = resolution.epgStartEpochSeconds,
-                epgEndEpochSeconds = resolution.epgEndEpochSeconds,
-            )
-        }
-    }
-
-    suspend fun saveLiveOnSatResolution(profileId: String, version: String, resolved: List<ResolvedLiveOnSatMatch>) =
-        liveOnSatRepository.saveResolution(
-            profileId,
-            version,
-            resolved.map {
-                LiveOnSatResolution(
-                    channelKeys = it.matchedChannels.mapValues { (_, channels) -> channels.map(MediaEntry::key) },
-                    epgStartEpochSeconds = it.epgStartEpochSeconds,
-                    epgEndEpochSeconds = it.epgEndEpochSeconds,
-                )
-            },
-        )
-
-    /** Cache disque encore frais : les chargements correspondants ne contacteront aucun site. */
-    suspend fun hasFreshLiveOnSatCache() = liveOnSatRepository.hasFreshCache(LIVE_ONSAT_CACHE_MAX_AGE_MS)
-    suspend fun hasFreshTvProgrammeTonightCache() = tvProgrammeRepository.hasFreshCache(TV_PROGRAMME_CACHE_MAX_AGE_MS)
-    suspend fun hasFreshTvProgrammeNowCache() = tvProgrammeNowRepository.hasFreshCache(TV_PROGRAMME_NOW_CACHE_MAX_AGE_MS)
-    suspend fun hasFreshBeinSportsGuideCache() = beinSportsGuideRepository.hasFreshCache(BEIN_SPORTS_GUIDE_CACHE_MAX_AGE_MS)
-    suspend fun hasFreshUkGuideCache() = ukGuideRepository.hasFreshCache(UK_GUIDE_CACHE_MAX_AGE_MS)
-
-    // Données déjà sur disque, quel que soit leur âge : affichées immédiatement pendant que le
-    // chargement habituel (load*) les actualise, au lieu d'un squelette le temps du téléchargement.
-    suspend fun cachedLiveOnSatMatches() = liveOnSatRepository.cached()
-    suspend fun cachedTvProgrammeTonight() = tvProgrammeRepository.cached()
-    suspend fun cachedTvProgrammeNow() = tvProgrammeNowRepository.cached()
-    suspend fun cachedBeinSportsGuide() = beinSportsGuideRepository.cached()
-    suspend fun cachedUkGuide() = ukGuideRepository.cached()
-
-    /** Réseau revenu : les guides en attente après un échec peuvent réessayer tout de suite. */
-    fun clearGuideFailureBackoffs() = tvProgrammeNowRepository.clearFailureBackoff()
-
-    /** Programmes TV français du soir scrapés depuis tv-programme.com avec cache local. */
-    suspend fun loadTvProgrammeTonight(forceRefresh: Boolean = false): TvProgrammeFetchResult =
-        tvProgrammeRepository.loadTonight(forceRefresh, maxAgeMillis = TV_PROGRAMME_CACHE_MAX_AGE_MS)
-
-    /** Programmes TV français actuellement diffusés, rafraîchis fréquemment. */
-    suspend fun loadTvProgrammeNow(forceRefresh: Boolean = false): TvProgrammeNowFetchResult =
-        tvProgrammeNowRepository.loadNow(forceRefresh, maxAgeMillis = TV_PROGRAMME_NOW_CACHE_MAX_AGE_MS)
-
-    /** Grille MENA beIN SPORTS : programmes en cours et suivants avec cache court. */
-    suspend fun loadBeinSportsGuide(forceRefresh: Boolean = false): BeinSportsGuideFetchResult =
-        beinSportsGuideRepository.loadGuide(forceRefresh, maxAgeMillis = BEIN_SPORTS_GUIDE_CACHE_MAX_AGE_MS)
-
-    /** Grille TV britannique (tvguideuk.com) : programmes en cours et suivants avec cache court. */
-    suspend fun loadUkGuide(forceRefresh: Boolean = false): UkGuideFetchResult =
-        ukGuideRepository.loadGuide(forceRefresh, maxAgeMillis = UK_GUIDE_CACHE_MAX_AGE_MS)
 
     /**
      * Recherche indexée en base plutôt que dans le sous-ensemble matérialisé en mémoire : sous
@@ -723,7 +310,7 @@ class XtreamRepository private constructor(context: Context) {
         playlistStore.delete(profileId)
         cache.clear(profileId)
         epgCache.clear(profileId)
-        liveOnSatRepository.clearResolution(profileId)
+        guides.clearLiveOnSatResolution(profileId)
     }
 
     /** Contrôle léger des identifiants (sans charger le catalogue), utilisé avant l'enregistrement. */
@@ -1059,29 +646,6 @@ class XtreamRepository private constructor(context: Context) {
         }
 
         const val DEFAULT_CATEGORY_PAGE_SIZE = 500
-        private const val TMDB_RELATED_CACHE_SIZE = 64
-
-        // Chargé au démarrage de l'app puis relu depuis ce cache disque (page Matchs, accueil) :
-        // un nouveau scrape au plus toutes les 2 h, ou sur le bouton Actualiser. liveonsat.com n'a
-        // pas d'API et ne doit pas être sollicité plus souvent que nécessaire.
-        const val LIVE_ONSAT_CACHE_MAX_AGE_MS = 2 * 60 * 60_000L
-
-        // Le programme du soir change beaucoup moins souvent que les matchs live. Deux heures
-        // limitent les requêtes vers tv-programme.com tout en renouvelant les données dans la soirée.
-        private const val TV_PROGRAMME_CACHE_MAX_AGE_MS = 2 * 60 * 60_000L
-
-        // Le cache garde toute la grille (programme en cours recalculé localement) : pas besoin de
-        // re-scraper souvent, et tv-programme.com bloque (403) les requêtes trop fréquentes.
-        private const val TV_PROGRAMME_NOW_CACHE_MAX_AGE_MS = 30 * 60_000L
-
-        // La grille couvre 24 h et "maintenant"/"suivant" est recalculé localement depuis le cache
-        // (boucle de 2 min de l'accueil) : re-télécharger plus souvent ne changerait rien.
-        private const val BEIN_SPORTS_GUIDE_CACHE_MAX_AGE_MS = 30 * 60_000L
-
-        // Grille complète en cache, créneau courant recalculé localement : ~16 requêtes par
-        // téléchargement, donc pas plus d'une fois par demi-heure vers tvguideuk.com.
-        private const val UK_GUIDE_CACHE_MAX_AGE_MS = 30 * 60_000L
-private const val INDEX_REBUILD_MIN_DELTA = 200
 
         // Partagé par toutes les instances de XtreamRepository du process : le worker EPG en
         // arrière-plan (EpgSyncWorker) et le ViewModel créent chacun leur propre instance, mais
@@ -1117,27 +681,6 @@ data class LoadedCatalog(
 )
 
 enum class CatalogSource { Network, Cache, Local, Import }
-
-private val titleTokenizer = MetadataSimilarityEngine()
-private val YEAR_IN_NAME = Regex("\\b(19|20)\\d{2}\\b")
-private const val JUSTWATCH_TTL_MS = 6 * 60 * 60 * 1000L
-private const val TMDB_RELATED_LIMIT = 20
-private const val TMDB_SEARCH_LIMIT = 20
-private const val TMDB_TOP_SCORE = 0.70
-private const val TMDB_RANK_STEP = 0.01
-private const val TMDB_MAX_FAILURES = 5
-private const val JUSTWATCH_SEARCH_LIMIT = 30
-
-/** Titre normalisé sans année, qualité ni préfixe de langue : « FR - Dune (2021) 4K » → « dune ». */
-internal fun titleKey(name: String): String = titleTokenizer.titleTokens(name).joinToString(" ")
-
-/** Même titre (français ou original) et, si le nom IPTV porte une année, à un an près. */
-internal fun matchesTrending(entry: MediaEntry, title: TrendingTitle): Boolean {
-    val key = titleKey(entry.displayName)
-    if (key.isEmpty() || (key != titleKey(title.title) && key != title.originalTitle?.let(::titleKey))) return false
-    val year = YEAR_IN_NAME.findAll(entry.displayName).lastOrNull()?.value?.toInt() ?: return true
-    return title.year == null || kotlin.math.abs(year - title.year) <= 1
-}
 
 /**
  * Lot écrit seulement si la coroutine appelante est encore active. Le parsing est synchrone (la

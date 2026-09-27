@@ -1171,7 +1171,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         retryOfflineCatalog()
         weather.retryNow()
         liveOnSat.retryNow()
-        repository.clearGuideFailureBackoffs()
+        repository.guides.clearGuideFailureBackoffs()
         homeGuides.loadAll()
         recommendations.reloadJustWatchRows()
         epg.startEpgBackgroundSync()
@@ -1306,11 +1306,11 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         secondaryLoadsJob?.cancel()
         secondaryLoadsJob = viewModelScope.launch {
             val loads = listOf<Pair<suspend () -> Boolean, () -> Unit>>(
-                repository::hasFreshTvProgrammeNowCache to { homeGuides.tvProgrammeNowGuide.load(forceRefresh = false) },
-                repository::hasFreshBeinSportsGuideCache to { homeGuides.beinSportsGuide.load(forceRefresh = false) },
-                repository::hasFreshUkGuideCache to { homeGuides.ukGuide.load(forceRefresh = false) },
-                repository::hasFreshTvProgrammeTonightCache to { homeGuides.tvProgrammeTonightGuide.load(forceRefresh = false) },
-                repository::hasFreshLiveOnSatCache to { liveOnSat.loadLiveOnSatMatches(forceRefresh = false) },
+                repository.guides::hasFreshTvProgrammeNowCache to { homeGuides.tvProgrammeNowGuide.load(forceRefresh = false) },
+                repository.guides::hasFreshBeinSportsGuideCache to { homeGuides.beinSportsGuide.load(forceRefresh = false) },
+                repository.guides::hasFreshUkGuideCache to { homeGuides.ukGuide.load(forceRefresh = false) },
+                repository.guides::hasFreshTvProgrammeTonightCache to { homeGuides.tvProgrammeTonightGuide.load(forceRefresh = false) },
+                repository.guides::hasFreshLiveOnSatCache to { liveOnSat.loadLiveOnSatMatches(forceRefresh = false) },
             )
             // Reprise directe dans le lecteur : la vidéo passe d'abord, même les lectures de cache attendent.
             val (cached, scraped) = loads.partition { (hasFreshCache, _) ->

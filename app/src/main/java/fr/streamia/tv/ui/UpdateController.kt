@@ -29,14 +29,14 @@ internal class UpdateController(host: StreamiaStateHolder) : StreamiaController(
         _uiState.update { it.copy(updateChecking = true, updateCheck = null) }
         viewModelScope.launch {
             try {
-                val result = repository.checkForUpdate(BuildConfig.VERSION_CODE)
+                val result = repository.updates.checkForUpdate(BuildConfig.VERSION_CODE)
                 _uiState.update { it.copy(updateCheck = result) }
                 if (result !is UpdateCheckResult.UpdateAvailable) return@launch
                 val release = result.release
-                val alreadyDownloaded = repository.pendingUpdate(BuildConfig.VERSION_CODE)?.version == release.version
+                val alreadyDownloaded = repository.updates.pendingUpdate(BuildConfig.VERSION_CODE)?.version == release.version
                 if (!alreadyDownloaded) {
                     val downloaded = runCatching {
-                        repository.downloadUpdate(release) { progress ->
+                        repository.updates.downloadUpdate(release) { progress ->
                             _uiState.update { it.copy(updateCheck = UpdateCheckResult.Downloading(release, progress)) }
                         }
                     }
@@ -57,19 +57,19 @@ internal class UpdateController(host: StreamiaStateHolder) : StreamiaController(
 
     /** Bouton « Installer » / « Réessayer l'installation » : l'APK est déjà téléchargé. */
     fun installPendingUpdate() {
-        val release = repository.pendingUpdate(BuildConfig.VERSION_CODE) ?: return checkForUpdate()
+        val release = repository.updates.pendingUpdate(BuildConfig.VERSION_CODE) ?: return checkForUpdate()
         viewModelScope.launch { installUpdate(release, openSettingsIfNeeded = true) }
     }
 
     /** Bouton « Autoriser l'installation » : ouvre le réglage, l'installation reprend au retour. */
     fun openUpdateInstallPermission() {
-        val release = repository.pendingUpdate(BuildConfig.VERSION_CODE) ?: return
-        repository.openInstallPermissionSettings()
+        val release = repository.updates.pendingUpdate(BuildConfig.VERSION_CODE) ?: return
+        repository.updates.openInstallPermissionSettings()
         _uiState.update { it.copy(updateCheck = UpdateCheckResult.AwaitingInstallPermission(release)) }
     }
 
     private suspend fun installUpdate(release: ReleaseInfo, openSettingsIfNeeded: Boolean) {
-        runCatching { repository.installDownloadedUpdate(openSettingsIfNeeded) }
+        runCatching { repository.updates.installDownloadedUpdate(openSettingsIfNeeded) }
             .onSuccess { start -> onUpdateInstallStart(start, release) }
             .onFailure { error ->
                 if (error is CancellationException) throw error
@@ -88,14 +88,14 @@ internal class UpdateController(host: StreamiaStateHolder) : StreamiaController(
         if (_uiState.value.updateChecking) return
         val current = _uiState.value.updateCheck
         if (current is UpdateCheckResult.Installing || current is UpdateCheckResult.Downloading) return
-        val release = repository.pendingUpdate(BuildConfig.VERSION_CODE)
+        val release = repository.updates.pendingUpdate(BuildConfig.VERSION_CODE)
         if (release == null) {
             if (current is UpdateCheckResult.AwaitingInstallPermission || current is UpdateCheckResult.Downloaded) {
                 _uiState.update { it.copy(updateCheck = null) }
             }
             return
         }
-        if (repository.consumeAwaitingInstallPermission()) {
+        if (repository.updates.consumeAwaitingInstallPermission()) {
             viewModelScope.launch { installUpdate(release, openSettingsIfNeeded = false) }
         } else if (current == null || current is UpdateCheckResult.AwaitingInstallPermission) {
             // Mise à jour prête (installation annulée ou pas encore autorisée) : proposée dans Paramètres.
@@ -105,7 +105,7 @@ internal class UpdateController(host: StreamiaStateHolder) : StreamiaController(
 
     private fun onUpdateInstallStart(start: UpdateInstallStart, release: ReleaseInfo) {
         val next = when (start) {
-            UpdateInstallStart.Started -> UpdateCheckResult.Installing(release, silent = repository.canInstallUpdateSilently)
+            UpdateInstallStart.Started -> UpdateCheckResult.Installing(release, silent = repository.updates.canInstallUpdateSilently)
             // Réglage ouvert : l'installation reprendra au retour dans l'app (onResume).
             UpdateInstallStart.PermissionRequested -> UpdateCheckResult.AwaitingInstallPermission(release)
             UpdateInstallStart.PermissionStillMissing -> UpdateCheckResult.AwaitingInstallPermission(release)
@@ -122,12 +122,12 @@ internal class UpdateController(host: StreamiaStateHolder) : StreamiaController(
     private fun onUpdateInstallEvent(event: UpdateInstallEvent) {
         val release = when (val current = _uiState.value.updateCheck) {
             is UpdateCheckResult.Installing -> current.release
-            else -> repository.pendingUpdate(BuildConfig.VERSION_CODE)
+            else -> repository.updates.pendingUpdate(BuildConfig.VERSION_CODE)
         } ?: return
         val next = when (event) {
             UpdateInstallEvent.ConfirmationShown -> UpdateCheckResult.Installing(release, silent = false)
             UpdateInstallEvent.Aborted -> UpdateCheckResult.Downloaded(release)
-            UpdateInstallEvent.Succeeded -> null.also { repository.clearPendingUpdate() }
+            UpdateInstallEvent.Succeeded -> null.also { repository.updates.clearPendingUpdate() }
             is UpdateInstallEvent.Failed -> UpdateCheckResult.Error(event.message, release)
         }
         _uiState.update { it.copy(updateCheck = next) }

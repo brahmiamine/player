@@ -28,8 +28,8 @@ internal class HomeGuidesController(host: StreamiaStateHolder) : StreamiaControl
     // Guides tiers de l'accueil : même cycle chargement → rapprochement → publication, voir [HomeGuide].
     val tvProgrammeNowGuide = HomeGuide(
         blocks = setOf(HomeBlock.TvProgrammeNow),
-        fetch = { repository.loadTvProgrammeNow(it) },
-        cached = { repository.cachedTvProgrammeNow() },
+        fetch = { repository.guides.loadTvProgrammeNow(it) },
+        cached = { repository.guides.cachedTvProgrammeNow() },
         isEmpty = { it.programmes.isEmpty() },
     ) { fetch, catalog, visible ->
         val resolved = tvProgrammeChannelMatcher.resolveNow(fetch.programmes, catalog).filter { visible(it.channel) }
@@ -38,8 +38,8 @@ internal class HomeGuidesController(host: StreamiaStateHolder) : StreamiaControl
 
     val tvProgrammeTonightGuide = HomeGuide(
         blocks = setOf(HomeBlock.TvProgrammeTonight),
-        fetch = { repository.loadTvProgrammeTonight(it) },
-        cached = { repository.cachedTvProgrammeTonight() },
+        fetch = { repository.guides.loadTvProgrammeTonight(it) },
+        cached = { repository.guides.cachedTvProgrammeTonight() },
         isEmpty = { it.programmes.isEmpty() },
     ) { fetch, catalog, visible ->
         val resolved = tvProgrammeChannelMatcher.resolve(fetch.programmes, catalog).filter { visible(it.channel) }
@@ -53,8 +53,8 @@ internal class HomeGuidesController(host: StreamiaStateHolder) : StreamiaControl
      */
     val beinSportsGuide = HomeGuide(
         blocks = setOf(HomeBlock.BeinSportsNow, HomeBlock.BeinSportsNext),
-        fetch = { repository.loadBeinSportsGuide(it) },
-        cached = { repository.cachedBeinSportsGuide() },
+        fetch = { repository.guides.loadBeinSportsGuide(it) },
+        cached = { repository.guides.cachedBeinSportsGuide() },
         isEmpty = { it.rows.current.isEmpty() && it.rows.next.isEmpty() },
     ) { fetch, catalog, visible ->
         val current = beinSportsChannelMatcher.resolve(fetch.rows.current, catalog).filter { visible(it.channel) }
@@ -64,8 +64,8 @@ internal class HomeGuidesController(host: StreamiaStateHolder) : StreamiaControl
 
     val ukGuide = HomeGuide(
         blocks = setOf(HomeBlock.UkGuideNow, HomeBlock.UkGuideNext),
-        fetch = { repository.loadUkGuide(it) },
-        cached = { repository.cachedUkGuide() },
+        fetch = { repository.guides.loadUkGuide(it) },
+        cached = { repository.guides.cachedUkGuide() },
         isEmpty = { it.rows.current.isEmpty() && it.rows.next.isEmpty() },
     ) { fetch, catalog, visible ->
         val current = ukGuideChannelMatcher.resolve(fetch.rows.current, catalog).filter { visible(it.channel) }

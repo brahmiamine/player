@@ -79,7 +79,7 @@ class MetadataEnrichmentWorker(context: Context, params: WorkerParameters) : Cor
         for (batch in 0 until MAX_SAGA_BATCHES) {
             if (isStopped) return Result.success()
             if (isBusy()) return Result.retry()
-            val processed = runCatching { repository.fetchSagaBatch(profileId, SAGA_BATCH_SIZE) }.getOrElse { error ->
+            val processed = runCatching { repository.similarity.fetchSagaBatch(profileId, SAGA_BATCH_SIZE) }.getOrElse { error ->
                 android.util.Log.w(TAG, "Wikidata indisponible, reprise au prochain passage", error)
                 break
             }
@@ -87,7 +87,7 @@ class MetadataEnrichmentWorker(context: Context, params: WorkerParameters) : Cor
             delay(SAGA_PAUSE_MS)
         }
         // Enfin TMDB (résumé anglais, mots-clés, recommandations), une requête par contenu.
-        runCatching { repository.fetchTmdbBatch(profileId, TMDB_PER_RUN, TMDB_PAUSE_MS) { isStopped || isBusy() } }
+        runCatching { repository.similarity.fetchTmdbBatch(profileId, TMDB_PER_RUN, TMDB_PAUSE_MS) { isStopped || isBusy() } }
             .onFailure { android.util.Log.w(TAG, "TMDB indisponible, reprise au prochain passage", it) }
         return Result.success()
     }

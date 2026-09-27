@@ -96,7 +96,7 @@ internal class RecommendationsController(host: StreamiaStateHolder) : StreamiaCo
                 for (source in tasteSources) {
                     if (source.type != type) continue
                     tasteCandidates += runCatching {
-                        repository.similarityCandidates(profileId, source, HOME_RECOMMENDATION_PER_SOURCE_LIMIT)
+                        repository.similarity.similarityCandidates(profileId, source, HOME_RECOMMENDATION_PER_SOURCE_LIMIT)
                     }.getOrDefault(emptyList())
                 }
                 // Candidats liés aux goûts d'abord : avec « récents » en tête, la limite coupait
@@ -122,7 +122,7 @@ internal class RecommendationsController(host: StreamiaStateHolder) : StreamiaCo
             val feedback = runCatching { repository.recommendationFeedback(profileId) }.getOrDefault(emptyMap())
             val boostsBySource = tasteSources.associate { source ->
                 source.key to runCatching {
-                    repository.similarityBoosts(profileId, source, detailsByKey[source.key])
+                    repository.similarity.similarityBoosts(profileId, source, detailsByKey[source.key])
                 }.getOrDefault(emptyMap())
             }
 
@@ -200,11 +200,11 @@ internal class RecommendationsController(host: StreamiaStateHolder) : StreamiaCo
             JustWatchSection.entries.filter { it.homeBlock !in disabledBlocks }.forEach { section ->
                 launch {
                     fun publish(entries: List<MediaEntry>) = publishJustWatchRow(profileId, section, entries, hiddenEntries, excludedCategoryIds)
-                    val cached = runCatching { repository.cachedJustWatch(profileId, section) }.getOrNull()
+                    val cached = runCatching { repository.trending.cachedJustWatch(profileId, section) }.getOrNull()
                     cached?.let { publish(it.entries) }
                     if (cached?.fresh == true) return@launch
                     // Échec réseau : la rangée gardée sur disque reste affichée.
-                    runCatching { repository.justWatch(profileId, section, JUSTWATCH_ROW_LIMIT * 2) }.onSuccess(::publish)
+                    runCatching { repository.trending.justWatch(profileId, section, JUSTWATCH_ROW_LIMIT * 2) }.onSuccess(::publish)
                 }
             }
         }
@@ -266,12 +266,12 @@ internal class RecommendationsController(host: StreamiaStateHolder) : StreamiaCo
             .mapTo(mutableSetOf()) { it.id }
 
         // Résumé anglais + mots-clés TMDB : même langue que le reste du catalogue enrichi.
-        val sourceFeatures = repository.withTmdb(profileId, ContentFeatures.from(entry, details))
+        val sourceFeatures = repository.similarity.withTmdb(profileId, ContentFeatures.from(entry, details))
         val candidates = runCatching {
-            repository.similarityCandidates(profileId, entry, SIMILAR_CANDIDATE_LIMIT, sourceFeatures)
+            repository.similarity.similarityCandidates(profileId, entry, SIMILAR_CANDIDATE_LIMIT, sourceFeatures)
         }.getOrDefault(emptyList())
         if (candidates.isEmpty()) return
-        val boosts = runCatching { repository.similarityBoosts(profileId, entry, sourceFeatures) }.getOrDefault(emptyMap())
+        val boosts = runCatching { repository.similarity.similarityBoosts(profileId, entry, sourceFeatures) }.getOrDefault(emptyMap())
 
         val detailsByKey = runCatching {
             repository.recommendationContentFeatures(profileId, candidates)
