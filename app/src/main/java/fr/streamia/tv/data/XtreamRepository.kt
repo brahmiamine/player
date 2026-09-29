@@ -20,6 +20,7 @@ import fr.streamia.tv.domain.ServerCredentials
 import fr.streamia.tv.domain.XtreamUrlBuilder
 import fr.streamia.tv.recommendation.ContentFeatures
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.ensureActive
@@ -228,7 +229,8 @@ class XtreamRepository private constructor(context: Context) {
         when (profile.kind) {
             PlaylistKind.Xtream -> {
                 val credentials = profile.credentialsOrNull() ?: throw XtreamException("Identifiants Xtream incomplets.")
-                val catalog = fetchAndStoreXtreamCatalog(profileId, credentials)
+                // Actualisation d'un catalogue déjà affiché : basse priorité, l'interface reste fluide.
+                val catalog = fetchAndStoreXtreamCatalog(profileId, credentials, BackgroundWork.dispatcher)
                 playlistStore.markRefreshed(profileId)
                 LoadedCatalog(catalog, credentials, CatalogSource.Network, profileId)
             }
@@ -492,9 +494,18 @@ class XtreamRepository private constructor(context: Context) {
      * begin/commit/abort/[XtreamClient.loadCatalogOnIo] sont de simples fonctions synchrones :
      * aucun point de suspension n'existe entre l'ouverture et la fin de la transaction, donc rien
      * ne peut ni migrer de thread ni être interrompu par une annulation de coroutine au milieu.
+     *
+     * [dispatcher] : priorité normale quand l'utilisateur attend le catalogue (connexion, première
+     * ouverture sans cache). Les fils [BackgroundWork] (priorité « arrière-plan ») ne reçoivent sur
+     * TV qu'une petite part du processeur dès que l'écran de chargement s'anime : la connexion
+     * durait alors plus de dix minutes.
      */
-    private suspend fun fetchAndStoreXtreamCatalog(profileId: String, credentials: ServerCredentials): Catalog =
-        withContext(BackgroundWork.dispatcher) {
+    private suspend fun fetchAndStoreXtreamCatalog(
+        profileId: String,
+        credentials: ServerCredentials,
+        dispatcher: CoroutineDispatcher = Dispatchers.IO,
+    ): Catalog =
+        withContext(dispatcher) {
             val job = coroutineContext.job
             val session = cache.beginReplaceOnIo(profileId)
             val result = try {

@@ -64,19 +64,7 @@ internal object CatalogSchema {
             )
             """.trimIndent(),
         )
-        db.execSQL(
-            "CREATE INDEX idx_catalog_category ON catalog_entries(profile_id, media_type, category_id, navigable, number, media_id)",
-        )
-        db.execSQL(
-            "CREATE INDEX idx_catalog_section ON catalog_entries(profile_id, media_type, navigable, number, media_id)",
-        )
-        db.execSQL(
-            "CREATE INDEX idx_catalog_recent ON catalog_entries(profile_id, media_type, navigable, added_at DESC)",
-        )
-        db.execSQL(
-            "CREATE INDEX idx_catalog_tvg ON catalog_entries(profile_id, media_type, tvg_id)",
-        )
-        createSortIndexes(db)
+        createSecondaryIndexes(db)
         createCountsTable(db)
         createSearchIndex(db)
     }
@@ -103,7 +91,7 @@ internal object CatalogSchema {
                 added_rank = COALESCE(added_at, -1)
             """.trimIndent(),
         )
-        createSortIndexes(db)
+        createSecondaryIndexes(db)
         createCountsTable(db)
         db.execSQL(
             """
@@ -125,16 +113,33 @@ internal object CatalogSchema {
     }
 
     /**
-     * Un index par tri et par portée (catégorie ou « Tout ») : chaque page est une lecture d'index
-     * à partir de la dernière ligne affichée, au lieu de trier toute la section à chaque page.
+     * Index de lecture de la table des entrées. Un index par tri et par portée (catégorie ou
+     * « Tout ») : chaque page est une lecture d'index à partir de la dernière ligne affichée, au
+     * lieu de trier toute la section à chaque page.
+     *
+     * Ils sont retirés pendant le remplacement d'un catalogue et reconstruits en une passe à la
+     * fin (voir [CatalogDatabase.beginReplace]) : tenir dix index à jour ligne par ligne sur des
+     * centaines de milliers d'insertions dispersées coûtait des minutes d'accès disque sur TV.
      */
-    private fun createSortIndexes(db: SQLiteDatabase) {
-        db.execSQL("CREATE INDEX IF NOT EXISTS idx_catalog_alpha_cat ON catalog_entries(profile_id, media_type, category_id, navigable, sort_key, media_id)")
-        db.execSQL("CREATE INDEX IF NOT EXISTS idx_catalog_alpha ON catalog_entries(profile_id, media_type, navigable, sort_key, media_id)")
-        db.execSQL("CREATE INDEX IF NOT EXISTS idx_catalog_rating_cat ON catalog_entries(profile_id, media_type, category_id, navigable, rating_rank DESC, media_id)")
-        db.execSQL("CREATE INDEX IF NOT EXISTS idx_catalog_rating ON catalog_entries(profile_id, media_type, navigable, rating_rank DESC, media_id)")
-        db.execSQL("CREATE INDEX IF NOT EXISTS idx_catalog_added_cat ON catalog_entries(profile_id, media_type, category_id, navigable, added_rank DESC, media_id)")
-        db.execSQL("CREATE INDEX IF NOT EXISTS idx_catalog_added ON catalog_entries(profile_id, media_type, navigable, added_rank DESC, media_id)")
+    private val SECONDARY_INDEXES = listOf(
+        "idx_catalog_category" to "(profile_id, media_type, category_id, navigable, number, media_id)",
+        "idx_catalog_section" to "(profile_id, media_type, navigable, number, media_id)",
+        "idx_catalog_recent" to "(profile_id, media_type, navigable, added_at DESC)",
+        "idx_catalog_tvg" to "(profile_id, media_type, tvg_id)",
+        "idx_catalog_alpha_cat" to "(profile_id, media_type, category_id, navigable, sort_key, media_id)",
+        "idx_catalog_alpha" to "(profile_id, media_type, navigable, sort_key, media_id)",
+        "idx_catalog_rating_cat" to "(profile_id, media_type, category_id, navigable, rating_rank DESC, media_id)",
+        "idx_catalog_rating" to "(profile_id, media_type, navigable, rating_rank DESC, media_id)",
+        "idx_catalog_added_cat" to "(profile_id, media_type, category_id, navigable, added_rank DESC, media_id)",
+        "idx_catalog_added" to "(profile_id, media_type, navigable, added_rank DESC, media_id)",
+    )
+
+    fun createSecondaryIndexes(db: SQLiteDatabase) {
+        SECONDARY_INDEXES.forEach { (name, columns) -> db.execSQL("CREATE INDEX IF NOT EXISTS $name ON catalog_entries$columns") }
+    }
+
+    fun dropSecondaryIndexes(db: SQLiteDatabase) {
+        SECONDARY_INDEXES.forEach { (name, _) -> db.execSQL("DROP INDEX IF EXISTS $name") }
     }
 
     /** Comptes par catégorie écrits au remplacement du catalogue : l'ouverture ne parcourt plus toute la table. */
@@ -158,13 +163,19 @@ internal object CatalogSchema {
      * à contenu externe devait être reconstruit en entier — tous les profils — à chaque actualisation.
      * Accents ignorés quand le tokenizer unicode61 est disponible ; sans FTS, la recherche reste sur `LIKE`.
      */
-    private fun createSearchIndex(db: SQLiteDatabase) {
+    fun createSearchIndex(db: SQLiteDatabase) {
         val columns = "name, display_name, tvg_id, profile_id, notindexed=profile_id"
         runCatching {
             db.execSQL("CREATE VIRTUAL TABLE IF NOT EXISTS $SEARCH_TABLE USING fts4($columns, tokenize=unicode61 \"remove_diacritics=1\")")
         }.recoverCatching {
             db.execSQL("CREATE VIRTUAL TABLE IF NOT EXISTS $SEARCH_TABLE USING fts4($columns)")
         }
+    }
+
+    /** Vide l'index plein texte d'un coup (table recréée) plutôt que ligne par ligne. */
+    fun recreateSearchIndex(db: SQLiteDatabase) {
+        db.execSQL("DROP TABLE IF EXISTS $SEARCH_TABLE")
+        createSearchIndex(db)
     }
 
     fun searchAvailable(db: SQLiteDatabase): Boolean = runCatching {

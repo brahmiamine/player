@@ -74,12 +74,49 @@ internal class CatalogDatabase(context: Context) :
         val db = writableDatabase
         db.beginTransaction()
         try {
-            deleteProfileRows(db, profileId)
+            // Écriture en masse : les index de lecture sont retirés puis reconstruits en une passe
+            // au commit (un tri par index), au lieu d'être tenus à jour à chaque insertion. Tout se
+            // passe dans la transaction : un abandon les restaure, et les lecteurs (WAL) continuent
+            // de voir l'ancien catalogue et ses index jusqu'au commit.
+            CatalogSchema.dropSecondaryIndexes(db)
+            runCatching { db.execSQL("PRAGMA cache_size = $BULK_CACHE_SIZE") }
+            replaceProfileRows(db, profileId)
         } catch (error: Throwable) {
             db.endTransaction()
+            restoreCacheSize(db)
             throw error
         }
         return ReplaceSession(db, profileId, hasSearchTable(db))
+    }
+
+    /**
+     * Comme [deleteProfileRows], mais sans rien supprimer ligne par ligne quand aucun autre profil
+     * n'a de catalogue (le cas courant) : table vidée d'un coup, index plein texte recréé vide.
+     * Retirer 200 000 lignes d'un index FTS une par une coûtait autant que de les y écrire.
+     */
+    private fun replaceProfileRows(db: SQLiteDatabase, profileId: String) {
+        if (hasOtherProfileEntries(db, profileId)) {
+            deleteProfileRows(db, profileId)
+            return
+        }
+        if (hasSearchTable(db)) {
+            runCatching { CatalogSchema.recreateSearchIndex(db) }
+            searchTableChecked = CatalogSchema.searchAvailable(db)
+        }
+        db.execSQL("DELETE FROM catalog_entries")
+        db.delete("catalog_categories", "profile_id = ?", arrayOf(profileId))
+        db.delete("catalog_counts", "profile_id = ?", arrayOf(profileId))
+        db.delete("catalog_profiles", "profile_id = ?", arrayOf(profileId))
+    }
+
+    /** Deux lectures de la clé primaire (profils avant et après [profileId]) : pas de parcours de table. */
+    private fun hasOtherProfileEntries(db: SQLiteDatabase, profileId: String): Boolean =
+        listOf("<", ">").any { op ->
+            db.rawQuery("SELECT 1 FROM catalog_entries WHERE profile_id $op ? LIMIT 1", arrayOf(profileId)).use(Cursor::moveToFirst)
+        }
+
+    private fun restoreCacheSize(db: SQLiteDatabase) {
+        runCatching { db.execSQL("PRAGMA cache_size = $DEFAULT_CACHE_SIZE") }
     }
 
     private fun deleteProfileRows(db: SQLiteDatabase, profileId: String) {
@@ -97,7 +134,6 @@ internal class CatalogDatabase(context: Context) :
     ) : CatalogWriteSink {
         private var categoryStatement: android.database.sqlite.SQLiteStatement? = null
         private var entryStatement: android.database.sqlite.SQLiteStatement? = null
-        private var searchStatement: android.database.sqlite.SQLiteStatement? = null
         private val categoryPositions = HashMap<String, Int>()
         private var nextCategoryPosition = 0
         private var finished = false
@@ -164,41 +200,30 @@ internal class CatalogDatabase(context: Context) :
                 statement.bindString(16, catalogSortKey(entry.displayName))
                 statement.bindDouble(17, catalogRatingRank(entry.rating))
                 statement.bindLong(18, entry.addedAtEpochSeconds ?: -1L)
-                val rowId = try {
+                try {
                     statement.executeInsert()
                 } catch (_: android.database.sqlite.SQLiteConstraintException) {
                     // Même entrée réécrite par une nouvelle tentative réseau (la section est
-                    // reparsée depuis le début) : l'ancienne ligne et son entrée de recherche sont
-                    // retirées avant de réécrire, pour ne laisser aucun doublon dans l'index.
+                    // reparsée depuis le début) : l'ancienne ligne est retirée avant de réécrire.
+                    // L'index plein texte n'est rempli qu'au commit : rien à y retirer.
                     removeEntry(entry)
                     statement.executeInsert()
                 }
-                if (indexSearch && rowId > 0) indexForSearch(rowId, entry)
             }
         }
 
         private fun removeEntry(entry: MediaEntry) {
-            val args = arrayOf(profileId, entry.type.name, entry.id.toString())
-            if (indexSearch) {
-                db.rawQuery("SELECT rowid FROM catalog_entries WHERE profile_id = ? AND media_type = ? AND media_id = ?", args).use { cursor ->
-                    if (cursor.moveToFirst()) runCatching { db.delete(SEARCH_TABLE, "docid = ?", arrayOf(cursor.getLong(0).toString())) }
-                }
-            }
-            db.delete("catalog_entries", "profile_id = ? AND media_type = ? AND media_id = ?", args)
+            db.delete("catalog_entries", "profile_id = ? AND media_type = ? AND media_id = ?", arrayOf(profileId, entry.type.name, entry.id.toString()))
         }
 
-        private fun indexForSearch(rowId: Long, entry: MediaEntry) {
+        /** Index plein texte rempli en une seule requête une fois toutes les entrées écrites. */
+        private fun indexForSearch() {
             runCatching {
-                val statement = searchStatement ?: db.compileStatement(
-                    "INSERT INTO $SEARCH_TABLE(docid, name, display_name, tvg_id, profile_id) VALUES(?,?,?,?,?)",
-                ).also { searchStatement = it }
-                statement.clearBindings()
-                statement.bindLong(1, rowId)
-                statement.bindString(2, entry.name)
-                statement.bindString(3, entry.displayName)
-                statement.bindNullableString(4, entry.tvgId)
-                statement.bindString(5, profileId)
-                statement.executeInsert()
+                db.execSQL(
+                    "INSERT INTO $SEARCH_TABLE(docid, name, display_name, tvg_id, profile_id) " +
+                        "SELECT rowid, name, display_name, tvg_id, profile_id FROM catalog_entries WHERE profile_id = ?",
+                    arrayOf(profileId),
+                )
             }
         }
 
@@ -219,6 +244,8 @@ internal class CatalogDatabase(context: Context) :
                     }
                 }
                 check(db.insertOrThrow("catalog_profiles", null, profileValues) != -1L)
+                // Index reconstruits d'abord : le calcul des comptes qui suit s'appuie dessus.
+                CatalogSchema.createSecondaryIndexes(db)
                 db.execSQL(
                     """
                     INSERT INTO catalog_counts(profile_id, media_type, category_id, entry_count)
@@ -227,12 +254,13 @@ internal class CatalogDatabase(context: Context) :
                     """.trimIndent(),
                     arrayOf(profileId),
                 )
+                if (indexSearch) indexForSearch()
                 db.setTransactionSuccessful()
             } finally {
                 categoryStatement?.close()
                 entryStatement?.close()
-                searchStatement?.close()
                 db.endTransaction()
+                restoreCacheSize(db)
             }
         }
 
@@ -242,8 +270,10 @@ internal class CatalogDatabase(context: Context) :
             finished = true
             categoryStatement?.close()
             entryStatement?.close()
-            searchStatement?.close()
             db.endTransaction()
+            restoreCacheSize(db)
+            // L'index plein texte a pu être recréé puis annulé avec la transaction : on revérifiera.
+            searchTableChecked = null
         }
     }
 
@@ -603,6 +633,10 @@ internal class CatalogDatabase(context: Context) :
 
     private companion object {
         const val SEARCH_TABLE = CatalogSchema.SEARCH_TABLE
+
+        /** Cache de pages (en Kio, valeur négative) du seul remplacement d'un catalogue : 32 Mo. */
+        private const val BULK_CACHE_SIZE = -32768
+        private const val DEFAULT_CACHE_SIZE = -2000
         const val DEFAULT_RECENT_PER_TYPE = 8
         const val MAX_PAGE_SIZE = 500
         const val MAX_SEARCH_RESULTS = 1_000
