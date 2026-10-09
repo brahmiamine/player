@@ -47,3 +47,39 @@ class AiModelInfoTest {
         assertTrue(parseModelInfos("pas du json").isEmpty())
     }
 }
+
+class AiSubtitlesTest {
+    private val srt = "1\n00:00:01,000 --> 00:00:03,000\nHello there.\nHow are you?\n\n2\n00:00:04,000 --> 00:00:05,500\n<i>Fine.</i>\n"
+
+    @Test
+    fun cuesKeepTimingAndDropNumbersAndHeaders() {
+        val cues = parseCues("WEBVTT\n\n" + srt)
+        assertEquals(2, cues.size)
+        assertEquals("00:00:01,000 --> 00:00:03,000", cues[0].timing)
+        assertEquals(listOf("Hello there.", "How are you?"), cues[0].lines)
+    }
+
+    @Test
+    fun renderedSrtCanBeParsedAgain() {
+        val cues = parseCues(srt)
+        assertEquals(cues, parseCues(renderCues(cues, vtt = false)))
+        assertTrue(renderCues(cues, vtt = true).startsWith("WEBVTT"))
+    }
+
+    @Test
+    fun cuesArePackedInFewLargeBatchesWithGlobalNumbers() {
+        val cues = List(10) { SubtitleCue("t", listOf("ligne $it")) }
+        val batches = packCues(cues, maxChars = 10_000, maxCues = 4)
+        assertEquals(listOf(4, 4, 2), batches.map { it.size })
+        assertEquals(1, batches.first().first().first)
+        assertEquals(10, batches.last().last().first)
+    }
+
+    @Test
+    fun translatedLinesAreSplitBackIntoSubtitleLines() {
+        val lines = parseTranslatedLines("1|Bonjour. // Comment ça va ?\n2|<i>Bien.</i>\nbruit")
+        assertEquals(listOf("Bonjour.", "Comment ça va ?"), lines[1])
+        assertEquals(listOf("<i>Bien.</i>"), lines[2])
+        assertEquals(2, lines.size)
+    }
+}

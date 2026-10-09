@@ -8,6 +8,7 @@ import java.util.concurrent.ConcurrentHashMap
 enum class AiFeature(val label: String) {
     Translation("Traductions"),
     Similar("Similaires"),
+    Subtitles("Sous-titres"),
 }
 
 /** Ce que le fournisseur annonce d'un modèle dans sa liste `/models` (tout est facultatif). */

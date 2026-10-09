@@ -55,6 +55,7 @@ internal fun BoxScope.PlayerSettings(
     onLoadExternalSubtitleUrl: ((String) -> Unit)? = null,
     onSearchOnlineSubtitles: (() -> Unit)? = null,
     onlineSubtitleBusy: Boolean = false,
+    onlineSubtitleStatus: String? = null,
     onlineSubtitleResultCount: Int = 0,
     onShowOnlineSubtitleResults: (() -> Unit)? = null,
 ) {
@@ -96,6 +97,7 @@ internal fun BoxScope.PlayerSettings(
                 onLoadUrl = onLoadExternalSubtitleUrl,
                 onSearchOnline = onSearchOnlineSubtitles,
                 searching = onlineSubtitleBusy,
+                status = onlineSubtitleStatus,
                 resultCount = onlineSubtitleResultCount,
                 onShowResults = onShowOnlineSubtitleResults,
             )
@@ -132,6 +134,7 @@ private fun ExternalSubtitleSection(
     onLoadUrl: (String) -> Unit,
     onSearchOnline: (() -> Unit)? = null,
     searching: Boolean = false,
+    status: String? = null,
     resultCount: Int = 0,
     onShowResults: (() -> Unit)? = null,
 ) {
@@ -164,7 +167,7 @@ private fun ExternalSubtitleSection(
         if (onSearchOnline != null) {
             FocusableSurface(onClick = { if (!searching) onSearchOnline() }, accent = true, modifier = Modifier.fillMaxWidth().height(58.dp)) {
                 Text(
-                    if (searching) "Recherche en cours…" else "Rechercher automatiquement",
+                    if (searching) status ?: "Recherche en cours…" else "Rechercher automatiquement",
                     color = Ink, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 16.dp),
                 )
             }

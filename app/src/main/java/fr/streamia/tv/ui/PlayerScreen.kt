@@ -116,9 +116,14 @@ import fr.streamia.tv.player.LivePlaybackSession
 import fr.streamia.tv.ui.theme.FocusBlueBright
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
+import fr.streamia.tv.data.AiGate
+import fr.streamia.tv.data.AiLanguages
 import fr.streamia.tv.data.OnlineSubtitleService
+import fr.streamia.tv.data.normalizeLanguage
 import fr.streamia.tv.data.SubtitleQuery
 import fr.streamia.tv.data.SubtitleResult
 import fr.streamia.tv.data.buildSubtitleQuery
@@ -298,6 +303,7 @@ fun PlayerScreen(
     val subtitleService = remember { OnlineSubtitleService() }
     val subtitleScope = rememberCoroutineScope()
     var onlineSubtitleBusy by remember(entry.key) { mutableStateOf(false) }
+    var onlineSubtitleStatus by remember(entry.key) { mutableStateOf<String?>(null) }
     var onlineSubtitleResults by remember(entry.key) { mutableStateOf<List<SubtitleResult>>(emptyList()) }
     var onlineSubtitleQuery by remember(entry.key) { mutableStateOf<SubtitleQuery?>(null) }
     var onlineSubtitlesListOpen by remember(entry.key) { mutableStateOf(false) }
@@ -354,9 +360,35 @@ fun PlayerScreen(
         startCandidate(activeStreamUrl, player.currentPosition.coerceAtLeast(0L))
     }
 
+    val aiAssistant = remember { XtreamRepository.get(context).ai }
+
+    /** Vrai si le sous-titre [result] sera traduit par l'IA : assistant actif et langue différente de celle choisie. */
+    fun needsAiTranslation(result: SubtitleResult): Boolean =
+        AiGate.active.value && normalizeLanguage(result.language).let { it != "und" && it != appSettings.aiLanguage }
+
     suspend fun applyOnlineSubtitle(result: SubtitleResult, query: SubtitleQuery): Boolean = runCatching {
-        val file = subtitleService.fetch(result, query, java.io.File(context.cacheDir, "online-subtitles"))
-        loadExternalSubtitle(Uri.fromFile(file), "${result.languageLabel} · ${result.provider}.${file.extension}")
+        val directory = java.io.File(context.cacheDir, "online-subtitles")
+        val file = subtitleService.fetch(result, query, directory)
+        var shown = file
+        var label = "${result.languageLabel} · ${result.provider}.${file.extension}"
+        // Traduction par l'IA seulement si elle est active ; la coupure de l'assistant ramène au sous-titre d'origine.
+        if (needsAiTranslation(result)) {
+            val vtt = file.extension == "vtt"
+            val translated = aiAssistant.translateSubtitle(
+                text = withContext(Dispatchers.IO) { file.readText() },
+                vtt = vtt,
+                sourceLanguage = normalizeLanguage(result.language),
+            ) { done, total -> onlineSubtitleStatus = "Traduction IA ${done + 1}/$total…".takeIf { done < total } }
+            onlineSubtitleStatus = null
+            if (translated != null) {
+                shown = java.io.File(directory, "ai-${file.nameWithoutExtension}-${appSettings.aiLanguage}.${file.extension}")
+                withContext(Dispatchers.IO) { shown.writeText(translated, Charsets.UTF_8) }
+                label = "${AiLanguages.name(appSettings.aiLanguage)} (IA) · ${result.provider}.${file.extension}"
+            } else {
+                externalSubtitleError = "Traduction IA indisponible : sous-titre d'origine chargé."
+            }
+        }
+        loadExternalSubtitle(Uri.fromFile(shown), label)
     }.isSuccess
 
     fun searchOnlineSubtitles() {
@@ -367,7 +399,8 @@ fun PlayerScreen(
             name = entry.name,
             displayName = entry.displayName,
             seriesTitle = seriesTitle,
-            languages = listOfNotNull(preferred, java.util.Locale.getDefault().language) + listOf("fr", "en", "ar"),
+            // Assistant actif : la langue choisie passe en premier, pour ne traduire que si aucun sous-titre ne l'est déjà.
+            languages = listOfNotNull(appSettings.aiLanguage.takeIf { AiGate.active.value }, preferred, java.util.Locale.getDefault().language) + listOf("fr", "en", "ar"),
         )
         onlineSubtitleQuery = query
         onlineSubtitleBusy = true
@@ -1351,6 +1384,7 @@ fun PlayerScreen(
                 externalSubtitleError = externalSubtitleError,
                 onSearchOnlineSubtitles = ::searchOnlineSubtitles,
                 onlineSubtitleBusy = onlineSubtitleBusy,
+                onlineSubtitleStatus = onlineSubtitleStatus,
                 onlineSubtitleResultCount = onlineSubtitleResults.size,
                 onShowOnlineSubtitleResults = { onlineSubtitlesListOpen = true },
                 onPickExternalSubtitleFile = {
@@ -1377,7 +1411,9 @@ fun PlayerScreen(
             val query = onlineSubtitleQuery
             ChoiceDialog(
                 title = "Sous-titres trouvés",
-                options = onlineSubtitleResults.map { "${it.languageLabel} · ${it.provider} · ${it.release.take(60)}" },
+                options = onlineSubtitleResults.map {
+                    "${it.languageLabel} · ${it.provider} · ${it.release.take(60)}" + if (needsAiTranslation(it)) " · traduit par IA" else ""
+                },
                 selectedIndex = 0,
                 onSelect = { index ->
                     onlineSubtitlesListOpen = false

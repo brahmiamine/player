@@ -48,6 +48,8 @@ object AiLanguages {
  * envoyé au fournisseur. Les réponses sont gardées sur disque pour ne jamais payer deux fois la même.
  */
 class AiAssistant(context: Context, private val keyStore: AiKeyStore, val usage: AiUsageStore) {
+    private val appContext = context.applicationContext
+
     private class Config(val provider: AiProvider, val model: String, val language: String)
 
     @Volatile private var config: Config? = null
@@ -95,6 +97,54 @@ class AiAssistant(context: Context, private val keyStore: AiKeyStore, val usage:
         ) ?: return null
         cache.put(cacheKey, translated)
         return translated
+    }
+
+    /**
+     * Texte d'un sous-titre SRT/WebVTT ([vtt]) traduit de [sourceLanguage] vers la langue choisie ; null si l'IA est
+     * coupée, si la traduction échoue ou si elle est inutile. Peu de requêtes : de gros lots de texte seul (ni numéros ni
+     * temps), chaque lot terminé est gardé sur disque (une reprise ne repaie rien) et le résultat complet aussi.
+     */
+    suspend fun translateSubtitle(
+        text: String,
+        vtt: Boolean,
+        sourceLanguage: String,
+        onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
+    ): String? {
+        val cfg = config ?: return null
+        if (sourceLanguage == cfg.language) return null
+        val cues = parseCues(text)
+        if (cues.isEmpty()) return null
+        val key = "${text.length}-${text.hashCode().toUInt()}-${cfg.language}-${if (vtt) "vtt" else "srt"}"
+        val store = withContext(Dispatchers.IO) { AiSubtitleCache(File(appContext.cacheDir, "ai-subtitles")) }
+        withContext(Dispatchers.IO) { store.full(key).takeIf(File::exists)?.readText() }?.let { return it }
+        val batches = packCues(cues)
+        val translated = HashMap<Int, List<String>>()
+        for ((position, batch) in batches.withIndex()) {
+            if (config !== cfg) return null
+            onProgress(position, batches.size)
+            val saved = withContext(Dispatchers.IO) { store.batch(key, position).takeIf(File::exists)?.readText() }
+            val answer = saved ?: chat(
+                cfg,
+                AiFeature.Subtitles,
+                system = "Tu traduis des sous-titres de ${AiLanguages.name(sourceLanguage)} vers ${AiLanguages.name(cfg.language)}. " +
+                    "Chaque ligne est « numéro|texte » ; « // » sépare deux lignes d'un même sous-titre. " +
+                    "Traduis de façon naturelle et concise, garde les balises (<i>…), la ponctuation et les « // ». " +
+                    "Réponds uniquement par les mêmes lignes « numéro|traduction », sans rien ajouter.",
+                user = batch.joinToString("\n") { (number, line) -> "$number|$line" },
+                maxTokens = batch.sumOf { it.second.length } / 2 + 300,
+            )?.also { reply -> withContext(Dispatchers.IO) { store.batch(key, position).writeText(reply) } } ?: return null
+            val lines = parseTranslatedLines(answer)
+            // Plus de 30 % de lignes manquantes : réponse inexploitable, on abandonne (les lots déjà payés restent).
+            if (batch.count { it.first !in lines } * 10 > batch.size * 3) return null
+            translated += lines
+        }
+        onProgress(batches.size, batches.size)
+        val result = renderCues(cues.mapIndexed { index, cue -> SubtitleCue(cue.timing, translated[index + 1] ?: cue.lines) }, vtt)
+        withContext(Dispatchers.IO) {
+            store.full(key).writeText(result)
+            store.finish(key)
+        }
+        return result
     }
 
     /** Clés de [candidates] classées de la plus proche à la moins proche de [source] ; null si indisponible. */
