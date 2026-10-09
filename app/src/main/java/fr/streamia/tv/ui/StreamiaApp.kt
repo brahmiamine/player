@@ -272,6 +272,12 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onSearchCities = viewModel::searchCities,
                     onSetHomePlace = viewModel::setHomePlace,
                     onSetPrayerMethod = viewModel::setPrayerMethod,
+                    onToggleAi = viewModel::toggleAi,
+                    onSetAiProvider = viewModel::setAiProvider,
+                    onSetAiModel = viewModel::setAiModel,
+                    hasAiKey = viewModel::hasAiKey,
+                    onSaveAiKey = viewModel::saveAiKey,
+                    onLoadAiModels = viewModel::loadAiModels,
                     onBack = viewModel::backFromMenu,
                 )
 

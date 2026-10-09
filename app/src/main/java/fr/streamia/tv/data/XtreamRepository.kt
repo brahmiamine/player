@@ -50,6 +50,7 @@ class XtreamRepository private constructor(context: Context) {
     private val playlistStore = PlaylistStore(context)
     private val libraryStore = UserLibraryStore(context)
     private val appSettingsStore = AppSettingsStore(context)
+    private val aiKeyStore = AiKeyStore(context)
     private val recommendationStore = RecommendationStore(context)
     private val xmlTvRepository = XmlTvRepository()
     private val epgValidators = EpgHttpValidatorsStore(context)
@@ -72,6 +73,10 @@ class XtreamRepository private constructor(context: Context) {
     fun profile(profileId: String): PlaylistProfile? = playlistStore.find(profileId)
     fun library(profileId: String): UserLibrarySnapshot = libraryStore.snapshot(profileId)
     fun appSettings(): AppSettings = appSettingsStore.load()
+    fun hasAiKey(provider: AiProvider): Boolean = aiKeyStore.has(provider)
+    fun saveAiKey(provider: AiProvider, key: String) = aiKeyStore.set(provider, key)
+    suspend fun aiModels(provider: AiProvider): Result<List<String>> =
+        AiModelsClient.list(provider, aiKeyStore.get(provider).orEmpty())
     fun updateAppSettings(transform: (AppSettings) -> AppSettings): AppSettings = appSettingsStore.update(transform)
     fun customizedCatalog(profileId: String, catalog: Catalog): Catalog = libraryStore.applyToCatalog(profileId, catalog)
 

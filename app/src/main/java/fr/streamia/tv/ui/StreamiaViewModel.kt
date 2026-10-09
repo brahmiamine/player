@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import fr.streamia.tv.data.AiProvider
 import fr.streamia.tv.data.AppSettings
 import fr.streamia.tv.data.CatalogSource
 import fr.streamia.tv.data.HomeBlock
@@ -795,6 +796,24 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     fun cycleDisplayModeSwitch() {
         updateAppSettings { it.copy(displayModeSwitch = it.nextDisplayModeSwitch()) }
     }
+
+    fun toggleAi() {
+        updateAppSettings { it.copy(aiEnabled = !it.aiEnabled) }
+    }
+
+    fun setAiProvider(provider: AiProvider) {
+        updateAppSettings { it.copy(aiProvider = provider) }
+    }
+
+    fun setAiModel(provider: AiProvider, model: String) {
+        updateAppSettings { it.copy(aiModels = it.aiModels + (provider to model)) }
+    }
+
+    fun hasAiKey(provider: AiProvider): Boolean = repository.hasAiKey(provider)
+
+    fun saveAiKey(provider: AiProvider, key: String) = repository.saveAiKey(provider, key)
+
+    suspend fun loadAiModels(provider: AiProvider): Result<List<String>> = repository.aiModels(provider)
 
     fun toggleTunneling() {
         updateAppSettings { it.copy(tunnelingEnabled = !it.tunnelingEnabled) }

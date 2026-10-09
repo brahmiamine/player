@@ -2,6 +2,8 @@ package fr.streamia.tv.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.focusGroup
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -113,6 +115,16 @@ internal fun CitySearchModal(
             }
         }
     }
+}
+
+/**
+ * Garde le focus dans un modal : sans cela, Haut/Bas au bout de la liste saute sur les cartes
+ * visibles derrière lui (le modal n'est qu'une couche au-dessus de l'écran, pas une fenêtre).
+ */
+@OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+@Composable
+internal fun FocusTrap(content: @Composable () -> Unit) {
+    Box(Modifier.fillMaxSize().focusProperties { exit = { FocusRequester.Cancel } }.focusGroup()) { content() }
 }
 
 @Composable
@@ -253,6 +265,13 @@ internal fun HomeBlocksModal(
     }
 }
 
+/** Dernière carte de Paramètres ayant eu le focus : le focus lui est rendu quand le modal qu'elle a ouvert se ferme. */
+internal class SettingsFocusTracker {
+    var last: FocusRequester? = null
+}
+
+internal val LocalSettingsFocusTracker = androidx.compose.runtime.staticCompositionLocalOf<SettingsFocusTracker?> { null }
+
 @Composable
 internal fun SettingsTile(
     glyph: StreamiaIconGlyph,
@@ -263,12 +282,15 @@ internal fun SettingsTile(
     enabled: Boolean = true,
     selected: Boolean = false,
 ) {
+    val tracker = LocalSettingsFocusTracker.current
+    val requester = remember { FocusRequester() }
     FocusableSurface(
         onClick = onClick,
         enabled = enabled,
         selected = selected,
         accent = selected,
-        modifier = modifier.fillMaxSize(),
+        onFocused = { tracker?.last = requester },
+        modifier = modifier.fillMaxSize().focusRequester(requester),
     ) {
         Column(
             Modifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 8.dp),

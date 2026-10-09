@@ -32,6 +32,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
+import fr.streamia.tv.data.AiProvider
 import fr.streamia.tv.data.AppSettings
 import fr.streamia.tv.data.BufferMode
 import fr.streamia.tv.data.DisplayModeSwitch
@@ -47,9 +48,12 @@ import fr.streamia.tv.data.VideoAspectSetting
 import fr.streamia.tv.data.VodSortOrder
 import fr.streamia.tv.ui.theme.HeadingWeight
 import fr.streamia.tv.ui.theme.Ink
+import fr.streamia.tv.ui.theme.MutedInk
 import fr.streamia.tv.ui.theme.RadiusPanel
 import fr.streamia.tv.ui.theme.RadiusPill
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.yield
 
 @Composable
 fun SettingsScreen(
@@ -101,6 +105,12 @@ fun SettingsScreen(
     onSearchCities: suspend (String) -> List<HomePlace>,
     onSetHomePlace: (HomePlace?) -> Unit,
     onSetPrayerMethod: (PrayerMethod) -> Unit,
+    onToggleAi: () -> Unit = {},
+    onSetAiProvider: (AiProvider) -> Unit = {},
+    onSetAiModel: (AiProvider, String) -> Unit = { _, _ -> },
+    hasAiKey: (AiProvider) -> Boolean = { false },
+    onSaveAiKey: (AiProvider, String) -> Unit = { _, _ -> },
+    onLoadAiModels: suspend (AiProvider) -> Result<List<String>> = { Result.success(emptyList()) },
     onBack: () -> Unit,
 ) {
     BackHandler(onBack = onBack)
@@ -132,9 +142,31 @@ fun SettingsScreen(
             StreamiaIconGlyph.Reorder to "Catalogue & sous-titres",
             StreamiaIconGlyph.Search to "Outils",
             StreamiaIconGlyph.Settings to "Données & application",
+            StreamiaIconGlyph.Guide to "Assistant IA",
         )
     }
     var citySearchOpen by remember { mutableStateOf(false) }
+    var aiKeyDialog by remember { mutableStateOf(false) }
+    var aiModelDialog by remember { mutableStateOf(false) }
+    // Relu après chaque enregistrement de clé (le store chiffré n'est pas observable).
+    var aiKeyRevision by remember { mutableStateOf(0) }
+    val aiKeySet = remember(aiKeyRevision, settings.aiProvider) { hasAiKey(settings.aiProvider) }
+    // Un modal ouvert : à sa fermeture, le focus retourne à la carte qui l'avait ouvert (sinon il tombait sur la première).
+    val modalOpen = activeModal != null || citySearchOpen || homeBlocksModalOpen || updateDialogOpen || aiKeyDialog || aiModelDialog
+    val focusTracker = remember { SettingsFocusTracker() }
+    // Actif dès l'ouverture d'un modal et jusqu'au retour du focus : à la fermeture, il tombe d'abord
+    // sur la sidebar, qui changerait de catégorie (et ferait disparaître la carte à qui le rendre).
+    var restoringFocus by remember { mutableStateOf(false) }
+    LaunchedEffect(modalOpen) {
+        if (modalOpen) {
+            restoringFocus = true
+        } else if (restoringFocus) {
+            yield()
+            runCatching { focusTracker.last?.requestFocus() }
+            delay(400)
+            restoringFocus = false
+        }
+    }
     val homeBlockRows = remember {
         listOf(
             HomeBlock.Resume to "Reprendre la lecture",
@@ -195,6 +227,7 @@ fun SettingsScreen(
         }
     }
 
+    androidx.compose.runtime.CompositionLocalProvider(LocalSettingsFocusTracker provides focusTracker) {
     Column(Modifier.fillMaxSize().padding(horizontal = 42.dp, vertical = 28.dp)) {
         GlassSurface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(RadiusPill)) {
             Row(
@@ -215,7 +248,7 @@ fun SettingsScreen(
                     FocusableSurface(
                         onClick = { category = index },
                         selected = category == index,
-                        onFocused = { category = index },
+                        onFocused = { if (!restoringFocus) category = index },
                         focusScale = 1.02f,
                         idleBackground = Color.Transparent,
                         modifier = (if (index == 0) Modifier.focusRequester(firstFocus) else Modifier).fillMaxWidth().height(56.dp),
@@ -689,6 +722,59 @@ fun SettingsScreen(
                     )
                 }
             }
+            if (category == 5) {
+                Row(Modifier.fillMaxWidth().height(88.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    SettingsTile(
+                        StreamiaIconGlyph.Guide,
+                        "Assistant IA",
+                        if (settings.aiEnabled) "Activé" else "Désactivé",
+                        {
+                            openChoices(
+                                "Assistant IA",
+                                "Désactivé : aucune fonction IA n'est utilisée nulle part dans l'application, et rien n'est envoyé au fournisseur.",
+                                listOf("Activé" to settings.aiEnabled, "Désactivé" to !settings.aiEnabled),
+                            ) { if ((it == 0) != settings.aiEnabled) onToggleAi() }
+                        },
+                        Modifier.weight(1f),
+                        selected = settings.aiEnabled,
+                    )
+                    SettingsTile(
+                        StreamiaIconGlyph.Swap,
+                        "Fournisseur",
+                        settings.aiProvider.label,
+                        {
+                            val values = AiProvider.entries.toList()
+                            openChoices(
+                                "Fournisseur d'IA",
+                                "Chaque fournisseur garde sa propre clé et son propre modèle.",
+                                values.map { it.label to (it == settings.aiProvider) },
+                            ) { onSetAiProvider(values[it]) }
+                        },
+                        Modifier.weight(1f),
+                        enabled = settings.aiEnabled,
+                    )
+                    SettingsTile(
+                        StreamiaIconGlyph.Lock,
+                        "Clé d'API",
+                        if (aiKeySet) "Enregistrée" else "Non définie",
+                        { aiKeyDialog = true },
+                        Modifier.weight(1f),
+                        enabled = settings.aiEnabled,
+                        selected = aiKeySet,
+                    )
+                    SettingsTile(
+                        StreamiaIconGlyph.Reorder,
+                        "Modèle",
+                        settings.aiModels[settings.aiProvider] ?: "Aucun choisi",
+                        { aiModelDialog = true },
+                        Modifier.weight(1f),
+                        enabled = settings.aiEnabled && aiKeySet,
+                    )
+                }
+                if (settings.aiEnabled && !aiKeySet) {
+                    Text("Ajoutez la clé d'API de ${settings.aiProvider.label} pour pouvoir lister ses modèles.", color = MutedInk, fontSize = 13.sp)
+                }
+            }
             }
             }
         }
@@ -700,10 +786,11 @@ fun SettingsScreen(
             }
         }
     }
+    }
 
     if (updateDialogOpen) {
         val content = updateDialogContent(updateChecking, updateCheck, currentVersion)
-        UpdateDialog(
+        FocusTrap { UpdateDialog(
             content = content,
             currentVersion = currentVersion,
             onAction = { action ->
@@ -721,37 +808,64 @@ fun SettingsScreen(
                 updateDialogOpen = false
                 if (content.closeClearsState) onDismissUpdateCheck()
             },
-        )
+        ) }
     }
 
     activeModal?.let { modal ->
-        SettingsChoiceModal(
+        FocusTrap { SettingsChoiceModal(
             state = modal,
             onDismiss = { activeModal = null },
             onOption = { option ->
                 option.onSelect()
                 activeModal = null
             },
-        )
+        ) }
     }
 
     if (citySearchOpen) {
-        CitySearchModal(
+        FocusTrap { CitySearchModal(
             onSearch = onSearchCities,
             onPick = { place ->
                 onSetHomePlace(place)
                 citySearchOpen = false
             },
             onDismiss = { citySearchOpen = false },
-        )
+        ) }
+    }
+
+    if (aiKeyDialog) {
+        FocusTrap { AiKeyModal(
+            provider = settings.aiProvider,
+            hasKey = aiKeySet,
+            onSave = { key ->
+                onSaveAiKey(settings.aiProvider, key)
+                aiKeyRevision++
+                aiKeyDialog = false
+            },
+            onDismiss = { aiKeyDialog = false },
+        ) }
+    }
+
+    if (aiModelDialog) {
+        val provider = settings.aiProvider
+        FocusTrap { AiModelPickerModal(
+            provider = provider,
+            current = settings.aiModels[provider],
+            load = { onLoadAiModels(provider) },
+            onPick = { model ->
+                onSetAiModel(provider, model)
+                aiModelDialog = false
+            },
+            onDismiss = { aiModelDialog = false },
+        ) }
     }
 
     if (homeBlocksModalOpen) {
-        HomeBlocksModal(
+        FocusTrap { HomeBlocksModal(
             blocks = homeBlockRows,
             disabledBlocks = settings.disabledHomeBlocks,
             onToggle = onToggleHomeBlock,
             onDismiss = { homeBlocksModalOpen = false },
-        )
+        ) }
     }
 }

@@ -81,6 +81,11 @@ data class AppSettings(
     /** Ville de la météo et des prières de l'accueil ; null = détectée d'après la connexion. */
     val homePlace: HomePlace? = null,
     val prayerMethod: PrayerMethod = PrayerMethod.MuslimWorldLeague,
+    /** Interrupteur général de l'assistant IA : faux = aucune fonction IA nulle part dans l'app. */
+    val aiEnabled: Boolean = false,
+    val aiProvider: AiProvider = AiProvider.OpenRouter,
+    /** Modèle choisi pour chaque fournisseur (la clé, elle, est dans [AiKeyStore]). */
+    val aiModels: Map<AiProvider, String> = emptyMap(),
 ) {
     val vodSeekStepMs: Long
         get() = vodSeekStepSeconds * 1_000L
@@ -203,6 +208,14 @@ class AppSettingsStore(context: Context) {
         prayerMethod = runCatching {
             PrayerMethod.valueOf(preferences.getString(KEY_PRAYER_METHOD, null)!!)
         }.getOrDefault(PrayerMethod.MuslimWorldLeague),
+        aiEnabled = preferences.getBoolean(KEY_AI_ENABLED, false),
+        aiProvider = runCatching { AiProvider.valueOf(preferences.getString(KEY_AI_PROVIDER, null)!!) }
+            .getOrDefault(AiProvider.OpenRouter),
+        aiModels = runCatching {
+            JSONObject(preferences.getString(KEY_AI_MODELS, null)!!).let { json ->
+                AiProvider.entries.mapNotNull { p -> json.optString(p.name).takeIf(String::isNotBlank)?.let { p to it } }.toMap()
+            }
+        }.getOrDefault(emptyMap()),
     )
 
     fun save(settings: AppSettings) {
@@ -229,6 +242,9 @@ class AppSettingsStore(context: Context) {
             .putString(KEY_HOME_PLACE_LATITUDE, settings.homePlace?.latitude?.toString())
             .putString(KEY_HOME_PLACE_LONGITUDE, settings.homePlace?.longitude?.toString())
             .putString(KEY_PRAYER_METHOD, settings.prayerMethod.name)
+            .putBoolean(KEY_AI_ENABLED, settings.aiEnabled)
+            .putString(KEY_AI_PROVIDER, settings.aiProvider.name)
+            .putString(KEY_AI_MODELS, JSONObject(settings.aiModels.mapKeys { it.key.name }).toString())
             .apply()
     }
 
@@ -329,6 +345,9 @@ class AppSettingsStore(context: Context) {
         const val KEY_HOME_PLACE_LATITUDE = "home_place_latitude"
         const val KEY_HOME_PLACE_LONGITUDE = "home_place_longitude"
         const val KEY_PRAYER_METHOD = "prayer_method"
+        const val KEY_AI_ENABLED = "ai_enabled"
+        const val KEY_AI_PROVIDER = "ai_provider"
+        const val KEY_AI_MODELS = "ai_models"
         const val KEY_PARENTAL_PIN_SALT = "parental_pin_salt"
         const val KEY_PARENTAL_PIN_HASH = "parental_pin_hash"
         const val KEY_PARENTAL_PIN_ALGORITHM = "parental_pin_algorithm"
@@ -431,4 +450,8 @@ fun appSettingsFromBackupJson(json: JSONObject, fallback: AppSettings): AppSetti
     // La ville reste propre à l'appareil : une sauvegarde peut venir d'une TV installée ailleurs.
     homePlace = fallback.homePlace,
     prayerMethod = runCatching { PrayerMethod.valueOf(json.getString("prayerMethod")) }.getOrDefault(fallback.prayerMethod),
+    // L'assistant IA reste propre à l'appareil (sa clé n'est jamais exportée) : une restauration n'y touche pas.
+    aiEnabled = fallback.aiEnabled,
+    aiProvider = fallback.aiProvider,
+    aiModels = fallback.aiModels,
 )
