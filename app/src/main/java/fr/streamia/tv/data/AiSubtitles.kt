@@ -7,7 +7,7 @@ internal data class SubtitleCue(val timing: String, val lines: List<String>)
 
 /** Cues d'un fichier SRT ou WebVTT ; les blocs sans ligne de temps (en-tête WEBVTT, NOTE, numéros seuls) sont ignorés. */
 internal fun parseCues(text: String): List<SubtitleCue> =
-    text.replace("\r\n", "\n").replace('\r', '\n').trim().removePrefix("﻿")
+    text.replace("\r\n", "\n").replace('\r', '\n').trim().removePrefix("\uFEFF")
         .split(Regex("\n{2,}"))
         .mapNotNull { block ->
             val lines = block.lines()
