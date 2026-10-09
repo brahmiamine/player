@@ -2,6 +2,8 @@ package fr.streamia.tv.data
 
 import android.content.Context
 import android.util.Base64
+import androidx.annotation.DrawableRes
+import fr.streamia.tv.R
 import fr.streamia.tv.net.HttpClients
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -15,16 +17,17 @@ import javax.crypto.spec.GCMParameterSpec
  * Fournisseurs d'IA proposés dans Paramètres. Tous parlent le format OpenAI (`/models`,
  * `/chat/completions`) sauf Claude, qui a ses propres en-têtes.
  */
-enum class AiProvider(val label: String, val baseUrl: String) {
-    OpenRouter("OpenRouter", "https://openrouter.ai/api/v1"),
-    OpenCode("OpenCode Go", "https://opencode.ai/zen/go/v1"),
-    Gemini("Gemini", "https://generativelanguage.googleapis.com/v1beta/openai"),
-    Grok("Grok (xAI)", "https://api.x.ai/v1"),
-    Nvidia("NVIDIA NIM", "https://integrate.api.nvidia.com/v1"),
-    Claude("Claude", "https://api.anthropic.com/v1"),
-    ChatGpt("ChatGPT (OpenAI)", "https://api.openai.com/v1"),
-    Together("Together AI", "https://api.together.xyz/v1"),
-    HuggingFace("Hugging Face", "https://router.huggingface.co/v1"),
+enum class AiProvider(val label: String, val baseUrl: String, @DrawableRes val logo: Int) {
+    OpenRouter("OpenRouter", "https://openrouter.ai/api/v1", R.drawable.ai_logo_openrouter),
+    OpenCode("OpenCode Go", "https://opencode.ai/zen/go/v1", R.drawable.ai_logo_opencode),
+    OpenCodeZen("OpenCode Zen", "https://opencode.ai/zen/v1", R.drawable.ai_logo_opencode_zen),
+    Gemini("Gemini", "https://generativelanguage.googleapis.com/v1beta/openai", R.drawable.ai_logo_gemini),
+    Grok("Grok (xAI)", "https://api.x.ai/v1", R.drawable.ai_logo_grok),
+    Nvidia("NVIDIA NIM", "https://integrate.api.nvidia.com/v1", R.drawable.ai_logo_nvidia),
+    Claude("Claude", "https://api.anthropic.com/v1", R.drawable.ai_logo_claude),
+    ChatGpt("ChatGPT (OpenAI)", "https://api.openai.com/v1", R.drawable.ai_logo_chatgpt),
+    Together("Together AI", "https://api.together.xyz/v1", R.drawable.ai_logo_together),
+    HuggingFace("Hugging Face", "https://router.huggingface.co/v1", R.drawable.ai_logo_huggingface),
 }
 
 /** Fonctionnalités IA : actives seulement si l'interrupteur est sur Activé, avec une clé et un modèle choisi. */

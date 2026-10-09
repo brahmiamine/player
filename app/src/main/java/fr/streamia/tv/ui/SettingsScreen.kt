@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -770,6 +771,14 @@ fun SettingsScreen(
                         Modifier.weight(1f),
                         enabled = settings.aiEnabled && aiKeySet,
                     )
+                }
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    androidx.compose.foundation.Image(
+                        androidx.compose.ui.res.painterResource(settings.aiProvider.logo),
+                        contentDescription = null,
+                        modifier = Modifier.size(28.dp),
+                    )
+                    Text(settings.aiProvider.label, color = MutedInk, fontSize = 13.sp)
                 }
                 if (settings.aiEnabled && !aiKeySet) {
                     Text("Ajoutez la clé d'API de ${settings.aiProvider.label} pour pouvoir lister ses modèles.", color = MutedInk, fontSize = 13.sp)

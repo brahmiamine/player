@@ -1,6 +1,7 @@
 package fr.streamia.tv.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -12,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -34,6 +36,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
@@ -53,7 +56,7 @@ internal fun AiKeyModal(provider: AiProvider, hasKey: Boolean, onSave: (String) 
     Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.76f)), contentAlignment = Alignment.Center) {
         GlassSurface(modifier = Modifier.width(640.dp)) {
             Column(Modifier.padding(26.dp)) {
-                Text("Clé d'API · ${provider.label}", color = Ink, fontSize = 22.sp, fontWeight = HeadingWeight)
+                AiProviderTitle("Clé d'API · ${provider.label}", provider)
                 Spacer(Modifier.height(8.dp))
                 Text(
                     "La clé est chiffrée sur cet appareil. Elle n'apparaît jamais dans les sauvegardes ni sur GitHub." +
@@ -121,7 +124,7 @@ internal fun AiModelPickerModal(
         GlassSurface(modifier = Modifier.width(700.dp)) {
             // Le focus ne sort pas de la fenêtre vers les Paramètres affichés derrière.
             Column(Modifier.padding(26.dp).focusProperties { onExit = { cancelFocusChange() } }.focusGroup()) {
-                Text("Modèle · ${provider.label}", color = Ink, fontSize = 22.sp, fontWeight = HeadingWeight)
+                AiProviderTitle("Modèle · ${provider.label}", provider)
                 Spacer(Modifier.height(8.dp))
                 when {
                     error != null -> {
@@ -158,5 +161,14 @@ internal fun AiModelPickerModal(
                 Text("Retour pour fermer", color = MutedInk, fontSize = 12.sp)
             }
         }
+    }
+}
+
+/** Titre de fenêtre précédé du logo du fournisseur. */
+@Composable
+internal fun AiProviderTitle(title: String, provider: AiProvider) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Image(painterResource(provider.logo), contentDescription = provider.label, modifier = Modifier.size(32.dp))
+        Text(title, color = Ink, fontSize = 22.sp, fontWeight = HeadingWeight)
     }
 }
