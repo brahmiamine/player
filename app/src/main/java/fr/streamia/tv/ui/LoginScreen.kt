@@ -139,6 +139,16 @@ fun LoginScreen(
                         lineHeight = 23.sp,
                     )
                 }
+                PhoneQrPanel(onSubmit = { f ->
+                    val name = f["name"].orEmpty()
+                    if (f["type"] == "m3u") {
+                        if (f["m3uUrl"].orEmpty().isNotBlank()) {
+                            onImportM3uUrl(null, name, f["m3uUrl"].orEmpty(), f["xmlTvUrl"].orEmpty(), 6)
+                        }
+                    } else if (f["server"].orEmpty().isNotBlank() && f["username"].orEmpty().isNotBlank() && f["password"].orEmpty().isNotBlank()) {
+                        onSignIn(null, name, f["server"].orEmpty(), f["username"].orEmpty(), f["password"].orEmpty())
+                    }
+                })
                 Text("Données locales · Identifiants chiffrés · HTTP/HTTPS · Télécommande", color = MutedInk, fontSize = 12.sp, lineHeight = 18.sp)
             }
         }

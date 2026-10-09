@@ -188,6 +188,8 @@ dependencies {
     // Parseur HTML tolérant pour le scrape de liveonsat.com (balisage ancien, tables imbriquées,
     // balises non refermées) : voir fr.streamia.tv.liveonsat.LiveOnSatParser.
     implementation("org.jsoup:jsoup:1.18.3")
+    // QR code de la saisie depuis le téléphone (génération seule, pas de caméra).
+    implementation("com.google.zxing:core:3.5.3")
 
     // Heures de prière calculées hors ligne à partir des coordonnées (MIT, sans dépendance).
     implementation("com.batoulapps.adhan:adhan:1.2.1")
