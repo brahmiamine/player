@@ -380,6 +380,7 @@ fun PlayerScreen(
     }
 
     val aiAssistant = remember { XtreamRepository.get(context).ai }
+    val aiActive by AiGate.active.collectAsState()
 
     /** Vrai si le sous-titre [result] sera traduit par l'IA : assistant actif et langue différente de celle choisie. */
     fun needsAiTranslation(result: SubtitleResult): Boolean =
@@ -1456,6 +1457,7 @@ fun PlayerScreen(
                 onlineSubtitleStatus = onlineSubtitleStatus,
                 onlineSubtitleResultCount = onlineSubtitleResults.size,
                 onShowOnlineSubtitleResults = { onlineSubtitlesListOpen = true },
+                aiTranslateLanguage = AiLanguages.name(appSettings.aiLanguage).replaceFirstChar(Char::uppercase).takeIf { aiActive },
                 onPickExternalSubtitleFile = {
                     // Les fournisseurs de documents décrivent rarement .srt/.vtt avec un type MIME
                     // fiable (souvent text/plain ou application/octet-stream) : on filtre large côté

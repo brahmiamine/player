@@ -58,11 +58,18 @@ internal fun BoxScope.PlayerSettings(
     onlineSubtitleStatus: String? = null,
     onlineSubtitleResultCount: Int = 0,
     onShowOnlineSubtitleResults: (() -> Unit)? = null,
+    /** Langue des réglages IA (« Français ») quand l'assistant est actif : bouton « Traduire par IA » en tête. */
+    aiTranslateLanguage: String? = null,
 ) {
     // Audio / sous-titres : choix dans une fenêtre à cases à cocher (sélection unique), au lieu
     // d'une liste déroulante dans le panneau. Le focus revient sur la ligne à la fermeture.
     var picker by remember { mutableStateOf<TrackPicker?>(null) }
     val subtitleFocus = remember { FocusRequester() }
+    val ownAudioFocus = remember { FocusRequester() }
+    val aiButton = aiTranslateLanguage != null && onSearchOnlineSubtitles != null &&
+        externalSubtitleAvailable && onPickExternalSubtitleFile != null && onLoadExternalSubtitleUrl != null
+    // Bouton IA présent : c'est lui qui reçoit le focus à l'ouverture du panneau.
+    val audioFocus = if (aiButton) ownAudioFocus else firstFocus
     Column(
         Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(430.dp)
             .padding(vertical = 40.dp, horizontal = 24.dp)
@@ -81,7 +88,21 @@ internal fun BoxScope.PlayerSettings(
             }
         }
         Spacer(Modifier.height(8.dp))
-        TrackRow("Piste audio", audioTracks.getOrNull(audioIndex)?.label ?: "Auto", { picker = TrackPicker.Audio }, Modifier.focusRequester(firstFocus))
+        if (aiButton && onSearchOnlineSubtitles != null) {
+            AiTranslateButton(
+                language = aiTranslateLanguage.orEmpty(),
+                searching = onlineSubtitleBusy,
+                status = onlineSubtitleStatus,
+                onClick = onSearchOnlineSubtitles,
+                modifier = Modifier.focusRequester(firstFocus),
+            )
+            if (onlineSubtitleResultCount > 1 && onShowOnlineSubtitleResults != null) {
+                FocusableSurface(onClick = onShowOnlineSubtitleResults, modifier = Modifier.fillMaxWidth().height(58.dp)) {
+                    Text("Autres résultats ($onlineSubtitleResultCount)", color = Ink, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 16.dp))
+                }
+            }
+        }
+        TrackRow("Piste audio", audioTracks.getOrNull(audioIndex)?.label ?: "Auto", { picker = TrackPicker.Audio }, Modifier.focusRequester(audioFocus))
         TrackRow("Sous-titres", subtitleTracks.getOrNull(subtitleIndex)?.label ?: "Désactivés", { picker = TrackPicker.Subtitle }, Modifier.focusRequester(subtitleFocus))
         SettingButton("Format vidéo", aspect.label, onNextAspect)
         val dolbyText = listOfNotNull(dolbyVisionLabel, dolbyAtmosLabel).joinToString(" · ")
@@ -95,18 +116,20 @@ internal fun BoxScope.PlayerSettings(
                 errorMessage = externalSubtitleError,
                 onPickFile = onPickExternalSubtitleFile,
                 onLoadUrl = onLoadExternalSubtitleUrl,
-                onSearchOnline = onSearchOnlineSubtitles,
+                // Recherche déjà proposée en tête par le bouton « Traduire par IA ».
+                onSearchOnline = onSearchOnlineSubtitles.takeUnless { aiButton },
                 searching = onlineSubtitleBusy,
                 status = onlineSubtitleStatus,
                 resultCount = onlineSubtitleResultCount,
                 onShowResults = onShowOnlineSubtitleResults,
+                aiAbove = aiButton,
             )
         }
         Text("OK sur une ligne pour choisir la langue.", color = MutedInk, fontSize = 13.sp, lineHeight = 19.sp)
     }
     picker?.let { current ->
         val audio = current == TrackPicker.Audio
-        val rowFocus = if (audio) firstFocus else subtitleFocus
+        val rowFocus = if (audio) audioFocus else subtitleFocus
         fun close() {
             picker = null
             runCatching { rowFocus.requestFocus() }
@@ -126,6 +149,27 @@ internal fun BoxScope.PlayerSettings(
 
 private enum class TrackPicker { Audio, Subtitle }
 
+/** Premier bouton du panneau quand l'assistant IA est actif : cherche un sous-titre puis le traduit si besoin. */
+@Composable
+private fun AiTranslateButton(language: String, searching: Boolean, status: String?, onClick: () -> Unit, modifier: Modifier) {
+    FocusableSurface(onClick = { if (!searching) onClick() }, accent = true, modifier = modifier.fillMaxWidth().height(76.dp)) {
+        Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+            AiSparkle(size = 22.dp)
+            Spacer(Modifier.width(12.dp))
+            Column {
+                Text(
+                    if (searching) status ?: "Recherche du sous-titre…" else "Traduire par IA en $language",
+                    color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    "Cherche un sous-titre et le traduit si besoin",
+                    color = Ink.copy(alpha = 0.8f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun ExternalSubtitleSection(
     currentLabel: String?,
@@ -137,6 +181,8 @@ private fun ExternalSubtitleSection(
     status: String? = null,
     resultCount: Int = 0,
     onShowResults: (() -> Unit)? = null,
+    /** Bouton « Traduire par IA » affiché plus haut : il garde seul la mise en avant. */
+    aiAbove: Boolean = false,
 ) {
     var urlFieldOpen by remember { mutableStateOf(false) }
     var urlInput by remember { mutableStateOf("") }
@@ -181,7 +227,7 @@ private fun ExternalSubtitleSection(
                 }
             }
         }
-        FocusableSurface(onClick = onPickFile, accent = onSearchOnline == null, modifier = Modifier.fillMaxWidth().height(58.dp)) {
+        FocusableSurface(onClick = onPickFile, accent = onSearchOnline == null && !aiAbove, modifier = Modifier.fillMaxWidth().height(58.dp)) {
             Text("Charger un fichier .srt / .vtt", color = Ink, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 16.dp))
         }
         FocusableSurface(onClick = { urlFieldOpen = !urlFieldOpen }, modifier = Modifier.fillMaxWidth().height(58.dp)) {
