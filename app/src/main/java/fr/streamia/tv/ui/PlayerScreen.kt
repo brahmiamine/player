@@ -123,6 +123,7 @@ import kotlinx.coroutines.launch
 import fr.streamia.tv.data.AiGate
 import fr.streamia.tv.data.AiLanguages
 import fr.streamia.tv.data.OnlineSubtitleService
+import fr.streamia.tv.data.XtreamRepository
 import fr.streamia.tv.data.normalizeLanguage
 import fr.streamia.tv.data.SubtitleQuery
 import fr.streamia.tv.data.SubtitleResult
