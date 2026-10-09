@@ -76,6 +76,12 @@ jobs:
           RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
           RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
           TMDB_TOKEN: ${{ secrets.TMDB_TOKEN }}
+          # Sous-titres en ligne : sans ces clés, seul Podnapisi est interrogé dans l'APK publié.
+          SUBDL_KEY: ${{ secrets.SUBDL_KEY }}
+          WYZIE_KEY: ${{ secrets.WYZIE_KEY }}
+          OPENSUBTITLES_KEY: ${{ secrets.OPENSUBTITLES_KEY }}
+          OPENSUBTITLES_USER: ${{ secrets.OPENSUBTITLES_USER }}
+          OPENSUBTITLES_PASSWORD: ${{ secrets.OPENSUBTITLES_PASSWORD }}
         run: gradle --no-daemon assembleOptimized
 
       - name: Report optimized APK size

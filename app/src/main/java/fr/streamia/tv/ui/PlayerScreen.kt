@@ -432,7 +432,9 @@ fun PlayerScreen(
                     externalSubtitleError = "Aucun fournisseur actif."
                 outcome.results.isEmpty() ->
                     externalSubtitleError = if (outcome.failedProviders.size == outcome.searched) {
-                        "Recherche impossible : vérifiez la connexion Internet."
+                        // Seul fournisseur sans clé : souvent bloqué, ce n'est alors pas la connexion du boîtier.
+                        if (outcome.searched == 1) "${outcome.failedProviders.first()} ne répond pas (seule source active sans clé SubDL/OpenSubtitles)."
+                        else "Recherche impossible : vérifiez la connexion Internet."
                     } else {
                         "Aucun sous-titre trouvé pour « ${query.title} »."
                     }
