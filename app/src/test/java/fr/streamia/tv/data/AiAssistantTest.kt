@@ -20,21 +20,6 @@ class AiAssistantTest {
     }
 
     @Test
-    fun titleLinesMapBackToOriginalAndIgnoreUnplausibleAnswers() {
-        val batch = listOf("FR| Inception (2010) HD", "Heat", "EN - The Matrix [MULTI]")
-        val cleaned = parseTitleLines("1|Inception\n2|Heat\n3|The Matrix\n9|Inconnu\nbruit", batch)
-        assertEquals(mapOf("FR| Inception (2010) HD" to "Inception", "EN - The Matrix [MULTI]" to "The Matrix"), cleaned)
-    }
-
-    @Test
-    fun titleCleanupOnlyFlagsNoisyTitles() {
-        assertTrue(TitleCleanup.needsCleaning("FR| Inception (2010)"))
-        assertTrue(TitleCleanup.needsCleaning("Dune 4K MULTI"))
-        assertFalse(TitleCleanup.needsCleaning("Heat"))
-        assertFalse(TitleCleanup.needsCleaning("Le Parrain, partie II"))
-    }
-
-    @Test
     fun languageGuessSkipsTextAlreadyInTargetLanguage() {
         val english = "A retired detective is pulled back into the city that he left, and the case is as personal as it is dangerous for his family."
         val french = "Un détective à la retraite est ramené dans la ville qu'il a quittée, et l'affaire est aussi personnelle que dangereuse pour sa famille."

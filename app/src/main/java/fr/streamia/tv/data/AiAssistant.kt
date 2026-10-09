@@ -2,7 +2,6 @@ package fr.streamia.tv.data
 
 import android.content.Context
 import fr.streamia.tv.domain.MediaEntry
-import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.net.HttpClients
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -15,7 +14,6 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
 /**
@@ -27,21 +25,6 @@ object AiGate {
     val active: StateFlow<Boolean> = state
     fun set(value: Boolean) {
         state.value = value
-    }
-}
-
-/** Titres nettoyés par l'IA (clé : titre d'origine). Lus par les cartes via [fr.streamia.tv.ui.aiTitle]. */
-object AiTitles {
-    private val cleaned = ConcurrentHashMap<String, String>()
-    private val revision = MutableStateFlow(0)
-    val version: StateFlow<Int> = revision
-
-    fun get(raw: String): String? = cleaned[raw]
-
-    fun putAll(values: Map<String, String>) {
-        if (values.isEmpty()) return
-        cleaned.putAll(values)
-        revision.value += 1
     }
 }
 
@@ -61,8 +44,7 @@ object AiLanguages {
 }
 
 /**
- * Fonctions IA de l'application : traduction des descriptions, classement des contenus similaires et
- * nettoyage des titres. Chaque appel vérifie d'abord que l'assistant est actif : désactivé, rien n'est
+ * Fonctions IA de l'application : traduction des descriptions et classement des contenus similaires. Chaque appel vérifie d'abord que l'assistant est actif : désactivé, rien n'est
  * envoyé au fournisseur. Les réponses sont gardées sur disque pour ne jamais payer deux fois la même.
  */
 class AiAssistant(context: Context, private val keyStore: AiKeyStore, val usage: AiUsageStore) {
@@ -71,10 +53,6 @@ class AiAssistant(context: Context, private val keyStore: AiKeyStore, val usage:
     @Volatile private var config: Config? = null
 
     private val cache by lazy { AiCache(File(context.applicationContext.cacheDir, "ai-cache.json")) }
-    private val pendingTitles: MutableSet<String> = ConcurrentHashMap.newKeySet()
-
-    @Volatile private var titlesBlockedUntil = 0L
-
     fun isActive(): Boolean = config != null
 
     /** À appeler à chaque changement de réglage ou de clé. Ne touche pas au Keystore (la clé est lue à l'appel). */
@@ -142,62 +120,10 @@ class AiAssistant(context: Context, private val keyStore: AiKeyStore, val usage:
         return keys
     }
 
-    /**
-     * Nettoie en une requête par lot les titres de [entries] qui en ont besoin (préfixes de pays, étiquettes de
-     * qualité, crochets…). Les titres déjà propres, déjà connus ou en cours de traitement ne coûtent rien.
-     */
-    suspend fun cleanTitles(entries: List<MediaEntry>) {
-        val cfg = config ?: return
-        val known = HashMap<String, String>()
-        val todo = ArrayList<String>()
-        for (raw in entries.asSequence().filter { it.type != MediaType.Live }.map { it.displayName }.distinct()) {
-            if (AiTitles.get(raw) != null) continue
-            val stored = cache.get("c|$raw")
-            when {
-                stored != null -> known[raw] = stored
-                !TitleCleanup.needsCleaning(raw) -> Unit
-                todo.size < MAX_TITLES_PER_CALL && pendingTitles.add(raw) -> todo += raw
-            }
-        }
-        if (known.isNotEmpty() && config === cfg) AiTitles.putAll(known)
-        if (todo.isEmpty() || System.currentTimeMillis() < titlesBlockedUntil) {
-            pendingTitles.removeAll(todo.toSet())
-            return
-        }
-        try {
-            for (batch in todo.chunked(TITLES_PER_REQUEST)) {
-                val answer = chat(
-                    cfg,
-                    AiFeature.Titles,
-                    system = "Tu nettoies des titres de films et séries issus de listes IPTV. Pour chaque ligne « numéro|titre », " +
-                        "supprime les préfixes de pays ou de langue (FR|, EN -), les étiquettes de qualité ou de version " +
-                        "(HD, FHD, 4K, MULTI, VOSTFR, VF…), les crochets, symboles et l'année entre parenthèses, et corrige la casse. " +
-                        "Ne traduis rien, ne change pas le titre lui-même, garde le numéro de saison ou d'épisode. " +
-                        "Réponds uniquement par les mêmes lignes « numéro|titre propre », dans le même ordre.",
-                    user = batch.mapIndexed { index, raw -> "${index + 1}|$raw" }.joinToString("\n"),
-                    maxTokens = 40 * batch.size + 100,
-                )
-                if (answer == null) {
-                    titlesBlockedUntil = System.currentTimeMillis() + TITLES_RETRY_DELAY_MS
-                    break
-                }
-                val cleaned = parseTitleLines(answer, batch)
-                // Un titre que l'IA laisse tel quel est mémorisé aussi : il ne sera pas redemandé.
-                cache.putAll(batch.associate { "c|$it" to (cleaned[it] ?: it) })
-                if (config === cfg) AiTitles.putAll(cleaned)
-            }
-        } finally {
-            pendingTitles.removeAll(todo.toSet())
-        }
-    }
-
     private companion object {
         const val MIN_PLOT_CHARS = 30
         const val MAX_PLOT_CHARS = 1_500
         const val MAX_RERANK_CANDIDATES = 20
-        const val MAX_TITLES_PER_CALL = 80
-        const val TITLES_PER_REQUEST = 40
-        const val TITLES_RETRY_DELAY_MS = 60_000L
     }
 }
 
@@ -211,30 +137,6 @@ internal fun parseRanking(answer: String, size: Int): List<Int>? {
     if (seen.size < (size + 1) / 2) return null
     for (index in 0 until size) seen += index
     return seen.toList()
-}
-
-/** Lignes « numéro|titre » → titre d'origine ↦ titre nettoyé (seulement s'il diffère et reste plausible). */
-internal fun parseTitleLines(answer: String, batch: List<String>): Map<String, String> {
-    val result = HashMap<String, String>()
-    for (line in answer.lineSequence()) {
-        val separator = line.indexOf('|')
-        if (separator <= 0) continue
-        val index = line.substring(0, separator).trim().toIntOrNull()?.minus(1) ?: continue
-        val raw = batch.getOrNull(index) ?: continue
-        val cleaned = line.substring(separator + 1).trim().trim('"')
-        if (cleaned.isNotEmpty() && cleaned != raw && cleaned.length <= raw.length) result[raw] = cleaned
-    }
-    return result
-}
-
-internal object TitleCleanup {
-    private val noise = Regex("[\\[\\](){}|_]")
-    private val qualityTag = Regex("\\b(HD|FHD|UHD|4K|MULTI|VOSTFR|VOST|VF|VFF|TRUEFRENCH|1080P|720P|WEB|BLURAY|HDR)\\b")
-    private val countryPrefix = Regex("^[A-Za-z]{2,3}\\s*[-:|]")
-
-    /** Vrai si le titre porte du « bruit » typique des listes IPTV : les titres propres ne déclenchent aucune requête. */
-    fun needsCleaning(title: String): Boolean =
-        noise.containsMatchIn(title) || qualityTag.containsMatchIn(title.uppercase()) || countryPrefix.containsMatchIn(title)
 }
 
 /** Détection grossière de la langue d'un texte (mots courants), pour ne pas traduire ce qui l'est déjà. */

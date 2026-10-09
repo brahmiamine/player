@@ -128,7 +128,7 @@ fun MovieDetailsScreen(
             Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text(aiTitle(movie), color = Ink, fontSize = TypeHero, lineHeight = TypeHeroLineHeight, fontWeight = HeadingWeight)
+            Text(movie.displayName, color = Ink, fontSize = TypeHero, lineHeight = TypeHeroLineHeight, fontWeight = HeadingWeight)
             if (busy && details == null) Text("Chargement des informations…", color = MutedInk, fontSize = TypeBody)
             val rating = details?.rating ?: movie.rating
             val meta = listOfNotNull(

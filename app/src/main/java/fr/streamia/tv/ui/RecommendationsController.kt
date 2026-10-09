@@ -152,8 +152,6 @@ internal class RecommendationsController(host: StreamiaStateHolder) : StreamiaCo
             homeRecommendationLastBuiltProfileId = profileId
             homeRecommendationLastBuiltAtMillis = System.currentTimeMillis()
             if (_uiState.value.activeProfileId == profileId) _homeState.update { it.copy(homeRecommendationRows = rows) }
-            // Titres des cartes de l'accueil nettoyés par l'IA (sans effet si elle est désactivée).
-            runCatching { repository.ai.cleanTitles(rows.flatMap { row -> row.items.map { it.entry } }) }
         }
     }
 

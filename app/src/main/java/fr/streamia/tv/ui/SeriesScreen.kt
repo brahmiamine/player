@@ -159,7 +159,7 @@ fun SeriesScreen(
             Spacer(Modifier.height(20.dp))
             ChannelLogo(details?.details?.posterUrl ?: series.iconUrl, series.name, Modifier.size(230.dp))
             Spacer(Modifier.height(16.dp))
-            Text(aiTitle(series, series.name), color = Ink, fontSize = TypeHero, lineHeight = TypeHeroLineHeight, fontWeight = HeadingWeight)
+            Text(series.name, color = Ink, fontSize = TypeHero, lineHeight = TypeHeroLineHeight, fontWeight = HeadingWeight)
             val info = details?.details
             val meta = listOfNotNull(
                 (info?.rating ?: series.rating)?.let(::formatRating),

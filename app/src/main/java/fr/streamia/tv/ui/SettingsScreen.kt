@@ -738,7 +738,7 @@ fun SettingsScreen(
                         {
                             openChoices(
                                 "Assistant IA",
-                                "Désactivé : toutes les fonctions IA (traduction, similaires, titres nettoyés) sont coupées sur tous les écrans, et rien n'est envoyé au fournisseur.",
+                                "Désactivé : toutes les fonctions IA (traduction, similaires) sont coupées sur tous les écrans, et rien n'est envoyé au fournisseur.",
                                 listOf("Activé" to settings.aiEnabled, "Désactivé" to !settings.aiEnabled),
                             ) { if ((it == 0) != settings.aiEnabled) onToggleAi() }
                         },

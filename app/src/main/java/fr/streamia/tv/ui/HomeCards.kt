@@ -161,7 +161,7 @@ private fun HomeRecommendationCard(
             MediaArtwork(entry.iconUrl, entry.displayName, Modifier.fillMaxWidth().height(128.dp))
             Spacer(Modifier.height(7.dp))
             Text(
-                aiTitle(entry),
+                entry.displayName,
                 color = Ink,
                 fontSize = 13.sp,
                 lineHeight = 16.sp,
@@ -214,7 +214,7 @@ private fun HomeMediaCard(
             MediaArtwork(entry.iconUrl, entry.displayName, Modifier.fillMaxWidth().height(if (compact) 80.dp else 128.dp))
             Spacer(Modifier.height(if (compact) 5.dp else 7.dp))
             Text(
-                aiTitle(entry),
+                entry.displayName,
                 color = Ink,
                 fontSize = 13.sp,
                 lineHeight = 16.sp,

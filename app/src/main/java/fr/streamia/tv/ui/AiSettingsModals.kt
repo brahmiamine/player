@@ -202,7 +202,7 @@ internal fun AiUsageModal(load: suspend () -> List<AiUsage>, onReset: () -> Unit
                 when {
                     list == null -> Text("Chargement…", color = MutedInk, fontSize = 14.sp)
                     list.isEmpty() -> Text(
-                        "Aucune requête envoyée pour l'instant. Les compteurs apparaissent dès qu'une fonction IA (traduction, similaires, titres) utilise un modèle.",
+                        "Aucune requête envoyée pour l'instant. Les compteurs apparaissent dès qu'une fonction IA (traduction, similaires) utilise un modèle.",
                         color = MutedInk, fontSize = 14.sp, lineHeight = 19.sp,
                     )
                     else -> {

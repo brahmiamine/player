@@ -1182,7 +1182,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     }
 
     /**
-     * Fonctions IA d'une fiche Film/Série, dans l'ordre : titres nettoyés, description traduite, similaires
+     * Fonctions IA d'une fiche Film/Série, dans l'ordre : description traduite, similaires
      * reclassés. Sans effet si l'assistant est désactivé ; un résultat qui arrive après la fermeture de la
      * fiche (ou la désactivation) est jeté.
      */
@@ -1193,7 +1193,6 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             is StreamiaScreen.Series -> screen.series.key == entry.key
             else -> false
         }
-        repository.ai.cleanTitles(listOf(entry) + _uiState.value.similarMedia.map { it.entry })
         if (!plot.isNullOrBlank()) {
             repository.ai.translatePlot(plot)?.let { translated ->
                 _uiState.update { if (onSameEntry(it)) it.copy(aiPlot = translated) else it }
