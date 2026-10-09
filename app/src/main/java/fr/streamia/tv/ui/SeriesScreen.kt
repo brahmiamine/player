@@ -114,6 +114,8 @@ fun SeriesScreen(
         }
     }
 
+    Box(Modifier.fillMaxSize()) {
+    DetailBackdrop(details?.details?.backdropUrl ?: details?.details?.posterUrl ?: series.iconUrl)
     Row(Modifier.fillMaxSize().padding(30.dp)) {
         Column(Modifier.width(620.dp).fillMaxHeight().verticalScroll(rememberScrollState())) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -291,6 +293,7 @@ fun SeriesScreen(
                 }
             }
         }
+    }
     }
 }
 

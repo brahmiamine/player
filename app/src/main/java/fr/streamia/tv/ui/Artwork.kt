@@ -295,3 +295,22 @@ private object ArtworkLoader {
     private const val FAILURE_TTL_MS = 30 * 60_000L
     private const val MAX_TRACKED_FAILURES = 2_000
 }
+
+/** Image de la fiche en fond plein écran, assombrie pour garder le texte lisible. Sans image : rien. */
+@Composable
+fun DetailBackdrop(url: String?) {
+    if (url.isNullOrBlank()) return
+    Box(Modifier.fillMaxSize()) {
+        MediaArtwork(url, "", Modifier.fillMaxSize())
+        Box(
+            Modifier.fillMaxSize().background(
+                androidx.compose.ui.graphics.Brush.horizontalGradient(
+                    listOf(
+                        androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.92f),
+                        androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.72f),
+                    ),
+                ),
+            ),
+        )
+    }
+}

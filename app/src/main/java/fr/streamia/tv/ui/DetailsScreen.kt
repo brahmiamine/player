@@ -65,6 +65,8 @@ fun MovieDetailsScreen(
     val playFocus = remember { FocusRequester() }
     // Le bouton est désactivé pendant le chargement de la fiche : focus posé dès qu'il est actif.
     LaunchedEffect(movie.key, busy) { if (!busy) runCatching { playFocus.requestFocus() } }
+    Box(Modifier.fillMaxSize()) {
+    DetailBackdrop(details?.backdropUrl ?: details?.posterUrl ?: movie.iconUrl)
     Row(Modifier.fillMaxSize().padding(34.dp)) {
         Column(Modifier.width(330.dp).fillMaxHeight()) {
             FocusableSurface(onClick = onBack, modifier = Modifier.width(130.dp).height(50.dp)) {
@@ -176,6 +178,7 @@ fun MovieDetailsScreen(
             )
             Spacer(Modifier.height(30.dp))
         }
+    }
     }
 }
 
