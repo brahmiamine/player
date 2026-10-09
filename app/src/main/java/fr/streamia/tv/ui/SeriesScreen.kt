@@ -67,6 +67,7 @@ fun SeriesScreen(
     message: String?,
     favorite: Boolean,
     watched: Boolean,
+    translatedPlot: String? = null,
     similarMedia: List<RecommendedMedia> = emptyList(),
     similarLoading: Boolean = false,
     otherVersions: List<RecommendedMedia> = emptyList(),
@@ -158,7 +159,7 @@ fun SeriesScreen(
             Spacer(Modifier.height(20.dp))
             ChannelLogo(details?.details?.posterUrl ?: series.iconUrl, series.name, Modifier.size(230.dp))
             Spacer(Modifier.height(16.dp))
-            Text(series.name, color = Ink, fontSize = TypeHero, lineHeight = TypeHeroLineHeight, fontWeight = HeadingWeight)
+            Text(aiTitle(series, series.name), color = Ink, fontSize = TypeHero, lineHeight = TypeHeroLineHeight, fontWeight = HeadingWeight)
             val info = details?.details
             val meta = listOfNotNull(
                 (info?.rating ?: series.rating)?.let(::formatRating),
@@ -172,7 +173,7 @@ fun SeriesScreen(
                 Spacer(Modifier.height(8.dp))
                 Text(meta.joinToString(" · "), color = FocusBlueBright, fontSize = TypeLabel, fontWeight = FontWeight.SemiBold)
             }
-            val plot = info?.plot ?: series.plot
+            val plot = translatedPlot ?: info?.plot ?: series.plot
             if (!plot.isNullOrBlank()) {
                 Spacer(Modifier.height(12.dp))
                 Text(plot, color = MutedInk, fontSize = TypeBody, lineHeight = TypeBodyLineHeight, maxLines = 12, overflow = TextOverflow.Ellipsis)

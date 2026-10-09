@@ -33,6 +33,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
+import fr.streamia.tv.data.AiLanguages
 import fr.streamia.tv.data.AiProvider
 import fr.streamia.tv.data.AppSettings
 import fr.streamia.tv.data.BufferMode
@@ -107,6 +108,7 @@ fun SettingsScreen(
     onSetHomePlace: (HomePlace?) -> Unit,
     onSetPrayerMethod: (PrayerMethod) -> Unit,
     onToggleAi: () -> Unit = {},
+    onSetAiLanguage: (String) -> Unit = {},
     onSetAiProvider: (AiProvider) -> Unit = {},
     onSetAiModel: (AiProvider, String) -> Unit = { _, _ -> },
     hasAiKey: (AiProvider) -> Boolean = { false },
@@ -732,7 +734,7 @@ fun SettingsScreen(
                         {
                             openChoices(
                                 "Assistant IA",
-                                "Désactivé : aucune fonction IA n'est utilisée nulle part dans l'application, et rien n'est envoyé au fournisseur.",
+                                "Désactivé : toutes les fonctions IA (traduction, similaires, titres nettoyés) sont coupées sur tous les écrans, et rien n'est envoyé au fournisseur.",
                                 listOf("Activé" to settings.aiEnabled, "Désactivé" to !settings.aiEnabled),
                             ) { if ((it == 0) != settings.aiEnabled) onToggleAi() }
                         },
@@ -779,6 +781,23 @@ fun SettingsScreen(
                         modifier = Modifier.size(28.dp),
                     )
                     Text(settings.aiProvider.label, color = MutedInk, fontSize = 13.sp)
+                }
+                Row(Modifier.fillMaxWidth().height(88.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    SettingsTile(
+                        StreamiaIconGlyph.Guide,
+                        "Langue des descriptions",
+                        AiLanguages.name(settings.aiLanguage),
+                        {
+                            openChoices(
+                                "Langue des descriptions",
+                                "Les descriptions des films et séries sont traduites dans cette langue par l'assistant IA (gardées sur la TV, jamais retraduites).",
+                                AiLanguages.all.map { it.second to (it.first == settings.aiLanguage) },
+                            ) { onSetAiLanguage(AiLanguages.all[it].first) }
+                        },
+                        Modifier.weight(1f),
+                        enabled = settings.aiEnabled,
+                    )
+                    Spacer(Modifier.weight(3f))
                 }
                 if (settings.aiEnabled && !aiKeySet) {
                     Text("Ajoutez la clé d'API de ${settings.aiProvider.label} pour pouvoir lister ses modèles.", color = MutedInk, fontSize = 13.sp)

@@ -86,6 +86,8 @@ data class AppSettings(
     val aiProvider: AiProvider = AiProvider.OpenRouter,
     /** Modèle choisi pour chaque fournisseur (la clé, elle, est dans [AiKeyStore]). */
     val aiModels: Map<AiProvider, String> = emptyMap(),
+    /** Langue des descriptions traduites par l'IA (code : fr, en, es…). */
+    val aiLanguage: String = "fr",
 ) {
     val vodSeekStepMs: Long
         get() = vodSeekStepSeconds * 1_000L
@@ -216,6 +218,8 @@ class AppSettingsStore(context: Context) {
                 AiProvider.entries.mapNotNull { p -> json.optString(p.name).takeIf(String::isNotBlank)?.let { p to it } }.toMap()
             }
         }.getOrDefault(emptyMap()),
+        aiLanguage = preferences.getString(KEY_AI_LANGUAGE, null)
+            ?.takeIf { code -> AiLanguages.all.any { it.first == code } } ?: "fr",
     )
 
     fun save(settings: AppSettings) {
@@ -244,6 +248,7 @@ class AppSettingsStore(context: Context) {
             .putString(KEY_PRAYER_METHOD, settings.prayerMethod.name)
             .putBoolean(KEY_AI_ENABLED, settings.aiEnabled)
             .putString(KEY_AI_PROVIDER, settings.aiProvider.name)
+            .putString(KEY_AI_LANGUAGE, settings.aiLanguage)
             .putString(KEY_AI_MODELS, JSONObject(settings.aiModels.mapKeys { it.key.name }).toString())
             .apply()
     }
@@ -347,6 +352,7 @@ class AppSettingsStore(context: Context) {
         const val KEY_PRAYER_METHOD = "prayer_method"
         const val KEY_AI_ENABLED = "ai_enabled"
         const val KEY_AI_PROVIDER = "ai_provider"
+        const val KEY_AI_LANGUAGE = "ai_language"
         const val KEY_AI_MODELS = "ai_models"
         const val KEY_PARENTAL_PIN_SALT = "parental_pin_salt"
         const val KEY_PARENTAL_PIN_HASH = "parental_pin_hash"
@@ -454,4 +460,5 @@ fun appSettingsFromBackupJson(json: JSONObject, fallback: AppSettings): AppSetti
     aiEnabled = fallback.aiEnabled,
     aiProvider = fallback.aiProvider,
     aiModels = fallback.aiModels,
+    aiLanguage = fallback.aiLanguage,
 )

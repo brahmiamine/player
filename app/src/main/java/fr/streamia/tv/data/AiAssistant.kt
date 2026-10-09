@@ -1,0 +1,358 @@
+package fr.streamia.tv.data
+
+import android.content.Context
+import fr.streamia.tv.domain.MediaEntry
+import fr.streamia.tv.domain.MediaType
+import fr.streamia.tv.net.HttpClients
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
+
+/**
+ * Miroir observable de « l'assistant IA est actif » (interrupteur sur Activé, clé enregistrée, modèle choisi).
+ * Tous les écrans le lisent pour se remettre à l'état sans IA dès que l'assistant est désactivé.
+ */
+object AiGate {
+    private val state = MutableStateFlow(false)
+    val active: StateFlow<Boolean> = state
+    fun set(value: Boolean) {
+        state.value = value
+    }
+}
+
+/** Titres nettoyés par l'IA (clé : titre d'origine). Lus par les cartes via [fr.streamia.tv.ui.aiTitle]. */
+object AiTitles {
+    private val cleaned = ConcurrentHashMap<String, String>()
+    private val revision = MutableStateFlow(0)
+    val version: StateFlow<Int> = revision
+
+    fun get(raw: String): String? = cleaned[raw]
+
+    fun putAll(values: Map<String, String>) {
+        if (values.isEmpty()) return
+        cleaned.putAll(values)
+        revision.value += 1
+    }
+}
+
+/** Langues proposées pour la traduction des descriptions : code → nom (dans la langue de l'interface). */
+object AiLanguages {
+    val all: List<Pair<String, String>> = listOf(
+        "fr" to "Français",
+        "en" to "Anglais",
+        "es" to "Espagnol",
+        "de" to "Allemand",
+        "it" to "Italien",
+        "pt" to "Portugais",
+        "ar" to "Arabe",
+    )
+
+    fun name(code: String): String = all.firstOrNull { it.first == code }?.second ?: "Français"
+}
+
+/**
+ * Fonctions IA de l'application : traduction des descriptions, classement des contenus similaires et
+ * nettoyage des titres. Chaque appel vérifie d'abord que l'assistant est actif : désactivé, rien n'est
+ * envoyé au fournisseur. Les réponses sont gardées sur disque pour ne jamais payer deux fois la même.
+ */
+class AiAssistant(context: Context, private val keyStore: AiKeyStore) {
+    private class Config(val provider: AiProvider, val model: String, val language: String)
+
+    @Volatile private var config: Config? = null
+
+    private val cache by lazy { AiCache(File(context.applicationContext.cacheDir, "ai-cache.json")) }
+    private val pendingTitles: MutableSet<String> = ConcurrentHashMap.newKeySet()
+
+    @Volatile private var titlesBlockedUntil = 0L
+
+    fun isActive(): Boolean = config != null
+
+    /** À appeler à chaque changement de réglage ou de clé. Ne touche pas au Keystore (la clé est lue à l'appel). */
+    fun sync(settings: AppSettings) {
+        val model = settings.aiModels[settings.aiProvider]
+        val usable = settings.aiEnabled && model != null && keyStore.has(settings.aiProvider)
+        config = if (usable) Config(settings.aiProvider, model!!, settings.aiLanguage) else null
+        AiGate.set(usable)
+    }
+
+    private suspend fun chat(cfg: Config, system: String, user: String, maxTokens: Int): String? {
+        val key = withContext(Dispatchers.IO) { keyStore.get(cfg.provider) } ?: return null
+        val answer = AiChatClient.complete(cfg.provider, key, cfg.model, system, user, maxTokens).getOrNull()
+        // Désactivé pendant l'attente : la réponse est jetée.
+        return answer?.trim()?.takeIf { it.isNotEmpty() && config === cfg }
+    }
+
+    /** Description traduite dans la langue choisie ; null si inutile (déjà dans cette langue), impossible ou IA coupée. */
+    suspend fun translatePlot(plot: String): String? {
+        val cfg = config ?: return null
+        val text = plot.trim()
+        if (text.length < MIN_PLOT_CHARS || LanguageGuess.isLikely(text, cfg.language)) return null
+        val cacheKey = "t|${cfg.language}|${text.length}|${text.hashCode()}"
+        cache.get(cacheKey)?.let { return it }
+        val translated = chat(
+            cfg,
+            system = "Tu es un traducteur. Traduis le texte en ${AiLanguages.name(cfg.language)}. " +
+                "Réponds uniquement par la traduction, sans commentaire ni guillemets.",
+            user = text.take(MAX_PLOT_CHARS),
+            maxTokens = 1_500,
+        ) ?: return null
+        cache.put(cacheKey, translated)
+        return translated
+    }
+
+    /** Clés de [candidates] classées de la plus proche à la moins proche de [source] ; null si indisponible. */
+    suspend fun rerankSimilar(source: MediaEntry, candidates: List<MediaEntry>): List<String>? {
+        val cfg = config ?: return null
+        if (candidates.size < 3) return null
+        val items = candidates.take(MAX_RERANK_CANDIDATES)
+        val cacheKey = "r|${source.key}|${items.joinToString(",") { it.key }.hashCode()}"
+        cache.get(cacheKey)?.let { return it.split(',').filter(String::isNotEmpty) }
+        val answer = chat(
+            cfg,
+            system = "Tu classes des films ou séries par proximité (genre, ambiance, public) avec un titre de référence. " +
+                "Réponds uniquement par un tableau JSON des numéros, du plus proche au moins proche, par exemple [3,1,2]. " +
+                "N'invente aucun numéro et n'en répète aucun.",
+            user = "Référence : ${source.displayName}\nCandidats :\n" +
+                items.mapIndexed { index, entry -> "${index + 1}. ${entry.displayName}" }.joinToString("\n"),
+            maxTokens = 200,
+        ) ?: return null
+        val order = parseRanking(answer, items.size) ?: return null
+        val keys = order.map { items[it].key } + candidates.drop(items.size).map(MediaEntry::key)
+        cache.put(cacheKey, keys.joinToString(","))
+        return keys
+    }
+
+    /**
+     * Nettoie en une requête par lot les titres de [entries] qui en ont besoin (préfixes de pays, étiquettes de
+     * qualité, crochets…). Les titres déjà propres, déjà connus ou en cours de traitement ne coûtent rien.
+     */
+    suspend fun cleanTitles(entries: List<MediaEntry>) {
+        val cfg = config ?: return
+        val known = HashMap<String, String>()
+        val todo = ArrayList<String>()
+        for (raw in entries.asSequence().filter { it.type != MediaType.Live }.map { it.displayName }.distinct()) {
+            if (AiTitles.get(raw) != null) continue
+            val stored = cache.get("c|$raw")
+            when {
+                stored != null -> known[raw] = stored
+                !TitleCleanup.needsCleaning(raw) -> Unit
+                todo.size < MAX_TITLES_PER_CALL && pendingTitles.add(raw) -> todo += raw
+            }
+        }
+        if (known.isNotEmpty() && config === cfg) AiTitles.putAll(known)
+        if (todo.isEmpty() || System.currentTimeMillis() < titlesBlockedUntil) {
+            pendingTitles.removeAll(todo.toSet())
+            return
+        }
+        try {
+            for (batch in todo.chunked(TITLES_PER_REQUEST)) {
+                val answer = chat(
+                    cfg,
+                    system = "Tu nettoies des titres de films et séries issus de listes IPTV. Pour chaque ligne « numéro|titre », " +
+                        "supprime les préfixes de pays ou de langue (FR|, EN -), les étiquettes de qualité ou de version " +
+                        "(HD, FHD, 4K, MULTI, VOSTFR, VF…), les crochets, symboles et l'année entre parenthèses, et corrige la casse. " +
+                        "Ne traduis rien, ne change pas le titre lui-même, garde le numéro de saison ou d'épisode. " +
+                        "Réponds uniquement par les mêmes lignes « numéro|titre propre », dans le même ordre.",
+                    user = batch.mapIndexed { index, raw -> "${index + 1}|$raw" }.joinToString("\n"),
+                    maxTokens = 40 * batch.size + 100,
+                )
+                if (answer == null) {
+                    titlesBlockedUntil = System.currentTimeMillis() + TITLES_RETRY_DELAY_MS
+                    break
+                }
+                val cleaned = parseTitleLines(answer, batch)
+                // Un titre que l'IA laisse tel quel est mémorisé aussi : il ne sera pas redemandé.
+                cache.putAll(batch.associate { "c|$it" to (cleaned[it] ?: it) })
+                if (config === cfg) AiTitles.putAll(cleaned)
+            }
+        } finally {
+            pendingTitles.removeAll(todo.toSet())
+        }
+    }
+
+    private companion object {
+        const val MIN_PLOT_CHARS = 30
+        const val MAX_PLOT_CHARS = 1_500
+        const val MAX_RERANK_CANDIDATES = 20
+        const val MAX_TITLES_PER_CALL = 80
+        const val TITLES_PER_REQUEST = 40
+        const val TITLES_RETRY_DELAY_MS = 60_000L
+    }
+}
+
+/** Numéros (1 à [size]) de la réponse du modèle, sans doublon ; les oubliés sont ajoutés à la fin. Null si inexploitable. */
+internal fun parseRanking(answer: String, size: Int): List<Int>? {
+    val seen = LinkedHashSet<Int>()
+    Regex("\\d+").findAll(answer).forEach { match ->
+        val number = match.value.toIntOrNull() ?: return@forEach
+        if (number in 1..size) seen += number - 1
+    }
+    if (seen.size < (size + 1) / 2) return null
+    for (index in 0 until size) seen += index
+    return seen.toList()
+}
+
+/** Lignes « numéro|titre » → titre d'origine ↦ titre nettoyé (seulement s'il diffère et reste plausible). */
+internal fun parseTitleLines(answer: String, batch: List<String>): Map<String, String> {
+    val result = HashMap<String, String>()
+    for (line in answer.lineSequence()) {
+        val separator = line.indexOf('|')
+        if (separator <= 0) continue
+        val index = line.substring(0, separator).trim().toIntOrNull()?.minus(1) ?: continue
+        val raw = batch.getOrNull(index) ?: continue
+        val cleaned = line.substring(separator + 1).trim().trim('"')
+        if (cleaned.isNotEmpty() && cleaned != raw && cleaned.length <= raw.length) result[raw] = cleaned
+    }
+    return result
+}
+
+internal object TitleCleanup {
+    private val noise = Regex("[\\[\\](){}|_]")
+    private val qualityTag = Regex("\\b(HD|FHD|UHD|4K|MULTI|VOSTFR|VOST|VF|VFF|TRUEFRENCH|1080P|720P|WEB|BLURAY|HDR)\\b")
+    private val countryPrefix = Regex("^[A-Za-z]{2,3}\\s*[-:|]")
+
+    /** Vrai si le titre porte du « bruit » typique des listes IPTV : les titres propres ne déclenchent aucune requête. */
+    fun needsCleaning(title: String): Boolean =
+        noise.containsMatchIn(title) || qualityTag.containsMatchIn(title.uppercase()) || countryPrefix.containsMatchIn(title)
+}
+
+/** Détection grossière de la langue d'un texte (mots courants), pour ne pas traduire ce qui l'est déjà. */
+internal object LanguageGuess {
+    private val commonWords: Map<String, Set<String>> = mapOf(
+        "fr" to setOf("le", "la", "les", "des", "un", "une", "et", "est", "dans", "qui", "que", "pour", "avec", "son", "ses", "sur", "au", "du", "il", "elle", "sont", "pas", "ce", "cette"),
+        "en" to setOf("the", "and", "of", "to", "in", "is", "with", "his", "her", "for", "that", "who", "on", "as", "an", "from", "by", "are", "their", "he", "she", "it"),
+        "es" to setOf("el", "la", "los", "las", "de", "y", "en", "un", "una", "que", "con", "por", "su", "sus", "es", "del", "al", "se", "para", "como"),
+        "de" to setOf("der", "die", "das", "und", "ein", "eine", "ist", "mit", "von", "zu", "den", "dem", "sich", "auf", "nicht", "für", "im", "er", "sie"),
+        "it" to setOf("il", "lo", "la", "gli", "le", "un", "una", "di", "che", "con", "per", "del", "della", "nel", "sono", "si", "da", "ma", "suo", "sua"),
+        "pt" to setOf("o", "os", "as", "um", "uma", "de", "que", "em", "com", "para", "por", "do", "da", "dos", "das", "seu", "sua", "se", "não", "é"),
+    )
+
+    fun isLikely(text: String, language: String): Boolean {
+        val letters = text.count(Char::isLetter)
+        if (letters == 0) return true
+        val arabic = text.count { it in '؀'..'ۿ' }
+        if (language == "ar") return arabic * 2 > letters
+        if (arabic * 2 > letters) return false
+        val tokens = text.lowercase().split(Regex("[^\\p{L}]+")).filter(String::isNotEmpty)
+        val scores = commonWords.mapValues { (_, words) -> tokens.count { it in words } }
+        val own = scores[language] ?: return false
+        return own >= 3 && own >= (scores.values.maxOrNull() ?: 0)
+    }
+}
+
+/** Petit cache clé/valeur sur disque (JSON), borné aux entrées les plus récemment utilisées. */
+private class AiCache(private val file: File) {
+    private val entries = object : LinkedHashMap<String, String>(256, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?): Boolean = size > MAX_ENTRIES
+    }
+    private var loaded = false
+
+    @Synchronized private fun ensureLoaded() {
+        if (loaded) return
+        loaded = true
+        runCatching {
+            val json = JSONObject(file.readText())
+            json.keys().forEach { entries[it] = json.getString(it) }
+        }
+    }
+
+    @Synchronized fun get(key: String): String? {
+        ensureLoaded()
+        return entries[key]
+    }
+
+    @Synchronized fun put(key: String, value: String) = putAll(mapOf(key to value))
+
+    @Synchronized fun putAll(values: Map<String, String>) {
+        ensureLoaded()
+        entries.putAll(values)
+        runCatching {
+            val temp = File(file.parentFile, file.name + ".tmp")
+            val json = JSONObject()
+            entries.forEach { (key, value) -> json.put(key, value) }
+            temp.writeText(json.toString())
+            if (!temp.renameTo(file)) {
+                file.delete()
+                temp.renameTo(file)
+            }
+        }
+    }
+
+    private companion object {
+        const val MAX_ENTRIES = 2_000
+    }
+}
+
+/** Appel `/chat/completions` (format OpenAI) ou `/messages` (Claude) : une requête, une réponse texte. */
+internal object AiChatClient {
+    private val client: OkHttpClient by lazy {
+        HttpClients.api.newBuilder().readTimeout(45, TimeUnit.SECONDS).build()
+    }
+
+    suspend fun complete(
+        provider: AiProvider,
+        key: String,
+        model: String,
+        system: String,
+        user: String,
+        maxTokens: Int,
+    ): Result<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            val claude = provider == AiProvider.Claude
+            val body = JSONObject().put("model", model)
+            if (claude) {
+                body.put("max_tokens", maxTokens)
+                    .put("system", system)
+                    .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", user)))
+            } else {
+                body.put(
+                    "messages",
+                    JSONArray()
+                        .put(JSONObject().put("role", "system").put("content", system))
+                        .put(JSONObject().put("role", "user").put("content", user)),
+                )
+                // Les modèles récents d'OpenAI refusent max_tokens et toute température autre que 1.
+                if (provider == AiProvider.ChatGpt) {
+                    body.put("max_completion_tokens", maxTokens + REASONING_MARGIN_TOKENS)
+                } else {
+                    body.put("max_tokens", maxTokens).put("temperature", 0)
+                }
+            }
+            val request = Request.Builder()
+                .url(provider.baseUrl + if (claude) "/messages" else "/chat/completions")
+                .header("User-Agent", HttpClients.USER_AGENT)
+                .apply {
+                    if (claude) {
+                        header("x-api-key", key)
+                        header("anthropic-version", "2023-06-01")
+                    } else {
+                        header("Authorization", "Bearer $key")
+                    }
+                }
+                .post(body.toString().toRequestBody("application/json".toMediaType()))
+                .build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) error("${provider.label} a répondu ${response.code}.")
+                val json = JSONObject(response.body?.string().orEmpty())
+                val text = if (claude) {
+                    json.optJSONArray("content")?.optJSONObject(0)?.optString("text")
+                } else {
+                    json.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content")
+                }
+                text?.takeIf(String::isNotBlank) ?: error("Réponse vide de ${provider.label}.")
+            }
+        }
+    }
+
+    private const val REASONING_MARGIN_TOKENS = 1_000
+}

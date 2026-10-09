@@ -73,11 +73,19 @@ class XtreamRepository private constructor(context: Context) {
     fun profile(profileId: String): PlaylistProfile? = playlistStore.find(profileId)
     fun library(profileId: String): UserLibrarySnapshot = libraryStore.snapshot(profileId)
     fun appSettings(): AppSettings = appSettingsStore.load()
+    /** Fonctions IA (traduction, similaires, titres) : inactives tant que [syncAi] n'a pas validé les réglages. */
+    val ai = AiAssistant(appContext, aiKeyStore)
     fun hasAiKey(provider: AiProvider): Boolean = aiKeyStore.has(provider)
-    fun saveAiKey(provider: AiProvider, key: String) = aiKeyStore.set(provider, key)
+    fun saveAiKey(provider: AiProvider, key: String) {
+        aiKeyStore.set(provider, key)
+        ai.sync(appSettingsStore.load())
+    }
+    /** Recalcule si l'assistant IA est actif (interrupteur, clé, modèle) ; à appeler après chaque changement. */
+    fun syncAi(settings: AppSettings = appSettingsStore.load()) = ai.sync(settings)
     suspend fun aiModels(provider: AiProvider): Result<List<String>> =
         AiModelsClient.list(provider, aiKeyStore.get(provider).orEmpty())
-    fun updateAppSettings(transform: (AppSettings) -> AppSettings): AppSettings = appSettingsStore.update(transform)
+    fun updateAppSettings(transform: (AppSettings) -> AppSettings): AppSettings =
+        appSettingsStore.update(transform).also { syncAi(it) }
     fun customizedCatalog(profileId: String, catalog: Catalog): Catalog = libraryStore.applyToCatalog(profileId, catalog)
 
     suspend fun cacheSizeBytes(): Long = withContext(Dispatchers.IO) { cache.databaseFileSizeBytes() }

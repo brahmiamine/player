@@ -160,7 +160,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         // retardaient la première image. StreamiaTvRoot attend [awaitStartupData] avant de choisir
         // quoi rouvrir.
         viewModelScope.launch {
-            val (profiles, settings) = withContext(Dispatchers.IO) { repository.profiles() to repository.appSettings() }
+            val (profiles, settings) = withContext(Dispatchers.IO) { repository.profiles() to repository.appSettings().also { repository.syncAi(it) } }
             _uiState.update { state ->
                 if (state.activeProfileId == null) state.copy(profiles = profiles, appSettings = settings)
                 else state.copy(profiles = profiles)
@@ -801,6 +801,10 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         updateAppSettings { it.copy(aiEnabled = !it.aiEnabled) }
     }
 
+    fun setAiLanguage(code: String) {
+        updateAppSettings { it.copy(aiLanguage = code) }
+    }
+
     fun setAiProvider(provider: AiProvider) {
         updateAppSettings { it.copy(aiProvider = provider) }
     }
@@ -1005,7 +1009,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             it.copy(
                 screen = it.contentReturnContext?.destinationScreen() ?: StreamiaScreen.Browser,
                 mediaDetails = null,
-                similarMedia = emptyList(),
+                similarMedia = emptyList(), aiPlot = null, aiSimilarKeys = null,
                 similarLoading = false,
                 message = null,
             )
@@ -1014,7 +1018,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     /** Fiche ouverte depuis une autre fiche (contenu similaire) : Retour rouvre la précédente. */
     private fun reopenPreviousDetails(): Boolean {
         val previous = detailsTrail.removeLastOrNull() ?: return false
-        _uiState.update { it.copy(mediaDetails = null, seriesDetails = null, similarMedia = emptyList(), similarLoading = false, message = null) }
+        _uiState.update { it.copy(mediaDetails = null, seriesDetails = null, similarMedia = emptyList(), aiPlot = null, aiSimilarKeys = null, similarLoading = false, message = null) }
         openEntryInternal(previous)
         return true
     }
@@ -1025,7 +1029,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             it.copy(
                 screen = it.contentReturnContext?.destinationScreen() ?: StreamiaScreen.Browser,
                 seriesDetails = null,
-                similarMedia = emptyList(),
+                similarMedia = emptyList(), aiPlot = null, aiSimilarKeys = null,
                 similarLoading = false,
                 message = null,
             )
@@ -1112,7 +1116,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             it.copy(
                 busy = true,
                 mediaDetails = null,
-                similarMedia = emptyList(),
+                similarMedia = emptyList(), aiPlot = null, aiSimilarKeys = null,
                 similarLoading = profileId != null,
                 screen = StreamiaScreen.MovieDetails(movie),
                 message = null,
@@ -1136,6 +1140,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 resolvedDetails?.let { runCatching { repository.cacheRecommendationDetails(profileId, it) } }
                 recommendations.loadSimilarMedia(profileId, movie, resolvedDetails)
                 endSimilarLoading(movie)
+                enrichWithAi(movie, resolvedDetails?.plot ?: movie.plot)
             }
         }
     }
@@ -1148,7 +1153,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 busy = true,
                 message = null,
                 seriesDetails = null,
-                similarMedia = emptyList(),
+                similarMedia = emptyList(), aiPlot = null, aiSimilarKeys = null,
                 similarLoading = profileId != null,
                 screen = StreamiaScreen.Series(series),
             )
@@ -1164,6 +1169,31 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 }
                 .onFailure { error -> _uiState.update { it.copy(busy = false, message = error.safeMessage()) } }
             endSimilarLoading(series)
+            enrichWithAi(series, _uiState.value.seriesDetails?.details?.plot ?: series.plot)
+        }
+    }
+
+    /**
+     * Fonctions IA d'une fiche Film/Série, dans l'ordre : titres nettoyés, description traduite, similaires
+     * reclassés. Sans effet si l'assistant est désactivé ; un résultat qui arrive après la fermeture de la
+     * fiche (ou la désactivation) est jeté.
+     */
+    private suspend fun enrichWithAi(entry: MediaEntry, plot: String?) {
+        if (!repository.ai.isActive()) return
+        fun onSameEntry(state: StreamiaUiState) = when (val screen = state.screen) {
+            is StreamiaScreen.MovieDetails -> screen.movie.key == entry.key
+            is StreamiaScreen.Series -> screen.series.key == entry.key
+            else -> false
+        }
+        repository.ai.cleanTitles(listOf(entry) + _uiState.value.similarMedia.map { it.entry })
+        if (!plot.isNullOrBlank()) {
+            repository.ai.translatePlot(plot)?.let { translated ->
+                _uiState.update { if (onSameEntry(it)) it.copy(aiPlot = translated) else it }
+            }
+        }
+        val similar = _uiState.value.similarMedia.map { it.entry }
+        repository.ai.rerankSimilar(entry, similar)?.let { keys ->
+            _uiState.update { if (onSameEntry(it)) it.copy(aiSimilarKeys = keys) else it }
         }
     }
 

@@ -99,7 +99,7 @@ private fun SimilarMediaCard(recommended: RecommendedMedia, onClick: () -> Unit)
             MediaArtwork(entry.iconUrl, entry.displayName, Modifier.fillMaxWidth().height(112.dp))
             Spacer(Modifier.height(6.dp))
             Text(
-                entry.displayName,
+                aiTitle(entry),
                 color = Ink,
                 fontSize = 12.sp,
                 lineHeight = 15.sp,

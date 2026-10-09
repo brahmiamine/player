@@ -49,6 +49,7 @@ fun MovieDetailsScreen(
     favorite: Boolean,
     watched: Boolean,
     resumePositionMs: Long,
+    translatedPlot: String? = null,
     similarMedia: List<RecommendedMedia> = emptyList(),
     similarLoading: Boolean = false,
     otherVersions: List<RecommendedMedia> = emptyList(),
@@ -127,7 +128,7 @@ fun MovieDetailsScreen(
             Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text(movie.displayName, color = Ink, fontSize = TypeHero, lineHeight = TypeHeroLineHeight, fontWeight = HeadingWeight)
+            Text(aiTitle(movie), color = Ink, fontSize = TypeHero, lineHeight = TypeHeroLineHeight, fontWeight = HeadingWeight)
             if (busy && details == null) Text("Chargement des informations…", color = MutedInk, fontSize = TypeBody)
             val rating = details?.rating ?: movie.rating
             val meta = listOfNotNull(
@@ -140,7 +141,7 @@ fun MovieDetailsScreen(
             )
             if (meta.isNotEmpty()) Text(meta.joinToString("  ·  "), color = FocusBlueBright, fontSize = TypeLabel, fontWeight = FontWeight.SemiBold)
             if (!details?.plot.isNullOrBlank() || !movie.plot.isNullOrBlank()) {
-                Text(details?.plot ?: movie.plot.orEmpty(), color = Ink, fontSize = TypeBody, lineHeight = TypeBodyLineHeight)
+                Text(translatedPlot ?: details?.plot ?: movie.plot.orEmpty(), color = Ink, fontSize = TypeBody, lineHeight = TypeBodyLineHeight)
             }
             val hasDetailLines = listOf(details?.director, details?.cast, details?.country, details?.tmdbId)
                 .any { !it.isNullOrBlank() }

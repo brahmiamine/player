@@ -352,7 +352,7 @@ private fun PosterCard(
             }
             Spacer(Modifier.height(7.dp))
             Text(
-                entry.displayName,
+                aiTitle(entry),
                 color = Ink,
                 fontSize = 15.sp,
                 lineHeight = 16.sp,

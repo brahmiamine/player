@@ -54,6 +54,7 @@ import androidx.media3.ui.PlayerView
 @Composable
 fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackSession) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val aiActive by fr.streamia.tv.data.AiGate.active.collectAsStateWithLifecycle()
     // Vidéo du Direct : une seule vue, posée une fois sous tous les écrans. Le lecteur plein écran et
     // la liste catégories/chaînes ne font que la réclamer (liveVideoSurface). Avant, la vue passait
     // d'un écran à l'autre ; ce déplacement la détachait de la fenêtre, sa surface était détruite
@@ -273,6 +274,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onSetHomePlace = viewModel::setHomePlace,
                     onSetPrayerMethod = viewModel::setPrayerMethod,
                     onToggleAi = viewModel::toggleAi,
+                    onSetAiLanguage = viewModel::setAiLanguage,
                     onSetAiProvider = viewModel::setAiProvider,
                     onSetAiModel = viewModel::setAiModel,
                     hasAiKey = viewModel::hasAiKey,
@@ -379,7 +381,8 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                         favorite = movie.key in state.library.favoriteEntries,
                         watched = movie.key in state.library.watchedEntries,
                         resumePositionMs = resume,
-                        similarMedia = state.similarMedia,
+                        translatedPlot = state.aiPlot.takeIf { aiActive },
+                        similarMedia = state.similarMedia.withAiOrder(state.aiSimilarKeys.takeIf { aiActive }),
                         similarLoading = state.similarLoading,
                         otherVersions = otherVersions.orEmpty(),
                         otherVersionsLoading = otherVersions == null,
@@ -402,7 +405,8 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                         message = state.message,
                         favorite = series.key in state.library.favoriteEntries,
                         watched = series.key in state.library.watchedEntries,
-                        similarMedia = state.similarMedia,
+                        translatedPlot = state.aiPlot.takeIf { aiActive },
+                        similarMedia = state.similarMedia.withAiOrder(state.aiSimilarKeys.takeIf { aiActive }),
                         similarLoading = state.similarLoading,
                         otherVersions = otherVersions.orEmpty(),
                         otherVersionsLoading = otherVersions == null,

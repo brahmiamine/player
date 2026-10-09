@@ -129,6 +129,8 @@ internal class CatalogPagingController(
                     }
                 } else {
                     mergeVodPage(profileId, pageKey, offset, page.entries)
+                    // Titres de la page nettoyés par l'IA (sans effet si elle est désactivée).
+                    viewModelScope.launch { runCatching { repository.ai.cleanTitles(page.entries) } }
                 }
             } finally {
                 categoryLoadsInFlight.remove(loadKey)

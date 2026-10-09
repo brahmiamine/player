@@ -54,6 +54,10 @@ data class StreamiaUiState(
     val epgSelectedDate: LocalDate? = null,
     val epgLoading: Boolean = false,
     val similarMedia: List<RecommendedMedia> = emptyList(),
+    /** Description de la fiche ouverte traduite par l'IA (null = pas de traduction). */
+    val aiPlot: String? = null,
+    /** Ordre des similaires proposé par l'IA (clés des entrées) ; null = ordre du moteur. */
+    val aiSimilarKeys: List<String>? = null,
     /** Premier calcul de « Films/Séries similaires » en cours pour la fiche ouverte (cartes fantômes). */
     val similarLoading: Boolean = false,
     val resumePositionMs: Long = 0,
