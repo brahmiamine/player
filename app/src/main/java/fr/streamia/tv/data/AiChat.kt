@@ -81,8 +81,26 @@ internal object AiChatClient {
     /** Les modèles « raisonneurs » dépensent des tokens à réfléchir avant de répondre : le plafond en tient compte. */
     private const val REASONING_MARGIN_TOKENS = 1_000
 
-    /** Codes qui disent « ce format ou ces paramètres ne conviennent pas à ce modèle » : on essaie la variante suivante. */
-    private val retryableCodes = setOf(400, 404, 405, 415, 422)
+    /** Codes qui disent « ce chemin n'existe pas pour ce modèle » : on essaie toujours le format suivant. */
+    private val routeCodes = setOf(404, 405, 415)
+
+    /** Mots d'un 400/422 qui visent le format ou un paramètre (et non la clé, la session ou le quota). */
+    private val formatHints = Regex(
+        "unsupported|not supported|unknown|unrecognized|not allowed|invalid.*(param|field|endpoint|model)|max_tokens|" +
+            "max_completion_tokens|max_output_tokens|endpoint|responses|messages|chat/completions",
+        RegexOption.IGNORE_CASE,
+    )
+
+    /** Au plus 3 requêtes par appel logique, même quand le format du modèle est encore inconnu. */
+    private const val MAX_ATTEMPTS = 3
+
+    internal fun worthAnotherFormat(error: AiCallException): Boolean = when {
+        error.code in routeCodes -> true
+        error.code == 400 || error.code == 422 ->
+            // Une erreur de session ou d'authentification se répéterait à l'identique sur tous les formats.
+            !error.message.orEmpty().contains("session", ignoreCase = true) && formatHints.containsMatchIn(error.message.orEmpty())
+        else -> false
+    }
 
     suspend fun complete(
         provider: AiProvider,
@@ -91,18 +109,21 @@ internal object AiChatClient {
         system: String,
         user: String,
         maxTokens: Int,
+        session: String,
     ): Result<AiReply> = withContext(Dispatchers.IO) {
         runCatching {
             var firstError: AiCallException? = null
+            var attempts = 0
             for (format in AiCompat.formatOrder(provider, model)) {
                 val variants = if (format == AiFormat.Chat) AiCompat.chatVariants(provider, model) else listOf(0)
                 for (variant in variants) {
+                    if (attempts++ >= MAX_ATTEMPTS) throw firstError ?: AiCallException("${provider.label} : aucun format d'API utilisable.")
                     try {
-                        val reply = send(provider, key, model, system, user, maxTokens + REASONING_MARGIN_TOKENS, format, variant)
+                        val reply = send(provider, key, model, system, user, maxTokens + REASONING_MARGIN_TOKENS, format, variant, session)
                         AiCompat.remember(provider, model, format, variant)
                         return@runCatching reply
                     } catch (error: AiCallException) {
-                        if (error.code !in retryableCodes) throw error
+                        if (!worthAnotherFormat(error)) throw error
                         if (firstError == null) firstError = error
                     }
                 }
@@ -120,6 +141,7 @@ internal object AiChatClient {
         maxTokens: Int,
         format: AiFormat,
         variant: Int,
+        session: String,
     ): AiReply {
         val body = JSONObject().put("model", model)
         when (format) {
@@ -146,6 +168,9 @@ internal object AiChatClient {
             .url(provider.baseUrl + format.path)
             .header("User-Agent", HttpClients.USER_AGENT)
             .apply {
+                // OpenCode (Go et Zen) refuse depuis septembre 2026 toute requête sans identifiant de session (400
+                // MissingSessionID) : il sert à router une même conversation vers le même serveur et à garder son cache.
+                if (provider == AiProvider.OpenCode || provider == AiProvider.OpenCodeZen) header("x-opencode-session", session)
                 if (format == AiFormat.Messages) {
                     header("x-api-key", key)
                     header("anthropic-version", "2023-06-01")

@@ -105,3 +105,19 @@ class AiCompatTest {
         assertEquals(listOf(0, 1, 2), AiCompat.chatVariants(AiProvider.OpenCode, "deepseek-v4.1-flash"))
     }
 }
+
+class AiChatRetryTest {
+    @Test
+    fun sessionAndAuthErrorsAreNotRetriedOnOtherFormats() {
+        assertFalse(AiChatClient.worthAnotherFormat(AiCallException("400 : Request is missing x-opencode-session and cannot be routed", 400)))
+        assertFalse(AiChatClient.worthAnotherFormat(AiCallException("401 : invalid api key", 401)))
+        assertFalse(AiChatClient.worthAnotherFormat(AiCallException("429 : rate limited", 429)))
+    }
+
+    @Test
+    fun wrongEndpointOrParameterTriesTheNextFormat() {
+        assertTrue(AiChatClient.worthAnotherFormat(AiCallException("404 : not found", 404)))
+        assertTrue(AiChatClient.worthAnotherFormat(AiCallException("400 : Unsupported parameter: 'max_tokens'", 400)))
+        assertTrue(AiChatClient.worthAnotherFormat(AiCallException("400 : model is not supported on chat/completions", 400)))
+    }
+}

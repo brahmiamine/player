@@ -62,10 +62,18 @@ class AiAssistant(context: Context, private val keyStore: AiKeyStore, val usage:
         AiGate.set(usable)
     }
 
-    private suspend fun chat(cfg: Config, feature: AiFeature, system: String, user: String, maxTokens: Int): String? {
+    /** [session] : même valeur pour les requêtes d'un même travail (les lots d'un sous-titre), nouvelle sinon. */
+    private suspend fun chat(
+        cfg: Config,
+        feature: AiFeature,
+        system: String,
+        user: String,
+        maxTokens: Int,
+        session: String = newSession(),
+    ): String? {
         val key = withContext(Dispatchers.IO) { keyStore.get(cfg.provider) } ?: return null
         val startedAt = System.currentTimeMillis()
-        val result = AiChatClient.complete(cfg.provider, key, cfg.model, system, user, maxTokens)
+        val result = AiChatClient.complete(cfg.provider, key, cfg.model, system, user, maxTokens, session)
         usage.record(
             cfg.provider, cfg.model, feature,
             reply = result.getOrNull(),
@@ -83,7 +91,7 @@ class AiAssistant(context: Context, private val keyStore: AiKeyStore, val usage:
         val text = plot.trim()
         if (text.length < MIN_PLOT_CHARS || LanguageGuess.isLikely(text, cfg.language)) return null
         val cacheKey = "t|${cfg.language}|${text.length}|${text.hashCode()}"
-        cache.get(cacheKey)?.let { return it }
+        cached(cacheKey)?.let { return it }
         val translated = chat(
             cfg,
             AiFeature.Translation,
@@ -92,7 +100,7 @@ class AiAssistant(context: Context, private val keyStore: AiKeyStore, val usage:
             user = text.take(MAX_PLOT_CHARS),
             maxTokens = 1_500,
         ) ?: return null
-        cache.put(cacheKey, translated)
+        store(cacheKey, translated)
         return translated
     }
 
@@ -116,6 +124,7 @@ class AiAssistant(context: Context, private val keyStore: AiKeyStore, val usage:
         withContext(Dispatchers.IO) { store.full(key).takeIf(File::exists)?.readText() }?.let { return it }
         val batches = packCues(cues)
         val translated = HashMap<Int, List<String>>()
+        val session = newSession()
         for ((position, batch) in batches.withIndex()) {
             if (config !== cfg) return null
             onProgress(position, batches.size)
@@ -129,6 +138,7 @@ class AiAssistant(context: Context, private val keyStore: AiKeyStore, val usage:
                     "Réponds uniquement par les mêmes lignes « numéro|traduction », sans rien ajouter.",
                 user = batch.joinToString("\n") { (number, line) -> "$number|$line" },
                 maxTokens = batch.sumOf { it.second.length } / 2 + 300,
+                session = session,
             )?.also { reply -> withContext(Dispatchers.IO) { store.batch(key, position).writeText(reply) } } ?: return null
             val lines = parseTranslatedLines(answer)
             // Plus de 30 % de lignes manquantes : réponse inexploitable, on abandonne (les lots déjà payés restent).
@@ -150,7 +160,7 @@ class AiAssistant(context: Context, private val keyStore: AiKeyStore, val usage:
         if (candidates.size < 3) return null
         val items = candidates.take(MAX_RERANK_CANDIDATES)
         val cacheKey = "r|${source.key}|${items.joinToString(",") { it.key }.hashCode()}"
-        cache.get(cacheKey)?.let { return it.split(',').filter(String::isNotEmpty) }
+        cached(cacheKey)?.let { return it.split(',').filter(String::isNotEmpty) }
         val answer = chat(
             cfg,
             AiFeature.Similar,
@@ -163,9 +173,16 @@ class AiAssistant(context: Context, private val keyStore: AiKeyStore, val usage:
         ) ?: return null
         val order = parseRanking(answer, items.size) ?: return null
         val keys = order.map { items[it].key } + candidates.drop(items.size).map(MediaEntry::key)
-        cache.put(cacheKey, keys.joinToString(","))
+        store(cacheKey, keys.joinToString(","))
         return keys
     }
+
+    // Cache disque lu et écrit hors du thread principal : les fiches appellent ces fonctions depuis Main.
+    private suspend fun cached(key: String): String? = withContext(Dispatchers.IO) { cache.get(key) }
+
+    private suspend fun store(key: String, value: String) = withContext(Dispatchers.IO) { cache.put(key, value) }
+
+    private fun newSession(): String = "streamia-" + java.util.UUID.randomUUID()
 
     private companion object {
         const val MIN_PLOT_CHARS = 30

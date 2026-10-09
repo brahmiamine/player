@@ -219,7 +219,7 @@ internal fun AiUsageModal(load: suspend () -> List<AiUsage>, onReset: () -> Unit
                                 FocusableSurface(
                                     onClick = {},
                                     focusScale = 1.01f,
-                                    modifier = Modifier.fillMaxWidth().height(176.dp).then(if (usage === list.first()) Modifier.focusRequester(firstRowFocus) else Modifier),
+                                    modifier = Modifier.fillMaxWidth().height(196.dp).then(if (usage === list.first()) Modifier.focusRequester(firstRowFocus) else Modifier),
                                 ) {
                                     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -250,7 +250,7 @@ internal fun AiUsageModal(load: suspend () -> List<AiUsage>, onReset: () -> Unit
                                             ).joinToString(" · ").ifEmpty { "non communiqués par le fournisseur" },
                                         )
                                         UsageLine("Dernier appel", DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(usage.lastAtMillis)) +
-                                            (usage.lastError?.let { " · $it" } ?: ""))
+                                            (usage.lastError?.let { " · $it" } ?: ""), maxLines = 2)
                                     }
                                 }
                             }
@@ -276,10 +276,10 @@ internal fun AiUsageModal(load: suspend () -> List<AiUsage>, onReset: () -> Unit
 }
 
 @Composable
-private fun UsageLine(label: String, value: String) {
+private fun UsageLine(label: String, value: String, maxLines: Int = 1) {
     Row {
         Text(label, color = MutedInk, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(96.dp))
-        Text(value, color = Ink, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        Text(value, color = Ink, fontSize = 12.sp, maxLines = maxLines, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
     }
 }
 
