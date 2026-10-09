@@ -90,6 +90,7 @@ class SettingsScreenTest {
         var toggled = false
         setScreen(onToggleLivePreview = { toggled = true })
 
+        composeRule.onNodeWithText("Lecture").performClick()
         composeRule.onNodeWithText("Aperçu TV en direct").performScrollTo().performClick()
         assertTrue(toggled)
     }
@@ -99,6 +100,7 @@ class SettingsScreenTest {
         var opened = false
         setScreen(onAbout = { opened = true })
 
+        composeRule.onNodeWithText("Données & application").performClick()
         composeRule.onNodeWithText("À propos").performScrollTo().performClick()
         assertTrue(opened)
     }
