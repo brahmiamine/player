@@ -24,16 +24,12 @@ object AiGate {
 /** Langues proposées pour la traduction des descriptions : code → nom (dans la langue de l'interface). */
 object AiLanguages {
     val all: List<Pair<String, String>> = listOf(
+        "ar" to "Arabe",
         "fr" to "Français",
         "en" to "Anglais",
-        "es" to "Espagnol",
-        "de" to "Allemand",
-        "it" to "Italien",
-        "pt" to "Portugais",
-        "ar" to "Arabe",
     )
 
-    fun name(code: String): String = all.firstOrNull { it.first == code }?.second ?: "Français"
+    fun name(code: String): String = all.firstOrNull { it.first == code }?.second ?: "Arabe"
 }
 
 /**
@@ -217,7 +213,7 @@ class AiAssistant(context: Context, private val keyStore: AiKeyStore, val usage:
     }
 
     private fun plotToTranslate(cfg: Config, plot: String): String? =
-        plot.trim().takeUnless { it.length < MIN_PLOT_CHARS || LanguageGuess.isLikely(it, cfg.language) }
+        plot.trim().takeUnless { it.length < MIN_PLOT_CHARS || LanguageGuess.isLikely(it, cfg.language) || LanguageGuess.isLikely(it, "ar") }
 
     private fun plotCacheKey(cfg: Config, text: String) = "t|${cfg.language}|${text.length}|${text.hashCode()}"
 

@@ -87,7 +87,7 @@ data class AppSettings(
     /** Modèle choisi pour chaque fournisseur (la clé, elle, est dans [AiKeyStore]). */
     val aiModels: Map<AiProvider, String> = emptyMap(),
     /** Langue des descriptions traduites par l'IA (code : fr, en, es…). */
-    val aiLanguage: String = "fr",
+    val aiLanguage: String = "ar",
 ) {
     val vodSeekStepMs: Long
         get() = vodSeekStepSeconds * 1_000L
@@ -219,7 +219,7 @@ class AppSettingsStore(context: Context) {
             }
         }.getOrDefault(emptyMap()),
         aiLanguage = preferences.getString(KEY_AI_LANGUAGE, null)
-            ?.takeIf { code -> AiLanguages.all.any { it.first == code } } ?: "fr",
+            ?.takeIf { code -> AiLanguages.all.any { it.first == code } } ?: "ar",
     )
 
     fun save(settings: AppSettings) {

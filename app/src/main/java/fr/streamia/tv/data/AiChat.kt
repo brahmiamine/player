@@ -75,11 +75,11 @@ internal object AiCompat {
 /** Appel de chat : une requête logique, une réponse texte ; bascule de format ou de paramètres sur « requête invalide ». */
 internal object AiChatClient {
     private val client: OkHttpClient by lazy {
-        HttpClients.api.newBuilder().readTimeout(45, TimeUnit.SECONDS).build()
+        HttpClients.api.newBuilder().readTimeout(90, TimeUnit.SECONDS).build()
     }
 
     /** Les modèles « raisonneurs » dépensent des tokens à réfléchir avant de répondre : le plafond en tient compte. */
-    private const val REASONING_MARGIN_TOKENS = 1_000
+    private const val REASONING_MARGIN_TOKENS = 6_000
 
     /** Codes qui disent « ce chemin n'existe pas pour ce modèle » : on essaie toujours le format suivant. */
     private val routeCodes = setOf(404, 405, 415)
@@ -195,6 +195,10 @@ internal object AiChatClient {
             }
             val json = runCatching { JSONObject(text) }.getOrNull()
                 ?: throw AiCallException("Réponse illisible de ${provider.label}.", 0, requestQuota, tokenQuota)
+            // Certains fournisseurs répondent 200 avec un objet « error » : on affiche leur message plutôt que « réponse vide ».
+            if (json.has("error") && !json.isNull("error")) {
+                throw AiCallException("${provider.label} : ${errorDetail(text)} (${format.label})", 0, requestQuota, tokenQuota)
+            }
             val answer = when (format) {
                 AiFormat.Chat -> json.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content")
                 AiFormat.Messages -> json.optJSONArray("content")?.let { blocks ->
@@ -211,7 +215,7 @@ internal object AiChatClient {
             val usage = json.optJSONObject("usage")
             return AiReply(
                 text = answer?.takeIf(String::isNotBlank)
-                    ?: throw AiCallException("Réponse vide de ${provider.label} (${format.label}).", 0, requestQuota, tokenQuota),
+                    ?: throw AiCallException("Réponse vide de ${provider.label} (${format.label}) : ${(json.optJSONArray("choices")?.optJSONObject(0)?.toString() ?: text).replace(Regex("\\s+"), " ").take(600)}", 0, requestQuota, tokenQuota),
                 promptTokens = usage?.let { it.optLong("prompt_tokens", it.optLong("input_tokens")) } ?: 0L,
                 completionTokens = usage?.let { it.optLong("completion_tokens", it.optLong("output_tokens")) } ?: 0L,
                 requestQuota = requestQuota,

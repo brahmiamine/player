@@ -219,7 +219,7 @@ internal fun AiUsageModal(load: suspend () -> List<AiUsage>, onReset: () -> Unit
                                 FocusableSurface(
                                     onClick = {},
                                     focusScale = 1.01f,
-                                    modifier = Modifier.fillMaxWidth().height(196.dp).then(if (usage === list.first()) Modifier.focusRequester(firstRowFocus) else Modifier),
+                                    modifier = Modifier.fillMaxWidth().height(260.dp).then(if (usage === list.first()) Modifier.focusRequester(firstRowFocus) else Modifier),
                                 ) {
                                     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -250,7 +250,7 @@ internal fun AiUsageModal(load: suspend () -> List<AiUsage>, onReset: () -> Unit
                                             ).joinToString(" · ").ifEmpty { "non communiqués par le fournisseur" },
                                         )
                                         UsageLine("Dernier appel", DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(usage.lastAtMillis)) +
-                                            (usage.lastError?.let { " · $it" } ?: ""), maxLines = 2)
+                                            (usage.lastError?.let { " · $it" } ?: ""), maxLines = 8)
                                     }
                                 }
                             }
