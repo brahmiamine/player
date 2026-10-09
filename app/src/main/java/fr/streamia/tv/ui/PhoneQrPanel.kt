@@ -2,6 +2,7 @@ package fr.streamia.tv.ui
 
 import android.graphics.Bitmap
 import android.graphics.Color as AColor
+import android.annotation.SuppressLint
 import android.os.Handler
 import android.os.Looper
 import androidx.compose.foundation.Image
@@ -32,6 +33,8 @@ import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
 
 /** QR code permanent de la page login : le téléphone choisit Xtream ou M3U et envoie ses champs (thread principal). */
+// Le logo est un fichier image (webp) lu tel quel pour la page du téléphone : openRawResource convient, malgré l'alerte lint.
+@SuppressLint("ResourceType")
 @Composable
 fun PhoneQrPanel(onSubmit: (Map<String, String>) -> Unit) {
     val main = remember { Handler(Looper.getMainLooper()) }
