@@ -379,7 +379,7 @@ fun PlayerScreen(
                 text = withContext(Dispatchers.IO) { file.readText() },
                 vtt = vtt,
                 sourceLanguage = normalizeLanguage(result.language),
-            ) { done, total -> onlineSubtitleStatus = "Traduction IA ${done + 1}/$total…".takeIf { done < total } }
+            ) { done, total -> onlineSubtitleStatus = "$AI_SUBTITLE_STATUS_PREFIX ${done + 1}/$total…".takeIf { done < total } }
             onlineSubtitleStatus = null
             if (translated != null) {
                 shown = java.io.File(directory, "ai-${file.nameWithoutExtension}-${appSettings.aiLanguage}.${file.extension}")

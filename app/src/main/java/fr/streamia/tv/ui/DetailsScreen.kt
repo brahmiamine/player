@@ -50,6 +50,8 @@ fun MovieDetailsScreen(
     watched: Boolean,
     resumePositionMs: Long,
     translatedPlot: String? = null,
+    aiPlotLoading: Boolean = false,
+    aiSimilarLoading: Boolean = false,
     similarMedia: List<RecommendedMedia> = emptyList(),
     similarLoading: Boolean = false,
     otherVersions: List<RecommendedMedia> = emptyList(),
@@ -143,6 +145,7 @@ fun MovieDetailsScreen(
             if (!details?.plot.isNullOrBlank() || !movie.plot.isNullOrBlank()) {
                 Text(translatedPlot ?: details?.plot ?: movie.plot.orEmpty(), color = Ink, fontSize = TypeBody, lineHeight = TypeBodyLineHeight)
             }
+            AiLoadingIndicator("Traduction de la description par l'IA…", aiPlotLoading)
             val hasDetailLines = listOf(details?.director, details?.cast, details?.country, details?.tmdbId)
                 .any { !it.isNullOrBlank() }
             if (hasDetailLines) {
@@ -170,6 +173,7 @@ fun MovieDetailsScreen(
                 modifier = Modifier.padding(top = 18.dp),
                 loading = otherVersionsLoading,
             )
+            AiLoadingIndicator("Classement des similaires par l'IA…", aiSimilarLoading, Modifier.padding(top = 18.dp))
             SimilarMediaRow(
                 title = "Films similaires",
                 items = similarMedia,

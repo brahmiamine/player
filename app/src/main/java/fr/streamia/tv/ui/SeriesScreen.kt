@@ -68,6 +68,8 @@ fun SeriesScreen(
     favorite: Boolean,
     watched: Boolean,
     translatedPlot: String? = null,
+    aiPlotLoading: Boolean = false,
+    aiSimilarLoading: Boolean = false,
     similarMedia: List<RecommendedMedia> = emptyList(),
     similarLoading: Boolean = false,
     otherVersions: List<RecommendedMedia> = emptyList(),
@@ -178,6 +180,7 @@ fun SeriesScreen(
                 Spacer(Modifier.height(12.dp))
                 Text(plot, color = MutedInk, fontSize = TypeBody, lineHeight = TypeBodyLineHeight, maxLines = 12, overflow = TextOverflow.Ellipsis)
             }
+            AiLoadingIndicator("Traduction de la description par l'IA…", aiPlotLoading, Modifier.padding(top = 10.dp))
             SeriesInfoLine("Réalisateur", info?.director)
             SeriesInfoLine("Distribution", info?.cast)
             SeriesInfoLine("Pays", info?.country)
@@ -190,6 +193,7 @@ fun SeriesScreen(
                 modifier = Modifier.padding(top = 18.dp),
                 loading = otherVersionsLoading,
             )
+            AiLoadingIndicator("Classement des similaires par l'IA…", aiSimilarLoading, Modifier.padding(top = 18.dp))
             SimilarMediaRow(
                 title = "Séries similaires",
                 items = similarMedia,

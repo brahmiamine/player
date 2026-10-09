@@ -58,6 +58,10 @@ data class StreamiaUiState(
     val aiPlot: String? = null,
     /** Ordre des similaires proposé par l'IA (clés des entrées) ; null = ordre du moteur. */
     val aiSimilarKeys: List<String>? = null,
+    /** Traduction de la description par l'IA en cours (icône animée sur la fiche). */
+    val aiPlotLoading: Boolean = false,
+    /** Reclassement des similaires par l'IA en cours (icône animée sur la fiche). */
+    val aiSimilarLoading: Boolean = false,
     /** Premier calcul de « Films/Séries similaires » en cours pour la fiche ouverte (cartes fantômes). */
     val similarLoading: Boolean = false,
     val resumePositionMs: Long = 0,

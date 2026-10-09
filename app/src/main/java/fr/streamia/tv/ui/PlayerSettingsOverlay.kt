@@ -166,10 +166,14 @@ private fun ExternalSubtitleSection(
         )
         if (onSearchOnline != null) {
             FocusableSurface(onClick = { if (!searching) onSearchOnline() }, accent = true, modifier = Modifier.fillMaxWidth().height(58.dp)) {
-                Text(
-                    if (searching) status ?: "Recherche en cours…" else "Rechercher automatiquement",
-                    color = Ink, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 16.dp),
-                )
+                Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    // Traduction des sous-titres par l'IA en cours : icône animée devant « Traduction IA 2/5… ».
+                    if (searching && status?.startsWith(AI_SUBTITLE_STATUS_PREFIX) == true) {
+                        AiSparkle()
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    Text(if (searching) status ?: "Recherche en cours…" else "Rechercher automatiquement", color = Ink, fontSize = 14.sp)
+                }
             }
             if (resultCount > 1 && onShowResults != null) {
                 FocusableSurface(onClick = onShowResults, modifier = Modifier.fillMaxWidth().height(58.dp)) {

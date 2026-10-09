@@ -1017,7 +1017,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             it.copy(
                 screen = it.contentReturnContext?.destinationScreen() ?: StreamiaScreen.Browser,
                 mediaDetails = null,
-                similarMedia = emptyList(), aiPlot = null, aiSimilarKeys = null,
+                similarMedia = emptyList(), aiPlot = null, aiSimilarKeys = null, aiPlotLoading = false, aiSimilarLoading = false,
                 similarLoading = false,
                 message = null,
             )
@@ -1026,7 +1026,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     /** Fiche ouverte depuis une autre fiche (contenu similaire) : Retour rouvre la précédente. */
     private fun reopenPreviousDetails(): Boolean {
         val previous = detailsTrail.removeLastOrNull() ?: return false
-        _uiState.update { it.copy(mediaDetails = null, seriesDetails = null, similarMedia = emptyList(), aiPlot = null, aiSimilarKeys = null, similarLoading = false, message = null) }
+        _uiState.update { it.copy(mediaDetails = null, seriesDetails = null, similarMedia = emptyList(), aiPlot = null, aiSimilarKeys = null, aiPlotLoading = false, aiSimilarLoading = false, similarLoading = false, message = null) }
         openEntryInternal(previous)
         return true
     }
@@ -1037,7 +1037,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             it.copy(
                 screen = it.contentReturnContext?.destinationScreen() ?: StreamiaScreen.Browser,
                 seriesDetails = null,
-                similarMedia = emptyList(), aiPlot = null, aiSimilarKeys = null,
+                similarMedia = emptyList(), aiPlot = null, aiSimilarKeys = null, aiPlotLoading = false, aiSimilarLoading = false,
                 similarLoading = false,
                 message = null,
             )
@@ -1124,7 +1124,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             it.copy(
                 busy = true,
                 mediaDetails = null,
-                similarMedia = emptyList(), aiPlot = null, aiSimilarKeys = null,
+                similarMedia = emptyList(), aiPlot = null, aiSimilarKeys = null, aiPlotLoading = false, aiSimilarLoading = false,
                 similarLoading = profileId != null,
                 screen = StreamiaScreen.MovieDetails(movie),
                 message = null,
@@ -1161,7 +1161,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 busy = true,
                 message = null,
                 seriesDetails = null,
-                similarMedia = emptyList(), aiPlot = null, aiSimilarKeys = null,
+                similarMedia = emptyList(), aiPlot = null, aiSimilarKeys = null, aiPlotLoading = false, aiSimilarLoading = false,
                 similarLoading = profileId != null,
                 screen = StreamiaScreen.Series(series),
             )
@@ -1194,13 +1194,24 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             else -> false
         }
         if (!plot.isNullOrBlank()) {
-            repository.ai.translatePlot(plot)?.let { translated ->
-                _uiState.update { if (onSameEntry(it)) it.copy(aiPlot = translated) else it }
+            _uiState.update { if (onSameEntry(it)) it.copy(aiPlotLoading = true) else it }
+            try {
+                repository.ai.translatePlot(plot)?.let { translated ->
+                    _uiState.update { if (onSameEntry(it)) it.copy(aiPlot = translated) else it }
+                }
+            } finally {
+                _uiState.update { if (onSameEntry(it)) it.copy(aiPlotLoading = false) else it }
             }
         }
         val similar = _uiState.value.similarMedia.map { it.entry }
-        repository.ai.rerankSimilar(entry, similar)?.let { keys ->
-            _uiState.update { if (onSameEntry(it)) it.copy(aiSimilarKeys = keys) else it }
+        if (similar.isEmpty()) return
+        _uiState.update { if (onSameEntry(it)) it.copy(aiSimilarLoading = true) else it }
+        try {
+            repository.ai.rerankSimilar(entry, similar)?.let { keys ->
+                _uiState.update { if (onSameEntry(it)) it.copy(aiSimilarKeys = keys) else it }
+            }
+        } finally {
+            _uiState.update { if (onSameEntry(it)) it.copy(aiSimilarLoading = false) else it }
         }
     }
 
