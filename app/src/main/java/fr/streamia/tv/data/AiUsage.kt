@@ -59,7 +59,12 @@ internal class AiReply(
 )
 
 /** Échec d'un appel, avec les quotas lus dans les en-têtes (utiles surtout pour un 429). */
-internal class AiCallException(message: String, val requestQuota: String? = null, val tokenQuota: String? = null) : Exception(message)
+internal class AiCallException(
+    message: String,
+    val code: Int = 0,
+    val requestQuota: String? = null,
+    val tokenQuota: String? = null,
+) : Exception(message)
 
 /** Compteurs d'utilisation par fournisseur et modèle, gardés sur la TV (jamais dans les sauvegardes). */
 class AiUsageStore(context: Context) {

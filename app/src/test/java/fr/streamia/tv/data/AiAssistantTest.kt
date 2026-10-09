@@ -83,3 +83,25 @@ class AiSubtitlesTest {
         assertEquals(2, lines.size)
     }
 }
+
+class AiCompatTest {
+    @Test
+    fun openCodeRoutesGptGrokAndMuseModelsToResponsesFirst() {
+        assertEquals(AiFormat.Responses, AiCompat.formatOrder(AiProvider.OpenCode, "muse-spark-1.2-contributor").first())
+        assertEquals(AiFormat.Responses, AiCompat.formatOrder(AiProvider.OpenCodeZen, "gpt-5.5").first())
+        assertEquals(AiFormat.Messages, AiCompat.formatOrder(AiProvider.OpenCodeZen, "claude-sonnet-5-5").first())
+        assertEquals(AiFormat.Chat, AiCompat.formatOrder(AiProvider.OpenCode, "deepseek-v4.1-flash").first())
+    }
+
+    @Test
+    fun directProvidersKeepASingleFormat() {
+        assertEquals(listOf(AiFormat.Messages), AiCompat.formatOrder(AiProvider.Claude, "claude-haiku-5-5"))
+        assertEquals(listOf(AiFormat.Chat), AiCompat.formatOrder(AiProvider.OpenRouter, "a/b"))
+    }
+
+    @Test
+    fun openAiNeverTriesMaxTokens() {
+        assertEquals(listOf(1, 2), AiCompat.chatVariants(AiProvider.ChatGpt, "gpt-5"))
+        assertEquals(listOf(0, 1, 2), AiCompat.chatVariants(AiProvider.OpenCode, "deepseek-v4.1-flash"))
+    }
+}

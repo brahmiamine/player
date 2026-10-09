@@ -2,19 +2,12 @@ package fr.streamia.tv.data
 
 import android.content.Context
 import fr.streamia.tv.domain.MediaEntry
-import fr.streamia.tv.net.HttpClients
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
-import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
-import java.util.concurrent.TimeUnit
 
 /**
  * Miroir observable de « l'assistant IA est actif » (interrupteur sur Activé, clé enregistrée, modèle choisi).
@@ -49,6 +42,10 @@ object AiLanguages {
  */
 class AiAssistant(context: Context, private val keyStore: AiKeyStore, val usage: AiUsageStore) {
     private val appContext = context.applicationContext
+
+    init {
+        AiCompat.attach(appContext.getSharedPreferences("ai-compat", Context.MODE_PRIVATE))
+    }
 
     private class Config(val provider: AiProvider, val model: String, val language: String)
 
@@ -254,90 +251,4 @@ private class AiCache(private val file: File) {
     private companion object {
         const val MAX_ENTRIES = 2_000
     }
-}
-
-/** Appel `/chat/completions` (format OpenAI) ou `/messages` (Claude) : une requête, une réponse texte. */
-internal object AiChatClient {
-    private val client: OkHttpClient by lazy {
-        HttpClients.api.newBuilder().readTimeout(45, TimeUnit.SECONDS).build()
-    }
-
-    suspend fun complete(
-        provider: AiProvider,
-        key: String,
-        model: String,
-        system: String,
-        user: String,
-        maxTokens: Int,
-    ): Result<AiReply> = withContext(Dispatchers.IO) {
-        runCatching {
-            val claude = provider == AiProvider.Claude
-            val body = JSONObject().put("model", model)
-            if (claude) {
-                body.put("max_tokens", maxTokens)
-                    .put("system", system)
-                    .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", user)))
-            } else {
-                body.put(
-                    "messages",
-                    JSONArray()
-                        .put(JSONObject().put("role", "system").put("content", system))
-                        .put(JSONObject().put("role", "user").put("content", user)),
-                )
-                // Les modèles récents d'OpenAI refusent max_tokens et toute température autre que 1.
-                if (provider == AiProvider.ChatGpt) {
-                    body.put("max_completion_tokens", maxTokens + REASONING_MARGIN_TOKENS)
-                } else {
-                    body.put("max_tokens", maxTokens).put("temperature", 0)
-                }
-            }
-            val request = Request.Builder()
-                .url(provider.baseUrl + if (claude) "/messages" else "/chat/completions")
-                .header("User-Agent", HttpClients.USER_AGENT)
-                .apply {
-                    if (claude) {
-                        header("x-api-key", key)
-                        header("anthropic-version", "2023-06-01")
-                    } else {
-                        header("Authorization", "Bearer $key")
-                    }
-                }
-                .post(body.toString().toRequestBody("application/json".toMediaType()))
-                .build()
-            client.newCall(request).execute().use { response ->
-                val requestQuota = quota(response, "requests")
-                val tokenQuota = quota(response, "tokens")
-                if (!response.isSuccessful) {
-                    throw AiCallException("${provider.label} a répondu ${response.code}.", requestQuota, tokenQuota)
-                }
-                val json = JSONObject(response.body?.string().orEmpty())
-                val usage = json.optJSONObject("usage")
-                val text = if (claude) {
-                    json.optJSONArray("content")?.optJSONObject(0)?.optString("text")
-                } else {
-                    json.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content")
-                }
-                AiReply(
-                    text = text?.takeIf(String::isNotBlank) ?: throw AiCallException("Réponse vide de ${provider.label}.", requestQuota, tokenQuota),
-                    promptTokens = usage?.let { it.optLong("prompt_tokens", it.optLong("input_tokens")) } ?: 0L,
-                    completionTokens = usage?.let { it.optLong("completion_tokens", it.optLong("output_tokens")) } ?: 0L,
-                    requestQuota = requestQuota,
-                    tokenQuota = tokenQuota,
-                )
-            }
-        }
-    }
-
-    /** « restant / limite » lu dans les en-têtes de quota (OpenAI, Groq, Anthropic…), ou null si le fournisseur n'en donne pas. */
-    private fun quota(response: okhttp3.Response, kind: String): String? {
-        val remaining = response.header("x-ratelimit-remaining-$kind") ?: response.header("anthropic-ratelimit-$kind-remaining")
-        val limit = response.header("x-ratelimit-limit-$kind") ?: response.header("anthropic-ratelimit-$kind-limit")
-        return when {
-            remaining != null && limit != null -> "$remaining / $limit"
-            remaining != null -> remaining
-            else -> null
-        }
-    }
-
-    private const val REASONING_MARGIN_TOKENS = 1_000
 }
