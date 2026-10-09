@@ -162,6 +162,9 @@ private data class LiveVersionSwitch(val from: MediaEntry, val targetKey: String
 private data class LiveOutageStart(val atMs: Long, val afterPlayback: Boolean)
 
 /** Test de toutes les versions : [queue] est lancée à l'écran une version après l'autre. */
+/** Sous-titre traduit par l'IA ([translated]) et l'original à remettre si l'assistant est coupé. */
+private data class AiSubtitleSwap(val translated: Uri, val original: Uri, val originalLabel: String)
+
 private data class LiveVersionScan(val origin: MediaEntry, val queue: List<MediaEntry>, val index: Int)
 
 @androidx.annotation.OptIn(markerClass = [UnstableApi::class])
@@ -381,6 +384,14 @@ fun PlayerScreen(
 
     val aiAssistant = remember { XtreamRepository.get(context).ai }
     val aiActive by AiGate.active.collectAsState()
+    // Sous-titre traduit par l'IA en cours d'affichage et son original : l'assistant coupé ramène l'original.
+    var aiSubtitle by remember(entry.key) { mutableStateOf<AiSubtitleSwap?>(null) }
+    LaunchedEffect(aiActive) {
+        if (aiActive) return@LaunchedEffect
+        val swap = aiSubtitle ?: return@LaunchedEffect
+        aiSubtitle = null
+        if (externalSubtitle?.uri == swap.translated) loadExternalSubtitle(swap.original, swap.originalLabel)
+    }
 
     /** Vrai si le sous-titre [result] sera traduit par l'IA : assistant actif et langue différente de celle choisie. */
     fun needsAiTranslation(result: SubtitleResult): Boolean =
@@ -400,11 +411,13 @@ fun PlayerScreen(
                 sourceLanguage = normalizeLanguage(result.language),
             ) { done, total -> onlineSubtitleStatus = "$AI_SUBTITLE_STATUS_PREFIX ${done + 1}/$total…".takeIf { done < total } }
             onlineSubtitleStatus = null
-            if (translated != null) {
+            if (translated != null && AiGate.active.value) {
                 shown = java.io.File(directory, "ai-${file.nameWithoutExtension}-${appSettings.aiLanguage}.${file.extension}")
                 withContext(Dispatchers.IO) { shown.writeText(translated, Charsets.UTF_8) }
+                val originalLabel = label
                 label = "${AiLanguages.name(appSettings.aiLanguage)} (IA) · ${result.provider}.${file.extension}"
-            } else {
+                aiSubtitle = AiSubtitleSwap(Uri.fromFile(shown), Uri.fromFile(file), originalLabel)
+            } else if (AiGate.active.value) {
                 externalSubtitleError = "Traduction IA indisponible : sous-titre d'origine chargé."
             }
         }
