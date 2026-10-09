@@ -123,7 +123,7 @@ fun SeriesScreen(
         Column(Modifier.width(620.dp).fillMaxHeight().verticalScroll(rememberScrollState())) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 FocusableSurface(onClick = onBack, modifier = Modifier.width(130.dp).height(48.dp)) {
-                    Text("← Retour", color = Ink, fontSize = TypeLabel, modifier = Modifier.padding(horizontal = 15.dp))
+                    BackLabel(TypeLabel, 15.dp)
                 }
                 continueEpisode?.let { episode ->
                     val code = "S${episode.season.toString().padStart(2, '0')}E${episode.number.toString().padStart(2, '0')}"

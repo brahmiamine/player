@@ -101,7 +101,7 @@ fun SearchScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 FocusableSurface(onClick = onBack, modifier = Modifier.width(120.dp).height(52.dp)) {
-                    Text("← Retour", color = Ink, fontSize = TypeLabel, modifier = Modifier.padding(horizontal = 14.dp))
+                    BackLabel(TypeLabel, 14.dp)
                 }
                 Spacer(Modifier.width(18.dp))
                 Text("Recherche globale", color = Ink, fontSize = TypeScreenTitle, fontWeight = HeadingWeight)

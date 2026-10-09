@@ -51,7 +51,7 @@ fun ParentalControlScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 FocusableSurface(onClick = onBack, modifier = Modifier.width(120.dp).height(50.dp)) {
-                    Text("← Retour", color = Ink, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 14.dp))
+                    BackLabel(14.sp, 14.dp)
                 }
                 Spacer(Modifier.width(16.dp))
                 Text("Contrôle parental", color = Ink, fontSize = 27.sp, fontWeight = HeadingWeight)

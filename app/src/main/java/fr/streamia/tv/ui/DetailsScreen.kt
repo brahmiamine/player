@@ -17,6 +17,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.LaunchedEffect
@@ -66,14 +69,18 @@ fun MovieDetailsScreen(
     BackHandler(onBack = onBack)
     // Focus d'entrée sur Lire/Reprendre : sans lui, le premier appui tombait sur « ← Retour ».
     val playFocus = remember { FocusRequester() }
+    val detailScroll = rememberScrollState()
+    val scope = rememberCoroutineScope()
     // Le bouton est désactivé pendant le chargement de la fiche : focus posé dès qu'il est actif.
     LaunchedEffect(movie.key, busy) { if (!busy) runCatching { playFocus.requestFocus() } }
     Box(Modifier.fillMaxSize()) {
     DetailBackdrop(details?.backdropUrl ?: details?.posterUrl ?: movie.iconUrl)
     Row(Modifier.fillMaxSize().padding(34.dp)) {
-        Column(Modifier.width(330.dp).fillMaxHeight()) {
+        // Aucun élément focalisable dans le texte : en remontant depuis les listes du bas, le focus retombe sur la colonne de
+        // gauche (Retour, Lire…). On remet alors le texte (description, infos) en haut, sinon il reste hors de l'écran.
+        Column(Modifier.width(330.dp).fillMaxHeight().onFocusChanged { if (it.hasFocus) scope.launch { detailScroll.animateScrollTo(0) } }) {
             FocusableSurface(onClick = onBack, modifier = Modifier.width(130.dp).height(50.dp)) {
-                Text("← Retour", color = Ink, fontSize = TypeLabel, modifier = Modifier.padding(horizontal = 15.dp))
+                BackLabel(TypeLabel, 15.dp)
             }
             Spacer(Modifier.height(22.dp))
             ChannelLogo(details?.posterUrl ?: movie.iconUrl, movie.displayName, Modifier.size(300.dp))
@@ -127,7 +134,7 @@ fun MovieDetailsScreen(
         }
         Spacer(Modifier.width(34.dp))
         Column(
-            Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()),
+            Modifier.weight(1f).fillMaxHeight().verticalScroll(detailScroll),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(movie.displayName, color = Ink, fontSize = TypeHero, lineHeight = TypeHeroLineHeight, fontWeight = HeadingWeight)

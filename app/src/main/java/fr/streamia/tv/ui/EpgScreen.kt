@@ -187,7 +187,7 @@ fun EpgScreen(
                     onClick = { if (selected != null) selected = null else onBack() },
                     modifier = Modifier.width(115.dp).height(50.dp),
                 ) {
-                    Text("← Retour", color = Ink, fontSize = TypeLabel, modifier = Modifier.padding(horizontal = 14.dp))
+                    BackLabel(TypeLabel, 14.dp)
                 }
                 Spacer(Modifier.width(16.dp))
                 Text("Guide TV · Grille horaire", color = Ink, fontSize = TypeScreenTitle, fontWeight = HeadingWeight)

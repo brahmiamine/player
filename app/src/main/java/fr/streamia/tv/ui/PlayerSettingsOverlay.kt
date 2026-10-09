@@ -28,6 +28,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -105,6 +106,9 @@ internal fun BoxScope.PlayerSettings(
                     Text("Autres résultats ($onlineSubtitleResultCount)", color = Ink, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 16.dp))
                 }
             }
+            if (externalSubtitleError != null) {
+                Text(externalSubtitleError, color = MaterialTheme.colorScheme.error, fontSize = 13.sp, lineHeight = 18.sp)
+            }
         }
         TrackRow("Piste audio", audioTracks.getOrNull(audioIndex)?.label ?: "Auto", { picker = TrackPicker.Audio }, Modifier.focusRequester(audioFocus))
         TrackRow("Sous-titres", subtitleTracks.getOrNull(subtitleIndex)?.label ?: "Désactivés", { picker = TrackPicker.Subtitle }, Modifier.focusRequester(subtitleFocus))
@@ -165,15 +169,15 @@ private fun SubtitleOffsetRow(offsetMs: Long, onShift: (Long) -> Unit, onReset: 
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
             listOf("−5" to -5_000L, "−0,5" to -500L).forEach { (label, delta) ->
                 FocusableSurface(onClick = { onShift(delta) }, modifier = Modifier.weight(1f).height(48.dp)) {
-                    Text(label, color = Ink, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 8.dp))
+                    Text(label, color = Ink, fontSize = 13.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
                 }
             }
             FocusableSurface(onClick = onReset, modifier = Modifier.weight(1.4f).height(48.dp)) {
-                Text(value, color = FocusBlueBright, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, modifier = Modifier.padding(horizontal = 8.dp))
+                Text(value, color = FocusBlueBright, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
             }
             listOf("+0,5" to 500L, "+5" to 5_000L).forEach { (label, delta) ->
                 FocusableSurface(onClick = { onShift(delta) }, modifier = Modifier.weight(1f).height(48.dp)) {
-                    Text(label, color = Ink, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 8.dp))
+                    Text(label, color = Ink, fontSize = 13.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
                 }
             }
         }
@@ -185,7 +189,8 @@ private fun SubtitleOffsetRow(offsetMs: Long, onShift: (Long) -> Unit, onReset: 
 private fun AiTranslateButton(language: String, searching: Boolean, status: String?, onClick: () -> Unit, modifier: Modifier) {
     FocusableSurface(onClick = { if (!searching) onClick() }, accent = true, modifier = modifier.fillMaxWidth().height(76.dp)) {
         Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-            AiSparkle(size = 22.dp)
+            // Recherche du sous-titre : anneau qui tourne ; traduction par l'IA (« Traduction IA 2/5… ») : icône animée.
+            if (searching && status?.startsWith(AI_SUBTITLE_STATUS_PREFIX) != true) ButtonSpinner(size = 22.dp) else AiSparkle(size = 22.dp)
             Spacer(Modifier.width(12.dp))
             Column {
                 Text(
@@ -245,8 +250,8 @@ private fun ExternalSubtitleSection(
             FocusableSurface(onClick = { if (!searching) onSearchOnline() }, accent = true, modifier = Modifier.fillMaxWidth().height(58.dp)) {
                 Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                     // Traduction des sous-titres par l'IA en cours : icône animée devant « Traduction IA 2/5… ».
-                    if (searching && status?.startsWith(AI_SUBTITLE_STATUS_PREFIX) == true) {
-                        AiSparkle()
+                    if (searching) {
+                        if (status?.startsWith(AI_SUBTITLE_STATUS_PREFIX) == true) AiSparkle() else ButtonSpinner()
                         Spacer(Modifier.width(8.dp))
                     }
                     Text(if (searching) status ?: "Recherche en cours…" else "Rechercher automatiquement", color = Ink, fontSize = 14.sp)
@@ -284,7 +289,7 @@ private fun ExternalSubtitleSection(
                 Text("Valider", color = Ink, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 16.dp))
             }
         }
-        if (errorMessage != null) {
+        if (errorMessage != null && !aiAbove) {
             Text(errorMessage, color = MaterialTheme.colorScheme.error, fontSize = 12.sp, lineHeight = 16.sp)
         }
     }
