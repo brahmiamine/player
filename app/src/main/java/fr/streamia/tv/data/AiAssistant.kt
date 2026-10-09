@@ -88,9 +88,8 @@ class AiAssistant(context: Context, private val keyStore: AiKeyStore, val usage:
     /** Description traduite dans la langue choisie ; null si inutile (déjà dans cette langue), impossible ou IA coupée. */
     suspend fun translatePlot(plot: String): String? {
         val cfg = config ?: return null
-        val text = plot.trim()
-        if (text.length < MIN_PLOT_CHARS || LanguageGuess.isLikely(text, cfg.language)) return null
-        val cacheKey = "t|${cfg.language}|${text.length}|${text.hashCode()}"
+        val text = plotToTranslate(cfg, plot) ?: return null
+        val cacheKey = plotCacheKey(cfg, text)
         cached(cacheKey)?.let { return it }
         val translated = chat(
             cfg,
@@ -157,9 +156,8 @@ class AiAssistant(context: Context, private val keyStore: AiKeyStore, val usage:
     /** Clés de [candidates] classées de la plus proche à la moins proche de [source] ; null si indisponible. */
     suspend fun rerankSimilar(source: MediaEntry, candidates: List<MediaEntry>): List<String>? {
         val cfg = config ?: return null
-        if (candidates.size < 3) return null
-        val items = candidates.take(MAX_RERANK_CANDIDATES)
-        val cacheKey = "r|${source.key}|${items.joinToString(",") { it.key }.hashCode()}"
+        val items = rankable(candidates) ?: return null
+        val cacheKey = rankCacheKey(source, items)
         cached(cacheKey)?.let { return it.split(',').filter(String::isNotEmpty) }
         val answer = chat(
             cfg,
@@ -177,6 +175,57 @@ class AiAssistant(context: Context, private val keyStore: AiKeyStore, val usage:
         return keys
     }
 
+    /**
+     * Fonctions IA d'une fiche en **une seule requête** quand la description est à traduire et les similaires à
+     * classer : la moitié des appels d'une fiche jamais ouverte. Ce qui est déjà en cache n'est pas redemandé ;
+     * s'il ne reste qu'une tâche, elle part seule.
+     */
+    suspend fun enrichFiche(source: MediaEntry, plot: String?, candidates: List<MediaEntry>): FicheAi {
+        val cfg = config ?: return FicheAi(null, null)
+        val text = plot?.let { plotToTranslate(cfg, it) }
+        val plotKey = text?.let { plotCacheKey(cfg, it) }
+        val items = rankable(candidates)
+        val rankKey = items?.let { rankCacheKey(source, it) }
+        val cachedPlot = plotKey?.let { cached(it) }
+        val cachedKeys = rankKey?.let { key -> cached(key)?.split(',')?.filter(String::isNotEmpty) }
+        val needPlot = text != null && cachedPlot == null
+        val needRank = items != null && cachedKeys == null
+        if (!needPlot || !needRank) {
+            return FicheAi(
+                plot = cachedPlot ?: if (needPlot && plot != null) translatePlot(plot) else null,
+                similarKeys = cachedKeys ?: if (needRank) rerankSimilar(source, candidates) else null,
+            )
+        }
+        val answer = chat(
+            cfg,
+            AiFeature.Fiche,
+            system = "Tu fais deux tâches pour la fiche d'un film ou d'une série. " +
+                "1) Classe les candidats par proximité (genre, ambiance, public) avec la référence. " +
+                "2) Traduis la description en ${AiLanguages.name(cfg.language)}. " +
+                "Réponds exactement sous cette forme, sans rien d'autre :\n" +
+                "ORDRE: [numéros du plus proche au moins proche, chacun une fois]\nTRADUCTION:\n<la traduction>",
+            user = "Référence : ${source.displayName}\nCandidats :\n" +
+                items!!.mapIndexed { index, entry -> "${index + 1}. ${entry.displayName}" }.joinToString("\n") +
+                "\n\nDescription :\n" + text!!.take(MAX_PLOT_CHARS),
+            maxTokens = 1_700,
+        ) ?: return FicheAi(null, null)
+        val (order, translated) = parseFicheAnswer(answer, items.size)
+        val keys = order?.let { indexes -> indexes.map { items[it].key } + candidates.drop(items.size).map(MediaEntry::key) }
+        translated?.let { store(plotKey!!, it) }
+        keys?.let { store(rankKey!!, it.joinToString(",")) }
+        return FicheAi(translated, keys)
+    }
+
+    private fun plotToTranslate(cfg: Config, plot: String): String? =
+        plot.trim().takeUnless { it.length < MIN_PLOT_CHARS || LanguageGuess.isLikely(it, cfg.language) }
+
+    private fun plotCacheKey(cfg: Config, text: String) = "t|${cfg.language}|${text.length}|${text.hashCode()}"
+
+    private fun rankable(candidates: List<MediaEntry>): List<MediaEntry>? =
+        candidates.takeIf { it.size >= 3 }?.take(MAX_RERANK_CANDIDATES)
+
+    private fun rankCacheKey(source: MediaEntry, items: List<MediaEntry>) = "r|${source.key}|${items.joinToString(",") { it.key }.hashCode()}"
+
     // Cache disque lu et écrit hors du thread principal : les fiches appellent ces fonctions depuis Main.
     private suspend fun cached(key: String): String? = withContext(Dispatchers.IO) { cache.get(key) }
 
@@ -189,6 +238,22 @@ class AiAssistant(context: Context, private val keyStore: AiKeyStore, val usage:
         const val MAX_PLOT_CHARS = 1_500
         const val MAX_RERANK_CANDIDATES = 20
     }
+}
+
+/** Ce que l'IA apporte à une fiche : description traduite et ordre des similaires (null = inutile ou indisponible). */
+class FicheAi(val plot: String?, val similarKeys: List<String>?)
+
+/** Réponse combinée « ORDRE: […] / TRADUCTION: … » : ordre (indices) et traduction, chacun null s'il manque. */
+internal fun parseFicheAnswer(answer: String, size: Int): Pair<List<Int>?, String?> {
+    val orderMarker = Regex("^\\W*ORDRE\\s*:(.*)$", setOf(RegexOption.IGNORE_CASE, RegexOption.MULTILINE)).find(answer)
+    val order = orderMarker?.groupValues?.get(1)?.let { parseRanking(it, size) }
+    val marker = Regex("TRADUCTION\\s*:", RegexOption.IGNORE_CASE).find(answer)
+    // Traduction : après « TRADUCTION: », sans la ligne ORDRE si le modèle l'a mise en dernier.
+    val translation = marker?.let { found ->
+        val end = orderMarker?.range?.first?.takeIf { it > found.range.last } ?: answer.length
+        answer.substring(found.range.last + 1, end).trim { it.isWhitespace() || it in "\"«»*" }
+    }?.takeIf(String::isNotEmpty)
+    return order to translation
 }
 
 /** Numéros (1 à [size]) de la réponse du modèle, sans doublon ; les oubliés sont ajoutés à la fin. Null si inexploitable. */

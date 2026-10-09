@@ -138,7 +138,7 @@ internal fun AiModelPickerModal(
                             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Réessayer", color = Ink, fontSize = 15.sp, fontWeight = HeadingWeight) }
                         }
                     }
-                    models == null -> Text("Chargement des modèles…", color = MutedInk, fontSize = 14.sp)
+                    models == null -> AiLoadingIndicator("Chargement des modèles…", visible = true)
                     else -> {
                         Text("${models!!.size} modèles disponibles", color = MutedInk, fontSize = 13.sp)
                         Spacer(Modifier.height(10.dp))
@@ -200,9 +200,9 @@ internal fun AiUsageModal(load: suspend () -> List<AiUsage>, onReset: () -> Unit
                 Spacer(Modifier.height(8.dp))
                 val list = rows
                 when {
-                    list == null -> Text("Chargement…", color = MutedInk, fontSize = 14.sp)
+                    list == null -> AiLoadingIndicator("Chargement…", visible = true)
                     list.isEmpty() -> Text(
-                        "Aucune requête envoyée pour l'instant. Les compteurs apparaissent dès qu'une fonction IA (traduction, similaires) utilise un modèle.",
+                        "Aucune requête envoyée pour l'instant. Les compteurs apparaissent dès qu'une fonction IA (traduction, similaires, sous-titres) utilise un modèle.",
                         color = MutedInk, fontSize = 14.sp, lineHeight = 19.sp,
                     )
                     else -> {

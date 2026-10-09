@@ -20,6 +20,27 @@ class AiAssistantTest {
     }
 
     @Test
+    fun ficheAnswerGivesOrderAndTranslation() {
+        val (order, translation) = parseFicheAnswer("ORDRE: [2, 3, 1]\nTRADUCTION:\nUn détective revient en ville.", 3)
+        assertEquals(listOf(1, 2, 0), order)
+        assertEquals("Un détective revient en ville.", translation)
+    }
+
+    @Test
+    fun ficheAnswerToleratesOrderAfterTranslationAndMarkdown() {
+        val (order, translation) = parseFicheAnswer("**TRADUCTION:** « Une famille fuit. »\n**ORDRE:** [3,1,2]", 3)
+        assertEquals(listOf(2, 0, 1), order)
+        assertEquals("Une famille fuit.", translation?.trim('*', ' '))
+    }
+
+    @Test
+    fun ficheAnswerWithoutMarkersGivesNothing() {
+        val (order, translation) = parseFicheAnswer("Je ne peux pas répondre.", 4)
+        assertNull(order)
+        assertNull(translation)
+    }
+
+    @Test
     fun languageGuessSkipsTextAlreadyInTargetLanguage() {
         val english = "A retired detective is pulled back into the city that he left, and the case is as personal as it is dangerous for his family."
         val french = "Un détective à la retraite est ramené dans la ville qu'il a quittée, et l'affaire est aussi personnelle que dangereuse pour sa famille."

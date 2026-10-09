@@ -1193,25 +1193,19 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             is StreamiaScreen.Series -> screen.series.key == entry.key
             else -> false
         }
-        if (!plot.isNullOrBlank()) {
-            _uiState.update { if (onSameEntry(it)) it.copy(aiPlotLoading = true) else it }
-            try {
-                repository.ai.translatePlot(plot)?.let { translated ->
-                    _uiState.update { if (onSameEntry(it)) it.copy(aiPlot = translated) else it }
-                }
-            } finally {
-                _uiState.update { if (onSameEntry(it)) it.copy(aiPlotLoading = false) else it }
-            }
-        }
         val similar = _uiState.value.similarMedia.map { it.entry }
-        if (similar.isEmpty()) return
-        _uiState.update { if (onSameEntry(it)) it.copy(aiSimilarLoading = true) else it }
+        if (plot.isNullOrBlank() && similar.isEmpty()) return
+        _uiState.update {
+            if (onSameEntry(it)) it.copy(aiPlotLoading = !plot.isNullOrBlank(), aiSimilarLoading = similar.isNotEmpty()) else it
+        }
         try {
-            repository.ai.rerankSimilar(entry, similar)?.let { keys ->
-                _uiState.update { if (onSameEntry(it)) it.copy(aiSimilarKeys = keys) else it }
+            // Une seule requête pour la traduction et les similaires quand les deux manquent au cache.
+            val result = repository.ai.enrichFiche(entry, plot, similar)
+            _uiState.update {
+                if (onSameEntry(it)) it.copy(aiPlot = result.plot ?: it.aiPlot, aiSimilarKeys = result.similarKeys ?: it.aiSimilarKeys) else it
             }
         } finally {
-            _uiState.update { if (onSameEntry(it)) it.copy(aiSimilarLoading = false) else it }
+            _uiState.update { if (onSameEntry(it)) it.copy(aiPlotLoading = false, aiSimilarLoading = false) else it }
         }
     }
 

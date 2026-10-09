@@ -89,8 +89,8 @@ fun FocusableSurface(
     content: @Composable () -> Unit,
 ) {
     var hasFocus by remember { mutableStateOf(false) }
-    // Au doigt (smartphone) : pas d'effet de focus TV (agrandissement, bordure rose) sur l'élément touché.
-    val focused = hasFocus && LocalInputModeManager.current.inputMode != InputMode.Touch
+    // Au doigt, sur téléphone seulement (la TV garde toujours son focus visible) : pas d'effet de focus TV (agrandissement, bordure rose) sur l'élément touché.
+    val focused = hasFocus && !(LocalHandheld.current && LocalInputModeManager.current.inputMode == InputMode.Touch)
     var longPressConsumed by remember { mutableStateOf(false) }
     var selectPressed by remember { mutableStateOf(false) }
     // Le focus doit rester visible depuis l'autre bout du salon : un agrandissement net, une

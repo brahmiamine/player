@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -38,11 +39,17 @@ fun ResponsiveTvViewport(content: @Composable () -> Unit) {
             fontScale = systemDensity.fontScale,
         )
 
-        CompositionLocalProvider(LocalDensity provides responsiveDensity) {
+        CompositionLocalProvider(LocalDensity provides responsiveDensity, LocalHandheld provides handheld) {
             Box(Modifier.fillMaxSize()) { content() }
         }
     }
 }
+
+/**
+ * Vrai sur téléphone ou tablette, faux sur Android TV : les commandes au doigt n'existent que sur les premiers,
+ * la TV se pilote uniquement à la télécommande (même avec une télécommande à pointeur).
+ */
+val LocalHandheld = staticCompositionLocalOf { false }
 
 private const val REFERENCE_WIDTH_DP = 1280f
 private const val REFERENCE_HEIGHT_DP = 720f

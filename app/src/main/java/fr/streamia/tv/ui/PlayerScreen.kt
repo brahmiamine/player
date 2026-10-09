@@ -249,8 +249,9 @@ fun PlayerScreen(
     var hudVisible by remember { mutableStateOf(true) }
     // Chaque appui sur une commande au doigt relance le délai de masquage du bandeau.
     var hudTouchTick by remember { mutableIntStateOf(0) }
-    // Dernière saisie au doigt (pas à la télécommande) : commandes tactiles du lecteur visibles.
-    val touchInput = LocalInputModeManager.current.inputMode == InputMode.Touch
+    // Téléphone et dernière saisie au doigt : commandes tactiles visibles. Jamais sur TV (télécommande seule).
+    val handheld = LocalHandheld.current
+    val touchInput = handheld && LocalInputModeManager.current.inputMode == InputMode.Touch
     // Icône lecture/pause des commandes au doigt, tenue à jour par le lecteur.
     var touchPlaying by remember(player) { mutableStateOf(player.isPlaying) }
     DisposableEffect(player) {
@@ -1281,7 +1282,7 @@ fun PlayerScreen(
 
         // Toucher l'image : affiche ou masque le bandeau ; double toucher à gauche / à droite d'un film ou
         // d'un épisode : recul / avance. Posé sous les panneaux, qui gardent leurs propres touchers.
-        Box(
+        if (handheld) Box(
             Modifier
                 .fillMaxSize()
                 .pointerInput(entry.type) {
