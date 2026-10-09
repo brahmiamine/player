@@ -74,7 +74,7 @@ class XtreamRepository private constructor(context: Context) {
     fun library(profileId: String): UserLibrarySnapshot = libraryStore.snapshot(profileId)
     fun appSettings(): AppSettings = appSettingsStore.load()
     /** Fonctions IA (traduction, similaires, titres) : inactives tant que [syncAi] n'a pas validé les réglages. */
-    val ai = AiAssistant(appContext, aiKeyStore)
+    val ai = AiAssistant(appContext, aiKeyStore, AiUsageStore(appContext))
     fun hasAiKey(provider: AiProvider): Boolean = aiKeyStore.has(provider)
     fun saveAiKey(provider: AiProvider, key: String) {
         aiKeyStore.set(provider, key)

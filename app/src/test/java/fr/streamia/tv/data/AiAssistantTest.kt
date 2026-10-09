@@ -44,3 +44,21 @@ class AiAssistantTest {
         assertFalse(LanguageGuess.isLikely(french, "en"))
     }
 }
+
+class AiModelInfoTest {
+    @Test
+    fun openRouterPricesPerTokenBecomePricePerMillion() {
+        val body = """{"data":[{"id":"a/b","context_length":128000,"pricing":{"prompt":"0.0000009","completion":"0.000002"},"top_provider":{"max_completion_tokens":16000}}]}"""
+        val info = parseModelInfos(body)["a/b"]!!
+        assertEquals(128_000L, info.contextTokens)
+        assertEquals(16_000L, info.maxOutputTokens)
+        assertEquals(0.9, info.inputPricePerMillion!!, 1e-9)
+        assertEquals(2.0, info.outputPricePerMillion!!, 1e-9)
+    }
+
+    @Test
+    fun modelsWithoutDetailsAreSkipped() {
+        assertTrue(parseModelInfos("""{"data":[{"id":"x"}]}""").isEmpty())
+        assertTrue(parseModelInfos("pas du json").isEmpty())
+    }
+}

@@ -59,7 +59,9 @@ object AiModelsClient {
                         },
                     )
                 }
-                parseModelIds(response.body?.string().orEmpty()).ifEmpty { error("Aucun modèle renvoyé par ${provider.label}.") }
+                val body = response.body?.string().orEmpty()
+                AiModelInfos.putAll(provider, parseModelInfos(body))
+                parseModelIds(body).ifEmpty { error("Aucun modèle renvoyé par ${provider.label}.") }
             }
         }
     }

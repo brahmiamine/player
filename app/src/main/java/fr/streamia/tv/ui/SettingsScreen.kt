@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
 import fr.streamia.tv.data.AiLanguages
 import fr.streamia.tv.data.AiProvider
+import fr.streamia.tv.data.AiUsage
 import fr.streamia.tv.data.AppSettings
 import fr.streamia.tv.data.BufferMode
 import fr.streamia.tv.data.DisplayModeSwitch
@@ -109,6 +110,8 @@ fun SettingsScreen(
     onSetPrayerMethod: (PrayerMethod) -> Unit,
     onToggleAi: () -> Unit = {},
     onSetAiLanguage: (String) -> Unit = {},
+    onLoadAiUsage: suspend () -> List<AiUsage> = { emptyList() },
+    onResetAiUsage: () -> Unit = {},
     onSetAiProvider: (AiProvider) -> Unit = {},
     onSetAiModel: (AiProvider, String) -> Unit = { _, _ -> },
     hasAiKey: (AiProvider) -> Boolean = { false },
@@ -151,11 +154,12 @@ fun SettingsScreen(
     var citySearchOpen by remember { mutableStateOf(false) }
     var aiKeyDialog by remember { mutableStateOf(false) }
     var aiModelDialog by remember { mutableStateOf(false) }
+    var aiUsageDialog by remember { mutableStateOf(false) }
     // Relu après chaque enregistrement de clé (le store chiffré n'est pas observable).
     var aiKeyRevision by remember { mutableStateOf(0) }
     val aiKeySet = remember(aiKeyRevision, settings.aiProvider) { hasAiKey(settings.aiProvider) }
     // Un modal ouvert : à sa fermeture, le focus retourne à la carte qui l'avait ouvert (sinon il tombait sur la première).
-    val modalOpen = activeModal != null || citySearchOpen || homeBlocksModalOpen || updateDialogOpen || aiKeyDialog || aiModelDialog
+    val modalOpen = activeModal != null || citySearchOpen || homeBlocksModalOpen || updateDialogOpen || aiKeyDialog || aiModelDialog || aiUsageDialog
     val focusTracker = remember { SettingsFocusTracker() }
     // Actif dès l'ouverture d'un modal et jusqu'au retour du focus : à la fermeture, il tombe d'abord
     // sur la sidebar, qui changerait de catégorie (et ferait disparaître la carte à qui le rendre).
@@ -797,7 +801,14 @@ fun SettingsScreen(
                         Modifier.weight(1f),
                         enabled = settings.aiEnabled,
                     )
-                    Spacer(Modifier.weight(3f))
+                    SettingsTile(
+                        StreamiaIconGlyph.Reorder,
+                        "Consommation IA",
+                        "Requêtes, tokens, quotas",
+                        { aiUsageDialog = true },
+                        Modifier.weight(1f),
+                    )
+                    Spacer(Modifier.weight(2f))
                 }
                 if (settings.aiEnabled && !aiKeySet) {
                     Text("Ajoutez la clé d'API de ${settings.aiProvider.label} pour pouvoir lister ses modèles.", color = MutedInk, fontSize = 13.sp)
@@ -874,6 +885,13 @@ fun SettingsScreen(
         ) }
     }
 
+    if (aiUsageDialog) {
+        FocusTrap { AiUsageModal(
+            load = onLoadAiUsage,
+            onReset = onResetAiUsage,
+            onDismiss = { aiUsageDialog = false },
+        ) }
+    }
     if (aiModelDialog) {
         val provider = settings.aiProvider
         FocusTrap { AiModelPickerModal(

@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import fr.streamia.tv.data.AiProvider
+import fr.streamia.tv.data.AiUsage
 import fr.streamia.tv.data.AppSettings
 import fr.streamia.tv.data.CatalogSource
 import fr.streamia.tv.data.HomeBlock
@@ -811,6 +812,13 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
 
     fun setAiModel(provider: AiProvider, model: String) {
         updateAppSettings { it.copy(aiModels = it.aiModels + (provider to model)) }
+        repository.ai.usage.rememberInfo(provider, model)
+    }
+
+    suspend fun loadAiUsage(): List<AiUsage> = withContext(Dispatchers.IO) { repository.ai.usage.all() }
+
+    fun resetAiUsage() {
+        viewModelScope.launch(Dispatchers.IO) { repository.ai.usage.clear() }
     }
 
     fun hasAiKey(provider: AiProvider): Boolean = repository.hasAiKey(provider)

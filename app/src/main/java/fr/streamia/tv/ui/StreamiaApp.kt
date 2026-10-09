@@ -275,6 +275,8 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onSetPrayerMethod = viewModel::setPrayerMethod,
                     onToggleAi = viewModel::toggleAi,
                     onSetAiLanguage = viewModel::setAiLanguage,
+                    onLoadAiUsage = viewModel::loadAiUsage,
+                    onResetAiUsage = viewModel::resetAiUsage,
                     onSetAiProvider = viewModel::setAiProvider,
                     onSetAiModel = viewModel::setAiModel,
                     hasAiKey = viewModel::hasAiKey,

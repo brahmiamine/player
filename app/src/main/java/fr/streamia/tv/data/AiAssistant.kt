@@ -65,7 +65,7 @@ object AiLanguages {
  * nettoyage des titres. Chaque appel vérifie d'abord que l'assistant est actif : désactivé, rien n'est
  * envoyé au fournisseur. Les réponses sont gardées sur disque pour ne jamais payer deux fois la même.
  */
-class AiAssistant(context: Context, private val keyStore: AiKeyStore) {
+class AiAssistant(context: Context, private val keyStore: AiKeyStore, val usage: AiUsageStore) {
     private class Config(val provider: AiProvider, val model: String, val language: String)
 
     @Volatile private var config: Config? = null
@@ -85,9 +85,17 @@ class AiAssistant(context: Context, private val keyStore: AiKeyStore) {
         AiGate.set(usable)
     }
 
-    private suspend fun chat(cfg: Config, system: String, user: String, maxTokens: Int): String? {
+    private suspend fun chat(cfg: Config, feature: AiFeature, system: String, user: String, maxTokens: Int): String? {
         val key = withContext(Dispatchers.IO) { keyStore.get(cfg.provider) } ?: return null
-        val answer = AiChatClient.complete(cfg.provider, key, cfg.model, system, user, maxTokens).getOrNull()
+        val startedAt = System.currentTimeMillis()
+        val result = AiChatClient.complete(cfg.provider, key, cfg.model, system, user, maxTokens)
+        usage.record(
+            cfg.provider, cfg.model, feature,
+            reply = result.getOrNull(),
+            error = result.exceptionOrNull()?.let { it as? AiCallException ?: AiCallException(it.message ?: "Erreur réseau") },
+            elapsedMillis = System.currentTimeMillis() - startedAt,
+        )
+        val answer = result.getOrNull()?.text
         // Désactivé pendant l'attente : la réponse est jetée.
         return answer?.trim()?.takeIf { it.isNotEmpty() && config === cfg }
     }
@@ -101,6 +109,7 @@ class AiAssistant(context: Context, private val keyStore: AiKeyStore) {
         cache.get(cacheKey)?.let { return it }
         val translated = chat(
             cfg,
+            AiFeature.Translation,
             system = "Tu es un traducteur. Traduis le texte en ${AiLanguages.name(cfg.language)}. " +
                 "Réponds uniquement par la traduction, sans commentaire ni guillemets.",
             user = text.take(MAX_PLOT_CHARS),
@@ -119,6 +128,7 @@ class AiAssistant(context: Context, private val keyStore: AiKeyStore) {
         cache.get(cacheKey)?.let { return it.split(',').filter(String::isNotEmpty) }
         val answer = chat(
             cfg,
+            AiFeature.Similar,
             system = "Tu classes des films ou séries par proximité (genre, ambiance, public) avec un titre de référence. " +
                 "Réponds uniquement par un tableau JSON des numéros, du plus proche au moins proche, par exemple [3,1,2]. " +
                 "N'invente aucun numéro et n'en répète aucun.",
@@ -158,6 +168,7 @@ class AiAssistant(context: Context, private val keyStore: AiKeyStore) {
             for (batch in todo.chunked(TITLES_PER_REQUEST)) {
                 val answer = chat(
                     cfg,
+                    AiFeature.Titles,
                     system = "Tu nettoies des titres de films et séries issus de listes IPTV. Pour chaque ligne « numéro|titre », " +
                         "supprime les préfixes de pays ou de langue (FR|, EN -), les étiquettes de qualité ou de version " +
                         "(HD, FHD, 4K, MULTI, VOSTFR, VF…), les crochets, symboles et l'année entre parenthèses, et corrige la casse. " +
@@ -306,7 +317,7 @@ internal object AiChatClient {
         system: String,
         user: String,
         maxTokens: Int,
-    ): Result<String> = withContext(Dispatchers.IO) {
+    ): Result<AiReply> = withContext(Dispatchers.IO) {
         runCatching {
             val claude = provider == AiProvider.Claude
             val body = JSONObject().put("model", model)
@@ -342,15 +353,37 @@ internal object AiChatClient {
                 .post(body.toString().toRequestBody("application/json".toMediaType()))
                 .build()
             client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) error("${provider.label} a répondu ${response.code}.")
+                val requestQuota = quota(response, "requests")
+                val tokenQuota = quota(response, "tokens")
+                if (!response.isSuccessful) {
+                    throw AiCallException("${provider.label} a répondu ${response.code}.", requestQuota, tokenQuota)
+                }
                 val json = JSONObject(response.body?.string().orEmpty())
+                val usage = json.optJSONObject("usage")
                 val text = if (claude) {
                     json.optJSONArray("content")?.optJSONObject(0)?.optString("text")
                 } else {
                     json.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content")
                 }
-                text?.takeIf(String::isNotBlank) ?: error("Réponse vide de ${provider.label}.")
+                AiReply(
+                    text = text?.takeIf(String::isNotBlank) ?: throw AiCallException("Réponse vide de ${provider.label}.", requestQuota, tokenQuota),
+                    promptTokens = usage?.let { it.optLong("prompt_tokens", it.optLong("input_tokens")) } ?: 0L,
+                    completionTokens = usage?.let { it.optLong("completion_tokens", it.optLong("output_tokens")) } ?: 0L,
+                    requestQuota = requestQuota,
+                    tokenQuota = tokenQuota,
+                )
             }
+        }
+    }
+
+    /** « restant / limite » lu dans les en-têtes de quota (OpenAI, Groq, Anthropic…), ou null si le fournisseur n'en donne pas. */
+    private fun quota(response: okhttp3.Response, kind: String): String? {
+        val remaining = response.header("x-ratelimit-remaining-$kind") ?: response.header("anthropic-ratelimit-$kind-remaining")
+        val limit = response.header("x-ratelimit-limit-$kind") ?: response.header("anthropic-ratelimit-$kind-limit")
+        return when {
+            remaining != null && limit != null -> "$remaining / $limit"
+            remaining != null -> remaining
+            else -> null
         }
     }
 

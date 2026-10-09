@@ -41,6 +41,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
 import fr.streamia.tv.data.AiProvider
+import fr.streamia.tv.data.AiUsage
+import java.text.DateFormat
+import java.text.NumberFormat
+import java.util.Date
 import fr.streamia.tv.ui.theme.FocusBlueBright
 import fr.streamia.tv.ui.theme.HeadingWeight
 import fr.streamia.tv.ui.theme.Ink
@@ -172,3 +176,113 @@ internal fun AiProviderTitle(title: String, provider: AiProvider) {
         Text(title, color = Ink, fontSize = 22.sp, fontWeight = HeadingWeight)
     }
 }
+
+/** Consommation de chaque modèle utilisé : requêtes, tokens, durée, coût estimé, quotas et caractéristiques annoncées. */
+@Composable
+internal fun AiUsageModal(load: suspend () -> List<AiUsage>, onReset: () -> Unit, onDismiss: () -> Unit) {
+    BackHandler(onBack = onDismiss)
+    var reload by remember { mutableIntStateOf(0) }
+    var rows by remember { mutableStateOf<List<AiUsage>?>(null) }
+    LaunchedEffect(reload) { rows = load() }
+    val closeFocus = remember { FocusRequester() }
+    val firstRowFocus = remember { FocusRequester() }
+    LaunchedEffect(rows) {
+        if (rows != null) {
+            delay(50)
+            runCatching { if (rows.orEmpty().isNotEmpty()) firstRowFocus.requestFocus() else closeFocus.requestFocus() }
+        }
+    }
+    val numbers = remember { NumberFormat.getIntegerInstance() }
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.76f)), contentAlignment = Alignment.Center) {
+        GlassSurface(modifier = Modifier.width(820.dp)) {
+            Column(Modifier.padding(26.dp).focusProperties { onExit = { cancelFocusChange() } }.focusGroup()) {
+                Text("Consommation de l'assistant IA", color = Ink, fontSize = 22.sp, fontWeight = HeadingWeight)
+                Spacer(Modifier.height(8.dp))
+                val list = rows
+                when {
+                    list == null -> Text("Chargement…", color = MutedInk, fontSize = 14.sp)
+                    list.isEmpty() -> Text(
+                        "Aucune requête envoyée pour l'instant. Les compteurs apparaissent dès qu'une fonction IA (traduction, similaires, titres) utilise un modèle.",
+                        color = MutedInk, fontSize = 14.sp, lineHeight = 19.sp,
+                    )
+                    else -> {
+                        val cost = list.mapNotNull(AiUsage::estimatedCost).takeIf { it.isNotEmpty() }?.sum()
+                        Text(
+                            "Total : ${numbers.format(list.sumOf(AiUsage::requests))} requêtes · ${numbers.format(list.sumOf(AiUsage::totalTokens))} tokens" +
+                                (cost?.let { " · ≈ ${formatDollars(it)}" } ?: "") +
+                                "  (${numbers.format(list.sumOf(AiUsage::failures))} échec(s))",
+                            color = FocusBlueBright, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        LazyColumn(Modifier.fillMaxWidth().heightIn(max = 380.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(list, key = { it.provider.name + "|" + it.model }) { usage ->
+                                FocusableSurface(
+                                    onClick = {},
+                                    focusScale = 1.01f,
+                                    modifier = Modifier.fillMaxWidth().height(176.dp).then(if (usage === list.first()) Modifier.focusRequester(firstRowFocus) else Modifier),
+                                ) {
+                                    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(usage.provider.logo), null, Modifier.size(20.dp))
+                                            Text("${usage.provider.label} · ${usage.model}", color = Ink, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        }
+                                        UsageLine("Requêtes", "${numbers.format(usage.requests)} (${numbers.format(usage.failures)} échec(s)) · durée moyenne ${usage.averageMillis} ms")
+                                        UsageLine("Tokens", "${numbers.format(usage.totalTokens)} (entrée ${numbers.format(usage.promptTokens)} · sortie ${numbers.format(usage.completionTokens)})")
+                                        usage.byFeature.takeIf { it.isNotEmpty() }?.let { byFeature ->
+                                            UsageLine("Fonctions", byFeature.entries.joinToString(" · ") { "${it.key.label} ${it.value}" })
+                                        }
+                                        usage.estimatedCost?.let { UsageLine("Coût estimé", formatDollars(it)) }
+                                        val info = usage.info
+                                        UsageLine(
+                                            "Modèle",
+                                            listOfNotNull(
+                                                info?.contextTokens?.let { "contexte ${numbers.format(it)} tokens" },
+                                                info?.maxOutputTokens?.let { "sortie max ${numbers.format(it)}" },
+                                                info?.inputPricePerMillion?.let { "entrée ${formatDollars(it)}/M" },
+                                                info?.outputPricePerMillion?.let { "sortie ${formatDollars(it)}/M" },
+                                            ).joinToString(" · ").ifEmpty { "caractéristiques non annoncées par le fournisseur" },
+                                        )
+                                        UsageLine(
+                                            "Quotas",
+                                            listOfNotNull(
+                                                usage.requestQuota?.let { "requêtes $it" },
+                                                usage.tokenQuota?.let { "tokens $it" },
+                                            ).joinToString(" · ").ifEmpty { "non communiqués par le fournisseur" },
+                                        )
+                                        UsageLine("Dernier appel", DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(usage.lastAtMillis)) +
+                                            (usage.lastError?.let { " · $it" } ?: ""))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    FocusableSurface(onClick = onDismiss, modifier = Modifier.weight(1f).height(52.dp).focusRequester(closeFocus)) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Fermer", color = Ink, fontSize = 15.sp, fontWeight = HeadingWeight) }
+                    }
+                    FocusableSurface(
+                        onClick = { onReset(); rows = emptyList(); reload++ },
+                        enabled = rows.orEmpty().isNotEmpty(),
+                        modifier = Modifier.weight(1f).height(52.dp),
+                    ) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Remettre à zéro", color = Ink, fontSize = 15.sp, fontWeight = HeadingWeight) }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun UsageLine(label: String, value: String) {
+    Row {
+        Text(label, color = MutedInk, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(96.dp))
+        Text(value, color = Ink, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+    }
+}
+
+/** 0,0006 $ pour les très petits montants, 1,25 $ sinon. */
+private fun formatDollars(value: Double): String =
+    if (value < 0.01) String.format(java.util.Locale.US, "%.4f $", value) else String.format(java.util.Locale.US, "%.2f $", value)
