@@ -30,7 +30,7 @@ import kotlin.math.sin
 enum class StreamiaIconGlyph {
     Live, Movie, Series, Search, Guide, Settings, Refresh, Swap,
     Star, StarOutline, ChevronUp, ChevronDown, CheckboxOn, CheckboxOff, ArrowBack, ArrowForward,
-    Reorder, Delete, Lock,
+    Reorder, Delete, Lock, Eye, EyeOff,
 }
 
 @Composable
@@ -66,6 +66,8 @@ fun StreamiaIcon(
             StreamiaIconGlyph.Reorder -> drawReorder(tint, stroke)
             StreamiaIconGlyph.Delete -> drawDelete(tint, stroke)
             StreamiaIconGlyph.Lock -> drawLock(tint, stroke)
+            StreamiaIconGlyph.Eye -> drawEye(tint, stroke, slashed = false)
+            StreamiaIconGlyph.EyeOff -> drawEye(tint, stroke, slashed = true)
         }
     }
 }
@@ -288,6 +290,19 @@ private fun DrawScope.drawCheckbox(tint: Color, stroke: Stroke, checked: Boolean
         }
         drawPath(path, tint, style = Stroke(width = stroke.width * 0.85f, cap = StrokeCap.Round, join = StrokeJoin.Round))
     }
+}
+
+/** Œil ouvert (vu) ; barré (`slashed`) pour « pas vu ». */
+private fun DrawScope.drawEye(tint: Color, stroke: Stroke, slashed: Boolean) {
+    val outline = Path().apply {
+        moveTo(pt(0.08f, 0.5f).x, pt(0.08f, 0.5f).y)
+        quadraticBezierTo(pt(0.5f, 0.12f).x, pt(0.5f, 0.12f).y, pt(0.92f, 0.5f).x, pt(0.92f, 0.5f).y)
+        quadraticBezierTo(pt(0.5f, 0.88f).x, pt(0.5f, 0.88f).y, pt(0.08f, 0.5f).x, pt(0.08f, 0.5f).y)
+        close()
+    }
+    drawPath(outline, tint, style = stroke)
+    drawCircle(tint, radius = size.width * 0.13f, center = pt(0.5f, 0.5f), style = stroke)
+    if (slashed) drawLine(tint, pt(0.18f, 0.84f), pt(0.82f, 0.16f), stroke.width * 1.15f, cap = StrokeCap.Round)
 }
 
 val FavoriteYellow = Color(0xFFFFC83D)

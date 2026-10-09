@@ -151,7 +151,7 @@ fun SeriesScreen(
                     contentDescription = if (watched) "Marquer comme non vue" else "Marquer comme vue",
                 ) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        StreamiaIcon(if (watched) StreamiaIconGlyph.CheckboxOn else StreamiaIconGlyph.CheckboxOff, size = 18.dp)
+                        StreamiaIcon(if (watched) StreamiaIconGlyph.Eye else StreamiaIconGlyph.EyeOff, size = 26.dp)
                     }
                 }
             }

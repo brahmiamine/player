@@ -44,6 +44,19 @@ internal class TmdbClient(private val token: String = BuildConfig.TMDB_TOKEN) {
         return parseTmdbInfo(JSONObject(body))
     }
 
+    /** Identifiant TMDB du premier résultat pour ce titre (sert à la recherche de sous-titres) ; null si inconnu. */
+    fun findId(title: String, year: Int?, series: Boolean): String? {
+        val path = if (series) "tv" else "movie"
+        val yearParam = year?.let { "&${if (series) "first_air_date_year" else "year"}=$it" }.orEmpty()
+        val body = HttpClients.getText(
+            "$BASE/search/$path?query=${java.net.URLEncoder.encode(title, "UTF-8")}$yearParam",
+            mapOf("Authorization" to "Bearer $token", "Accept" to "application/json"),
+            connectTimeoutMs = 8_000,
+            readTimeoutMs = 10_000,
+        )
+        return JSONObject(body).optJSONArray("results")?.optJSONObject(0)?.optInt("id", -1)?.takeIf { it > 0 }?.toString()
+    }
+
     private companion object {
         const val BASE = "https://api.themoviedb.org/3"
     }

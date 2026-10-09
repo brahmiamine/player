@@ -56,6 +56,18 @@ android {
             ?: ""
         buildConfigField("String", "TMDB_TOKEN", "\"$tmdbToken\"")
 
+        // Sous-titres en ligne : clés facultatives (secret GitHub en CI, local.properties en local).
+        // Podnapisi fonctionne sans clé ; SubDL, OpenSubtitles et Wyzie s'activent avec la leur.
+        fun secret(env: String, property: String): String = System.getenv(env)?.takeIf(String::isNotBlank)
+            ?: rootProject.file("local.properties").takeIf { it.exists() }
+                ?.readLines()?.firstOrNull { it.startsWith("$property=") }?.substringAfter('=')?.trim()
+            ?: ""
+        buildConfigField("String", "SUBDL_KEY", "\"${secret("SUBDL_KEY", "subdl.key")}\"")
+        buildConfigField("String", "WYZIE_KEY", "\"${secret("WYZIE_KEY", "wyzie.key")}\"")
+        buildConfigField("String", "OPENSUBTITLES_KEY", "\"${secret("OPENSUBTITLES_KEY", "opensubtitles.key")}\"")
+        buildConfigField("String", "OPENSUBTITLES_USER", "\"${secret("OPENSUBTITLES_USER", "opensubtitles.user")}\"")
+        buildConfigField("String", "OPENSUBTITLES_PASSWORD", "\"${secret("OPENSUBTITLES_PASSWORD", "opensubtitles.password")}\"")
+
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
     }

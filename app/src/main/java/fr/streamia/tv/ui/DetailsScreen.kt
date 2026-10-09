@@ -108,7 +108,7 @@ fun MovieDetailsScreen(
                     contentDescription = if (watched) "Marquer comme non vu" else "Marquer comme vu",
                 ) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        StreamiaIcon(if (watched) StreamiaIconGlyph.CheckboxOn else StreamiaIconGlyph.CheckboxOff, size = 20.dp)
+                        StreamiaIcon(if (watched) StreamiaIconGlyph.Eye else StreamiaIconGlyph.EyeOff, size = 28.dp)
                     }
                 }
             }

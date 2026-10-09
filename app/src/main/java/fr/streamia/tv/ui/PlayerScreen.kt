@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -116,6 +117,11 @@ import fr.streamia.tv.ui.theme.FocusBlueBright
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import fr.streamia.tv.data.OnlineSubtitleService
+import fr.streamia.tv.data.SubtitleQuery
+import fr.streamia.tv.data.SubtitleResult
+import fr.streamia.tv.data.buildSubtitleQuery
 import kotlinx.coroutines.yield
 
 private const val NEXT_EPISODE_COUNTDOWN_SECONDS = 8
@@ -181,6 +187,8 @@ fun PlayerScreen(
     onPlayNextEpisode: () -> Unit,
     /** Film lu jusqu'au bout : retour sur sa fiche au lieu de rester sur l'écran noir de fin. */
     onMovieFinished: () -> Unit = {},
+    /** Nom de la série quand [entry] est un épisode : sert à la recherche de sous-titres en ligne. */
+    seriesTitle: String? = null,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val sharedLivePlayer = entry.type == MediaType.Live
@@ -285,6 +293,15 @@ fun PlayerScreen(
     // "Désactivés" bien que le sous-titre externe soit réellement actif dans le lecteur.
     var externalSubtitlePendingSync by remember(entry.key) { mutableStateOf(false) }
 
+    // Recherche de sous-titres en ligne (SubDL, OpenSubtitles, Podnapisi, Wyzie) : le meilleur résultat
+    // est chargé tout seul, les autres restent consultables dans une liste.
+    val subtitleService = remember { OnlineSubtitleService() }
+    val subtitleScope = rememberCoroutineScope()
+    var onlineSubtitleBusy by remember(entry.key) { mutableStateOf(false) }
+    var onlineSubtitleResults by remember(entry.key) { mutableStateOf<List<SubtitleResult>>(emptyList()) }
+    var onlineSubtitleQuery by remember(entry.key) { mutableStateOf<SubtitleQuery?>(null) }
+    var onlineSubtitlesListOpen by remember(entry.key) { mutableStateOf(false) }
+
     fun startCandidate(url: String, positionMs: Long = 0L) {
         activeStreamUrl = url
         playbackError = null
@@ -335,6 +352,46 @@ fun PlayerScreen(
             .build()
         externalSubtitlePendingSync = true
         startCandidate(activeStreamUrl, player.currentPosition.coerceAtLeast(0L))
+    }
+
+    suspend fun applyOnlineSubtitle(result: SubtitleResult, query: SubtitleQuery): Boolean = runCatching {
+        val file = subtitleService.fetch(result, query, java.io.File(context.cacheDir, "online-subtitles"))
+        loadExternalSubtitle(Uri.fromFile(file), "${result.languageLabel} · ${result.provider}.${file.extension}")
+    }.isSuccess
+
+    fun searchOnlineSubtitles() {
+        if (sharedLivePlayer || onlineSubtitleBusy) return
+        val preferred = trackPreferenceStore.load().subtitleLanguage
+        val query = buildSubtitleQuery(
+            type = entry.type,
+            name = entry.name,
+            displayName = entry.displayName,
+            seriesTitle = seriesTitle,
+            languages = listOfNotNull(preferred, java.util.Locale.getDefault().language) + listOf("fr", "en", "ar"),
+        )
+        onlineSubtitleQuery = query
+        onlineSubtitleBusy = true
+        externalSubtitleError = null
+        subtitleScope.launch {
+            val outcome = subtitleService.search(query)
+            onlineSubtitleResults = outcome.results
+            when {
+                subtitleService.activeProviders.isEmpty() ->
+                    externalSubtitleError = "Aucun fournisseur actif."
+                outcome.results.isEmpty() ->
+                    externalSubtitleError = if (outcome.failedProviders.size == outcome.searched) {
+                        "Recherche impossible : vérifiez la connexion Internet."
+                    } else {
+                        "Aucun sous-titre trouvé pour « ${query.title} »."
+                    }
+                else -> {
+                    // Essaie les meilleurs résultats jusqu'à ce qu'un téléchargement réussisse.
+                    val loaded = outcome.results.take(3).any { applyOnlineSubtitle(it, query) }
+                    if (!loaded) externalSubtitleError = "Téléchargement impossible : choisissez un autre résultat."
+                }
+            }
+            onlineSubtitleBusy = false
+        }
     }
 
     val pickSubtitleFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -1292,6 +1349,10 @@ fun PlayerScreen(
                 externalSubtitleAvailable = !sharedLivePlayer,
                 externalSubtitleLabel = externalSubtitle?.label,
                 externalSubtitleError = externalSubtitleError,
+                onSearchOnlineSubtitles = ::searchOnlineSubtitles,
+                onlineSubtitleBusy = onlineSubtitleBusy,
+                onlineSubtitleResultCount = onlineSubtitleResults.size,
+                onShowOnlineSubtitleResults = { onlineSubtitlesListOpen = true },
                 onPickExternalSubtitleFile = {
                     // Les fournisseurs de documents décrivent rarement .srt/.vtt avec un type MIME
                     // fiable (souvent text/plain ou application/octet-stream) : on filtre large côté
@@ -1309,6 +1370,28 @@ fun PlayerScreen(
                         loadExternalSubtitle(uri, fileName.ifBlank { url })
                     }
                 },
+            )
+        }
+
+        if (onlineSubtitlesListOpen && onlineSubtitleResults.isNotEmpty()) {
+            val query = onlineSubtitleQuery
+            ChoiceDialog(
+                title = "Sous-titres trouvés",
+                options = onlineSubtitleResults.map { "${it.languageLabel} · ${it.provider} · ${it.release.take(60)}" },
+                selectedIndex = 0,
+                onSelect = { index ->
+                    onlineSubtitlesListOpen = false
+                    if (query != null) {
+                        onlineSubtitleBusy = true
+                        subtitleScope.launch {
+                            if (!applyOnlineSubtitle(onlineSubtitleResults[index], query)) {
+                                externalSubtitleError = "Téléchargement impossible : essayez un autre résultat."
+                            }
+                            onlineSubtitleBusy = false
+                        }
+                    }
+                },
+                onDismiss = { onlineSubtitlesListOpen = false },
             )
         }
 

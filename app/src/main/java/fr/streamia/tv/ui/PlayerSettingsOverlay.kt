@@ -53,6 +53,10 @@ internal fun BoxScope.PlayerSettings(
     externalSubtitleError: String? = null,
     onPickExternalSubtitleFile: (() -> Unit)? = null,
     onLoadExternalSubtitleUrl: ((String) -> Unit)? = null,
+    onSearchOnlineSubtitles: (() -> Unit)? = null,
+    onlineSubtitleBusy: Boolean = false,
+    onlineSubtitleResultCount: Int = 0,
+    onShowOnlineSubtitleResults: (() -> Unit)? = null,
 ) {
     // Audio / sous-titres : choix dans une fenêtre à cases à cocher (sélection unique), au lieu
     // d'une liste déroulante dans le panneau. Le focus revient sur la ligne à la fermeture.
@@ -90,6 +94,10 @@ internal fun BoxScope.PlayerSettings(
                 errorMessage = externalSubtitleError,
                 onPickFile = onPickExternalSubtitleFile,
                 onLoadUrl = onLoadExternalSubtitleUrl,
+                onSearchOnline = onSearchOnlineSubtitles,
+                searching = onlineSubtitleBusy,
+                resultCount = onlineSubtitleResultCount,
+                onShowResults = onShowOnlineSubtitleResults,
             )
         }
         Text("OK sur une ligne pour choisir la langue.", color = MutedInk, fontSize = 13.sp, lineHeight = 19.sp)
@@ -122,6 +130,10 @@ private fun ExternalSubtitleSection(
     errorMessage: String?,
     onPickFile: () -> Unit,
     onLoadUrl: (String) -> Unit,
+    onSearchOnline: (() -> Unit)? = null,
+    searching: Boolean = false,
+    resultCount: Int = 0,
+    onShowResults: (() -> Unit)? = null,
 ) {
     var urlFieldOpen by remember { mutableStateOf(false) }
     var urlInput by remember { mutableStateOf("") }
@@ -149,7 +161,20 @@ private fun ExternalSubtitleSection(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        FocusableSurface(onClick = onPickFile, accent = true, modifier = Modifier.fillMaxWidth().height(58.dp)) {
+        if (onSearchOnline != null) {
+            FocusableSurface(onClick = { if (!searching) onSearchOnline() }, accent = true, modifier = Modifier.fillMaxWidth().height(58.dp)) {
+                Text(
+                    if (searching) "Recherche en cours…" else "Rechercher automatiquement",
+                    color = Ink, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 16.dp),
+                )
+            }
+            if (resultCount > 1 && onShowResults != null) {
+                FocusableSurface(onClick = onShowResults, modifier = Modifier.fillMaxWidth().height(58.dp)) {
+                    Text("Autres résultats ($resultCount)", color = Ink, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 16.dp))
+                }
+            }
+        }
+        FocusableSurface(onClick = onPickFile, accent = onSearchOnline == null, modifier = Modifier.fillMaxWidth().height(58.dp)) {
             Text("Charger un fichier .srt / .vtt", color = Ink, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 16.dp))
         }
         FocusableSurface(onClick = { urlFieldOpen = !urlFieldOpen }, modifier = Modifier.fillMaxWidth().height(58.dp)) {

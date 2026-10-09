@@ -446,6 +446,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                         parentalControlEnabled = state.appSettings.parentalControlEnabled,
                         parentalUnlocked = state.parentalUnlocked,
                         nextEpisode = state.seriesDetails?.nextEpisode(playerScreen.entry.id),
+                        seriesTitle = state.seriesDetails?.series?.name,
                         livePlaybackSession = livePlaybackSession,
                         liveVideoSurface = liveVideoSurface,
                         liveReturnsToSource = livePlayerReturnsToSource(state.contentReturnContext?.origin),
