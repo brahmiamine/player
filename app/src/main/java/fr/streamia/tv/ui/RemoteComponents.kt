@@ -7,7 +7,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -33,7 +34,9 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.InputMode
 import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.platform.LocalInputModeManager
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -60,6 +63,7 @@ import fr.streamia.tv.ui.theme.RadiusTile
 import fr.streamia.tv.ui.theme.RaisedSurface
 import fr.streamia.tv.ui.theme.TypeSectionTitle
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun FocusableSurface(
     onClick: () -> Unit,
@@ -84,8 +88,11 @@ fun FocusableSurface(
     focusScale: Float = 1.06f,
     content: @Composable () -> Unit,
 ) {
-    var focused by remember { mutableStateOf(false) }
+    var hasFocus by remember { mutableStateOf(false) }
+    // Au doigt (smartphone) : pas d'effet de focus TV (agrandissement, bordure rose) sur l'élément touché.
+    val focused = hasFocus && LocalInputModeManager.current.inputMode != InputMode.Touch
     var longPressConsumed by remember { mutableStateOf(false) }
+    var selectPressed by remember { mutableStateOf(false) }
     // Le focus doit rester visible depuis l'autre bout du salon : un agrandissement net, une
     // lueur accent (pas seulement un changement de teinte) et une bordure large — jamais un
     // simple aplat de couleur — voir PRODUCT.md § Accessibilité & inclusion.
@@ -129,7 +136,7 @@ fun FocusableSurface(
     Box(
         modifier = modifier
             .onFocusChanged {
-                focused = it.isFocused
+                hasFocus = it.isFocused
                 if (it.isFocused) onFocused?.invoke()
             }
             .onPreviewKeyEvent { composeEvent ->
@@ -147,16 +154,25 @@ fun FocusableSurface(
                     event.action == AndroidKeyEvent.ACTION_DOWN && longPressConsumed -> true
                     event.action == AndroidKeyEvent.ACTION_UP && longPressConsumed -> {
                         longPressConsumed = false
+                        selectPressed = false
+                        true
+                    }
+                    // OK court : clic géré ici, pour que combinedClickable (appui long au doigt) ne voie
+                    // jamais la touche et ne déclenche pas son propre appui long au clavier en plus.
+                    // Un OK relâché dont l'appui visait un autre élément (écran qui vient de s'ouvrir) est ignoré.
+                    event.action == AndroidKeyEvent.ACTION_DOWN -> {
+                        selectPressed = true
                         true
                     }
                     event.action == AndroidKeyEvent.ACTION_UP -> {
-                        longPressConsumed = false
-                        false
+                        if (selectPressed) onClick()
+                        selectPressed = false
+                        true
                     }
                     else -> false
                 }
             }
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .combinedClickable(enabled = enabled, role = Role.Button, onLongClick = onLongClick, onClick = onClick)
             .focusable(enabled)
             .then(
                 if (contentDescription == null) Modifier

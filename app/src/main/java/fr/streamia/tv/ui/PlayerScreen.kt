@@ -10,6 +10,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -34,10 +35,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.InputMode
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalInputModeManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -239,6 +244,19 @@ fun PlayerScreen(
     // ignoré alors que le retour est en réalité déjà programmé et va aboutir.
     var returningToBrowser by remember(entry.key) { mutableStateOf(false) }
     var hudVisible by remember { mutableStateOf(true) }
+    // Chaque appui sur une commande au doigt relance le délai de masquage du bandeau.
+    var hudTouchTick by remember { mutableIntStateOf(0) }
+    // Dernière saisie au doigt (pas à la télécommande) : commandes tactiles du lecteur visibles.
+    val touchInput = LocalInputModeManager.current.inputMode == InputMode.Touch
+    // Icône lecture/pause des commandes au doigt, tenue à jour par le lecteur.
+    var touchPlaying by remember(player) { mutableStateOf(player.isPlaying) }
+    DisposableEffect(player) {
+        val listener = object : Player.Listener {
+            override fun onIsPlayingChanged(isPlaying: Boolean) { touchPlaying = isPlaying }
+        }
+        player.addListener(listener)
+        onDispose { player.removeListener(listener) }
+    }
     var buffering by remember { mutableStateOf(true) }
     var playbackError by remember { mutableStateOf<String?>(null) }
     var streamCandidates by remember { mutableStateOf(emptyList<String>()) }
@@ -1113,7 +1131,7 @@ fun PlayerScreen(
             runCatching { settingsFocus.requestFocus() }
         }
     }
-    LaunchedEffect(hudVisible, guideOpen, settingsOpen, entry.key, returningToBrowser) {
+    LaunchedEffect(hudVisible, guideOpen, settingsOpen, entry.key, returningToBrowser, hudTouchTick) {
         if (hudVisible && !guideOpen && !settingsOpen && !returningToBrowser) {
             delay(6_000)
             hudVisible = false
@@ -1125,7 +1143,7 @@ fun PlayerScreen(
         catalog.categoriesFor(entry.type).firstOrNull { it.id == entry.categoryId }?.name
     }
 
-    BackHandler {
+    fun handleBack() {
         when {
             versionScan != null -> cancelVersionScan()
             settingsOpen && versionsOpen -> { settingsOpen = false; versionsOpen = false; rootFocus.requestFocus() }
@@ -1143,6 +1161,23 @@ fun PlayerScreen(
             else -> onBack()
         }
     }
+    BackHandler { handleBack() }
+
+    // Gestes au doigt (smartphone) : saut relatif identique aux touches ← → de la télécommande.
+    fun seekRelative(forward: Boolean) {
+        val delta = if (forward) appSettings.vodSeekStepMs else -appSettings.vodSeekStepMs
+        val duration = player.duration.takeIf { it > 0L && it != C.TIME_UNSET } ?: 0L
+        val target = resolveSeekPosition(player.currentPosition, duration, delta)
+        player.seekTo(target)
+        positionMs = target
+        seekFeedback = if (delta < 0L) "−${appSettings.vodSeekStepSeconds} s" else "+${appSettings.vodSeekStepSeconds} s"
+        hudVisible = true
+    }
+    fun togglePlayback() {
+        if (player.isPlaying) player.pause() else player.play()
+        hudVisible = true
+    }
+    val touchSeek by rememberUpdatedState(::seekRelative)
 
     Box(
         modifier = Modifier
@@ -1175,23 +1210,9 @@ fun PlayerScreen(
                     // → en Direct : directement la liste des versions (réglages de lecture s'il n'y en a qu'une).
                     PlaybackRemoteAction.OpenVersions -> { versionsOpen = hasOtherVersions; settingsOpen = true; hudVisible = true; true }
                     PlaybackRemoteAction.ToggleHud -> { hudVisible = true; true }
-                    PlaybackRemoteAction.TogglePlayback -> {
-                        if (player.isPlaying) player.pause() else player.play()
-                        hudVisible = true
-                        true
-                    }
-                    PlaybackRemoteAction.SeekBackward,
-                    PlaybackRemoteAction.SeekForward,
-                    -> {
-                        val delta = if (remoteAction == PlaybackRemoteAction.SeekBackward) -appSettings.vodSeekStepMs else appSettings.vodSeekStepMs
-                        val duration = player.duration.takeIf { it > 0L && it != C.TIME_UNSET } ?: 0L
-                        val target = resolveSeekPosition(player.currentPosition, duration, delta)
-                        player.seekTo(target)
-                        positionMs = target
-                        seekFeedback = if (delta < 0L) "−${appSettings.vodSeekStepSeconds} s" else "+${appSettings.vodSeekStepSeconds} s"
-                        hudVisible = true
-                        true
-                    }
+                    PlaybackRemoteAction.TogglePlayback -> { togglePlayback(); true }
+                    PlaybackRemoteAction.SeekBackward -> { seekRelative(forward = false); true }
+                    PlaybackRemoteAction.SeekForward -> { seekRelative(forward = true); true }
                     PlaybackRemoteAction.None -> false
                 }
             },
@@ -1242,6 +1263,23 @@ fun PlayerScreen(
             }
         }
 
+        // Toucher l'image : affiche ou masque le bandeau ; double toucher à gauche / à droite d'un film ou
+        // d'un épisode : recul / avance. Posé sous les panneaux, qui gardent leurs propres touchers.
+        Box(
+            Modifier
+                .fillMaxSize()
+                .pointerInput(entry.type) {
+                    // En Direct, pas de double toucher : le simple toucher répond sans attendre.
+                    val doubleTap: ((Offset) -> Unit)? = if (entry.type == MediaType.Live) null else { offset ->
+                        if (!guideOpen && !settingsOpen) touchSeek(offset.x > size.width / 2f)
+                    }
+                    detectTapGestures(
+                        onTap = { if (!guideOpen && !settingsOpen) hudVisible = !hudVisible },
+                        onDoubleTap = doubleTap,
+                    )
+                },
+        )
+
         if (playbackError != null) {
             FocusableSurface(
                 onClick = {
@@ -1284,6 +1322,34 @@ fun PlayerScreen(
                 durationMs = { durationState.longValue },
                 otherVersionsCount = (liveVersions.size - 1).coerceAtLeast(0),
                 modifier = Modifier.align(Alignment.BottomCenter),
+            )
+        }
+
+        if (touchInput && hudVisible && playbackError == null && !guideOpen && !settingsOpen && !returningToBrowser && !showNextEpisodePrompt) {
+            PlayerTouchControls(
+                title = entry.displayName,
+                live = entry.type == MediaType.Live,
+                playing = touchPlaying,
+                seekStepSeconds = appSettings.vodSeekStepSeconds,
+                positionMs = { positionState.longValue },
+                durationMs = { durationState.longValue },
+                onBack = { hudTouchTick++; handleBack() },
+                onSettings = { versionsOpen = false; settingsOpen = true },
+                onTogglePlayback = { hudTouchTick++; togglePlayback() },
+                onSeekBackward = { hudTouchTick++; seekRelative(forward = false) },
+                onSeekForward = { hudTouchTick++; seekRelative(forward = true) },
+                onSeekTo = { target ->
+                    hudTouchTick++
+                    player.seekTo(target)
+                    positionMs = target
+                },
+                onChannelUp = { hudTouchTick++; onZap(1) },
+                onChannelDown = { hudTouchTick++; onZap(-1) },
+                onChannelList = {
+                    returningToBrowser = true
+                    PlayerOverlayController.requestReturnToBrowser()
+                    hudVisible = false
+                },
             )
         }
 
