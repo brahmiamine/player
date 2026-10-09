@@ -63,6 +63,7 @@ import androidx.media3.exoplayer.mediacodec.MediaCodecRenderer
 import fr.streamia.tv.data.DisplayModeSwitch
 import fr.streamia.tv.data.LiveVersionStatsStore
 import fr.streamia.tv.data.NetworkMonitor
+import fr.streamia.tv.data.shiftSubtitleTimings
 import fr.streamia.tv.player.unsupportedFormatMessage
 import fr.streamia.tv.player.isDecoderError
 import fr.streamia.tv.player.MAX_STREAM_RECOVERY_ATTEMPTS
@@ -330,6 +331,10 @@ fun PlayerScreen(
     var onlineSubtitleResults by remember(entry.key) { mutableStateOf<List<SubtitleResult>>(emptyList()) }
     var onlineSubtitleQuery by remember(entry.key) { mutableStateOf<SubtitleQuery?>(null) }
     var onlineSubtitlesListOpen by remember(entry.key) { mutableStateOf(false) }
+    // Décalage manuel : le sous-titre chargé depuis un fichier local est réécrit avec les temps décalés puis rechargé.
+    var shiftBase by remember(entry.key) { mutableStateOf<Pair<java.io.File, String>?>(null) }
+    var subtitleOffsetMs by remember(entry.key) { mutableLongStateOf(0L) }
+    var appliedOffsetMs by remember(entry.key) { mutableLongStateOf(0L) }
 
     fun startCandidate(url: String, positionMs: Long = 0L) {
         activeStreamUrl = url
@@ -357,7 +362,7 @@ fun PlayerScreen(
         }
     }
 
-    fun loadExternalSubtitle(subtitleUri: Uri, displayName: String) {
+    fun loadExternalSubtitle(subtitleUri: Uri, displayName: String, base: java.io.File? = null, keepOffset: Boolean = false) {
         if (sharedLivePlayer) return
         val mimeType = subtitleMimeTypeFor(displayName)
         if (mimeType == null) {
@@ -365,6 +370,11 @@ fun PlayerScreen(
             return
         }
         externalSubtitleError = null
+        shiftBase = base?.let { it to displayName }
+        if (!keepOffset) {
+            subtitleOffsetMs = 0L
+            appliedOffsetMs = 0L
+        }
         externalSubtitle = MediaItem.SubtitleConfiguration.Builder(subtitleUri)
             .setMimeType(mimeType)
             .setLanguage(EXTERNAL_SUBTITLE_LANGUAGE_TAG)
@@ -391,7 +401,7 @@ fun PlayerScreen(
         if (aiActive) return@LaunchedEffect
         val swap = aiSubtitle ?: return@LaunchedEffect
         aiSubtitle = null
-        if (externalSubtitle?.uri == swap.translated) loadExternalSubtitle(swap.original, swap.originalLabel)
+        if (externalSubtitle?.uri == swap.translated) loadExternalSubtitle(swap.original, swap.originalLabel, base = swap.original.path?.let { java.io.File(it) })
     }
 
     /** Vrai si le sous-titre [result] sera traduit par l'IA : assistant actif et langue différente de celle choisie. */
@@ -422,7 +432,7 @@ fun PlayerScreen(
                 externalSubtitleError = "Traduction IA indisponible : sous-titre d'origine chargé."
             }
         }
-        loadExternalSubtitle(Uri.fromFile(shown), label)
+        loadExternalSubtitle(Uri.fromFile(shown), label, base = shown)
     }.isSuccess
 
     fun searchOnlineSubtitles() {
@@ -461,6 +471,19 @@ fun PlayerScreen(
             }
             onlineSubtitleBusy = false
         }
+    }
+
+    // Quelques instants après le dernier appui sur −/+, le sous-titre est décalé d'un coup (un rechargement, pas un par appui).
+    LaunchedEffect(subtitleOffsetMs) {
+        val (file, label) = shiftBase ?: return@LaunchedEffect
+        if (subtitleOffsetMs == appliedOffsetMs) return@LaunchedEffect
+        delay(800)
+        val offset = subtitleOffsetMs
+        val shifted = withContext(Dispatchers.IO) {
+            java.io.File(file.parentFile, "shift$offset-${file.name}").also { it.writeText(shiftSubtitleTimings(file.readText(), offset), Charsets.UTF_8) }
+        }
+        appliedOffsetMs = offset
+        loadExternalSubtitle(Uri.fromFile(shifted), label, base = file, keepOffset = true)
     }
 
     val pickSubtitleFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -1471,6 +1494,9 @@ fun PlayerScreen(
                 onlineSubtitleStatus = onlineSubtitleStatus,
                 onlineSubtitleResultCount = onlineSubtitleResults.size,
                 onShowOnlineSubtitleResults = { onlineSubtitlesListOpen = true },
+                subtitleOffsetMs = subtitleOffsetMs.takeIf { shiftBase != null },
+                onShiftSubtitle = { subtitleOffsetMs += it },
+                onResetSubtitleShift = { subtitleOffsetMs = 0L },
                 aiTranslateLanguage = AiLanguages.name(appSettings.aiLanguage).replaceFirstChar(Char::uppercase).takeIf { aiActive },
                 onPickExternalSubtitleFile = {
                     // Les fournisseurs de documents décrivent rarement .srt/.vtt avec un type MIME

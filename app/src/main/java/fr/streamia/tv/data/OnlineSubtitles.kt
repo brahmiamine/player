@@ -31,6 +31,8 @@ data class SubtitleQuery(
     /** Codes ISO 639-1 par ordre de préférence ("fr", "ar", "en"). */
     val languages: List<String>,
     val tmdbId: String? = null,
+    /** Nom brut du fichier lu (qualité, source, groupe) : sert à préférer la version de sous-titre qui lui ressemble. */
+    val releaseHint: String = "",
 ) {
     val isEpisode: Boolean get() = season != null && episode != null
 }
@@ -330,9 +332,37 @@ internal fun rank(results: List<SubtitleResult>, query: SubtitleQuery): List<Sub
         .sortedWith(
             compareBy<SubtitleResult> { order.indexOf(it.language).let { index -> if (index < 0) order.size else index } }
                 .thenBy { if (query.isEpisode && result(it, query)) 0 else 1 }
+                .thenByDescending { releaseSimilarity(it.release, query.releaseHint) }
                 .thenByDescending { it.downloads },
         )
 }
+
+/**
+ * Mots communs (1080p, bluray, x264, groupe…) entre la version d'un sous-titre et le nom du fichier lu : plus il y en a,
+ * plus le sous-titre a de chances d'être calé sur la même vidéo.
+ */
+internal fun releaseSimilarity(release: String, hint: String): Int {
+    if (hint.isBlank()) return 0
+    fun words(text: String) = text.lowercase().split(Regex("[^a-z0-9]+")).filter { it.length >= 2 }.toSet()
+    return words(release).intersect(words(hint)).size
+}
+
+private val TIMESTAMP = Regex("""(?:(\d+):)?(\d{2}):(\d{2})([,.])(\d{3})""")
+
+/** Sous-titre SRT/WebVTT dont tous les temps sont décalés de [deltaMs] (positif = plus tard, jamais sous zéro). */
+internal fun shiftSubtitleTimings(text: String, deltaMs: Long): String =
+    if (deltaMs == 0L) text else text.lineSequence().joinToString("\n") { line ->
+        if ("-->" !in line) return@joinToString line
+        TIMESTAMP.replace(line) { m ->
+            val (h, min, sec, sep, ms) = m.destructured
+            val total = ((h.ifEmpty { "0" }.toLong() * 60 + min.toLong()) * 60 + sec.toLong()) * 1000 + ms.toLong() + deltaMs
+            val t = total.coerceAtLeast(0)
+            val hours = t / 3_600_000
+            // WebVTT peut omettre les heures ; on ne les réécrit que si elles existaient ou si elles deviennent utiles.
+            val prefix = if (h.isNotEmpty() || hours > 0) String.format(Locale.ROOT, "%02d:", hours) else ""
+            String.format(Locale.ROOT, "%s%02d:%02d%s%03d", prefix, t / 60_000 % 60, t / 1000 % 60, sep, t % 1000)
+        }
+    }
 
 private fun result(it: SubtitleResult, query: SubtitleQuery) = it.season == query.season && it.episode == query.episode
 
@@ -412,5 +442,6 @@ fun buildSubtitleQuery(
         season = seasonEpisode?.first,
         episode = seasonEpisode?.second,
         languages = languages.map(::normalizeLanguage).filter { it.length == 2 }.distinct().ifEmpty { listOf("fr", "en") },
+        releaseHint = name,
     )
 }

@@ -45,6 +45,22 @@ class OnlineSubtitlesTest {
         assertEquals(listOf("2", "1"), ranked.map { it.id })
     }
 
+    @Test fun prefersReleaseCloseToTheFile() {
+        val q = SubtitleQuery("Dune", languages = listOf("fr"), releaseHint = "Dune.2021.1080p.BluRay.x264-GRP")
+        val ranked = rank(listOf(
+            SubtitleResult("a", "1", "fr", "Dune 2021 720p WEB-DL", downloads = 900),
+            SubtitleResult("a", "2", "fr", "Dune.2021.1080p.BluRay.x264-GRP", downloads = 5),
+        ), q)
+        assertEquals(listOf("2", "1"), ranked.map { it.id })
+    }
+
+    @Test fun shiftsSubtitleTimings() {
+        val srt = "1\n00:00:01,000 --> 00:00:02,500\nHello 00:00:09,000\n"
+        assertEquals("1\n00:00:03,000 --> 00:00:04,500\nHello 00:00:09,000\n", shiftSubtitleTimings(srt, 2_000))
+        assertEquals("1\n00:00:00,000 --> 00:00:01,000\nHello 00:00:09,000\n", shiftSubtitleTimings(srt, -1_500))
+        assertEquals("WEBVTT\n\n00:03.000 --> 01:00.000\nx", shiftSubtitleTimings("WEBVTT\n\n00:01.000 --> 00:58.000\nx", 2_000))
+    }
+
     @Test fun picksEpisodeFromZipPackAndDecodesLegacyCharset() {
         val zip = ByteArrayOutputStream().also { out ->
             ZipOutputStream(out).use { z ->

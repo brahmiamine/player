@@ -58,6 +58,10 @@ internal fun BoxScope.PlayerSettings(
     onlineSubtitleStatus: String? = null,
     onlineSubtitleResultCount: Int = 0,
     onShowOnlineSubtitleResults: (() -> Unit)? = null,
+    /** Décalage manuel du sous-titre chargé (null : pas de réglage possible pour ce sous-titre). */
+    subtitleOffsetMs: Long? = null,
+    onShiftSubtitle: ((Long) -> Unit)? = null,
+    onResetSubtitleShift: (() -> Unit)? = null,
     /** Langue des réglages IA (« Français ») quand l'assistant est actif : bouton « Traduire par IA » en tête. */
     aiTranslateLanguage: String? = null,
 ) {
@@ -104,6 +108,9 @@ internal fun BoxScope.PlayerSettings(
         }
         TrackRow("Piste audio", audioTracks.getOrNull(audioIndex)?.label ?: "Auto", { picker = TrackPicker.Audio }, Modifier.focusRequester(audioFocus))
         TrackRow("Sous-titres", subtitleTracks.getOrNull(subtitleIndex)?.label ?: "Désactivés", { picker = TrackPicker.Subtitle }, Modifier.focusRequester(subtitleFocus))
+        if (subtitleOffsetMs != null && onShiftSubtitle != null && onResetSubtitleShift != null) {
+            SubtitleOffsetRow(subtitleOffsetMs, onShiftSubtitle, onResetSubtitleShift)
+        }
         SettingButton("Format vidéo", aspect.label, onNextAspect)
         val dolbyText = listOfNotNull(dolbyVisionLabel, dolbyAtmosLabel).joinToString(" · ")
         Text(if (dolbyText.isBlank()) "Dolby : aucun format Dolby sélectionné" else dolbyText,
@@ -148,6 +155,30 @@ internal fun BoxScope.PlayerSettings(
 }
 
 private enum class TrackPicker { Audio, Subtitle }
+
+/** Avance (+) ou retarde (−) le sous-titre : −5 s, −0,5 s, valeur (OK = remise à zéro), +0,5 s, +5 s. */
+@Composable
+private fun SubtitleOffsetRow(offsetMs: Long, onShift: (Long) -> Unit, onReset: () -> Unit) {
+    val value = if (offsetMs == 0L) "Synchro" else String.format(java.util.Locale.ROOT, "%+.1f s", offsetMs / 1000.0)
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("Décalage du sous-titre (+ = plus tard)", color = MutedInk, fontSize = 12.sp)
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+            listOf("−5" to -5_000L, "−0,5" to -500L).forEach { (label, delta) ->
+                FocusableSurface(onClick = { onShift(delta) }, modifier = Modifier.weight(1f).height(48.dp)) {
+                    Text(label, color = Ink, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 8.dp))
+                }
+            }
+            FocusableSurface(onClick = onReset, modifier = Modifier.weight(1.4f).height(48.dp)) {
+                Text(value, color = FocusBlueBright, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, modifier = Modifier.padding(horizontal = 8.dp))
+            }
+            listOf("+0,5" to 500L, "+5" to 5_000L).forEach { (label, delta) ->
+                FocusableSurface(onClick = { onShift(delta) }, modifier = Modifier.weight(1f).height(48.dp)) {
+                    Text(label, color = Ink, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 8.dp))
+                }
+            }
+        }
+    }
+}
 
 /** Premier bouton du panneau quand l'assistant IA est actif : cherche un sous-titre puis le traduit si besoin. */
 @Composable
