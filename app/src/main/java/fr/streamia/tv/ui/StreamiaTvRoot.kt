@@ -59,6 +59,7 @@ fun StreamiaTvRoot(viewModel: StreamiaViewModel) {
         LivePlaybackSession(context.applicationContext, state.appSettings.bufferMode, state.appSettings.tunnelingEnabled)
     }
     val lifecycleOwner = LocalLifecycleOwner.current
+    val mobileDevice = remember(context) { fr.streamia.tv.ui.mobile.detectDeviceKind(context) == fr.streamia.tv.ui.mobile.DeviceKind.Mobile }
     var pendingLiveBrowserReturn by remember { mutableStateOf(false) }
     val networkMonitor = remember { NetworkMonitor.get(context) }
     val networkReconnections by networkMonitor.reconnections.collectAsStateWithLifecycle()
@@ -88,7 +89,8 @@ fun StreamiaTvRoot(viewModel: StreamiaViewModel) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_START -> livePlaybackSession.resume()
-                Lifecycle.Event.ON_STOP -> livePlaybackSession.stop(clearSession = false)
+                // Mobile avec le lecteur ouvert : le flux continue en arrière-plan (écran verrouillé, picture-in-picture).
+                Lifecycle.Event.ON_STOP -> if (!(mobileDevice && viewModel.uiState.value.screen is StreamiaScreen.Player)) livePlaybackSession.stop(clearSession = false)
                 else -> Unit
             }
         }
@@ -160,6 +162,7 @@ fun StreamiaTvRoot(viewModel: StreamiaViewModel) {
             "live_matches" -> viewModel.showLiveMatches()
             "epg" -> viewModel.showEpg()
             "settings" -> viewModel.showSettings()
+            "more" -> viewModel.showMore()
             else -> page?.removePrefix("browser:")?.takeIf { page.startsWith("browser:") }
                 ?.let { type -> MediaType.entries.firstOrNull { it.name == type } }
                 ?.let(viewModel::openSection)
@@ -260,6 +263,7 @@ private fun persistedNavigationOf(state: StreamiaUiState): PersistedNavigation {
         StreamiaScreen.LiveMatches -> "live_matches"
         StreamiaScreen.Epg -> "epg"
         StreamiaScreen.Settings -> "settings"
+        StreamiaScreen.More -> "more"
         else -> null
     }
     val playerScreen = state.screen as? StreamiaScreen.Player

@@ -152,6 +152,10 @@ fun glassBlobsFor(screen: StreamiaScreen): List<GlassBlob> = when (screen) {
         GlassBlob(Offset(0.13f, 0.12f), 0.234f, Color(0xFF0A84FF)),
         GlassBlob(Offset(0.91f, 0.91f), 0.208f, Color(0xFFFF375F)),
     )
+    is StreamiaScreen.More -> listOf(
+        GlassBlob(Offset(0.13f, 0.12f), 0.234f, Color(0xFFFF375F)),
+        GlassBlob(Offset(0.93f, 0.56f), 0.208f, Color(0xFF5E5CE6)),
+    )
     is StreamiaScreen.LiveMatches -> listOf(
         GlassBlob(Offset(0.13f, 0.12f), 0.234f, Color(0xFFFF375F)),
         GlassBlob(Offset(0.93f, 0.56f), 0.208f, Color(0xFF5E5CE6)),

@@ -146,6 +146,8 @@ sealed interface StreamiaScreen {
     data object Epg : StreamiaScreen
     data object Organizer : StreamiaScreen
     data object LiveMatches : StreamiaScreen
+    /** Menu « Plus » de l'interface mobile (recherche, guide, matchs, organiser, paramètres…). */
+    data object More : StreamiaScreen
     data class MovieDetails(val movie: MediaEntry) : StreamiaScreen
     data class Series(val series: MediaEntry) : StreamiaScreen
     data class Player(

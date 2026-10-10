@@ -85,6 +85,11 @@ fun ChoiceDialog(
     onSelect: (Int) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    // Smartphone : feuille du bas au lieu de la fenêtre centrée de la TV.
+    if (LocalHandheld.current) {
+        fr.streamia.tv.ui.mobile.MobileChoiceSheet(title, options, selectedIndex, onSelect, onDismiss)
+        return
+    }
     BackHandler(onBack = onDismiss)
     val initialIndex = selectedIndex.coerceIn(0, (options.size - 1).coerceAtLeast(0))
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialIndex)
