@@ -1,7 +1,7 @@
 package fr.streamia.tv.data
 
 /**
- * Propositions de l'assistant : « Ce soir ? », collections automatiques, explications des recommandations et
+ * Propositions de l'assistant : « Ce soir ? », explications des recommandations et
  * « Quoi de neuf maintenant ? ». Toutes suivent le même principe, pour limiter les appels et les inventions :
  * le programme prépare localement une liste courte de candidats réels (identifiant, titre), le modèle ne
  * répond qu'avec des identifiants de cette liste, et toute réponse qui en sort est écartée.
@@ -37,9 +37,6 @@ data class TonightAnswers(val mood: TonightMood, val length: TonightLength, val 
 /** Proposition retenue : l'[id] du candidat et la raison en une phrase. */
 data class AiPick(val id: String, val why: String)
 
-/** Collection proposée : [ordered] vrai pour une saga (à voir dans l'ordre). */
-data class AiCollection(val title: String, val ordered: Boolean, val ids: List<String>)
-
 /** Résumé de « Quoi de neuf ? » : une phrase d'accroche et quelques éléments qui renvoient à un candidat par [AiBriefItem.ref]. */
 data class AiBrief(val headline: String, val items: List<AiBriefItem>)
 
@@ -72,38 +69,6 @@ internal fun parsePicks(answer: String, validIds: Set<String>, max: Int = 5): Li
     }
     return result.values.toList().takeIf { it.isNotEmpty() }
 }
-
-internal fun collectionsSystemPrompt(languageName: String, pool: List<AiCandidate>): String =
-    "Tu regroupes des films et séries d'un catalogue en collections : sagas ou thèmes précis.\n" +
-        "Réponds uniquement par un objet JSON : {\"collections\":[{\"title\":\"…\",\"ordered\":true,\"ids\":[\"F1\",\"F4\"]}]}\n" +
-        "- 3 à 5 collections de 3 à 10 éléments, avec uniquement les identifiants de la liste, sans qu'un élément figure dans deux collections.\n" +
-        "- Une saga (même franchise) : ordered=true, du premier au dernier épisode de la saga. Un thème : ordered=false, le plus pertinent d'abord.\n" +
-        "- title : 5 mots maximum, en $languageName, précis (« Soirée thriller psychologique », « Saga Jason Bourne »), jamais un simple genre.\n" +
-        "- Ne regroupe que ce qui va vraiment ensemble ; mieux vaut moins de collections que des collections forcées.\n" +
-        "Liste (identifiant|titre|année) :\n" + pool.asLines()
-
-internal const val COLLECTIONS_USER_PROMPT = "Propose les collections."
-
-internal fun parseCollections(answer: String, validIds: Set<String>): List<AiCollection>? {
-    val array = extractJsonObject(answer)?.optJSONArray("collections") ?: return null
-    val used = HashSet<String>()
-    val result = ArrayList<AiCollection>()
-    for (index in 0 until array.length()) {
-        val item = array.optJSONObject(index) ?: continue
-        val ids = item.stringList("ids", 12).filter { it in validIds && it !in used }.distinct()
-        val title = shorten(item.optString("title"), 60)
-        // Les identifiants ne sont réservés qu'une fois la collection acceptée : une collection écartée n'en prive pas une valide.
-        if (title.isNotEmpty() && ids.size >= MIN_COLLECTION_SIZE) {
-            val kept = ids.take(10)
-            used += kept
-            result += AiCollection(title, item.optBoolean("ordered", false), kept)
-        }
-        if (result.size >= 5) break
-    }
-    return result.takeIf { it.isNotEmpty() }
-}
-
-private const val MIN_COLLECTION_SIZE = 3
 
 internal fun explainSystemPrompt(languageName: String): String =
     "Tu expliques à un spectateur pourquoi des films et séries lui sont recommandés, d'après ses goûts.\n" +

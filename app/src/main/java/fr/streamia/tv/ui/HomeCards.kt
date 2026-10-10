@@ -21,6 +21,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -267,23 +269,118 @@ private fun HomeProgressBar(progress: Float, modifier: Modifier = Modifier) {
 
 internal const val AI_ASSISTANT_ROW_KEY = "ai-assistant"
 
-/** Accès aux écrans de l'assistant IA depuis l'accueil (visible seulement quand l'assistant est actif). */
+/** Rubrique « Quoi de neuf maintenant ? » de l'accueil : elle n'apparaît que s'il y a un résumé (ou son calcul en cours). */
+internal fun BriefUiState.visibleOnHome(): Boolean = loading || items.any { it.channel != null }
+
+/** Accès à l'assistant depuis l'accueil : « Ce soir ? » et le QR code permanent de la télécommande téléphone (visibles quand l'assistant est actif). */
 @Composable
-internal fun AiAssistantRow(onOpen: (AssistantMode) -> Unit, firstFocus: FocusRequester) {
+internal fun AiAssistantRow(
+    remote: RemoteUiState,
+    onOpen: (AssistantMode) -> Unit,
+    firstFocus: FocusRequester,
+) {
     Column(Modifier.fillMaxWidth()) {
         SectionLabel("✦ Assistant IA", fontSize = 16.sp)
         Spacer(Modifier.height(10.dp))
         androidx.compose.foundation.layout.Row(
             Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
         ) {
-            AssistantMode.entries.forEachIndexed { index, mode ->
+            AssistantMode.entries.forEach { mode ->
                 FocusableSurface(
                     onClick = { onOpen(mode) },
-                    modifier = Modifier.width(250.dp).height(56.dp).then(if (index == 0) Modifier.focusRequester(firstFocus) else Modifier),
+                    modifier = Modifier.width(250.dp).height(96.dp).focusRequester(firstFocus),
                 ) {
                     androidx.compose.foundation.layout.Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
-                        Text("✦ ${mode.title}", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text("✦ ${mode.title}", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+            }
+            AiRemoteQrCard(remote)
+        }
+    }
+}
+
+/** QR code de la télécommande téléphone, toujours affiché : le téléphone scanne, puis écrit à la TV. Non focalisable (rien à actionner à la télécommande). */
+@Composable
+internal fun AiRemoteQrCard(remote: RemoteUiState, modifier: Modifier = Modifier) {
+    val qr = remember(remote.url) { remote.url?.let(::qrBitmap) }
+    GlassSurface(modifier = modifier.height(96.dp)) {
+        androidx.compose.foundation.layout.Row(
+            Modifier.fillMaxHeight().padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+        ) {
+            if (qr != null) {
+                androidx.compose.foundation.Image(
+                    qr.asImageBitmap(), "QR code de la télécommande téléphone",
+                    Modifier.size(80.dp), filterQuality = androidx.compose.ui.graphics.FilterQuality.None,
+                )
+                Spacer(Modifier.width(12.dp))
+            }
+            Column(Modifier.width(430.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text("✦ Télécommande téléphone", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                val last = remote.log.lastOrNull()
+                Text(
+                    when {
+                        qr == null -> "Aucun réseau local détecté : connectez la TV au Wi-Fi ou à l'Ethernet."
+                        last != null -> "« ${last.message} » → ${last.reply}"
+                        else -> "Scannez, puis écrivez : « mets beIN Sports 1 », « reprends ma série », « trouve le match du PSG »."
+                    },
+                    color = MutedInk, fontSize = 12.sp, lineHeight = 16.sp, maxLines = 3, overflow = TextOverflow.Ellipsis,
+                )
+                AiLoadingIndicator("Traitement du message…", remote.busy)
+            }
+        }
+    }
+}
+
+/**
+ * « Quoi de neuf maintenant ? » : ce que l'assistant retient des matchs et programmes en direct, une carte par chaîne
+ * (OK ouvre la chaîne). Calculé à partir des guides déjà chargés, jamais d'une donnée de plus à télécharger.
+ */
+@Composable
+internal fun AiBriefRow(
+    brief: BriefUiState,
+    restoreItemKey: String?,
+    onOpen: (MediaEntry) -> Unit,
+    onRefresh: () -> Unit,
+) {
+    val items = brief.items.filter { it.channel != null }
+    val rowState = rememberLazyListState()
+    val restoreFocus = remember { FocusRequester() }
+    val restoreIndex = rememberRowFocusRestore(rowState, restoreItemKey, items.mapNotNull { it.channel?.key }, restoreFocus)
+    Column(Modifier.fillMaxWidth()) {
+        SectionLabel("✦ Quoi de neuf maintenant ?", fontSize = 16.sp)
+        brief.headline?.let { Text(it, color = MutedInk, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 12.dp, top = 4.dp)) }
+        AiLoadingIndicator("L'assistant résume ce qui passe en ce moment…", brief.loading, Modifier.padding(start = 12.dp, top = 6.dp))
+        Spacer(Modifier.height(8.dp))
+        LazyRow(
+            state = rowState,
+            modifier = Modifier.focusRestorer(),
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            itemsIndexed(items, key = { _, item -> item.channel!!.key + item.text.hashCode() }) { index, item ->
+                val channel = item.channel!!
+                FocusableSurface(
+                    onClick = { onOpen(channel) },
+                    modifier = Modifier.width(330.dp).height(116.dp).then(if (index == restoreIndex) Modifier.focusRequester(restoreFocus) else Modifier),
+                ) {
+                    androidx.compose.foundation.layout.Row(Modifier.fillMaxSize().padding(12.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        ChannelLogo(channel.iconUrl, channel.displayName, Modifier.size(56.dp))
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(item.text, color = Ink, fontSize = 14.sp, lineHeight = 18.sp, fontWeight = FontWeight.SemiBold, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                            Text(channel.displayName, color = FocusBlueBright, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                        }
+                    }
+                }
+            }
+            item(key = "ai-brief-refresh") {
+                FocusableSurface(onClick = onRefresh, enabled = !brief.loading, modifier = Modifier.width(170.dp).height(116.dp)) {
+                    androidx.compose.foundation.layout.Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
+                        AiButtonLabel("Actualiser", brief.loading)
                     }
                 }
             }

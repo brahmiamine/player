@@ -8,7 +8,7 @@ enum class ContentReturnOrigin {
     Search,
     LiveMatches,
     Epg,
-    /** Écrans de l'assistant IA (Ce soir, Collections, Quoi de neuf). */
+    /** Écrans de l'assistant IA (Ce soir, Quoi de neuf). */
     Assistant,
 }
 
@@ -84,6 +84,7 @@ data class ContentReturnContext(
 
 internal object HomeRowKey {
     const val Resume = "resume"
+    const val AiBrief = "ai-brief"
     const val Favorites = "favorites"
     const val LiveMatches = "live-matches"
     const val RecentChannels = "recent-channels"

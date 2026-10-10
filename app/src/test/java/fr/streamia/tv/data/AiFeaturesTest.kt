@@ -88,23 +88,6 @@ class AiFeaturesTest {
     }
 
     @Test
-    fun collectionsNeedThreeKnownItemsAndNeverRepeatAnItem() {
-        val ids = setOf("F1", "F2", "F3", "F4", "F5")
-        val answer = """{"collections":[{"title":"Saga","ordered":true,"ids":["F1","F2","F3","F9"]},{"title":"Trop petit","ids":["F3","F4"]}]}"""
-        val result = parseCollections(answer, ids)!!
-        assertEquals(1, result.size)
-        assertTrue(result[0].ordered)
-        assertEquals(listOf("F1", "F2", "F3"), result[0].ids)
-    }
-
-    @Test
-    fun discardedCollectionDoesNotReserveItsItems() {
-        val ids = setOf("F1", "F2", "F3", "F4")
-        val answer = """{"collections":[{"title":"","ids":["F1","F2"]},{"title":"Valide","ids":["F1","F2","F3","F4"]}]}"""
-        assertEquals(listOf("F1", "F2", "F3", "F4"), parseCollections(answer, ids)!!.single().ids)
-    }
-
-    @Test
     fun briefDropsUnknownReferences() {
         val brief = parseBrief("""{"headline":"Soirée foot","items":[{"ref":"M1","text":"PSG - OM"},{"ref":"M7","text":"inventé"}]}""", setOf("M1"))!!
         assertEquals(1, brief.items.size)

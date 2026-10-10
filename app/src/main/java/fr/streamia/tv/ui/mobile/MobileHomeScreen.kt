@@ -1,5 +1,10 @@
 package fr.streamia.tv.ui.mobile
 
+import fr.streamia.tv.ui.visibleOnHome
+import fr.streamia.tv.ui.BriefUiState
+import fr.streamia.tv.ui.AiLoadingIndicator
+import fr.streamia.tv.ui.AiButtonLabel
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -104,6 +109,9 @@ fun MobileHomeScreen(
     liveMatchesEnabled: Boolean,
     footballScoresEnabled: Boolean,
     recommendationRows: List<RecommendationRow>,
+    /** Assistant IA : résumé « Quoi de neuf maintenant ? » (vide ou absent quand l'assistant est coupé). */
+    aiBrief: BriefUiState = BriefUiState(),
+    onRefreshAiBrief: () -> Unit = {},
     tvProgrammeNow: List<ResolvedTvProgrammeNowItem>,
     tvProgrammeTonight: List<ResolvedTvProgrammeItem>,
     beinSportsNow: List<ResolvedBeinProgrammeItem>,
@@ -228,6 +236,31 @@ fun MobileHomeScreen(
                         QuickAction("Actualiser", StreamiaIconGlyph.Refresh, Modifier.weight(1f), onRefresh)
                         QuickAction("Matchs du jour", StreamiaIconGlyph.Trophy, Modifier.weight(1f), onOpenLiveMatches)
                         QuickAction("Changer de liste", StreamiaIconGlyph.Swap, Modifier.weight(1f), onChangePlaylist)
+                    }
+                }
+            }
+            if (aiBrief.visibleOnHome()) item(key = HomeRowKey.AiBrief) {
+                Column(Modifier.padding(start = MobileGutter, end = MobileGutter, top = 14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        MobileSectionLabel("✦ Quoi de neuf maintenant ?")
+                        Spacer(Modifier.weight(1f))
+                        Box(Modifier.clip(RoundedCornerShape(50)).clickable(enabled = !aiBrief.loading, onClick = onRefreshAiBrief).padding(horizontal = 10.dp, vertical = 4.dp)) {
+                            AiButtonLabel("Actualiser", aiBrief.loading)
+                        }
+                    }
+                    aiBrief.headline?.let { Text(it, color = MutedInk, fontSize = 13.sp, maxLines = 2) }
+                    AiLoadingIndicator("L'assistant résume ce qui passe en ce moment…", aiBrief.loading)
+                    aiBrief.items.forEach { item ->
+                        val channel = item.channel ?: return@forEach
+                        MobileCard(Modifier.fillMaxWidth(), onClick = { onOpenHomeEntry(channel, HomeRowKey.AiBrief, channel.key) }) {
+                            Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                ChannelLogo(channel.iconUrl, channel.displayName, Modifier.size(46.dp).clip(RoundedCornerShape(14.dp)), imagePadding = 4)
+                                Column(Modifier.weight(1f)) {
+                                    Text(item.text, color = Ink, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                                    Text(channel.displayName, color = AccentPinkText, fontSize = 12.sp, maxLines = 1)
+                                }
+                            }
+                        }
                     }
                 }
             }

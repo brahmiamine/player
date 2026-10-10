@@ -13,7 +13,6 @@ enum class AiFeature(val label: String) {
     Fiche("Fiches"),
     Search("Recherche"),
     Tonight("Ce soir"),
-    Collections("Collections"),
     Explain("Explications"),
     Recap("Résumés"),
     Brief("Quoi de neuf"),

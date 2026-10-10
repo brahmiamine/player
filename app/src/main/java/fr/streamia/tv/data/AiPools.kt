@@ -60,28 +60,10 @@ internal fun candidateLabel(entry: MediaEntry, genre: String? = null): String =
 
 /**
  * Construit les listes de candidats à partir de l'index local : lectures bornées, aucun parcours du catalogue.
- * Partagé par l'écran (Ce soir, Collections) et le pré-calcul de nuit : les deux envoient exactement la même liste,
+ * Partagé par l'écran (Ce soir) et le pré-calcul de nuit : les deux envoient exactement la même liste,
  * donc la réponse calculée la nuit est celle que l'écran trouve en cache.
  */
 internal class AiPoolBuilder(private val repository: XtreamRepository) {
-
-    /** Nouveautés, mieux notés et favoris : de quoi former des sagas et des thèmes, valable toute la semaine. */
-    suspend fun collectionsPool(profileId: String, library: UserLibrarySnapshot, allowed: (MediaEntry) -> Boolean): AiPool {
-        val found = LinkedHashMap<String, MediaEntry>()
-        for (type in listOf(MediaType.Movie, MediaType.Series)) {
-            runCatching { repository.homeRecommendationCandidates(profileId, type, COLLECTION_RECENT) }.getOrDefault(emptyList())
-                .forEach { found.putIfAbsent(it.key, it) }
-            runCatching {
-                repository.loadCategoryPage(profileId, type, Catalog.ALL_CATEGORY_ID, 0, order = VodSortOrder.Rating, limit = COLLECTION_TOP).entries
-            }.getOrDefault(emptyList()).forEach { found.putIfAbsent(it.key, it) }
-        }
-        runCatching { repository.entriesByKeys(profileId, library.favoriteEntries.take(COLLECTION_FAVORITES).toSet()) }
-            .getOrDefault(emptyList()).forEach { found.putIfAbsent(it.key, it) }
-        val usable = found.values.filter { it.type != MediaType.Live && allowed(it) }
-            // Les titres d'une même saga se suivent : le modèle les voit côte à côte.
-            .sortedBy { normalizeForMatch(it.displayName) }
-        return poolOf(usable) { candidateLabel(it) }
-    }
 
     /** Titres déjà aimés : films bien regardés (récents d'abord) puis favoris. Sert de goût au modèle. */
     suspend fun tastes(profileId: String, library: UserLibrarySnapshot, allowed: (MediaEntry) -> Boolean): List<String> {
@@ -137,9 +119,6 @@ internal class AiPoolBuilder(private val repository: XtreamRepository) {
     }
 
     private companion object {
-        const val COLLECTION_RECENT = 24
-        const val COLLECTION_TOP = 24
-        const val COLLECTION_FAVORITES = 12
         const val TASTE_FAVORITES = 8
         const val TASTE_LIMIT = 10
         const val RECOMMENDED_IN_POOL = 6

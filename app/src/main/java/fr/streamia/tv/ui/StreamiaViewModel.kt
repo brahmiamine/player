@@ -114,7 +114,6 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     fun clearAiSearch() = aiFeatures.clearAiSearch()
     fun startTonight(answers: fr.streamia.tv.data.TonightAnswers) = aiFeatures.startTonight(answers)
     fun resetTonight() = aiFeatures.resetTonight()
-    fun loadCollections() = aiFeatures.loadCollections()
     fun loadBrief(force: Boolean = false) = aiFeatures.loadBrief(force)
     fun loadRecap() = aiFeatures.loadRecap()
     fun showAssistant(mode: AssistantMode) {
@@ -122,8 +121,8 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         navigateToMenu(StreamiaScreen.Assistant(mode), HomeFocusTarget.Assistant)
     }
 
-    /** Message du téléphone (voir [fr.streamia.tv.data.PhoneChatServer]) ; bloquant, appelé hors du thread principal. */
-    fun handleRemoteMessage(text: String): String = kotlinx.coroutines.runBlocking { aiFeatures.handleRemote(text) }
+    /** Page de chat du téléphone (QR code de l'accueil) : démarrée une fois, tant que l'assistant est actif. */
+    fun startRemote(logo: ByteArray?) = aiFeatures.startRemote(logo)
 
     private fun openRemoteEntry(entry: MediaEntry) {
         liveZap.zapList = null
