@@ -143,7 +143,7 @@ internal fun CategoryRail(
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             items(categories, key = MediaCategory::key) { category ->
-                val virtual = category.id in setOf(Catalog.ALL_CATEGORY_ID, FAVORITES_CATEGORY_ID, HISTORY_CATEGORY_ID)
+                val virtual = category.id == Catalog.ALL_CATEGORY_ID || category.id in VIRTUAL_CATEGORY_IDS
                 FocusableSurface(
                     onClick = { onSelected(category) },
                     onLongClick = if (virtual || type != MediaType.Live) null else ({

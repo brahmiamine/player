@@ -58,6 +58,8 @@ import fr.streamia.tv.domain.epgNowContextAt
 import fr.streamia.tv.ui.ChannelLogo
 import fr.streamia.tv.ui.FAVORITES_CATEGORY_ID
 import fr.streamia.tv.ui.HISTORY_CATEGORY_ID
+import fr.streamia.tv.ui.UHD_CATEGORY_ID
+import fr.streamia.tv.ui.VIRTUAL_CATEGORY_IDS
 import fr.streamia.tv.ui.LOAD_MORE_THRESHOLD
 import fr.streamia.tv.ui.MediaArtwork
 import fr.streamia.tv.ui.StreamiaIcon
@@ -153,13 +155,21 @@ fun MobileBrowserScreen(
             .filter { it.type == type && it.key !in library.hiddenEntries && it.categoryId !in excludedIds }
             .toList()
     }
-    val categories = remember(catalog, type, library.hiddenCategories, library.favoriteCategories, favoriteEntries.isNotEmpty(), historyEntries.isNotEmpty()) {
+    val uhdEntries = remember(catalog, type, library.uhdEntries, library.hiddenEntries, excludedIds) {
+        if (!isLive) emptyList()
+        else library.uhdEntries.asSequence()
+            .mapNotNull(catalog::entry)
+            .filter { it.type == MediaType.Live && it.key !in library.hiddenEntries && it.categoryId !in excludedIds }
+            .toList()
+    }
+    val categories = remember(catalog, type, library.hiddenCategories, library.favoriteCategories, favoriteEntries.isNotEmpty(), historyEntries.isNotEmpty(), uhdEntries.isNotEmpty()) {
         buildBrowserCategories(
             type = type,
             providerCategories = catalog.categoriesFor(type).filterNot { it.key in library.hiddenCategories },
             favoriteCategoryKeys = if (isLive) library.favoriteCategories else emptySet(),
             hasFavoriteEntries = favoriteEntries.isNotEmpty(),
             hasHistory = historyEntries.isNotEmpty(),
+            hasUhdEntries = uhdEntries.isNotEmpty(),
         )
     }
     LaunchedEffect(type, categories) {
@@ -170,19 +180,20 @@ fun MobileBrowserScreen(
     val pagesMissing = paged && vodPageKey(type, selectedCategoryId, vodSort) !in vodPages
     LaunchedEffect(type, selectedCategoryId, pagesMissing, vodSort) {
         onLocationChanged(type, selectedCategoryId)
-        if (selectedCategoryId != FAVORITES_CATEGORY_ID && selectedCategoryId != HISTORY_CATEGORY_ID) {
+        if (selectedCategoryId !in VIRTUAL_CATEGORY_IDS) {
             onEnsureCategoryLoaded(type, selectedCategoryId, vodSort)
         }
     }
 
     val entries by produceState<List<MediaEntry>>(
-        emptyList(), catalog, type, selectedCategoryId, favoriteEntries, historyEntries, excludedIds,
+        emptyList(), catalog, type, selectedCategoryId, favoriteEntries, historyEntries, uhdEntries, excludedIds,
         library.hiddenEntries, vodPages, vodSort, liveSort,
     ) {
         value = withContext(Dispatchers.Default) {
             when (selectedCategoryId) {
                 FAVORITES_CATEGORY_ID -> favoriteEntries
                 HISTORY_CATEGORY_ID -> historyEntries
+                UHD_CATEGORY_ID -> uhdEntries
                 else -> {
                     val source = when {
                         !paged -> catalog.entriesIn(type, selectedCategoryId)
@@ -258,7 +269,7 @@ fun MobileBrowserScreen(
                         onOpen = onEntrySelected,
                         onLongPress = { sheet = BrowserSheet.EntryActions(it) },
                         onNearEnd = {
-                            if (paged && selectedCategoryId != FAVORITES_CATEGORY_ID && selectedCategoryId != HISTORY_CATEGORY_ID) {
+                            if (paged && selectedCategoryId !in VIRTUAL_CATEGORY_IDS) {
                                 onLoadMoreInCategory(type, selectedCategoryId, vodSort)
                             }
                         },

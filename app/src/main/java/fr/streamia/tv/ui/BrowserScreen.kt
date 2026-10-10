@@ -48,6 +48,12 @@ internal const val FAVORITES_CATEGORY_ID = "__favorites__"
 
 internal const val HISTORY_CATEGORY_ID = "__history__"
 
+/** Chaînes du Direct lues en vraie 3840 × 2160, ajoutées automatiquement (voir LiveUhdDetector). */
+internal const val UHD_CATEGORY_ID = "__uhd__"
+
+/** Catégories construites par l'application (pas de chargement fournisseur, pas de favori). */
+internal val VIRTUAL_CATEGORY_IDS = setOf(FAVORITES_CATEGORY_ID, HISTORY_CATEGORY_ID, UHD_CATEGORY_ID)
+
 /** Distance (en éléments) à la fin de la liste/grille matérialisée à partir de laquelle la page suivante est demandée. */
 internal const val LOAD_MORE_THRESHOLD = 20
 
@@ -202,7 +208,19 @@ fun BrowserScreen(
             }
             .toList()
     }
-    val categories = remember(baseCategories, favoriteEntriesForType.isNotEmpty(), historyForType.isNotEmpty(), selectedType, library.favoriteCategories) {
+    // Ordre de découverte ; une chaîne masquée, verrouillée ou disparue de la liste n'y figure pas.
+    val uhdEntriesForType = remember(catalog, selectedType, library.uhdEntries, library.hiddenEntries, excludedCategoryIds) {
+        if (selectedType != MediaType.Live) emptyList()
+        else library.uhdEntries.asSequence()
+            .mapNotNull(catalog::entry)
+            .filter {
+                it.type == MediaType.Live &&
+                    it.key !in library.hiddenEntries &&
+                    it.categoryId !in excludedCategoryIds
+            }
+            .toList()
+    }
+    val categories = remember(baseCategories, favoriteEntriesForType.isNotEmpty(), historyForType.isNotEmpty(), uhdEntriesForType.isNotEmpty(), selectedType, library.favoriteCategories) {
         buildBrowserCategories(
             type = selectedType,
             providerCategories = baseCategories,
@@ -210,6 +228,7 @@ fun BrowserScreen(
             favoriteCategoryKeys = if (selectedType == MediaType.Live) library.favoriteCategories else emptySet(),
             hasFavoriteEntries = favoriteEntriesForType.isNotEmpty(),
             hasHistory = historyForType.isNotEmpty(),
+            hasUhdEntries = uhdEntriesForType.isNotEmpty(),
         )
     }
     /**
@@ -220,6 +239,7 @@ fun BrowserScreen(
     fun computeEntries(allowHeavySort: Boolean = true): List<MediaEntry>? = when (selectedCategoryId) {
         FAVORITES_CATEGORY_ID -> favoriteEntriesForType
         HISTORY_CATEGORY_ID -> historyForType.map { it.second }
+        UHD_CATEGORY_ID -> uhdEntriesForType
         else -> {
             // Films/Séries paginés : ordre des pages lues en base, déjà triées (voir vodPages).
             // Rien tant que la première page au tri courant n'est pas là, plutôt qu'un ordre
@@ -272,10 +292,11 @@ fun BrowserScreen(
     // dizaines de milliers de chaînes) à chaque aperçu de plus de 20 s.
     val favoritesKey = favoriteEntriesForType.takeIf { selectedCategoryId == FAVORITES_CATEGORY_ID }
     val historyKey = historyForType.takeIf { selectedCategoryId == HISTORY_CATEGORY_ID }
+    val uhdKey = uhdEntriesForType.takeIf { selectedCategoryId == UHD_CATEGORY_ID }
     // Liste en attente de tri (grande catégorie) : clé supplémentaire pour la calculer tout de suite.
     val pendingLocation = location.takeIf { computedEntries.second == null }
     LaunchedEffect(
-        catalog, favoritesKey, historyKey, excludedCategoryIds, library.hiddenEntries, vodPages, categorySortOrder,
+        catalog, favoritesKey, historyKey, uhdKey, excludedCategoryIds, library.hiddenEntries, vodPages, categorySortOrder,
         appSettings.liveChannelSortOrder, appSettings.vodSortOrder, pendingLocation,
     ) {
         val target = location
@@ -306,7 +327,7 @@ fun BrowserScreen(
         if (selectedType != MediaType.Live) {
             navigationStore.saveCategory(selectedType, selectedCategoryId)
         }
-        if (selectedCategoryId != FAVORITES_CATEGORY_ID && selectedCategoryId != HISTORY_CATEGORY_ID) {
+        if (selectedCategoryId !in VIRTUAL_CATEGORY_IDS) {
             onEnsureCategoryLoaded(selectedType, selectedCategoryId, categorySortOrder)
         }
     }
@@ -349,6 +370,7 @@ fun BrowserScreen(
                 favoriteEntries = library.favoriteEntries,
                 lockedCategories = library.lockedCategories,
                 historyCount = historyForType.size,
+                uhdCount = uhdEntriesForType.size,
                 onCategorySelected = ::selectCategory,
                 onPreviewChanged = {
                     lastLiveEntryKey = it.key
@@ -361,7 +383,10 @@ fun BrowserScreen(
                 onToggleCategoryFavorite = onToggleCategoryFavorite,
                 onEntrySelected = { onLiveEntrySelected(it, entries) },
                 onToggleEntryFavorite = onToggleEntryFavorite,
-                onLoadMore = { onLoadMoreInCategory(MediaType.Live, selectedCategoryId, VodSortOrder.Provider) },
+                onLoadMore = {
+                    // Catégories de l'application : déjà complètes, rien à demander au fournisseur.
+                    if (selectedCategoryId !in VIRTUAL_CATEGORY_IDS) onLoadMoreInCategory(MediaType.Live, selectedCategoryId, VodSortOrder.Provider)
+                },
                 onLivePreviewWatched = onLivePreviewWatched,
                 controlsVisible = liveControlsVisible,
                 onControlsVisibleChange = { liveControlsVisible = it },

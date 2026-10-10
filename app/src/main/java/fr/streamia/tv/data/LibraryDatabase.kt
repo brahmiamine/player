@@ -111,6 +111,7 @@ internal class LibraryDatabase private constructor(context: Context) :
             hiddenCategories = flags[HIDDEN_CATEGORY].orEmpty(),
             lockedCategories = flags[LOCKED_CATEGORY].orEmpty(),
             watchedEntries = flags[WATCHED_ENTRY].orEmpty(),
+            uhdEntries = flags[UHD_ENTRY].orEmpty(),
             categoryOrder = order,
             movedEntries = moves,
             history = history,
@@ -222,6 +223,7 @@ internal class LibraryDatabase private constructor(context: Context) :
                 HIDDEN_CATEGORY to snapshot.hiddenCategories,
                 LOCKED_CATEGORY to snapshot.lockedCategories,
                 WATCHED_ENTRY to snapshot.watchedEntries,
+                UHD_ENTRY to snapshot.uhdEntries,
             ).forEach { (kind, keys) -> keys.forEach { setFlag(profileId, kind, it, present = true) } }
             snapshot.movedEntries.forEach { (key, category) ->
                 db.insertWithOnConflict(
@@ -279,6 +281,8 @@ internal class LibraryDatabase private constructor(context: Context) :
         const val HIDDEN_CATEGORY = "hidden_category"
         const val LOCKED_CATEGORY = "locked_category"
         const val WATCHED_ENTRY = "watched_entry"
+        /** Chaîne Direct vue en vraie résolution 3840 × 2160 (catégorie « UHD 4K »). */
+        const val UHD_ENTRY = "uhd_entry"
         private const val META_MIGRATED = "migrated"
         private const val DATABASE_NAME = "library-v1.db"
         private const val DATABASE_VERSION = 1

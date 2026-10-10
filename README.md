@@ -33,6 +33,7 @@ Streamia TV est un lecteur Android TV natif, rapide et entièrement pilotable à
 ### Direct et guide TV
 
 - programme en cours et barre de progression sous chaque chaîne ;
+- catégorie **UHD 4K**, juste après « Tout » : chaque chaîne lue (aperçu ou plein écran) dont l'image mesure réellement 3840 × 2160 y est ajoutée automatiquement, une seule fois, sans tenir compte de son nom ;
 - grille EPG alignée sur l'heure (fenêtre de 2 h, repère « maintenant », navigation jour par jour) ;
 - décalage horaire EPG réglable si le guide du fournisseur est décalé ;
 - guides complémentaires : programme TV FR, beIN SPORTS et chaînes UK ;

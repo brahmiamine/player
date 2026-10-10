@@ -17,6 +17,7 @@ class UserLibraryLegacyJsonTest {
             hiddenCategories = setOf("Movie:8"),
             lockedCategories = setOf("Movie:9"),
             watchedEntries = setOf("Movie:7"),
+            uhdEntries = linkedSetOf("Live:4", "Live:1"),
             categoryOrder = mapOf("Live" to listOf("Live:2", "Live:1")),
             movedEntries = mapOf("Live:1" to "2"),
             history = listOf(
@@ -29,5 +30,6 @@ class UserLibraryLegacyJsonTest {
 
         assertEquals(snapshot, restored)
         assertEquals(listOf("Movie:9", "Movie:7", "Live:1"), restored.favoriteEntries.toList())
+        assertEquals(listOf("Live:4", "Live:1"), restored.uhdEntries.toList())
     }
 }

@@ -110,6 +110,7 @@ internal fun LiveCatalogLayout(
     favoriteEntries: Set<String>,
     lockedCategories: Set<String>,
     historyCount: Int,
+    uhdCount: Int = 0,
     onCategorySelected: (MediaCategory) -> Unit,
     onPreviewChanged: (MediaEntry) -> Unit,
     onListPositionChanged: (String, NavigationListPosition) -> Unit,
@@ -208,6 +209,7 @@ internal fun LiveCatalogLayout(
                 when (category.id) {
                     FAVORITES_CATEGORY_ID -> favoriteEntries.count { it.startsWith("${MediaType.Live.name}:") }
                     HISTORY_CATEGORY_ID -> historyCount
+                    UHD_CATEGORY_ID -> uhdCount
                     else -> catalog.countIn(MediaType.Live, category.id)
                 }
             },

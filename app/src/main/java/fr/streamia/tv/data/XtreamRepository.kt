@@ -464,6 +464,7 @@ class XtreamRepository private constructor(context: Context) {
     fun toggleCategoryHidden(profileId: String, category: MediaCategory): Boolean = libraryStore.toggleCategoryHidden(profileId, category)
     fun toggleCategoryLocked(profileId: String, category: MediaCategory): Boolean = libraryStore.toggleCategoryLocked(profileId, category)
     fun toggleEntryWatched(profileId: String, entry: MediaEntry): Boolean = libraryStore.toggleEntryWatched(profileId, entry)
+    fun addUhdEntry(profileId: String, entryKey: String): Boolean = libraryStore.addUhdEntry(profileId, entryKey)
     fun setParentalPin(pin: String): AppSettings = appSettingsStore.setParentalPin(pin)
     fun clearParentalPin(): AppSettings = appSettingsStore.clearParentalPin()
     fun verifyParentalPin(pin: String): Boolean = appSettingsStore.verifyParentalPin(pin)

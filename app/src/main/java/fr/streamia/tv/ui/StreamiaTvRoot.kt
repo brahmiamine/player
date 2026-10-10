@@ -21,6 +21,7 @@ import fr.streamia.tv.data.resolveStartupProfileId
 import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.player.LivePlaybackSession
+import fr.streamia.tv.player.LiveUhdDetector
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.flowOn
@@ -99,6 +100,12 @@ fun StreamiaTvRoot(viewModel: StreamiaViewModel) {
             lifecycleOwner.lifecycle.removeObserver(observer)
             livePlaybackSession.release()
         }
+    }
+
+    // Chaîne lue en vraie 3840 × 2160 (aperçu ou plein écran) : rangée dans la catégorie « UHD 4K ».
+    DisposableEffect(livePlaybackSession) {
+        val detector = LiveUhdDetector(livePlaybackSession, viewModel::markLiveEntryUhd).also { it.start() }
+        onDispose { detector.stop() }
     }
 
     LaunchedEffect(Unit) {

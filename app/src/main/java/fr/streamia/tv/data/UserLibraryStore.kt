@@ -60,6 +60,18 @@ class UserLibraryStore(context: Context) {
     fun toggleEntryWatched(profileId: String, entry: MediaEntry): Boolean =
         toggle(profileId, LibraryDatabase.WATCHED_ENTRY, entry.key, { it.watchedEntries }) { snapshot, set -> snapshot.copy(watchedEntries = set) }
 
+    /**
+     * Chaîne vue en vraie 4K : ajoutée une seule fois (jamais retirée par une nouvelle lecture).
+     * `false` si elle y était déjà, sans aucune écriture.
+     */
+    fun addUhdEntry(profileId: String, entryKey: String): Boolean = synchronized(mutationLock) {
+        val current = snapshot(profileId)
+        if (entryKey in current.uhdEntries) return@synchronized false
+        database.setFlag(profileId, LibraryDatabase.UHD_ENTRY, entryKey, present = true)
+        snapshots[profileId] = current.copy(uhdEntries = LinkedHashSet(current.uhdEntries).apply { add(entryKey) })
+        true
+    }
+
     private fun toggle(
         profileId: String,
         kind: String,
@@ -182,6 +194,7 @@ internal fun parseLegacySnapshot(root: JSONObject): UserLibrarySnapshot = UserLi
     hiddenCategories = root.optJSONArray("hidden_categories").stringSet(),
     lockedCategories = root.optJSONArray("locked_categories").stringSet(),
     watchedEntries = root.optJSONArray("watched_entries").stringSet(),
+    uhdEntries = root.optJSONArray("uhd_entries").stringSet(),
     categoryOrder = root.optJSONObject("category_order").stringListMap(),
     movedEntries = root.optJSONObject("moved_entries").stringMap(),
     history = root.optJSONArray("history").historyList(),
@@ -194,6 +207,7 @@ internal fun UserLibrarySnapshot.toLegacyJson(): JSONObject = JSONObject().apply
     put("hidden_categories", JSONArray(hiddenCategories.toList()))
     put("locked_categories", JSONArray(lockedCategories.toList()))
     put("watched_entries", JSONArray(watchedEntries.toList()))
+    put("uhd_entries", JSONArray(uhdEntries.toList()))
     put("category_order", JSONObject().apply { categoryOrder.forEach { (type, keys) -> put(type, JSONArray(keys)) } })
     put("moved_entries", JSONObject().apply { movedEntries.forEach { (key, category) -> put(key, category) } })
     put("history", JSONArray().apply { history.forEach { put(it.toJson()) } })
@@ -273,6 +287,8 @@ data class UserLibrarySnapshot(
     val hiddenCategories: Set<String> = emptySet(),
     val lockedCategories: Set<String> = emptySet(),
     val watchedEntries: Set<String> = emptySet(),
+    /** Chaînes Direct mesurées en 3840 × 2160 à la lecture, dans l'ordre de découverte. */
+    val uhdEntries: Set<String> = emptySet(),
     val categoryOrder: Map<String, List<String>> = emptyMap(),
     val movedEntries: Map<String, String> = emptyMap(),
     val history: List<PlaybackHistoryItem> = emptyList(),

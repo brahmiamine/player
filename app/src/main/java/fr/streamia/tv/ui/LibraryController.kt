@@ -94,6 +94,26 @@ internal class LibraryController(
         repository.toggleCategoryFavorite(profileId, category)
     }
 
+    /**
+     * Chaîne Direct lue en vraie 3840 × 2160 : ajoutée à la catégorie « UHD 4K ». Déjà connue
+     * (cas de chaque relecture) : rien du tout, ni écriture ni recomposition.
+     */
+    fun markLiveEntryUhd(entryKey: String) {
+        val state = _uiState.value
+        val profileId = state.activeProfileId ?: return
+        if (entryKey in state.library.uhdEntries) return
+        _uiState.update { current ->
+            if (current.activeProfileId != profileId || entryKey in current.library.uhdEntries) current
+            else current.copy(library = current.library.copy(uhdEntries = LinkedHashSet(current.library.uhdEntries).apply { add(entryKey) }))
+        }
+        // Une ligne SQLite, en priorité basse : ne dispute pas le processeur à la chaîne qui démarre.
+        viewModelScope.launch {
+            libraryMutation.withLock {
+                runCatching { withContext(BackgroundWork.light) { repository.addUhdEntry(profileId, entryKey) } }
+            }
+        }
+    }
+
     /** Enregistre un nouveau code parental et active le verrouillage — déverrouille aussi la session en cours puisque c'est l'utilisateur qui vient de le saisir. */
     fun setParentalPin(pin: String) {
         // PBKDF2 volontairement lent (plusieurs centaines de ms sur un boîtier TV) : hors du thread principal.
