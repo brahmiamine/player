@@ -270,7 +270,7 @@ private fun HomeProgressBar(progress: Float, modifier: Modifier = Modifier) {
 internal const val AI_ASSISTANT_ROW_KEY = "ai-assistant"
 
 /** Rubrique « Quoi de neuf maintenant ? » de l'accueil : elle n'apparaît que s'il y a un résumé (ou son calcul en cours). */
-internal fun BriefUiState.visibleOnHome(): Boolean = loading || items.any { it.channel != null }
+internal fun BriefUiState.visibleOnHome(): Boolean = loading || error != null || items.any { it.channel != null }
 
 /** Accès à l'assistant depuis l'accueil : « Ce soir ? » et le QR code permanent de la télécommande téléphone (visibles quand l'assistant est actif). */
 @Composable
@@ -353,6 +353,7 @@ internal fun AiBriefRow(
     Column(Modifier.fillMaxWidth()) {
         SectionLabel("✦ Quoi de neuf maintenant ?", fontSize = 16.sp)
         brief.headline?.let { Text(it, color = MutedInk, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 12.dp, top = 4.dp)) }
+        brief.error?.takeIf { !brief.loading }?.let { Text(it, color = MutedInk, fontSize = 13.sp, modifier = Modifier.padding(start = 12.dp, top = 4.dp)) }
         AiLoadingIndicator("L'assistant résume ce qui passe en ce moment…", brief.loading, Modifier.padding(start = 12.dp, top = 6.dp))
         Spacer(Modifier.height(8.dp))
         LazyRow(

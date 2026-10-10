@@ -7,6 +7,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.runtime.LaunchedEffect
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -189,7 +190,10 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     val settings = state.appSettings
                     MobileScaffold(MobileTab.Home, onSelect = onMobileTab) {
                         LaunchedEffect(aiActive, homeState.liveOnSatMatches.size, homeState.homeTvProgrammeNow.size, homeState.homeBeinSportsNow.size) {
-                            if (aiActive) viewModel.loadBrief()
+                            while (aiActive) {
+                                viewModel.loadBrief()
+                                delay(AI_BRIEF_POLL_MS)
+                            }
                         }
                         MobileHomeScreen(
                             catalog = state.catalog!!,
@@ -543,7 +547,11 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                       if (aiActive) viewModel.startRemote(withContext(Dispatchers.IO) { readRemoteLogo(context) })
                   }
                   LaunchedEffect(aiActive, homeState.liveOnSatMatches.size, homeState.homeTvProgrammeNow.size, homeState.homeBeinSportsNow.size) {
-                      if (aiActive) viewModel.loadBrief()
+                      // Rappel régulier : les guides se renouvellent sans changer de taille ; la réutilisation de 15 min borne les requêtes.
+                      while (aiActive) {
+                          viewModel.loadBrief()
+                          delay(AI_BRIEF_POLL_MS)
+                      }
                   }
                   HomeScreen(
                     catalog = state.catalog!!,
@@ -1037,3 +1045,5 @@ private fun MediaType.mobileTab(): MobileTab = when (this) {
     MediaType.Movie -> MobileTab.Movies
     MediaType.Series -> MobileTab.Series
 }
+
+private const val AI_BRIEF_POLL_MS = 5 * 60_000L

@@ -100,6 +100,11 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     /** Matchs du jour sans chaînes masquées (voir [visibleLiveOnSatMatchesFlow]). */
     val visibleLiveOnSatMatches: StateFlow<List<ResolvedLiveOnSatMatch>> = visibleLiveOnSatMatchesFlow(host.ui, host.home, viewModelScope)
 
+    override fun onCleared() {
+        aiFeatures.close()
+        super.onCleared()
+    }
+
     // --- API publique déléguée : l'interface garde un seul point d'entrée, le ViewModel. ---
 
     // Mises à jour de l'application

@@ -249,6 +249,7 @@ fun MobileHomeScreen(
                         }
                     }
                     aiBrief.headline?.let { Text(it, color = MutedInk, fontSize = 13.sp, maxLines = 2) }
+                    aiBrief.error?.takeIf { !aiBrief.loading }?.let { Text(it, color = MutedInk, fontSize = 13.sp) }
                     AiLoadingIndicator("L'assistant résume ce qui passe en ce moment…", aiBrief.loading)
                     aiBrief.items.forEach { item ->
                         val channel = item.channel ?: return@forEach

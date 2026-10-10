@@ -247,12 +247,12 @@ internal class AiController(
             val outcome = runCatching { computeBrief() }
             if (outcome.exceptionOrNull() is CancellationException || !AiGate.active.value) return@launch
             val brief = outcome.getOrNull()
-            // Rien à résumer (guides pas encore chargés) : pas de délai de réutilisation, le prochain appel réessaie sans coût.
-            briefAtMillis = if (brief != null) System.currentTimeMillis() else 0L
+            // Sans résumé obtenu (rien à résumer, ou assistant injoignable) : pas de délai de réutilisation, le prochain appel réessaie.
+            briefAtMillis = if (brief?.items?.isNotEmpty() == true) System.currentTimeMillis() else 0L
             state.update {
                 it.copy(
                     brief = when {
-                        brief == null -> BriefUiState(loaded = true, error = "Pas de résumé pour l'instant : aucun match ni programme en direct n'est chargé, ou l'assistant est injoignable.")
+                        brief == null -> BriefUiState(loaded = true, error = "Résumé indisponible : l'assistant n'a pas répondu. Actualisez pour réessayer.")
                         else -> brief
                     },
                 )
@@ -286,7 +286,8 @@ internal class AiController(
         home.homeTvProgrammeNow.filter { allowed(it.channel) }.take(MAX_PROGRAMME_LINES).forEach {
             add("T", "${it.programme.channelName} : ${it.programme.title} (${it.programme.timeRangeLabel})", it.channel)
         }
-        if (lines.isEmpty()) return null
+        // Rien à résumer (guides pas encore chargés) : état vide et masqué, sans requête.
+        if (lines.isEmpty()) return BriefUiState(loaded = true)
         val brief = ai.whatsNew(lines, CLOCK.format(Instant.now().atZone(ZoneId.systemDefault()))) ?: return null
         return BriefUiState(
             loaded = true,
@@ -329,6 +330,9 @@ internal class AiController(
             }
         }
     }
+
+    /** ViewModel détruit : la page du téléphone ne doit pas survivre à l'écran qui la sert. */
+    fun close() = stopRemote()
 
     private fun stopRemote() {
         remoteServer?.close()
