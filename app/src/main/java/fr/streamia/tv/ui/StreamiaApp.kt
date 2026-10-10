@@ -275,6 +275,8 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                             onOrganizer = viewModel::showOrganizer,
                             onSettings = viewModel::showSettings,
                             onChangePlaylist = viewModel::logout,
+                            aiActive = aiActive,
+                            onAssistant = viewModel::showAssistant,
                         )
                     }
                 }
@@ -418,6 +420,8 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onSetHomePlace = viewModel::setHomePlace,
                     onSetPrayerMethod = viewModel::setPrayerMethod,
                     onToggleAi = viewModel::toggleAi,
+                    onToggleAiBilingual = viewModel::toggleAiBilingual,
+                    onToggleAiNightly = viewModel::toggleAiNightly,
                     onSetAiLanguage = viewModel::setAiLanguage,
                     onLoadAiUsage = viewModel::loadAiUsage,
                     onResetAiUsage = viewModel::resetAiUsage,
@@ -672,6 +676,8 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onSetHomePlace = viewModel::setHomePlace,
                     onSetPrayerMethod = viewModel::setPrayerMethod,
                     onToggleAi = viewModel::toggleAi,
+                    onToggleAiBilingual = viewModel::toggleAiBilingual,
+                    onToggleAiNightly = viewModel::toggleAiNightly,
                     onSetAiLanguage = viewModel::setAiLanguage,
                     onLoadAiUsage = viewModel::loadAiUsage,
                     onResetAiUsage = viewModel::resetAiUsage,

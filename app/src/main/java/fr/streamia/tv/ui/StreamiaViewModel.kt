@@ -860,6 +860,14 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         updateAppSettings { it.copy(aiEnabled = !it.aiEnabled) }
     }
 
+    fun toggleAiBilingual() {
+        updateAppSettings { it.copy(aiBilingualSubtitles = !it.aiBilingualSubtitles) }
+    }
+
+    fun toggleAiNightly() {
+        updateAppSettings { it.copy(aiNightly = !it.aiNightly) }
+    }
+
     fun setAiLanguage(code: String) {
         updateAppSettings { it.copy(aiLanguage = code) }
     }

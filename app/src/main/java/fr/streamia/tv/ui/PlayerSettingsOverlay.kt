@@ -65,6 +65,11 @@ internal fun BoxScope.PlayerSettings(
     onResetSubtitleShift: (() -> Unit)? = null,
     /** Langue des réglages IA (« Français ») quand l'assistant est actif : bouton « Traduire par IA » en tête. */
     aiTranslateLanguage: String? = null,
+    /** Assistant actif : bouton « Conseil de lecture » (panneau TV) qui explique les mesures du lecteur. */
+    adviceAvailable: Boolean = false,
+    adviceText: String? = null,
+    adviceLoading: Boolean = false,
+    onRequestAdvice: () -> Unit = {},
 ) {
     // Smartphone : feuille du bas au lieu du panneau latéral de la TV.
     if (LocalHandheld.current) {
@@ -147,6 +152,13 @@ internal fun BoxScope.PlayerSettings(
                 onShowResults = onShowOnlineSubtitleResults,
                 aiAbove = aiButton,
             )
+        }
+        if (adviceAvailable) {
+            FocusableSurface(onClick = onRequestAdvice, enabled = !adviceLoading, modifier = Modifier.fillMaxWidth().height(52.dp)) {
+                AiButtonLabel("Conseil de lecture", adviceLoading)
+            }
+            AiLoadingIndicator("L'assistant analyse la lecture…", adviceLoading)
+            if (adviceText != null) Text(adviceText, color = Ink, fontSize = 13.sp, lineHeight = 19.sp)
         }
         Text("OK sur une ligne pour choisir la langue.", color = MutedInk, fontSize = 13.sp, lineHeight = 19.sp)
     }
