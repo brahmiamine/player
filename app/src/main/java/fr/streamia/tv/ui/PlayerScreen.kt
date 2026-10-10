@@ -636,7 +636,6 @@ fun PlayerScreen(
                 diagnostics = diagnosticsTracker.snapshot(now)
                 buffering = false
                 streamHasPlayed = true
-                recoveryAttempt = 0
                 transportStore.recordSuccess(activeStreamUrl, entry.type)
                 if (entry.type == MediaType.Live) {
                     versionStatsStore.recordSuccess(versionScope, entry.key, diagnostics.startupTimeMs)
@@ -752,6 +751,25 @@ fun PlayerScreen(
         gaveUpOnNetworkError = false
         recoveryAttempt = 0
         startCandidate(activeStreamUrl.ifBlank { streamCandidates.firstOrNull() ?: return@LaunchedEffect }, player.currentPosition.coerceAtLeast(0L))
+    }
+
+    // Les compteurs de relance ne repartent à zéro qu'après une vraie lecture continue : une première image
+    // suivie aussitôt d'une coupure (serveur qui lâche la connexion) ne doit pas rendre la boucle infinie.
+    LaunchedEffect(entry.key, player) {
+        var playingSince = -1L
+        while (true) {
+            delay(1_000)
+            if (player.isPlaying && player.playbackState == Player.STATE_READY) {
+                val now = SystemClock.elapsedRealtime()
+                if (playingSince < 0) playingSince = now
+                if (now - playingSince >= STABLE_PLAYBACK_MS) {
+                    if (recoveryAttempt != 0) recoveryAttempt = 0
+                    if (watchdogRecoveryCount != 0) watchdogRecoveryCount = 0
+                }
+            } else {
+                playingSince = -1L
+            }
+        }
     }
 
     LaunchedEffect(pendingRecovery) {
@@ -882,7 +900,6 @@ fun PlayerScreen(
             // unwanted full stream restart on perfectly healthy playback.
             val stalled = shouldAdvance && previousPosition >= 0L && kotlin.math.abs(currentPosition - previousPosition) < 500L
             stalledChecks = if (stalled) stalledChecks + 1 else 0
-            if (!stalled) watchdogRecoveryCount = 0
 
             if (stalledChecks >= 2) {
                 if (watchdogRecoveryCount < 2) {
@@ -1384,7 +1401,11 @@ fun PlayerScreen(
             Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
                 StatusDot(diameter = 24.dp)
                 Spacer(Modifier.height(12.dp))
-                if (!sharedLivePlayer && watchdogRecoveryCount > 0) {
+                if (!sharedLivePlayer && recoveryAttempt > 0) {
+                    Text("Reconnexion en cours… (tentative $recoveryAttempt/$MAX_STREAM_RECOVERY_ATTEMPTS)", color = Ink, fontSize = 18.sp)
+                    Spacer(Modifier.height(6.dp))
+                    Text("Le serveur a interrompu la lecture, nouvelle tentative automatique", color = MutedInk, fontSize = 13.sp)
+                } else if (!sharedLivePlayer && watchdogRecoveryCount > 0) {
                     // Distingue une reconnexion automatique après un flux figé (watchdog) du
                     // chargement initial générique : même habillage visuel, message différent.
                     Text("Reconnexion en cours… (tentative $watchdogRecoveryCount/2)", color = Ink, fontSize = 18.sp)
@@ -1798,3 +1819,6 @@ private tailrec fun android.content.Context.findActivity(): android.app.Activity
     is android.content.ContextWrapper -> baseContext.findActivity()
     else -> null
 }
+
+/** Lecture continue exigée avant de remettre à zéro les compteurs de relance. */
+private const val STABLE_PLAYBACK_MS = 15_000L
