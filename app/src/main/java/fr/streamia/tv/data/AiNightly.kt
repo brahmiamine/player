@@ -5,8 +5,7 @@ import fr.streamia.tv.domain.MediaType
 
 /**
  * Pré-calcul de nuit : pendant que la TV ne sert pas, l'assistant prépare ce que la journée consultera depuis le
- * cache, sans attente ni requête. Une poignée de requêtes par jour au plus :
- *  - les collections et sagas de la semaine (une requête, même liste que l'écran) ;
+ * cache, sans attente ni requête. Quelques requêtes par jour au plus :
  *  - la traduction des descriptions des nouveautés et des favoris (lots de huit descriptions).
  * Sans effet si l'assistant est coupé ou si le pré-calcul est désactivé dans Paramètres.
  */
@@ -20,9 +19,6 @@ internal object AiNightly {
         val categories = repository.cachedCatalog(profileId)?.categories ?: return 0
         val allowed = allowedEntries(categories, library, settings.parentalControlEnabled, parentalUnlocked = false)
         var done = 0
-
-        val pool = AiPoolBuilder(repository).collectionsPool(profileId, library, allowed)
-        if (!pool.isEmpty && !shouldStop() && ai.collections(pool.candidates) != null) done++
 
         if (shouldStop() || !ai.isActive()) return done
         val recent = listOf(MediaType.Movie, MediaType.Series).flatMap { type ->

@@ -8,7 +8,7 @@ enum class ContentReturnOrigin {
     Search,
     LiveMatches,
     Epg,
-    /** Écrans de l'assistant IA (Ce soir, Collections, Quoi de neuf). */
+    /** Écrans de l'assistant IA (Ce soir, Quoi de neuf). */
     Assistant,
 }
 

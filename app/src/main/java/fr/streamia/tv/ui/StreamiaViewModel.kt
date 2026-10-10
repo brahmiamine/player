@@ -114,7 +114,6 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     fun clearAiSearch() = aiFeatures.clearAiSearch()
     fun startTonight(answers: fr.streamia.tv.data.TonightAnswers) = aiFeatures.startTonight(answers)
     fun resetTonight() = aiFeatures.resetTonight()
-    fun loadCollections() = aiFeatures.loadCollections()
     fun loadBrief(force: Boolean = false) = aiFeatures.loadBrief(force)
     fun loadRecap() = aiFeatures.loadRecap()
     fun showAssistant(mode: AssistantMode) {

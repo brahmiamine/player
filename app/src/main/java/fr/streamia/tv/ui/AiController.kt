@@ -42,7 +42,7 @@ import java.time.format.DateTimeFormatter
 
 /**
  * Fonctions de l'assistant IA affichées sur leurs propres écrans : recherche en langage naturel, « Ce soir ? »,
- * collections, « Quoi de neuf maintenant ? » et raisons des recommandations de l'accueil.
+ * « Quoi de neuf maintenant ? » et raisons des recommandations de l'accueil.
  *
  * Règles communes :
  *  - **assistant coupé = tout s'arrête** : les travaux en cours sont annulés, l'état est remis à zéro, aucune
@@ -67,7 +67,6 @@ internal class AiController(
 
     private var searchJob: Job? = null
     private var tonightJob: Job? = null
-    private var collectionsJob: Job? = null
     private var briefJob: Job? = null
 
     init {
@@ -89,7 +88,6 @@ internal class AiController(
     fun reset() {
         searchJob?.cancel()
         tonightJob?.cancel()
-        collectionsJob?.cancel()
         briefJob?.cancel()
         recapJob?.cancel()
         state.value = AiUiState()
@@ -228,43 +226,6 @@ internal class AiController(
                 ?: pick.id.removePrefix("T").toIntOrNull()?.let { tonightTv.getOrNull(it - 1) }?.let { item ->
                     TonightPick(item.channel, pick.why, "${item.programme.time} · ${item.programme.channelName}")
                 }
-        }
-    }
-
-    // ---------- Collections ----------
-
-    /** Collections et sagas du catalogue. Déjà chargées ou en cours : rien à refaire ; sinon une requête (souvent déjà préparée la nuit). */
-    fun loadCollections(force: Boolean = false) {
-        if (!AiGate.active.value) return
-        val current = state.value.collections
-        if (!force && (current.loaded || current.loading)) return
-        collectionsJob?.cancel()
-        state.update { it.copy(collections = CollectionsUiState(loading = true)) }
-        collectionsJob = viewModelScope.launch {
-            val outcome = runCatching { computeCollections() }
-            if (outcome.exceptionOrNull() is CancellationException || !AiGate.active.value) return@launch
-            val collections = outcome.getOrNull().orEmpty()
-            state.update {
-                it.copy(
-                    collections = if (collections.isEmpty()) {
-                        CollectionsUiState(loaded = true, error = "Aucune collection à proposer pour l'instant.")
-                    } else {
-                        CollectionsUiState(loaded = true, collections = collections)
-                    },
-                )
-            }
-        }
-    }
-
-    private suspend fun computeCollections(): List<EntryCollection> {
-        val snapshot = _uiState.value
-        val profileId = snapshot.activeProfileId ?: return emptyList()
-        val allowed = allowedEntries(snapshot.catalog?.categories.orEmpty(), snapshot.library, snapshot.appSettings.parentalControlEnabled, snapshot.parentalUnlocked)
-        val pool = pools.collectionsPool(profileId, snapshot.library, allowed)
-        if (pool.isEmpty) return emptyList()
-        return ai.collections(pool.candidates).orEmpty().mapNotNull { collection ->
-            val entries = collection.ids.mapNotNull(pool.entries::get)
-            if (entries.size >= 3) EntryCollection(collection.title, collection.ordered, entries) else null
         }
     }
 

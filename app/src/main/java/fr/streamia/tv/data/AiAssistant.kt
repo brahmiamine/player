@@ -35,7 +35,7 @@ object AiLanguages {
 
 /**
  * Fonctions IA de l'application : traduction des descriptions, classement des similaires, recherche en langage naturel,
- * « Ce soir ? », collections, résumés de séries, avis rapides, « Quoi de neuf ? », conseils de lecture et télécommande.
+ * « Ce soir ? », résumés de séries, avis rapides, « Quoi de neuf ? », conseils de lecture et télécommande.
  * Chaque appel vérifie d'abord que l'assistant est actif : désactivé, rien n'est envoyé au fournisseur et une réponse
  * en vol est jetée. Les réponses valides sont gardées sur disque pour ne jamais payer deux fois la même, et chaque
  * fonction tient en **une seule requête** qui répond en JSON.
@@ -141,20 +141,6 @@ class AiAssistant(context: Context, private val keyStore: AiKeyStore, val usage:
             user = tonightUserPrompt(answers, tastes),
             maxTokens = 700,
         ) { parsePicks(it, ids) }
-    }
-
-    /** Collections et sagas parmi [pool], valables la semaine (le catalogue bouge peu). */
-    suspend fun collections(pool: List<AiCandidate>): List<AiCollection>? {
-        val cfg = config ?: return null
-        if (pool.size < MIN_POOL) return null
-        val ids = pool.mapTo(HashSet(), AiCandidate::id)
-        return askParsed(
-            cfg, AiFeature.Collections,
-            cacheKey = "c|${cfg.language}|${week()}|${pool.joinToString("|") { it.label }.hashCode()}",
-            system = collectionsSystemPrompt(languageLabel(cfg), pool),
-            user = COLLECTIONS_USER_PROMPT,
-            maxTokens = 1_200,
-        ) { parseCollections(it, ids) }
     }
 
     /** Raison (une phrase) pour chaque recommandation de [items] d'après les [tastes] ; identifiant ↦ raison. */

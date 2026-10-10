@@ -130,7 +130,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
     // État de l'accueil (guides, matchs, recommandations, météo) : flux séparé, lu (.value)
     // seulement dans les écrans qui l'affichent — ses mises à jour ne recomposent pas les autres.
     val homeStateHolder = viewModel.homeState.collectAsStateWithLifecycle()
-    // Assistant IA (recherche naturelle, Ce soir, collections…) : lu (.value) seulement par les écrans concernés.
+    // Assistant IA (recherche naturelle, Ce soir…) : lu (.value) seulement par les écrans concernés.
     val aiStateHolder = viewModel.aiState.collectAsStateWithLifecycle()
     val liveOnSatMatchesHolder = viewModel.visibleLiveOnSatMatches.collectAsStateWithLifecycle()
     val liveEpgProgramsHolder = viewModel.liveEpgPrograms.collectAsStateWithLifecycle()
@@ -806,14 +806,6 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                                 onOpen = { entry -> viewModel.openAssistantEntry(entry, mode) },
                                 onBack = viewModel::backFromMenu,
                             )
-                            AssistantMode.Collections -> {
-                                LaunchedEffect(Unit) { viewModel.loadCollections() }
-                                CollectionsScreen(
-                                    state = ai.collections,
-                                    onOpen = { entry -> viewModel.openAssistantEntry(entry, mode) },
-                                    onBack = viewModel::backFromMenu,
-                                )
-                            }
                             AssistantMode.WhatsNew -> {
                                 LaunchedEffect(Unit) { viewModel.loadBrief() }
                                 WhatsNewScreen(

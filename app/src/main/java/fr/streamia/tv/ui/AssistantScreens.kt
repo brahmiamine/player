@@ -59,7 +59,7 @@ import fr.streamia.tv.ui.theme.TypeBody
 import fr.streamia.tv.ui.theme.TypeLabel
 import fr.streamia.tv.ui.theme.TypeScreenTitle
 
-// Écrans de l'assistant IA sur TV : Ce soir ?, Collections, Quoi de neuf maintenant ?
+// Écrans de l'assistant IA sur TV : Ce soir ?, Quoi de neuf maintenant ?
 // Ils ne sont atteignables que quand l'assistant est actif (voir StreamiaApp : l'assistant coupé les ferme).
 
 @Composable
@@ -182,41 +182,6 @@ fun TonightScreen(
                             AssistantEntryRow(pick.entry, pick.detail, pick.why) { onOpen(pick.entry) }
                         }
                     }
-                }
-            }
-        }
-    }
-}
-
-// ---------- Collections ----------
-
-@Composable
-fun CollectionsScreen(
-    state: CollectionsUiState,
-    onOpen: (MediaEntry) -> Unit,
-    onBack: () -> Unit,
-) {
-    BackHandler(onBack = onBack)
-    val firstFocus = remember { FocusRequester() }
-    LaunchedEffect(state.collections.isNotEmpty()) { if (state.collections.isNotEmpty()) runCatching { firstFocus.requestFocus() } }
-    AssistantFrame("Collections", "Sagas et thèmes composés par l'assistant", onBack) {
-        when {
-            state.loading || !state.loaded -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                AiLoadingIndicator("L'assistant regroupe votre catalogue…", visible = true)
-            }
-            state.collections.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(state.error ?: "Aucune collection à proposer pour l'instant.", color = MutedInk, fontSize = TypeBody)
-            }
-            else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(CardRowSpacing)) {
-                items(state.collections.size, key = { state.collections[it].title }) { index ->
-                    val collection = state.collections[index]
-                    HomeCardRow(
-                        title = if (collection.ordered) "${collection.title} · à voir dans l'ordre" else collection.title,
-                        entries = collection.entries.map { it to null },
-                        firstFocusRequester = if (index == 0) firstFocus else null,
-                        restoreItemKey = null,
-                        onEntryClick = onOpen,
-                    )
                 }
             }
         }
