@@ -93,7 +93,7 @@ fun MobileOrganizerScreen(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            MobileIconButton(StreamiaIconGlyph.ArrowBack, onClick = { if (selecting) { selecting = false; selected = emptySet() } else onBack() })
+            MobileIconButton(StreamiaIconGlyph.ChevronLeft, onClick = { if (selecting) { selecting = false; selected = emptySet() } else onBack() })
             Text(
                 if (selecting) "${selected.size} sélectionnée(s)" else "Organiser",
                 color = Ink,

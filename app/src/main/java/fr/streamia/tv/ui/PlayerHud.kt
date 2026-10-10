@@ -1,5 +1,8 @@
 package fr.streamia.tv.ui
 
+import fr.streamia.tv.ui.theme.RadiusPill
+import fr.streamia.tv.ui.theme.ButtonHeight
+import fr.streamia.tv.ui.theme.BackButtonWidth
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -94,12 +97,12 @@ internal fun NextEpisodePrompt(
             )
             Spacer(Modifier.height(16.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                FocusableSurface(onClick = onPlayNow, accent = true, modifier = Modifier.weight(1f).height(48.dp).focusRequester(playNowFocus)) {
+                FocusableSurface(onClick = onPlayNow, accent = true, modifier = Modifier.weight(1f).height(ButtonHeight).focusRequester(playNowFocus)) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text("Lire maintenant", color = Ink, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                     }
                 }
-                FocusableSurface(onClick = onCancel, modifier = Modifier.weight(1f).height(48.dp)) {
+                FocusableSurface(onClick = onCancel, modifier = Modifier.weight(1f).height(ButtonHeight)) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text("Annuler", color = Ink, fontSize = 14.sp)
                     }
@@ -404,8 +407,8 @@ internal fun PlayerGuide(
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 SectionLabel("Chaînes", fontSize = 22.sp)
                 Spacer(Modifier.weight(1f))
-                FocusableSurface(onClick = onClose, modifier = Modifier.width(105.dp).height(46.dp)) {
-                    Text("Fermer", color = Ink, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 14.dp))
+                FocusableSurface(onClick = onClose, radius = RadiusPill, modifier = Modifier.width(BackButtonWidth).height(ButtonHeight)) {
+                    Text("Fermer", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 18.dp))
                 }
             }
             Spacer(Modifier.height(14.dp))

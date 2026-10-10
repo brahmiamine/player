@@ -139,7 +139,7 @@ fun MobileEpgScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                MobileIconButton(StreamiaIconGlyph.ArrowBack, onClick = onBack)
+                MobileIconButton(StreamiaIconGlyph.ChevronLeft, onClick = onBack)
                 Text("Guide TV", color = Ink, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f).padding(start = 4.dp))
                 Text(
                     "Maintenant",

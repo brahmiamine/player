@@ -1,5 +1,6 @@
 package fr.streamia.tv.ui
 
+import fr.streamia.tv.ui.theme.ButtonHeight
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -217,7 +218,7 @@ private fun PosterGrid(
             Text("OK ouvrir · OK long ajouter/retirer favori", color = MutedInk, fontSize = 14.sp)
             if (sortOrder != null) {
                 Spacer(Modifier.width(14.dp))
-                FocusableSurface(onClick = { sortDialogOpen = true }, modifier = Modifier.width(290.dp).height(44.dp).focusRequester(sortButtonFocus)) {
+                FocusableSurface(onClick = { sortDialogOpen = true }, modifier = Modifier.width(290.dp).height(ButtonHeight).focusRequester(sortButtonFocus)) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text(
                             "Trier : " + vodSortLabel(sortOrder),
@@ -313,7 +314,7 @@ private fun PosterGrid(
 
 @Composable
 private fun PageLoadRetry(onRetry: () -> Unit) {
-    FocusableSurface(onClick = onRetry, modifier = Modifier.width(420.dp).height(54.dp)) {
+    FocusableSurface(onClick = onRetry, modifier = Modifier.width(420.dp).height(ButtonHeight)) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text("Chargement impossible · OK pour réessayer", color = Ink, fontSize = TypeBody)
         }

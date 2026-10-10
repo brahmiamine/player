@@ -1,5 +1,9 @@
 package fr.streamia.tv.ui
 
+import fr.streamia.tv.ui.theme.RadiusPill
+import fr.streamia.tv.ui.theme.ButtonHeight
+import fr.streamia.tv.ui.theme.BackButtonWidth
+import fr.streamia.tv.ui.theme.IconButtonWidth
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -82,14 +86,14 @@ fun MovieDetailsScreen(
         // Aucun élément focalisable dans le texte : en remontant depuis les listes du bas, le focus retombe sur la colonne de
         // gauche (Retour, Lire…). On remet alors le texte (description, infos) en haut, sinon il reste hors de l'écran.
         Column(Modifier.width(330.dp).fillMaxHeight().onFocusChanged { if (it.hasFocus) scope.launch { detailScroll.animateScrollTo(0) } }) {
-            FocusableSurface(onClick = onBack, modifier = Modifier.width(130.dp).height(50.dp)) {
-                BackLabel(TypeLabel, 15.dp)
+            FocusableSurface(onClick = onBack, radius = RadiusPill, modifier = Modifier.width(BackButtonWidth).height(ButtonHeight)) {
+                BackLabel(TypeBody, 18.dp)
             }
             Spacer(Modifier.height(22.dp))
             ChannelLogo(details?.posterUrl ?: movie.iconUrl, movie.displayName, Modifier.size(300.dp))
             Spacer(Modifier.height(16.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                FocusableSurface(onClick = onPlay, enabled = !busy, accent = true, modifier = Modifier.weight(1f).height(58.dp).focusRequester(playFocus)) {
+                FocusableSurface(onClick = onPlay, enabled = !busy, accent = true, modifier = Modifier.weight(1f).height(ButtonHeight).focusRequester(playFocus)) {
                     Row(
                         Modifier.padding(horizontal = 16.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -107,7 +111,7 @@ fun MovieDetailsScreen(
                 FocusableSurface(
                     onClick = onToggleFavorite,
                     selected = favorite,
-                    modifier = Modifier.width(72.dp).height(58.dp),
+                    modifier = Modifier.width(IconButtonWidth).height(ButtonHeight),
                     contentDescription = if (favorite) "Retirer des favoris" else "Ajouter aux favoris",
                 ) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -117,7 +121,7 @@ fun MovieDetailsScreen(
                 FocusableSurface(
                     onClick = onToggleWatched,
                     selected = watched,
-                    modifier = Modifier.width(72.dp).height(58.dp),
+                    modifier = Modifier.width(IconButtonWidth).height(ButtonHeight),
                     contentDescription = if (watched) "Marquer comme non vu" else "Marquer comme vu",
                 ) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -127,7 +131,7 @@ fun MovieDetailsScreen(
             }
             if (resumePositionMs > 0) {
                 Spacer(Modifier.height(10.dp))
-                FocusableSurface(onClick = onPlayFromStart, enabled = !busy, modifier = Modifier.fillMaxWidth().height(50.dp)) {
+                FocusableSurface(onClick = onPlayFromStart, enabled = !busy, modifier = Modifier.fillMaxWidth().height(ButtonHeight)) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text("Lire depuis le début", color = Ink, fontSize = TypeLabel, fontWeight = FontWeight.SemiBold)
                     }

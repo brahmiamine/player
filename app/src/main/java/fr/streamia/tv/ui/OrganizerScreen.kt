@@ -1,5 +1,9 @@
 package fr.streamia.tv.ui
 
+import fr.streamia.tv.ui.theme.TypeBody
+import fr.streamia.tv.ui.theme.ButtonHeight
+import fr.streamia.tv.ui.theme.BackButtonWidth
+import fr.streamia.tv.ui.theme.IconButtonWidth
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -92,8 +96,8 @@ fun OrganizerScreen(
                 Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                FocusableSurface(onClick = onBack, modifier = Modifier.width(120.dp).height(50.dp)) {
-                    BackLabel(TypeLabel, 14.dp)
+                FocusableSurface(onClick = onBack, radius = RadiusPill, modifier = Modifier.width(BackButtonWidth).height(ButtonHeight)) {
+                    BackLabel(TypeBody, 18.dp)
                 }
                 Spacer(Modifier.width(16.dp))
                 Text("Organiser le catalogue", color = Ink, fontSize = TypeScreenTitle, fontWeight = HeadingWeight)
@@ -348,7 +352,7 @@ fun OrganizerScreen(
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     FocusableSurface(
                         onClick = { destinationCategoryId = previousDestination(categories, destinationCategoryId, sourceCategoryId) },
-                        modifier = Modifier.width(62.dp).height(52.dp),
+                        modifier = Modifier.width(IconButtonWidth).height(ButtonHeight),
                         contentDescription = "Catégorie de destination précédente",
                     ) {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -361,7 +365,7 @@ fun OrganizerScreen(
                     }
                     FocusableSurface(
                         onClick = { destinationCategoryId = nextDestination(categories, destinationCategoryId, sourceCategoryId) },
-                        modifier = Modifier.width(62.dp).height(52.dp),
+                        modifier = Modifier.width(IconButtonWidth).height(ButtonHeight),
                         contentDescription = "Catégorie de destination suivante",
                     ) {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -401,7 +405,7 @@ fun OrganizerScreen(
                     FocusableSurface(
                         onClick = { onResetMoves(selectedEntryKeys); selectedEntryKeys = emptySet() },
                         enabled = selectedEntryKeys.isNotEmpty(),
-                        modifier = Modifier.width(150.dp).height(52.dp),
+                        modifier = Modifier.width(150.dp).height(ButtonHeight),
                     ) {
                         Text("Réinitialiser", color = Ink, fontSize = TypeLabel, modifier = Modifier.padding(horizontal = 14.dp))
                     }
@@ -423,7 +427,7 @@ private fun CategoryMoveButton(
         onClick = onClick,
         enabled = enabled,
         contentDescription = contentDescription,
-        modifier = Modifier.width(48.dp).height(44.dp),
+        modifier = Modifier.width(IconButtonWidth).height(ButtonHeight),
     ) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(glyph, color = Ink, fontSize = 17.sp)

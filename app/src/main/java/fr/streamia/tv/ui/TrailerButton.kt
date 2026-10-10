@@ -1,5 +1,6 @@
 package fr.streamia.tv.ui
 
+import fr.streamia.tv.ui.theme.ButtonHeight
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
@@ -41,7 +42,7 @@ fun TrailerButton(trailer: String?, modifier: Modifier = Modifier) {
         FocusableSurface(
             onClick = { failed = !openTrailer(context, candidates) },
             wrapContent = true,
-            modifier = Modifier.height(50.dp),
+            modifier = Modifier.height(ButtonHeight),
         ) {
             Row(Modifier.padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
                 StreamiaIcon(StreamiaIconGlyph.Movie, size = 16.dp)

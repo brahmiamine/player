@@ -40,6 +40,13 @@ val RadiusPanel = 24.dp
 val RadiusTile = 20.dp
 val RadiusPill = 999.dp
 
+// Boutons : un seul gabarit sur tous les écrans TV (Retour, actions, boutons carrés, pastilles).
+val ButtonHeight = 52.dp // Bouton standard et action principale
+val BackButtonWidth = 120.dp // « Retour » / « Fermer » des en-têtes
+val IconButtonWidth = 60.dp // Bouton carré (flèches, ✕, +/−)
+val PillActionHeight = 44.dp // Action en pilule sur une carte (Commencer, Regarder…)
+val PillHeight = 36.dp // Pastille de choix (humeur, filtre…)
+
 /**
  * Échelle typographique partagée : le même rôle (titre de contenu, titre d'écran, titre de
  * section, paragraphe, bouton/méta) garde la même taille sur tous les écrans plutôt que chaque

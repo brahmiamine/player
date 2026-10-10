@@ -128,7 +128,7 @@ fun MobileSearchScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                MobileIconButton(StreamiaIconGlyph.ArrowBack, onClick = onBack)
+                MobileIconButton(StreamiaIconGlyph.ChevronLeft, onClick = onBack)
                 TvTextField(query, onQueryChange, if (aiActive) "Chaîne, film, série… ou une phrase" else "Chaîne, film ou série", Modifier.weight(1f))
                 if (aiActive && canSpeak) {
                     MobileIconButton(StreamiaIconGlyph.Mic, onClick = {

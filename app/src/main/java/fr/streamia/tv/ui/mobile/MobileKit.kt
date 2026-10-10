@@ -198,7 +198,7 @@ fun MobileChip(label: String, selected: Boolean, onClick: () -> Unit, locked: Bo
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         if (locked) StreamiaIcon(StreamiaIconGlyph.Lock, tint = if (selected) Ink else Color(0xFFFF9F0A), size = 14.dp)
-        Text(label, color = Ink, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+        Text(label, color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
     }
 }
 

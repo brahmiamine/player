@@ -1,5 +1,9 @@
 package fr.streamia.tv.ui
 
+import fr.streamia.tv.ui.theme.ButtonHeight
+import fr.streamia.tv.ui.theme.BackButtonWidth
+import fr.streamia.tv.ui.theme.PillActionHeight
+import fr.streamia.tv.ui.theme.PillHeight
 import android.annotation.SuppressLint
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
@@ -70,15 +74,8 @@ private fun AssistantFrame(title: String, subtitle: String, onBack: () -> Unit, 
     Column(Modifier.fillMaxSize().padding(28.dp)) {
         GlassSurface(modifier = Modifier.fillMaxWidth().height(64.dp), shape = RoundedCornerShape(RadiusPill)) {
             Row(Modifier.fillMaxSize().padding(horizontal = 22.dp), verticalAlignment = Alignment.CenterVertically) {
-                FocusableSurface(
-                    onClick = onBack,
-                    radius = RadiusPill,
-                    idleBackground = Color.White.copy(alpha = 0.12f),
-                    modifier = Modifier.width(110.dp).height(44.dp),
-                ) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("‹ Retour", color = Ink, fontSize = TypeBody, fontWeight = FontWeight.Bold)
-                    }
+                FocusableSurface(onClick = onBack, radius = RadiusPill, modifier = Modifier.width(BackButtonWidth).height(ButtonHeight)) {
+                    BackLabel(TypeBody, 18.dp)
                 }
                 Spacer(Modifier.width(18.dp))
                 Text("✦ $title", color = Ink, fontSize = TypeScreenTitle, fontWeight = HeadingWeight)
@@ -93,15 +90,15 @@ private fun AssistantFrame(title: String, subtitle: String, onBack: () -> Unit, 
 
 @Composable
 private fun AssistantChip(label: String, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    // Sélection en aplat rose (comme MobileChip), pas en dégradé lumineux : seul le focus porte la lueur.
+    // Même pastille que la carte « Ce soir ? » de l'accueil (36 dp, 15 sp) ; la sélection passe en aplat rose.
     FocusableSurface(
         onClick = onClick,
-        idleBackground = if (selected) AccentPink else Color.White.copy(alpha = 0.09f),
+        idleBackground = if (selected) AccentPink else Color.White.copy(alpha = 0.14f),
         wrapContent = true,
         radius = RadiusPill,
-        modifier = modifier.height(44.dp),
+        modifier = modifier.height(PillHeight),
     ) {
-        Text(label, color = Ink, fontSize = TypeBody, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 16.dp))
+        Text(label, color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1, modifier = Modifier.padding(horizontal = 16.dp))
     }
 }
 
@@ -115,8 +112,8 @@ private fun <T> ChoiceGroup(
     firstFocus: FocusRequester? = null,
 ) {
     Text(title.uppercase(java.util.Locale.FRENCH), color = MutedInk, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = KickerLetterSpacing)
-    Spacer(Modifier.height(8.dp))
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Spacer(Modifier.height(10.dp))
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         options.forEachIndexed { index, option ->
             AssistantChip(
                 text(option), option == selected, { onSelect(option) },
@@ -159,7 +156,7 @@ fun TonightScreen(
                     enabled = !state.loading,
                     accent = true,
                     radius = RadiusPill,
-                    modifier = Modifier.fillMaxWidth().height(58.dp),
+                    modifier = Modifier.fillMaxWidth().height(PillActionHeight),
                 ) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         AiButtonLabel(if (state.picks.isEmpty()) "Proposer" else "Proposer autre chose", state.loading)
@@ -224,10 +221,10 @@ private fun TonightHeroCard(pick: TonightPick, replacing: Boolean, onOpen: () ->
                 if (!pick.detail.isNullOrBlank()) Text(pick.detail, color = AccentPinkText, fontSize = TypeBody, fontWeight = FontWeight.Bold, maxLines = 1)
                 Text("✦ ${pick.why}", color = Ink.copy(alpha = 0.88f), fontSize = 17.sp, lineHeight = 23.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    FocusableSurface(onClick = onOpen, accent = true, wrapContent = true, radius = RadiusPill, modifier = Modifier.height(46.dp)) {
+                    FocusableSurface(onClick = onOpen, accent = true, wrapContent = true, radius = RadiusPill, modifier = Modifier.height(PillActionHeight)) {
                         Text("▶  Regarder", color = Ink, fontSize = TypeBody, fontWeight = HeroWeight, modifier = Modifier.padding(horizontal = 24.dp))
                     }
-                    FocusableSurface(onClick = onReplace, enabled = !replacing, idleBackground = Color.White.copy(alpha = 0.12f), wrapContent = true, radius = RadiusPill, modifier = Modifier.height(46.dp)) {
+                    FocusableSurface(onClick = onReplace, enabled = !replacing, idleBackground = Color.White.copy(alpha = 0.12f), wrapContent = true, radius = RadiusPill, modifier = Modifier.height(PillActionHeight)) {
                         if (replacing) {
                             AiButtonLabel("Autre proposition", loading = true)
                         } else {

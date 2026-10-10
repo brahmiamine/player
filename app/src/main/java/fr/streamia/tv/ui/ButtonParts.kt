@@ -1,5 +1,7 @@
 package fr.streamia.tv.ui
 
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -28,9 +30,9 @@ import fr.streamia.tv.ui.theme.Ink
 /** « ← Retour » des boutons de retour : la flèche est une icône centrée sur le texte (le glyphe « ← » flottait sous la ligne). */
 @Composable
 fun BackLabel(fontSize: TextUnit, horizontalPadding: Dp = 14.dp) {
-    Row(Modifier.padding(horizontal = horizontalPadding), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        StreamiaIcon(StreamiaIconGlyph.ArrowBack, tint = Ink, size = 20.dp)
-        Text("Retour", color = Ink, fontSize = fontSize)
+    Row(Modifier.fillMaxWidth().padding(horizontal = horizontalPadding), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp, Alignment.CenterHorizontally)) {
+        StreamiaIcon(StreamiaIconGlyph.ChevronLeft, tint = Ink, size = 24.dp)
+        Text("Retour", color = Ink, fontSize = fontSize, fontWeight = FontWeight.Bold)
     }
 }
 

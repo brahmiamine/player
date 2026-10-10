@@ -1,5 +1,8 @@
 package fr.streamia.tv.ui
 
+import fr.streamia.tv.ui.theme.BackButtonWidth
+import fr.streamia.tv.ui.theme.TypeBody
+import fr.streamia.tv.ui.theme.ButtonHeight
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -73,7 +76,12 @@ internal fun BrowserHeader(
         ) {
             StreamiaLogo(compact = true)
             Spacer(Modifier.width(16.dp))
-            HeaderAction("Accueil", 100.dp, onHome, idleBackground = idleBackground)
+            FocusableSurface(onClick = onHome, radius = RadiusPill, idleBackground = idleBackground, modifier = Modifier.width(BackButtonWidth).height(ButtonHeight)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)) {
+                    StreamiaIcon(StreamiaIconGlyph.Home, tint = Ink, size = 22.dp)
+                    Text("Accueil", color = Ink, fontSize = TypeBody, fontWeight = FontWeight.Bold)
+                }
+            }
             Spacer(Modifier.width(6.dp))
 
             for (type in MediaType.entries) {
@@ -83,7 +91,7 @@ internal fun BrowserHeader(
                     enabled = catalog.count(type) > 0,
                     accent = selectedType == type,
                     idleBackground = idleBackground,
-                    modifier = Modifier.width(116.dp).height(48.dp),
+                    modifier = Modifier.width(116.dp).height(ButtonHeight),
                 ) {
                     Column(
                         Modifier.fillMaxSize().padding(horizontal = 10.dp),
@@ -150,7 +158,7 @@ private fun HeaderAction(
         onClick = onClick,
         enabled = enabled,
         idleBackground = idleBackground,
-        modifier = Modifier.width(width).height(48.dp),
+        modifier = Modifier.width(width).height(ButtonHeight),
         contentDescription = if (glyph != null) label else null,
     ) {
         if (glyph != null) {

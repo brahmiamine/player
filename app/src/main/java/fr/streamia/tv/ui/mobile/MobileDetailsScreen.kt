@@ -129,7 +129,7 @@ fun MobileDetailsScreen(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            MobileIconButton(StreamiaIconGlyph.ArrowBack, onClick = onBack)
+            MobileIconButton(StreamiaIconGlyph.ChevronLeft, onClick = onBack)
             Text(if (isSeries) "Série" else "Film", color = Ink, fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f).padding(start = 4.dp))
             MobileIconButton(
                 if (favorite) StreamiaIconGlyph.Star else StreamiaIconGlyph.StarOutline,

@@ -1,5 +1,6 @@
 package fr.streamia.tv.ui
 
+import fr.streamia.tv.ui.theme.ButtonHeight
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -174,7 +175,7 @@ fun AiRecapCard(
                 }
             }
             available && !loading -> {
-                FocusableSurface(onClick = onRequest, modifier = Modifier.width(300.dp).height(48.dp)) {
+                FocusableSurface(onClick = onRequest, modifier = Modifier.width(300.dp).height(ButtonHeight)) {
                     AiButtonLabel("Précédemment dans…", loading = false)
                 }
                 if (error != null) Text(error, color = MutedInk, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))

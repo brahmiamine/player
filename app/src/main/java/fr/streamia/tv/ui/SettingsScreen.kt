@@ -1,5 +1,6 @@
 package fr.streamia.tv.ui
 
+import fr.streamia.tv.ui.theme.ButtonHeight
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -843,7 +844,7 @@ fun SettingsScreen(
 
         backupMessage?.let { message ->
             Spacer(Modifier.height(10.dp))
-            FocusableSurface(onClick = { backupMessage = null }, modifier = Modifier.fillMaxWidth().height(48.dp)) {
+            FocusableSurface(onClick = { backupMessage = null }, modifier = Modifier.fillMaxWidth().height(ButtonHeight)) {
                 Text(message + "  ·  OK pour fermer", color = Ink, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 18.dp))
             }
         }

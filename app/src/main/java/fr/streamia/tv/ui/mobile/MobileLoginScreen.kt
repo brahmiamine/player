@@ -199,7 +199,7 @@ fun MobileLoginScreen(
             )
         } else {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                MobileIconButton(StreamiaIconGlyph.ArrowBack, onClick = ::showManager)
+                MobileIconButton(StreamiaIconGlyph.ChevronLeft, onClick = ::showManager)
                 Text(
                     if (mode == MobileLoginMode.Xtream) (if (editing == null) "Nouveau compte Xtream" else "Modifier la liste") else (if (editing == null) "Nouvelle playlist M3U" else "Modifier la liste"),
                     color = Ink,

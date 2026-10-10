@@ -1,5 +1,7 @@
 package fr.streamia.tv.ui
 
+import fr.streamia.tv.ui.theme.ButtonHeight
+import fr.streamia.tv.ui.theme.BackButtonWidth
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -128,8 +130,8 @@ fun LiveOnSatScreen(
                 Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                FocusableSurface(onClick = onBack, modifier = Modifier.width(120.dp).height(52.dp)) {
-                    BackLabel(TypeLabel, 14.dp)
+                FocusableSurface(onClick = onBack, radius = RadiusPill, modifier = Modifier.width(BackButtonWidth).height(ButtonHeight)) {
+                    BackLabel(TypeBody, 18.dp)
                 }
                 Spacer(Modifier.width(18.dp))
                 Text("Matchs du jour", color = Ink, fontSize = TypeScreenTitle, fontWeight = HeadingWeight)
@@ -138,7 +140,7 @@ fun LiveOnSatScreen(
                     Text("Mis à jour à ${formatClockTime(it)}", color = MutedInk, fontSize = TypeLabel)
                     Spacer(Modifier.width(14.dp))
                 }
-                FocusableSurface(onClick = onRefresh, enabled = !loading, modifier = Modifier.width(140.dp).height(52.dp)) {
+                FocusableSurface(onClick = onRefresh, enabled = !loading, modifier = Modifier.width(140.dp).height(ButtonHeight)) {
                     Text(
                         if (loading) "Actualisation…" else "Actualiser",
                         color = Ink,

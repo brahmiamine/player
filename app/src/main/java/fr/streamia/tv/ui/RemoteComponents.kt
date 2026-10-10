@@ -181,6 +181,9 @@ fun FocusableSurface(
                 else Modifier.semantics { this.contentDescription = contentDescription },
             ),
         contentAlignment = Alignment.CenterStart,
+        // Hauteur/largeur imposées à la surface : la Box interne en wrapContent les reprend comme minimum
+        // (sinon la pastille ne ferait que la taille de son texte).
+        propagateMinConstraints = true,
     ) {
         Box(
             modifier = Modifier

@@ -1,5 +1,7 @@
 package fr.streamia.tv.ui
 
+import fr.streamia.tv.ui.theme.ButtonHeight
+import fr.streamia.tv.ui.theme.IconButtonWidth
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -143,7 +145,7 @@ private fun NumericKeypad(
 private fun KeypadButton(label: String, wide: Boolean = false, onClick: () -> Unit) {
     FocusableSurface(
         onClick = onClick,
-        modifier = Modifier.width(if (wide) 96.dp else 56.dp).height(52.dp),
+        modifier = Modifier.width(if (wide) 96.dp else IconButtonWidth).height(ButtonHeight),
     ) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(label, color = Ink, fontSize = if (wide) 12.sp else 16.sp, fontWeight = FontWeight.Bold)

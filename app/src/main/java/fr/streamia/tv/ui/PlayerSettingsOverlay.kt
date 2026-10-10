@@ -1,5 +1,8 @@
 package fr.streamia.tv.ui
 
+import fr.streamia.tv.ui.theme.RadiusPill
+import fr.streamia.tv.ui.theme.ButtonHeight
+import fr.streamia.tv.ui.theme.BackButtonWidth
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -105,8 +108,8 @@ internal fun BoxScope.PlayerSettings(
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text("Lecture", color = Ink, fontSize = 24.sp, fontWeight = HeadingWeight)
             Spacer(Modifier.weight(1f))
-            FocusableSurface(onClick = onClose, modifier = Modifier.width(100.dp).height(48.dp)) {
-                Text("Fermer", color = Ink, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 14.dp))
+            FocusableSurface(onClick = onClose, radius = RadiusPill, modifier = Modifier.width(BackButtonWidth).height(ButtonHeight)) {
+                Text("Fermer", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 18.dp))
             }
         }
         Spacer(Modifier.height(8.dp))
@@ -119,7 +122,7 @@ internal fun BoxScope.PlayerSettings(
                 modifier = Modifier.focusRequester(firstFocus),
             )
             if (onlineSubtitleResultCount > 1 && onShowOnlineSubtitleResults != null) {
-                FocusableSurface(onClick = onShowOnlineSubtitleResults, modifier = Modifier.fillMaxWidth().height(58.dp)) {
+                FocusableSurface(onClick = onShowOnlineSubtitleResults, modifier = Modifier.fillMaxWidth().height(ButtonHeight)) {
                     Text("Autres résultats ($onlineSubtitleResultCount)", color = Ink, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 16.dp))
                 }
             }
@@ -154,7 +157,7 @@ internal fun BoxScope.PlayerSettings(
             )
         }
         if (adviceAvailable) {
-            FocusableSurface(onClick = onRequestAdvice, enabled = !adviceLoading, modifier = Modifier.fillMaxWidth().height(52.dp)) {
+            FocusableSurface(onClick = onRequestAdvice, enabled = !adviceLoading, modifier = Modifier.fillMaxWidth().height(ButtonHeight)) {
                 AiButtonLabel("Conseil de lecture", adviceLoading)
             }
             AiLoadingIndicator("L'assistant analyse la lecture…", adviceLoading)
@@ -192,15 +195,15 @@ private fun SubtitleOffsetRow(offsetMs: Long, onShift: (Long) -> Unit, onReset: 
         Text("Décalage du sous-titre (+ = plus tard)", color = MutedInk, fontSize = 12.sp)
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
             listOf("−5" to -5_000L, "−0,5" to -500L).forEach { (label, delta) ->
-                FocusableSurface(onClick = { onShift(delta) }, modifier = Modifier.weight(1f).height(48.dp)) {
+                FocusableSurface(onClick = { onShift(delta) }, modifier = Modifier.weight(1f).height(ButtonHeight)) {
                     Text(label, color = Ink, fontSize = 13.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
                 }
             }
-            FocusableSurface(onClick = onReset, modifier = Modifier.weight(1.4f).height(48.dp)) {
+            FocusableSurface(onClick = onReset, modifier = Modifier.weight(1.4f).height(ButtonHeight)) {
                 Text(value, color = FocusBlueBright, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
             }
             listOf("+0,5" to 500L, "+5" to 5_000L).forEach { (label, delta) ->
-                FocusableSurface(onClick = { onShift(delta) }, modifier = Modifier.weight(1f).height(48.dp)) {
+                FocusableSurface(onClick = { onShift(delta) }, modifier = Modifier.weight(1f).height(ButtonHeight)) {
                     Text(label, color = Ink, fontSize = 13.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
                 }
             }
@@ -271,7 +274,7 @@ private fun ExternalSubtitleSection(
             overflow = TextOverflow.Ellipsis,
         )
         if (onSearchOnline != null) {
-            FocusableSurface(onClick = { if (!searching) onSearchOnline() }, accent = true, modifier = Modifier.fillMaxWidth().height(58.dp)) {
+            FocusableSurface(onClick = { if (!searching) onSearchOnline() }, accent = true, modifier = Modifier.fillMaxWidth().height(ButtonHeight)) {
                 Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                     // Traduction des sous-titres par l'IA en cours : icône animée devant « Traduction IA 2/5… ».
                     if (searching) {
@@ -282,15 +285,15 @@ private fun ExternalSubtitleSection(
                 }
             }
             if (resultCount > 1 && onShowResults != null) {
-                FocusableSurface(onClick = onShowResults, modifier = Modifier.fillMaxWidth().height(58.dp)) {
+                FocusableSurface(onClick = onShowResults, modifier = Modifier.fillMaxWidth().height(ButtonHeight)) {
                     Text("Autres résultats ($resultCount)", color = Ink, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 16.dp))
                 }
             }
         }
-        FocusableSurface(onClick = onPickFile, accent = onSearchOnline == null && !aiAbove, modifier = Modifier.fillMaxWidth().height(58.dp)) {
+        FocusableSurface(onClick = onPickFile, accent = onSearchOnline == null && !aiAbove, modifier = Modifier.fillMaxWidth().height(ButtonHeight)) {
             Text("Charger un fichier .srt / .vtt", color = Ink, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 16.dp))
         }
-        FocusableSurface(onClick = { urlFieldOpen = !urlFieldOpen }, modifier = Modifier.fillMaxWidth().height(58.dp)) {
+        FocusableSurface(onClick = { urlFieldOpen = !urlFieldOpen }, modifier = Modifier.fillMaxWidth().height(ButtonHeight)) {
             Text("Charger depuis une URL", color = Ink, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 16.dp))
         }
         if (urlFieldOpen) {
@@ -308,7 +311,7 @@ private fun ExternalSubtitleSection(
                         onLoadUrl(url)
                     }
                 },
-                modifier = Modifier.fillMaxWidth().height(52.dp),
+                modifier = Modifier.fillMaxWidth().height(ButtonHeight),
             ) {
                 Text("Valider", color = Ink, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 16.dp))
             }

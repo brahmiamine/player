@@ -1,5 +1,6 @@
 package fr.streamia.tv.ui
 
+import fr.streamia.tv.ui.theme.ButtonHeight
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -250,7 +251,7 @@ internal fun UpdateDialog(
                         onClick = { onAction(action) },
                         accent = true,
                         focusScale = 1.04f,
-                        modifier = Modifier.width(280.dp).height(56.dp).focusRequester(primaryFocus),
+                        modifier = Modifier.width(280.dp).height(ButtonHeight).focusRequester(primaryFocus),
                     ) {
                         Text(
                             action.label,
@@ -265,7 +266,7 @@ internal fun UpdateDialog(
                     FocusableSurface(
                         onClick = onClose,
                         focusScale = 1.04f,
-                        modifier = Modifier.width(200.dp).height(56.dp).focusRequester(secondaryFocus),
+                        modifier = Modifier.width(200.dp).height(ButtonHeight).focusRequester(secondaryFocus),
                     ) {
                         Text(content.secondaryLabel, color = Ink, fontSize = 16.sp, modifier = Modifier.padding(horizontal = 20.dp))
                     }

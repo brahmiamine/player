@@ -1,5 +1,9 @@
 package fr.streamia.tv.ui
 
+import fr.streamia.tv.ui.theme.RadiusPill
+import fr.streamia.tv.ui.theme.ButtonHeight
+import fr.streamia.tv.ui.theme.BackButtonWidth
+import fr.streamia.tv.ui.theme.IconButtonWidth
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -130,12 +134,12 @@ fun SeriesScreen(
     Row(Modifier.fillMaxSize().padding(30.dp)) {
         Column(Modifier.width(620.dp).fillMaxHeight().verticalScroll(rememberScrollState())) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                FocusableSurface(onClick = onBack, modifier = Modifier.width(130.dp).height(48.dp)) {
-                    BackLabel(TypeLabel, 15.dp)
+                FocusableSurface(onClick = onBack, radius = RadiusPill, modifier = Modifier.width(BackButtonWidth).height(ButtonHeight)) {
+                    BackLabel(TypeBody, 18.dp)
                 }
                 continueEpisode?.let { episode ->
                     val code = "S${episode.season.toString().padStart(2, '0')}E${episode.number.toString().padStart(2, '0')}"
-                    FocusableSurface(onClick = { onEpisodeSelected(episode) }, accent = true, modifier = Modifier.height(48.dp)) {
+                    FocusableSurface(onClick = { onEpisodeSelected(episode) }, accent = true, modifier = Modifier.height(ButtonHeight)) {
                         Text(
                             if (historyByEpisode[episode.id]?.isResumable() == true) "Reprendre $code" else "Lire $code",
                             color = Ink,
@@ -148,7 +152,7 @@ fun SeriesScreen(
                 FocusableSurface(
                     onClick = onToggleFavorite,
                     selected = favorite,
-                    modifier = Modifier.width(68.dp).height(48.dp),
+                    modifier = Modifier.width(IconButtonWidth).height(ButtonHeight),
                     contentDescription = if (favorite) "Retirer des favoris" else "Ajouter aux favoris",
                 ) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -158,7 +162,7 @@ fun SeriesScreen(
                 FocusableSurface(
                     onClick = onToggleWatched,
                     selected = watched,
-                    modifier = Modifier.width(68.dp).height(48.dp),
+                    modifier = Modifier.width(IconButtonWidth).height(ButtonHeight),
                     contentDescription = if (watched) "Marquer comme non vue" else "Marquer comme vue",
                 ) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {

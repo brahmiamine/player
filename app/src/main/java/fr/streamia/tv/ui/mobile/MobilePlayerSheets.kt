@@ -209,7 +209,7 @@ private fun OffsetRow(offsetMs: Long, onShift: (Long) -> Unit, onReset: () -> Un
 
 @Composable
 private fun OffsetButton(label: String, modifier: Modifier, accent: Boolean = false, onClick: () -> Unit) {
-    MobileCard(modifier.heightIn(min = 48.dp), onClick = onClick) {
+    MobileCard(modifier.heightIn(min = 52.dp), onClick = onClick) {
         Text(label, color = if (accent) AccentPinkText else Ink, fontSize = 13.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, maxLines = 1, modifier = Modifier.fillMaxWidth().padding(vertical = 14.dp))
     }
 }

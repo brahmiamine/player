@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
@@ -22,6 +23,7 @@ import androidx.tv.material3.Text
 import fr.streamia.tv.domain.Catalog
 import fr.streamia.tv.domain.MediaType
 import androidx.compose.ui.graphics.Color
+import fr.streamia.tv.ui.theme.AccentPinkText
 import fr.streamia.tv.ui.theme.HeadingWeight
 import fr.streamia.tv.ui.theme.HeroWeight
 import fr.streamia.tv.ui.theme.Ink
@@ -76,6 +78,7 @@ internal fun MainActionGrid(
         )
         HomeTile(
             title = "Films",
+            icon = StreamiaIconGlyph.Movie,
             subtitle = if (catalogLoading) "Chargement…" else "${catalog.count(MediaType.Movie).grouped()} contenus",
             modifier = Modifier.weight(1f).fillMaxHeight()
                 .gridFocus(gridFocusRequester, focusTarget == HomeFocusTarget.Movies),
@@ -84,6 +87,7 @@ internal fun MainActionGrid(
         )
         HomeTile(
             title = "Séries",
+            icon = StreamiaIconGlyph.Series,
             subtitle = if (catalogLoading) "Chargement…" else "${catalog.count(MediaType.Series).grouped()} contenus",
             modifier = Modifier.weight(1f).fillMaxHeight()
                 .gridFocus(gridFocusRequester, focusTarget == HomeFocusTarget.Series),
@@ -92,6 +96,7 @@ internal fun MainActionGrid(
         )
         HomeTile(
             title = "Recherche",
+            icon = StreamiaIconGlyph.Search,
             subtitle = "Tout le catalogue",
             modifier = Modifier.weight(1f).fillMaxHeight()
                 .gridFocus(gridFocusRequester, focusTarget == HomeFocusTarget.Search),
@@ -100,6 +105,7 @@ internal fun MainActionGrid(
         )
         HomeTile(
             title = "Guide TV",
+            icon = StreamiaIconGlyph.Guide,
             subtitle = "EPG",
             modifier = Modifier.weight(1f).fillMaxHeight()
                 .gridFocus(gridFocusRequester, focusTarget == HomeFocusTarget.Guide),
@@ -171,6 +177,7 @@ private fun LiveTile(count: Int?, modifier: Modifier, onClick: () -> Unit, enabl
 @Composable
 private fun HomeTile(
     title: String,
+    icon: StreamiaIconGlyph,
     subtitle: String,
     modifier: Modifier,
     onClick: () -> Unit,
@@ -178,6 +185,8 @@ private fun HomeTile(
 ) {
     FocusableSurface(onClick = onClick, enabled = enabled, modifier = modifier) {
         Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.Bottom) {
+            StreamiaIcon(icon, tint = AccentPinkText, size = 32.dp)
+            Spacer(Modifier.weight(1f))
             Text(title, color = Ink, fontSize = 20.sp, fontWeight = HeadingWeight, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(subtitle, color = MutedInk, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }

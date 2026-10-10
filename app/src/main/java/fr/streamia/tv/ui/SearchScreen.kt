@@ -1,5 +1,10 @@
 package fr.streamia.tv.ui
 
+import androidx.compose.ui.graphics.Color
+import fr.streamia.tv.ui.theme.AccentPink
+import fr.streamia.tv.ui.theme.PillHeight
+import fr.streamia.tv.ui.theme.ButtonHeight
+import fr.streamia.tv.ui.theme.BackButtonWidth
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -111,8 +116,8 @@ fun SearchScreen(
                 Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                FocusableSurface(onClick = onBack, modifier = Modifier.width(120.dp).height(52.dp)) {
-                    BackLabel(TypeLabel, 14.dp)
+                FocusableSurface(onClick = onBack, radius = RadiusPill, modifier = Modifier.width(BackButtonWidth).height(ButtonHeight)) {
+                    BackLabel(TypeBody, 18.dp)
                 }
                 Spacer(Modifier.width(18.dp))
                 Text("Recherche globale", color = Ink, fontSize = TypeScreenTitle, fontWeight = HeadingWeight)
@@ -140,7 +145,7 @@ fun SearchScreen(
                     onClick = { onAiSearch(query.trim(), type) },
                     enabled = aiForQuery?.loading != true,
                     accent = true,
-                    modifier = Modifier.width(290.dp).height(46.dp),
+                    modifier = Modifier.width(290.dp).height(ButtonHeight),
                 ) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         AiButtonLabel("Chercher avec l'IA", aiForQuery?.loading == true)
@@ -247,8 +252,15 @@ fun SearchScreen(
 
 @Composable
 private fun SearchFilter(label: String, selected: Boolean, onClick: () -> Unit) {
-    FocusableSurface(onClick = onClick, selected = selected, accent = selected, modifier = Modifier.width(122.dp).height(46.dp)) {
-        Text(label, color = Ink, fontSize = TypeLabel, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 14.dp))
+    // Même pastille que « Ce soir ? » : 36 dp, rose plein quand elle est choisie.
+    FocusableSurface(
+        onClick = onClick,
+        idleBackground = if (selected) AccentPink else Color.White.copy(alpha = 0.14f),
+        wrapContent = true,
+        radius = RadiusPill,
+        modifier = Modifier.height(PillHeight),
+    ) {
+        Text(label, color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1, modifier = Modifier.padding(horizontal = 16.dp))
     }
 }
 

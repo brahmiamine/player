@@ -30,7 +30,7 @@ import kotlin.math.sin
 enum class StreamiaIconGlyph {
     Live, Movie, Series, Search, Guide, Settings, Refresh, Swap,
     Star, StarOutline, ChevronUp, ChevronDown, CheckboxOn, CheckboxOff, ArrowBack, ArrowForward,
-    Reorder, Delete, Lock, Eye, EyeOff, Home, Menu, Trophy, Close, Mic,
+    ChevronLeft, Reorder, Delete, Lock, Eye, EyeOff, Home, Menu, Trophy, Close, Mic,
 }
 
 @Composable
@@ -63,6 +63,7 @@ fun StreamiaIcon(
             StreamiaIconGlyph.CheckboxOff -> drawCheckbox(tint, stroke, checked = false)
             StreamiaIconGlyph.ArrowBack -> drawArrow(tint, stroke, pointRight = false)
             StreamiaIconGlyph.ArrowForward -> drawArrow(tint, stroke, pointRight = true)
+            StreamiaIconGlyph.ChevronLeft -> drawChevronLeft(tint, Stroke(stroke.width * 1.6f, cap = StrokeCap.Round, join = StrokeJoin.Round))
             StreamiaIconGlyph.Reorder -> drawReorder(tint, stroke)
             StreamiaIconGlyph.Delete -> drawDelete(tint, stroke)
             StreamiaIconGlyph.Lock -> drawLock(tint, stroke)
@@ -262,6 +263,15 @@ private fun DrawScope.drawChevron(tint: Color, stroke: Stroke, up: Boolean) {
         moveTo(pt(0.24f, sideY).x, pt(0.24f, sideY).y)
         lineTo(pt(0.5f, midY).x, pt(0.5f, midY).y)
         lineTo(pt(0.76f, sideY).x, pt(0.76f, sideY).y)
+    }
+    drawPath(path, tint, style = stroke)
+}
+
+private fun DrawScope.drawChevronLeft(tint: Color, stroke: Stroke) {
+    val path = Path().apply {
+        moveTo(pt(0.62f, 0.22f).x, pt(0.62f, 0.22f).y)
+        lineTo(pt(0.34f, 0.5f).x, pt(0.34f, 0.5f).y)
+        lineTo(pt(0.62f, 0.78f).x, pt(0.62f, 0.78f).y)
     }
     drawPath(path, tint, style = stroke)
 }

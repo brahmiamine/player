@@ -1,5 +1,8 @@
 package fr.streamia.tv.ui
 
+import fr.streamia.tv.ui.theme.RadiusPill
+import fr.streamia.tv.ui.theme.TypeBody
+import fr.streamia.tv.ui.theme.ButtonHeight
 import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -305,9 +308,9 @@ private fun PlaylistManager(
                 onClick = onAddXtream,
                 enabled = !busy,
                 accent = true,
-                modifier = Modifier.weight(1f).height(58.dp).focusRequester(primaryFocus),
+                modifier = Modifier.weight(1f).height(ButtonHeight).focusRequester(primaryFocus),
             ) { Text("＋ Ajouter Xtream", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 18.dp)) }
-            FocusableSurface(onClick = onAddM3u, enabled = !busy, modifier = Modifier.weight(1f).height(58.dp)) {
+            FocusableSurface(onClick = onAddM3u, enabled = !busy, modifier = Modifier.weight(1f).height(ButtonHeight)) {
                 Text("＋ Ajouter M3U / URL", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 18.dp))
             }
         }
@@ -396,8 +399,10 @@ private fun XtreamForm(
         }
         Spacer(Modifier.height(10.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(11.dp)) {
-            SmallAction("Retour", !locked, onBack, Modifier.weight(0.22f).height(60.dp))
-            FocusableSurface(onClick = onTest, enabled = canTest, modifier = Modifier.weight(0.32f).height(60.dp)) {
+            FocusableSurface(onClick = onBack, enabled = !locked, radius = RadiusPill, modifier = Modifier.weight(0.22f).height(ButtonHeight)) {
+                BackLabel(TypeBody, 18.dp)
+            }
+            FocusableSurface(onClick = onTest, enabled = canTest, modifier = Modifier.weight(0.32f).height(ButtonHeight)) {
                 Text(
                     if (testingConnection) "Vérification…" else "Tester la connexion",
                     color = if (canTest || testingConnection) Ink else MutedInk,
@@ -406,7 +411,7 @@ private fun XtreamForm(
                     modifier = Modifier.padding(horizontal = 12.dp),
                 )
             }
-            FocusableSurface(onClick = onSave, enabled = canSubmit, accent = canSubmit, modifier = Modifier.weight(0.46f).height(60.dp)) {
+            FocusableSurface(onClick = onSave, enabled = canSubmit, accent = canSubmit, modifier = Modifier.weight(0.46f).height(ButtonHeight)) {
                 Text(if (busy) "Connexion en cours…" else "Enregistrer et ouvrir", color = if (canSubmit || busy) Ink else MutedInk, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 18.dp))
             }
         }
@@ -445,10 +450,10 @@ private fun M3uForm(
             if (message != null) item { Text(message, color = MaterialTheme.colorScheme.error, fontSize = 14.sp) }
             item {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    FocusableSurface(onClick = onPickFile, enabled = !busy, modifier = Modifier.weight(1f).height(58.dp)) {
+                    FocusableSurface(onClick = onPickFile, enabled = !busy, modifier = Modifier.weight(1f).height(ButtonHeight)) {
                         Text(if (editingProfile?.m3uUri == null) "Choisir un fichier local" else "Remplacer le fichier local", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 16.dp))
                     }
-                    FocusableSurface(onClick = onSaveRemote, enabled = canSaveRemote, modifier = Modifier.weight(1f).height(58.dp)) {
+                    FocusableSurface(onClick = onSaveRemote, enabled = canSaveRemote, modifier = Modifier.weight(1f).height(ButtonHeight)) {
                         Text(if (busy) "Import…" else "Enregistrer URL et ouvrir", color = if (canSaveRemote || busy) Ink else MutedInk, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 16.dp))
                     }
                 }

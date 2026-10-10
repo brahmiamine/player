@@ -303,12 +303,12 @@ internal class AiController(
             .filter { it.match.startEpochSeconds in (nowSeconds - MATCH_PAST_SECONDS)..(nowSeconds + MATCH_AHEAD_SECONDS) }
             .sortedBy { it.match.startEpochSeconds }
             .mapNotNull { resolved -> matchLine(resolved, nowSeconds, allowed)?.let { resolved to it } }
-            .take(MAX_MATCH_LINES)
+            .take(BRIEF_MATCHES)
             .forEach { (resolved, text) -> add("M", text, firstChannel(resolved, allowed)) }
-        home.homeBeinSportsNow.filter { allowed(it.channel) }.take(MAX_PROGRAMME_LINES).forEach {
+        home.homeBeinSportsNow.filter { allowed(it.channel) }.take(BRIEF_BEIN).forEach {
             add("B", "${it.programme.channelName} : ${it.programme.title} (${it.programme.timeRangeLabel})", it.channel)
         }
-        home.homeTvProgrammeNow.filter { allowed(it.channel) }.take(MAX_PROGRAMME_LINES).forEach {
+        home.homeTvProgrammeNow.filter { allowed(it.channel) }.take(BRIEF_TV).forEach {
             add("T", "${it.programme.channelName} : ${it.programme.title} (${it.programme.timeRangeLabel})", it.channel)
         }
         // Rien à résumer (guides pas encore chargés) : état vide et masqué, sans requête.
@@ -539,8 +539,10 @@ internal class AiController(
         const val POOL_LIMIT = 800
         const val MAX_RESULTS = 80
         const val MAX_TV_IN_POOL = 6
-        const val MAX_MATCH_LINES = 12
-        const val MAX_PROGRAMME_LINES = 8
+        // « Quoi de neuf maintenant ? » : 7 cartes au plus (2 matchs, 2 programmes beIN SPORTS, 3 programmes TV).
+        const val BRIEF_MATCHES = 2
+        const val BRIEF_BEIN = 2
+        const val BRIEF_TV = 3
         const val MATCH_PAST_SECONDS = 150L * 60
         const val MATCH_AHEAD_SECONDS = 6L * 3_600
         const val BRIEF_REUSE_MS = 15 * 60_000L

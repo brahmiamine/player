@@ -94,7 +94,7 @@ internal fun briefSystemPrompt(languageName: String, nowLabel: String, lines: Li
         "aucun score, aucun fait ni aucune chaîne qui n'y figure pas.\n" +
         "Réponds uniquement par un objet JSON : {\"headline\":\"…\",\"items\":[{\"ref\":\"M2\",\"text\":\"…\"}]}\n" +
         "- headline : une phrase de 20 mots maximum, en $languageName.\n" +
-        "- items : 3 à 6 éléments parmi les plus intéressants (grands matchs, derbies, finales, événements, sinon programmes marquants). " +
+        "- items : jusqu'à 7 éléments : tous ceux de la liste (7 au plus), dans l'ordre d'intérêt, sans en écarter (grands matchs, derbies, finales, événements, sinon programmes marquants). " +
         "ref est l'identifiant de la liste ; text : 14 mots maximum, en $languageName, avec la chaîne si la liste la donne.\n" +
         "Liste (identifiant|texte) :\n" + lines.asLines()
 
@@ -110,7 +110,7 @@ internal fun parseBrief(answer: String, validRefs: Set<String>): AiBrief? {
         val ref = item.optString("ref").trim()
         val text = shorten(item.optString("text"), 140)
         if (ref in validRefs && text.isNotEmpty() && seen.add(ref)) items += AiBriefItem(ref, text)
-        if (items.size >= 6) break
+        if (items.size >= 7) break
     }
     if (items.isEmpty()) return null
     return AiBrief(shorten(json.optString("headline"), 160), items)

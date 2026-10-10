@@ -1,5 +1,8 @@
 package fr.streamia.tv.ui
 
+import fr.streamia.tv.ui.theme.PillActionHeight
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -167,8 +170,9 @@ internal fun BriefUiState.updatedLabel(): String? =
     updatedAtMillis?.let { "Mis à jour à " + BriefClock.format(Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault())) }
 
 /**
- * « Quoi de neuf maintenant ? » : le résumé en direct à gauche, la chaîne en cours (OK l'ouvre ; ← → passent aux
- * autres chaînes du résumé) et « ↻ Actualiser ». Calculé à partir des guides déjà chargés, jamais d'une donnée de plus.
+ * « Quoi de neuf maintenant ? » : l'en-tête porte l'heure de mise à jour et « Actualiser » ; dans la carte, le résumé à
+ * gauche (grand) et les chaînes en cours en tuiles côte à côte (OK ouvre ; ← → passent de l'une à l'autre).
+ * Calculé à partir des guides déjà chargés, jamais d'une donnée de plus.
  */
 @Composable
 internal fun AiBriefRow(
@@ -182,66 +186,104 @@ internal fun AiBriefRow(
     val restoreFocus = remember { FocusRequester() }
     val restoreIndex = rememberRowFocusRestore(rowState, restoreItemKey, items.mapNotNull { it.channel?.key }, restoreFocus)
     Column(Modifier.fillMaxWidth()) {
-        SectionLabel("✦ Quoi de neuf maintenant ?", fontSize = 13.sp)
-        Spacer(Modifier.height(12.dp))
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            SectionLabel("✦ Quoi de neuf maintenant ?", fontSize = 13.sp, modifier = Modifier.weight(1f))
+            brief.updatedLabel()?.let { Text(it, color = MutedInk, fontSize = 14.sp) }
+            FocusableSurface(
+                onClick = onRefresh,
+                enabled = !brief.loading,
+                wrapContent = true,
+                radius = RadiusPill,
+                idleBackground = Color.White.copy(alpha = 0.12f),
+                modifier = Modifier.height(PillActionHeight),
+            ) {
+                if (brief.loading) {
+                    AiButtonLabel("Actualiser", loading = true)
+                } else {
+                    Row(Modifier.padding(horizontal = 22.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        StreamiaIcon(StreamiaIconGlyph.Refresh, tint = Ink, size = 18.dp)
+                        Text("Actualiser", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(14.dp))
         GlassSurface(
-            modifier = Modifier.fillMaxWidth().height(122.dp),
+            modifier = Modifier.fillMaxWidth().heightIn(min = 112.dp),
             tintColor = Color.White.copy(alpha = 0.07f),
         ) {
             Row(
-                Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 16.dp),
+                Modifier.fillMaxWidth().padding(horizontal = 28.dp, vertical = 24.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(18.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Column(Modifier.weight(1f)) {
+                Column(Modifier.width(BriefSummaryWidth), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     val summary = when {
                         brief.error != null && !brief.loading -> brief.error
                         else -> brief.headline ?: items.firstOrNull()?.text
                     }
                     if (summary != null) {
-                        Text(summary, color = Ink, fontSize = 19.sp, lineHeight = 25.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            summary, color = Ink, fontSize = if (items.isEmpty()) 19.sp else 26.sp, lineHeight = if (items.isEmpty()) 25.sp else 32.sp,
+                            fontWeight = FontWeight.Bold, maxLines = 3, overflow = TextOverflow.Ellipsis,
+                        )
                     }
                     AiLoadingIndicator("L'assistant résume ce qui passe en ce moment…", brief.loading)
-                    brief.updatedLabel()?.let { Text(it, color = MutedInk, fontSize = 14.sp, modifier = Modifier.padding(top = 4.dp)) }
+                    if (items.isNotEmpty()) {
+                        val count = items.size
+                        Text(if (count == 1) "1 chaîne à regarder maintenant" else "$count chaînes à regarder maintenant", color = MutedInk, fontSize = 15.sp)
+                        if (count > 1) Text("◀ ▶ pour parcourir · OK pour ouvrir", color = MutedInk.copy(alpha = 0.7f), fontSize = 13.sp)
+                    }
                 }
                 if (items.isNotEmpty()) {
                     LazyRow(
                         state = rowState,
-                        modifier = Modifier.width(420.dp).height(80.dp).focusRestorer(),
-                        contentPadding = PaddingValues(0.dp),
-                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                        modifier = Modifier.weight(1f).focusRestorer(),
+                        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 20.dp),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
                     ) {
                         itemsIndexed(items, key = { _, item -> item.channel!!.key + item.text.hashCode() }) { index, item ->
-                            val channel = item.channel!!
-                            FocusableSurface(
-                                onClick = { onOpen(channel) },
-                                focusScale = 1.03f,
-                                idleBackground = Color.White.copy(alpha = 0.1f),
-                                modifier = Modifier.width(420.dp).fillMaxHeight()
-                                    .then(if (index == restoreIndex) Modifier.focusRequester(restoreFocus) else Modifier),
-                            ) {
-                                Row(Modifier.fillMaxSize().padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                                    ChannelLogo(channel.iconUrl, channel.displayName, Modifier.size(52.dp).clip(RoundedCornerShape(14.dp)), imagePadding = 4)
-                                    Column(Modifier.weight(1f)) {
-                                        Text(item.text, color = Ink, fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                        Text(
-                                            "EN DIRECT · ${channel.displayName}",
-                                            color = AccentPinkText, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                                        )
-                                    }
-                                }
-                            }
+                            BriefTile(
+                                item, onOpen = { onOpen(item.channel!!) },
+                                modifier = Modifier.then(if (index == restoreIndex) Modifier.focusRequester(restoreFocus) else Modifier),
+                            )
                         }
                     }
                 }
-                FocusableSurface(onClick = onRefresh, enabled = !brief.loading, wrapContent = true, idleBackground = Color.White.copy(alpha = 0.12f), modifier = Modifier.height(52.dp)) {
-                    if (brief.loading) {
-                        AiButtonLabel("Actualiser", loading = true)
-                    } else {
-                        Text("↻  Actualiser", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 24.dp))
-                    }
+            }
+        }
+    }
+}
+
+private val BriefSummaryWidth = 340.dp
+private val BriefTileWidth = 232.dp
+private val BriefTileHeight = 188.dp
+
+/** Tuile d'une chaîne en cours : logo, badge « EN DIRECT », ce qui passe, nom de la chaîne. */
+@Composable
+private fun BriefTile(item: BriefItemUi, onOpen: () -> Unit, modifier: Modifier = Modifier) {
+    val channel = item.channel ?: return
+    FocusableSurface(
+        onClick = onOpen,
+        focusScale = 1.03f,
+        idleBackground = Color.White.copy(alpha = 0.1f),
+        modifier = modifier.width(BriefTileWidth).height(BriefTileHeight),
+    ) {
+        Column(Modifier.fillMaxSize().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                ChannelLogo(channel.iconUrl, channel.displayName, Modifier.size(52.dp).clip(RoundedCornerShape(14.dp)), imagePadding = 4)
+                Row(
+                    Modifier.height(26.dp).clip(RoundedCornerShape(RadiusPill)).background(AccentPink.copy(alpha = 0.24f)).padding(horizontal = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Box(Modifier.size(7.dp).clip(CircleShape).background(AccentPinkText))
+                    Text("EN DIRECT", color = AccentPinkText, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp, maxLines = 1)
                 }
             }
+            Text(item.text, color = Ink, fontSize = 18.sp, lineHeight = 23.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Spacer(Modifier.weight(1f))
+            Text(channel.displayName, color = AccentPinkText, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }

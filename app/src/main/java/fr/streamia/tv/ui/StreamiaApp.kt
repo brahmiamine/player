@@ -189,7 +189,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     val homeState = homeStateHolder.value
                     val settings = state.appSettings
                     MobileScaffold(MobileTab.Home, onSelect = onMobileTab) {
-                        LaunchedEffect(aiActive, homeState.liveOnSatMatches.size, homeState.homeTvProgrammeNow.size, homeState.homeBeinSportsNow.size) {
+                        LaunchedEffect(aiActive, homeState.liveOnSatMatches.size, homeState.homeTvProgrammeNow.size, homeState.homeBeinSportsNow.size, homeState.homeUkGuideNow.size) {
                             while (aiActive) {
                                 viewModel.loadBrief()
                                 delay(AI_BRIEF_POLL_MS)
@@ -565,7 +565,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                   LaunchedEffect(aiActive, state.activeProfileId) {
                       if (aiActive) viewModel.startRemote(withContext(Dispatchers.IO) { readRemoteLogo(context) })
                   }
-                  LaunchedEffect(aiActive, homeState.liveOnSatMatches.size, homeState.homeTvProgrammeNow.size, homeState.homeBeinSportsNow.size) {
+                  LaunchedEffect(aiActive, homeState.liveOnSatMatches.size, homeState.homeTvProgrammeNow.size, homeState.homeBeinSportsNow.size, homeState.homeUkGuideNow.size) {
                       // Rappel régulier : les guides se renouvellent sans changer de taille ; la réutilisation de 15 min borne les requêtes.
                       while (aiActive) {
                           viewModel.loadBrief()

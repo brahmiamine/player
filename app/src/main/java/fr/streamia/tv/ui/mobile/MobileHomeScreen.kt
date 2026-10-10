@@ -75,6 +75,7 @@ import fr.streamia.tv.ui.HomeRowKey
 import fr.streamia.tv.ui.LiveMatchCard
 import fr.streamia.tv.ui.MediaArtwork
 import fr.streamia.tv.ui.StreamiaIcon
+import fr.streamia.tv.ui.updatedLabel
 import fr.streamia.tv.ui.StreamiaIconGlyph
 import fr.streamia.tv.ui.liveMatchCards
 import fr.streamia.tv.ui.liveOnSatMatchKey
@@ -384,48 +385,73 @@ private fun TonightCard(onStart: () -> Unit) {
         Text("✦ Ce soir ?", color = Ink, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold)
         Text("Trois questions, cinq propositions faites pour vous.", color = Ink.copy(alpha = 0.88f), fontSize = 14.sp, lineHeight = 19.sp)
         Box(
-            Modifier.fillMaxWidth().height(48.dp).clip(RoundedCornerShape(RadiusPill)).background(AccentPink).clickable(role = Role.Button, onClick = onStart),
+            Modifier.fillMaxWidth().height(52.dp).clip(RoundedCornerShape(RadiusPill)).background(AccentPink).clickable(role = Role.Button, onClick = onStart),
             contentAlignment = Alignment.Center,
         ) {
-            Text("Commencer", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
+            Text("Commencer", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
         }
     }
 }
 
-/** « ✦ Quoi de neuf ? » : résumé en direct, ↻ pour actualiser, puis la ou les chaînes en cours (▶ les ouvre). */
+/**
+ * « ✦ Quoi de neuf maintenant ? » : en-tête (heure de mise à jour, ↻), résumé en carte, puis les chaînes en cours en
+ * tuiles qui défilent côte à côte (toucher une tuile l'ouvre).
+ */
 @Composable
 private fun BriefCard(brief: BriefUiState, onRefresh: () -> Unit, onOpen: (MediaEntry) -> Unit) {
-    MobileCard(Modifier.fillMaxWidth(), radius = RadiusPanel) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("✦ Quoi de neuf ?", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f))
-                Box(
-                    Modifier.size(36.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.12f))
-                        .clickable(enabled = !brief.loading, role = Role.Button, onClick = onRefresh),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    if (brief.loading) AiSparkle(size = 18.dp) else Text("↻", color = Ink, fontSize = 16.sp)
+    val items = brief.items.filter { it.channel != null }
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "✦ Quoi de neuf maintenant ?".uppercase(java.util.Locale.FRENCH), color = MutedInk, fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold, letterSpacing = 1.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+                brief.updatedLabel()?.let { Text(it, color = MutedInk, fontSize = 13.sp, modifier = Modifier.padding(top = 2.dp)) }
+            }
+            Box(
+                Modifier.size(MobileMinTouch).clip(CircleShape).background(Color.White.copy(alpha = 0.12f))
+                    .clickable(enabled = !brief.loading, role = Role.Button, onClickLabel = "Actualiser", onClick = onRefresh),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (brief.loading) AiSparkle(size = 20.dp) else StreamiaIcon(StreamiaIconGlyph.Refresh, tint = Ink, size = 20.dp)
+            }
+        }
+        val summary = if (brief.error != null && !brief.loading) brief.error else brief.headline ?: items.firstOrNull()?.text
+        if (summary != null || brief.loading) {
+            MobileCard(Modifier.fillMaxWidth(), radius = RadiusCard) {
+                Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    summary?.let { Text(it, color = Ink, fontSize = if (items.isEmpty()) 15.sp else 21.sp, lineHeight = if (items.isEmpty()) 20.sp else 27.sp, fontWeight = FontWeight.Bold) }
+                    AiLoadingIndicator("L'assistant résume ce qui passe en ce moment…", brief.loading)
+                    if (items.isNotEmpty()) {
+                        Text(if (items.size == 1) "1 chaîne à regarder maintenant" else "${items.size} chaînes à regarder maintenant", color = MutedInk, fontSize = 14.sp)
+                    }
                 }
             }
-            val items = brief.items.filter { it.channel != null }
-            val summary = if (brief.error != null && !brief.loading) brief.error else brief.headline ?: items.firstOrNull()?.text
-            summary?.let { Text(it, color = Ink.copy(alpha = 0.88f), fontSize = 14.sp, lineHeight = 19.sp) }
-            AiLoadingIndicator("L'assistant résume ce qui passe en ce moment…", brief.loading)
-            items.forEach { item ->
-                val channel = item.channel ?: return@forEach
-                Row(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Color.White.copy(alpha = 0.08f))
-                        .clickable(role = Role.Button) { onOpen(channel) }.padding(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    ChannelLogo(channel.iconUrl, channel.displayName, Modifier.size(44.dp).clip(RoundedCornerShape(12.dp)), imagePadding = 4)
-                    Column(Modifier.weight(1f)) {
-                        Text(item.text, color = Ink, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        Text("EN DIRECT · ${channel.displayName}", color = AccentPinkText, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
-                    Box(Modifier.size(40.dp).clip(CircleShape).background(AccentPink), contentAlignment = Alignment.Center) {
-                        Text("▶", color = Ink, fontSize = 14.sp)
+        }
+        if (items.isNotEmpty()) {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                items(items, key = { it.channel!!.key + it.text.hashCode() }) { item ->
+                    val channel = item.channel ?: return@items
+                    Column(
+                        Modifier.width(270.dp).height(150.dp).clip(RoundedCornerShape(RadiusTile)).background(Color.White.copy(alpha = 0.1f))
+                            .clickable(role = Role.Button) { onOpen(channel) }.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            ChannelLogo(channel.iconUrl, channel.displayName, Modifier.size(44.dp).clip(RoundedCornerShape(12.dp)), imagePadding = 4)
+                            Row(
+                                Modifier.height(24.dp).clip(RoundedCornerShape(RadiusPill)).background(AccentPink.copy(alpha = 0.24f)).padding(horizontal = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                Box(Modifier.size(6.dp).clip(CircleShape).background(AccentPinkText))
+                                Text("EN DIRECT", color = AccentPinkText, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp, maxLines = 1)
+                            }
+                        }
+                        Text(item.text, color = Ink, fontSize = 17.sp, lineHeight = 22.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Spacer(Modifier.weight(1f))
+                        Text(channel.displayName, color = AccentPinkText, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
             }
@@ -463,7 +489,7 @@ private fun RemoteCard() {
                         color = Ink.copy(alpha = 0.85f), fontSize = 14.sp, lineHeight = 20.sp,
                     )
                     Box(
-                        Modifier.fillMaxWidth().height(MobileMinTouch).clip(RoundedCornerShape(RadiusPill)).background(Color.White.copy(alpha = 0.12f))
+                        Modifier.fillMaxWidth().height(52.dp).clip(RoundedCornerShape(RadiusPill)).background(Color.White.copy(alpha = 0.12f))
                             .clickable(role = Role.Button) { help = false },
                         contentAlignment = Alignment.Center,
                     ) {

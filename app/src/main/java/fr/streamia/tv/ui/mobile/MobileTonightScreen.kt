@@ -88,7 +88,7 @@ fun MobileTonightScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                MobileIconButton(StreamiaIconGlyph.ArrowBack, onClick = onBack)
+                MobileIconButton(StreamiaIconGlyph.ChevronLeft, onClick = onBack)
                 Text("✦ Ce soir ?", color = Ink, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
             }
             AnswersPill(
@@ -191,14 +191,14 @@ private fun HeroPick(pick: TonightPick, replacing: Boolean, onOpen: () -> Unit, 
                 Text("✦ ${pick.why}", color = Ink.copy(alpha = 0.88f), fontSize = 14.sp, lineHeight = 19.sp)
                 Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Box(
-                        Modifier.weight(1f).height(MobileMinTouch).clip(RoundedCornerShape(RadiusPill)).background(AccentPink)
+                        Modifier.weight(1f).height(52.dp).clip(RoundedCornerShape(RadiusPill)).background(AccentPink)
                             .clickable(role = Role.Button, onClick = onOpen),
                         contentAlignment = Alignment.Center,
                     ) {
                         Text("▶  Regarder", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
                     }
                     Box(
-                        Modifier.size(MobileMinTouch).clip(CircleShape).background(Color.White.copy(alpha = 0.12f))
+                        Modifier.size(52.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.12f))
                             .clickable(enabled = !replacing, role = Role.Button, onClick = onReplace),
                         contentAlignment = Alignment.Center,
                     ) {
@@ -243,7 +243,7 @@ private fun QuestionsSheet(initial: TonightAnswers, onDismiss: () -> Unit, onSub
             SheetGroup("Combien de temps ?", TonightLength.entries, length, TonightLength::label) { length = it }
             SheetGroup("Avec qui ?", TonightCompany.entries, company, TonightCompany::label) { company = it }
             Box(
-                Modifier.padding(top = 4.dp).fillMaxWidth().height(54.dp).clip(RoundedCornerShape(RadiusPill))
+                Modifier.padding(top = 4.dp).fillMaxWidth().height(52.dp).clip(RoundedCornerShape(RadiusPill))
                     .background(Brush.verticalGradient(listOf(AccentPinkLight, AccentPink)))
                     .clickable(role = Role.Button) { onSubmit(TonightAnswers(mood, length, company)) },
                 contentAlignment = Alignment.Center,
