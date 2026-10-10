@@ -140,13 +140,11 @@ fun LiveOnSatScreen(
                     Text("Mis à jour à ${formatClockTime(it)}", color = MutedInk, fontSize = TypeLabel)
                     Spacer(Modifier.width(14.dp))
                 }
-                FocusableSurface(onClick = onRefresh, enabled = !loading, modifier = Modifier.width(140.dp).height(ButtonHeight)) {
-                    Text(
-                        if (loading) "Actualisation…" else "Actualiser",
-                        color = Ink,
-                        fontSize = TypeLabel,
-                        modifier = Modifier.padding(horizontal = 14.dp),
-                    )
+                FocusableSurface(onClick = onRefresh, enabled = !loading, radius = RadiusPill, modifier = Modifier.width(190.dp).height(ButtonHeight)) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)) {
+                        if (loading) ButtonSpinner(size = 18.dp) else StreamiaIcon(StreamiaIconGlyph.Refresh, tint = Ink, size = 18.dp)
+                        Text(if (loading) "Actualisation…" else "Actualiser", color = Ink, fontSize = TypeBody, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
         }
