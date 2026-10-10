@@ -94,6 +94,8 @@ internal object HomeRowKey {
     const val BeinSportsNext = "bein-sports-next"
     const val UkGuideNow = "uk-guide-live"
     const val UkGuideNext = "uk-guide-next"
+    const val TvProgramme = "tv-programme"
+    const val MyChannels = "my-channels"
 
     fun recommendation(kind: RecommendationRowKind): String = "recommendation:$kind"
 }

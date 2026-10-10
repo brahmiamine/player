@@ -1,7 +1,13 @@
 package fr.streamia.tv.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -250,46 +256,45 @@ fun HomeScreen(
     val homeListState = rememberLazyListState()
     val restoreTarget = restoreContext?.takeIf { it.origin == ContentReturnOrigin.Home }
     val effectiveRestoreRowKey = restoreTarget?.homeRowKey
+    val tvGuidePending = HomeBlock.TvProgrammeNow in pendingBlocks || HomeBlock.TvProgrammeTonight in pendingBlocks ||
+        HomeBlock.BeinSportsNow in pendingBlocks || HomeBlock.BeinSportsNext in pendingBlocks ||
+        HomeBlock.UkGuideNow in pendingBlocks || HomeBlock.UkGuideNext in pendingBlocks
+    val tvGuideLoaded = tvProgrammeNow.isNotEmpty() || tvProgrammeTonight.isNotEmpty() || beinSportsNow.isNotEmpty() ||
+        beinSportsNext.isNotEmpty() || ukGuideNow.isNotEmpty() || ukGuideNext.isNotEmpty()
+    val recoGroups = remember(recommendationRows) { RecoGroup.entries.filter { it.rowsIn(recommendationRows).isNotEmpty() } }
     val visibleRowKeys = remember(
         resumeCards,
         favoriteCards,
         liveMatchCards,
         recentChannelCards,
-        tvProgrammeNow,
-        tvProgrammeTonight,
-        beinSportsNow,
-        beinSportsNext,
-        ukGuideNow,
-        ukGuideNext,
+        tvGuideLoaded,
+        tvGuidePending,
+        recoGroups,
         recommendationRows,
         footballScoresEnabled,
         liveMatchesPending,
         pendingBlocks,
         aiActive,
-        showAiBrief,
     ) {
         buildList {
-            // Même ordre que la LazyColumn : la rangée de l'assistant vient juste après la grille d'actions.
-            if (aiActive) add(AI_ASSISTANT_ROW_KEY)
-            if (aiActive && showAiBrief) add(HomeRowKey.AiBrief)
-            if (resumeCards.isNotEmpty()) add(HomeRowKey.Resume)
-            if (favoriteCards.isNotEmpty()) add(HomeRowKey.Favorites)
-            if (recentChannelCards.isNotEmpty()) add(HomeRowKey.RecentChannels)
-            // Même éléments que la LazyColumn, squelettes compris (sinon l'index de défilement se décale).
-            if (footballScoresEnabled) add("football-scores")
-            if (liveMatchCards.isNotEmpty() || liveMatchesPending) add(HomeRowKey.LiveMatches)
-            if (tvProgrammeNow.isNotEmpty() || HomeBlock.TvProgrammeNow in pendingBlocks) add(HomeRowKey.TvProgrammeNow)
-            if (tvProgrammeTonight.isNotEmpty() || HomeBlock.TvProgrammeTonight in pendingBlocks) add(HomeRowKey.TvProgrammeTonight)
-            if (beinSportsNow.isNotEmpty() || HomeBlock.BeinSportsNow in pendingBlocks) add(HomeRowKey.BeinSportsNow)
-            if (beinSportsNext.isNotEmpty() || HomeBlock.BeinSportsNext in pendingBlocks) add(HomeRowKey.BeinSportsNext)
-            if (ukGuideNow.isNotEmpty() || HomeBlock.UkGuideNow in pendingBlocks) add(HomeRowKey.UkGuideNow)
-            if (ukGuideNext.isNotEmpty() || HomeBlock.UkGuideNext in pendingBlocks) add(HomeRowKey.UkGuideNext)
+            // Même ordre que la LazyColumn, après l'en-tête et le dock : le hero (reprise, assistant, résumé) d'abord.
+            if (aiActive || resumeCards.isNotEmpty()) add(HERO_ROW_KEY)
+            if (tvGuideLoaded || tvGuidePending) add(HomeRowKey.TvProgramme)
+            if (footballScoresEnabled || liveMatchCards.isNotEmpty() || liveMatchesPending) add(HomeRowKey.LiveMatches)
+            if (favoriteCards.isNotEmpty() || recentChannelCards.isNotEmpty()) add(HomeRowKey.MyChannels)
             if (recommendationRows.isEmpty() && HomeBlock.Recommendations in pendingBlocks) repeat(2) { add("recommendations-skeleton") }
-            recommendationRows.forEach { row -> add(HomeRowKey.recommendation(row.kind)) }
+            recoGroups.forEach { add(it.key) }
         }
     }
+    // Clé de rangée enregistrée au retour → élément de liste qui la porte (plusieurs rangées partagent un même élément).
+    fun listKeyOf(rowKey: String?): String? = when (rowKey) {
+        null -> null
+        HomeRowKey.Resume, HomeRowKey.AiBrief, AI_ASSISTANT_ROW_KEY -> HERO_ROW_KEY
+        HomeRowKey.Favorites, HomeRowKey.RecentChannels -> HomeRowKey.MyChannels
+        else -> RecoGroup.entries.firstOrNull { g -> g.kinds.any { HomeRowKey.recommendation(it) == rowKey } }?.key ?: rowKey
+    }
     LaunchedEffect(effectiveRestoreRowKey, visibleRowKeys) {
-        val rowIndex = effectiveRestoreRowKey?.let(visibleRowKeys::indexOf) ?: -1
+        val rowIndex = listKeyOf(effectiveRestoreRowKey)?.let(visibleRowKeys::indexOf) ?: -1
         if (rowIndex >= 0) {
             homeListState.scrollToItem(rowIndex + 2)
         } else if (restoringHome) {
@@ -311,7 +316,8 @@ fun HomeScreen(
             return@LaunchedEffect
         }
         val toAssistant = focusTarget == HomeFocusTarget.Assistant && aiActive
-        homeListState.scrollToItem(if (toAssistant) gridListIndex + 1 else gridListIndex)
+        val inHeader = focusTarget == HomeFocusTarget.Settings || focusTarget == HomeFocusTarget.Refresh || focusTarget == HomeFocusTarget.ChangePlaylist
+        homeListState.scrollToItem(if (toAssistant) gridListIndex + 1 else if (inHeader) 0 else gridListIndex)
         delay(RESTORE_FOCUS_DELAY_MS)
         runCatching { (if (toAssistant) assistantFocus else gridFocusRequester).requestFocus() }
         onFocusConsumed()
@@ -328,6 +334,7 @@ fun HomeScreen(
         }
     }
     var confirmChangePlaylist by remember { mutableStateOf(false) }
+    var showRemote by remember { mutableStateOf(false) }
     val changePlaylistFocus = remember { FocusRequester() }
 
     Box(Modifier.fillMaxSize()) {
@@ -344,14 +351,14 @@ fun HomeScreen(
             Column(Modifier.fillMaxWidth()) {
                 GlassSurface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(RadiusPill)) {
                     Row(
-                        Modifier.fillMaxWidth().padding(horizontal = 26.dp, vertical = 14.dp),
+                        Modifier.fillMaxWidth().padding(start = 26.dp, end = 14.dp, top = 8.dp, bottom = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
-                            StreamiaLogo()
+                            StreamiaLogo(compact = true)
                         }
                         LocalClockText()
-                        Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
+                        Row(Modifier.weight(1f), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
                             Column(horizontalAlignment = Alignment.End) {
                                 WeatherAndPrayers(weatherPlace, weather, prayerMethod)
                                 // Nom de la liste et expiration : dans Paramètres. Ne reste ici que l'état anormal.
@@ -363,10 +370,22 @@ fun HomeScreen(
                                     )
                                 }
                             }
+                            Spacer(Modifier.width(20.dp))
+                            HomeHeaderActions(
+                                showRemote = aiActive,
+                                refreshEnabled = !busy && !catalogLoading,
+                                focusTarget = focusTarget,
+                                gridFocusRequester = gridFocusRequester,
+                                changePlaylistFocusRequester = changePlaylistFocus,
+                                onRemote = { showRemote = true },
+                                onRefresh = onRefresh,
+                                onChangePlaylist = { confirmChangePlaylist = true },
+                                onSettings = onSettings,
+                            )
                         }
                     }
                 }
-                Spacer(Modifier.height(28.dp))
+                Spacer(Modifier.height(20.dp))
             }
         }
 
@@ -374,312 +393,107 @@ fun HomeScreen(
             MainActionGrid(
                 catalog = catalog,
                 catalogLoading = catalogLoading,
-                busy = busy,
                 firstFocus = if (!preferGridFocus) firstFocus else null,
                 focusTarget = focusTarget,
                 gridFocusRequester = gridFocusRequester,
-                changePlaylistFocusRequester = changePlaylistFocus,
                 onOpenSection = onOpenSection,
                 onSearch = onSearch,
                 onEpg = onEpg,
-                onSettings = onSettings,
-                onRefresh = onRefresh,
-                onChangePlaylist = { confirmChangePlaylist = true },
                 onOpenLiveMatches = onOpenLiveMatches,
                 modifier = Modifier.fillMaxWidth().height(MainGridHeight),
             )
             Spacer(Modifier.height(CardRowSpacing))
         }
 
-        if (aiActive) {
-            item(key = AI_ASSISTANT_ROW_KEY, contentType = "ai-assistant") {
+        if (aiActive || resumeCards.isNotEmpty()) {
+            item(key = HERO_ROW_KEY, contentType = "hero") {
                 Column(Modifier.fillMaxWidth()) {
-                    AiAssistantRow(answers = aiTonightAnswers, remote = aiRemote, onOpen = onOpenAssistant, firstFocus = assistantFocus)
-                    Spacer(Modifier.height(CardRowSpacing))
-                }
-            }
-        }
-
-        // « Quoi de neuf maintenant ? » juste avant « Reprendre la lecture ».
-        if (aiActive && showAiBrief) {
-            item(key = HomeRowKey.AiBrief, contentType = "ai-brief") {
-                Column(Modifier.fillMaxWidth()) {
-                    AiBriefRow(
+                    HomeHero(
+                        resumeCards = resumeCards,
+                        resumeRestoreKey = restoreTarget?.takeIf { it.homeRowKey == HomeRowKey.Resume }?.itemKey,
+                        onResume = onResumePlayback,
+                        aiActive = aiActive,
+                        tonightAnswers = aiTonightAnswers,
+                        onOpenAssistant = onOpenAssistant,
+                        assistantFocus = assistantFocus,
+                        showBrief = showAiBrief,
                         brief = aiBrief,
-                        restoreItemKey = restoreTarget?.takeIf { it.homeRowKey == HomeRowKey.AiBrief }?.itemKey,
-                        onOpen = { channel -> onOpenHomeEntry(channel, HomeRowKey.AiBrief, channel.key) },
-                        onRefresh = onRefreshAiBrief,
+                        briefRestoreKey = restoreTarget?.takeIf { it.homeRowKey == HomeRowKey.AiBrief }?.itemKey,
+                        onOpenBrief = { channel -> onOpenHomeEntry(channel, HomeRowKey.AiBrief, channel.key) },
+                        onRefreshBrief = onRefreshAiBrief,
                     )
                     Spacer(Modifier.height(CardRowSpacing))
                 }
             }
         }
 
-        if (resumeCards.isNotEmpty()) {
-            item(key = HomeRowKey.Resume, contentType = "card-row") {
+        if (tvGuideLoaded) {
+            item(key = HomeRowKey.TvProgramme, contentType = "programme-row") {
                 Column(Modifier.fillMaxWidth()) {
-                    HomeCardRow(
-                        title = "Reprendre la lecture",
-                        entries = resumeCards,
-                        firstFocusRequester = null,
-                        restoreItemKey = restoreTarget
-                            ?.takeIf { it.homeRowKey == HomeRowKey.Resume }
-                            ?.itemKey,
-                        onEntryClick = onResumePlayback,
+                    TvGuideRow(
+                        tvNow = tvProgrammeNow,
+                        tvTonight = tvProgrammeTonight,
+                        beinNow = beinSportsNow,
+                        beinNext = beinSportsNext,
+                        ukNow = ukGuideNow,
+                        ukNext = ukGuideNext,
+                        nowMillis = tvProgrammeNowEpochMillis,
+                        ukTime = { ms -> java.time.Instant.ofEpochMilli(ms).atZone(UK_GUIDE_ZONE).toLocalTime() },
+                        restoreItemKey = restoreTarget?.takeIf { it.homeRowKey == HomeRowKey.TvProgramme }?.itemKey,
+                        onOpen = { channel, itemKey -> onOpenHomeEntry(channel, HomeRowKey.TvProgramme, itemKey) },
                     )
                     Spacer(Modifier.height(CardRowSpacing))
                 }
             }
-        }
-
-        if (favoriteCards.isNotEmpty()) {
-            item(key = HomeRowKey.Favorites, contentType = "card-row") {
+        } else if (tvGuidePending) {
+            item(key = HomeRowKey.TvProgramme, contentType = "skeleton") {
                 Column(Modifier.fillMaxWidth()) {
-                    HomeCardRow(
-                        title = "Favoris",
-                        entries = favoriteCards,
-                        firstFocusRequester = null,
-                        restoreItemKey = restoreTarget
-                            ?.takeIf { it.homeRowKey == HomeRowKey.Favorites }
-                            ?.itemKey,
-                        compact = true,
-                        onEntryClick = { entry ->
-                            onOpenHomeEntry(entry, HomeRowKey.Favorites, entry.key)
-                        },
-                    )
+                    SkeletonRow("Programme TV") { ProgrammeCardSkeleton() }
                     Spacer(Modifier.height(CardRowSpacing))
                 }
             }
         }
 
-        if (recentChannelCards.isNotEmpty()) {
-            item(key = HomeRowKey.RecentChannels, contentType = "card-row") {
-                Column(Modifier.fillMaxWidth()) {
-                    HomeCardRow(
-                        title = "Dernières chaînes regardées",
-                        entries = recentChannelCards,
-                        firstFocusRequester = null,
-                        restoreItemKey = restoreTarget
-                            ?.takeIf { it.homeRowKey == HomeRowKey.RecentChannels }
-                            ?.itemKey,
-                        compact = true,
-                        onEntryClick = { entry ->
-                            onOpenHomeEntry(entry, HomeRowKey.RecentChannels, entry.key)
-                        },
-                    )
-                    Spacer(Modifier.height(CardRowSpacing))
-                }
-            }
-        }
-
-        if (footballScoresEnabled) {
-            item(key = "football-scores") {
-                FootballScoresRow(Modifier.padding(bottom = CardRowSpacing))
-            }
-        }
-
-        if (liveMatchCards.isNotEmpty()) {
+        if (footballScoresEnabled || liveMatchCards.isNotEmpty() || liveMatchesPending) {
             item(key = HomeRowKey.LiveMatches, contentType = "live-matches") {
-                LiveMatchesRow(
+                FootRow(
                     cards = liveMatchCards,
-                    restoreItemKey = restoreTarget
-                        ?.takeIf { it.homeRowKey == HomeRowKey.LiveMatches }
-                        ?.itemKey,
+                    liveMatchesPending = liveMatchesPending,
+                    scoresEnabled = footballScoresEnabled,
+                    restoreItemKey = restoreTarget?.takeIf { it.homeRowKey == HomeRowKey.LiveMatches }?.itemKey,
                     onOpen = { card -> card.channel?.let { onOpenHomeEntry(it, HomeRowKey.LiveMatches, card.key) } },
                     modifier = Modifier.padding(bottom = CardRowSpacing),
                 )
             }
-        } else if (liveMatchesPending) {
-            item(key = HomeRowKey.LiveMatches, contentType = "skeleton") {
-                Column(Modifier.fillMaxWidth()) {
-                    SkeletonRow("Matchs en direct") { LiveMatchCardSkeleton() }
-                    Spacer(Modifier.height(CardRowSpacing))
-                }
-            }
         }
 
-        if (tvProgrammeNow.isNotEmpty()) {
-            item(key = HomeRowKey.TvProgrammeNow, contentType = "programme-row") {
+        if (favoriteCards.isNotEmpty() || recentChannelCards.isNotEmpty()) {
+            item(key = HomeRowKey.MyChannels, contentType = "card-row") {
+                val restoreItem = restoreTarget?.takeIf { it.homeRowKey == HomeRowKey.MyChannels }?.itemKey
+                var showFavorites by remember {
+                    mutableStateOf(restoreItem?.tabPart()?.let { it == "fav" } ?: favoriteCards.isNotEmpty())
+                }
+                val onFavorites = (showFavorites && favoriteCards.isNotEmpty()) || recentChannelCards.isEmpty()
+                val tab = if (onFavorites) "fav" else "recent"
                 Column(Modifier.fillMaxWidth()) {
-                    TvProgrammeNowRow(
-                        items = tvProgrammeNow,
-                        nowEpochMillis = tvProgrammeNowEpochMillis,
-                        firstFocusRequester = null,
-                        restoreItemKey = restoreTarget
-                            ?.takeIf { it.homeRowKey == HomeRowKey.TvProgrammeNow }
-                            ?.itemKey,
-                        onOpenProgramme = { item ->
-                            onOpenHomeEntry(
-                                item.channel,
-                                HomeRowKey.TvProgrammeNow,
-                                item.fingerprint,
-                            )
+                    TabbedRowHeader(
+                        title = "Mes chaînes",
+                        tabs = buildList {
+                            if (favoriteCards.isNotEmpty()) add("Favoris")
+                            if (recentChannelCards.isNotEmpty()) add("Dernières regardées")
                         },
+                        selected = if (onFavorites || favoriteCards.isEmpty()) 0 else 1,
+                        onSelect = { showFavorites = favoriteCards.isNotEmpty() && it == 0 },
                     )
-                    Spacer(Modifier.height(CardRowSpacing))
-                }
-            }
-        } else if (HomeBlock.TvProgrammeNow in pendingBlocks) {
-            item(key = HomeRowKey.TvProgrammeNow, contentType = "skeleton") {
-                Column(Modifier.fillMaxWidth()) {
-                    SkeletonRow("Programme TV FR en direct") { ProgrammeCardSkeleton() }
-                    Spacer(Modifier.height(CardRowSpacing))
-                }
-            }
-        }
-
-        if (tvProgrammeTonight.isNotEmpty()) {
-            item(key = HomeRowKey.TvProgrammeTonight, contentType = "programme-row") {
-                Column(Modifier.fillMaxWidth()) {
-                    TvProgrammeTonightRow(
-                        items = tvProgrammeTonight,
+                    HomeCardRow(
+                        title = "Mes chaînes",
+                        showTitle = false,
+                        entries = if (onFavorites) favoriteCards else recentChannelCards,
                         firstFocusRequester = null,
-                        restoreItemKey = restoreTarget
-                            ?.takeIf { it.homeRowKey == HomeRowKey.TvProgrammeTonight }
-                            ?.itemKey,
-                        onOpenProgramme = { item ->
-                            onOpenHomeEntry(
-                                item.channel,
-                                HomeRowKey.TvProgrammeTonight,
-                                item.fingerprint,
-                            )
-                        },
+                        restoreItemKey = restoreItem?.takeIf { it.tabPart() == tab }?.keyPart(),
+                        compact = true,
+                        onEntryClick = { entry -> onOpenHomeEntry(entry, HomeRowKey.MyChannels, tabItemKey(tab, entry.key)) },
                     )
-                    Spacer(Modifier.height(CardRowSpacing))
-                }
-            }
-        } else if (HomeBlock.TvProgrammeTonight in pendingBlocks) {
-            item(key = HomeRowKey.TvProgrammeTonight, contentType = "skeleton") {
-                Column(Modifier.fillMaxWidth()) {
-                    SkeletonRow("Programme TV FR ce soir") { ProgrammeCardSkeleton() }
-                    Spacer(Modifier.height(CardRowSpacing))
-                }
-            }
-        }
-
-        if (beinSportsNow.isNotEmpty()) {
-            item(key = HomeRowKey.BeinSportsNow, contentType = "programme-row") {
-                Column(Modifier.fillMaxWidth()) {
-                    BeinSportsProgrammeRow(
-                        title = "beIN Sports en direct",
-                        items = beinSportsNow,
-                        nowEpochMillis = beinNowEpochMillis,
-                        showLive = true,
-                        firstFocusRequester = null,
-                        restoreItemKey = restoreTarget
-                            ?.takeIf { it.homeRowKey == HomeRowKey.BeinSportsNow }
-                            ?.itemKey,
-                        onOpenProgramme = { item ->
-                            onOpenHomeEntry(
-                                item.channel,
-                                HomeRowKey.BeinSportsNow,
-                                item.fingerprint,
-                            )
-                        },
-                    )
-                    Spacer(Modifier.height(CardRowSpacing))
-                }
-            }
-        } else if (HomeBlock.BeinSportsNow in pendingBlocks) {
-            item(key = HomeRowKey.BeinSportsNow, contentType = "skeleton") {
-                Column(Modifier.fillMaxWidth()) {
-                    SkeletonRow("beIN Sports en direct") { ProgrammeCardSkeleton() }
-                    Spacer(Modifier.height(CardRowSpacing))
-                }
-            }
-        }
-
-        if (beinSportsNext.isNotEmpty()) {
-            item(key = HomeRowKey.BeinSportsNext, contentType = "programme-row") {
-                Column(Modifier.fillMaxWidth()) {
-                    BeinSportsProgrammeRow(
-                        title = "beIN Sports suivant",
-                        items = beinSportsNext,
-                        nowEpochMillis = beinNowEpochMillis,
-                        showLive = false,
-                        firstFocusRequester = null,
-                        restoreItemKey = restoreTarget
-                            ?.takeIf { it.homeRowKey == HomeRowKey.BeinSportsNext }
-                            ?.itemKey,
-                        onOpenProgramme = { item ->
-                            onOpenHomeEntry(
-                                item.channel,
-                                HomeRowKey.BeinSportsNext,
-                                item.fingerprint,
-                            )
-                        },
-                    )
-                    Spacer(Modifier.height(CardRowSpacing))
-                }
-            }
-        } else if (HomeBlock.BeinSportsNext in pendingBlocks) {
-            item(key = HomeRowKey.BeinSportsNext, contentType = "skeleton") {
-                Column(Modifier.fillMaxWidth()) {
-                    SkeletonRow("beIN Sports suivant") { ProgrammeCardSkeleton() }
-                    Spacer(Modifier.height(CardRowSpacing))
-                }
-            }
-        }
-
-        if (ukGuideNow.isNotEmpty()) {
-            item(key = HomeRowKey.UkGuideNow, contentType = "programme-row") {
-                Column(Modifier.fillMaxWidth()) {
-                    UkGuideProgrammeRow(
-                        title = "UK en direct",
-                        items = ukGuideNow,
-                        now = ukGuideNowTime,
-                        showLive = true,
-                        firstFocusRequester = null,
-                        restoreItemKey = restoreTarget
-                            ?.takeIf { it.homeRowKey == HomeRowKey.UkGuideNow }
-                            ?.itemKey,
-                        onOpenProgramme = { item ->
-                            onOpenHomeEntry(
-                                item.channel,
-                                HomeRowKey.UkGuideNow,
-                                item.fingerprint,
-                            )
-                        },
-                    )
-                    Spacer(Modifier.height(CardRowSpacing))
-                }
-            }
-        } else if (HomeBlock.UkGuideNow in pendingBlocks) {
-            item(key = HomeRowKey.UkGuideNow, contentType = "skeleton") {
-                Column(Modifier.fillMaxWidth()) {
-                    SkeletonRow("UK en direct") { ProgrammeCardSkeleton() }
-                    Spacer(Modifier.height(CardRowSpacing))
-                }
-            }
-        }
-
-        if (ukGuideNext.isNotEmpty()) {
-            item(key = HomeRowKey.UkGuideNext, contentType = "programme-row") {
-                Column(Modifier.fillMaxWidth()) {
-                    UkGuideProgrammeRow(
-                        title = "UK suivant",
-                        items = ukGuideNext,
-                        now = ukGuideNowTime,
-                        showLive = false,
-                        firstFocusRequester = null,
-                        restoreItemKey = restoreTarget
-                            ?.takeIf { it.homeRowKey == HomeRowKey.UkGuideNext }
-                            ?.itemKey,
-                        onOpenProgramme = { item ->
-                            onOpenHomeEntry(
-                                item.channel,
-                                HomeRowKey.UkGuideNext,
-                                item.fingerprint,
-                            )
-                        },
-                    )
-                    Spacer(Modifier.height(CardRowSpacing))
-                }
-            }
-        } else if (HomeBlock.UkGuideNext in pendingBlocks) {
-            item(key = HomeRowKey.UkGuideNext, contentType = "skeleton") {
-                Column(Modifier.fillMaxWidth()) {
-                    SkeletonRow("UK suivant") { ProgrammeCardSkeleton() }
                     Spacer(Modifier.height(CardRowSpacing))
                 }
             }
@@ -695,18 +509,15 @@ fun HomeScreen(
             }
         }
 
-        itemsIndexed(recommendationRows, key = { _, row -> HomeRowKey.recommendation(row.kind) }, contentType = { _, _ -> "recommendation-row" }) { index, row ->
+        items(recoGroups, key = { it.key }, contentType = { "recommendation-row" }) { group ->
             Column(Modifier.fillMaxWidth()) {
-                HomeRecommendationRow(
-                    row = row,
+                RecoGroupRow(
+                    group = group,
+                    rows = group.rowsIn(recommendationRows),
                     aiReasons = if (aiActive) aiReasons else emptyMap(),
-                    firstFocusRequester = null,
-                    restoreItemKey = restoreTarget
-                        ?.takeIf { it.homeRowKey == HomeRowKey.recommendation(row.kind) }
-                        ?.itemKey,
-                    onOpenRecommendation = { entry ->
-                        onOpenHomeEntry(entry, HomeRowKey.recommendation(row.kind), entry.key)
-                    },
+                    restoreRowKey = restoreTarget?.homeRowKey,
+                    restoreItemKey = restoreTarget?.itemKey,
+                    onOpen = { entry, rowKey -> onOpenHomeEntry(entry, rowKey, entry.key) },
                 )
                 Spacer(Modifier.height(CardRowSpacing))
             }
@@ -724,6 +535,19 @@ fun HomeScreen(
                 fontSize = TypeBody,
                 modifier = Modifier.padding(horizontal = 26.dp, vertical = 14.dp),
             )
+        }
+    }
+    if (showRemote) {
+        BackHandler { showRemote = false }
+        val closeFocus = remember { FocusRequester() }
+        LaunchedEffect(Unit) { runCatching { closeFocus.requestFocus() } }
+        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.72f)), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(20.dp)) {
+                AiRemoteQrCard(aiRemote, Modifier.width(680.dp).height(220.dp))
+                FocusableSurface(onClick = { showRemote = false }, wrapContent = true, radius = RadiusPill, modifier = Modifier.height(52.dp).focusRequester(closeFocus)) {
+                    Text("Fermer", color = Ink, fontSize = 17.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 32.dp, vertical = 12.dp))
+                }
+            }
         }
     }
     if (confirmChangePlaylist) {

@@ -34,8 +34,8 @@ import java.util.Locale
 // Grille des actions principales de l'accueil.
 
 /**
- * Grille du haut de l'accueil, sur une seule rangée : « TV en direct » (300 dp), quatre tuiles égales
- * (Films, Séries, Recherche, Guide TV), puis les quatre actions rangées en grille 2 × 2 (300 dp).
+ * Grille du haut de l'accueil, sur une seule rangée : « TV en direct » (300 dp), cinq tuiles égales
+ * (Films, Séries, Recherche, Guide TV, Matchs du jour). Les actions rares (Paramètres, Actualiser, Changer de liste) sont dans la barre du haut.
  * Textes alignés à gauche, en bas de chaque tuile.
  */
 internal val MainGridHeight = 150.dp
@@ -46,17 +46,12 @@ private val SideColumnWidth = 300.dp
 internal fun MainActionGrid(
     catalog: Catalog,
     catalogLoading: Boolean,
-    busy: Boolean,
     firstFocus: FocusRequester?,
     focusTarget: HomeFocusTarget?,
     gridFocusRequester: FocusRequester,
-    changePlaylistFocusRequester: FocusRequester,
     onOpenSection: (MediaType) -> Unit,
-    onSettings: () -> Unit,
     onSearch: () -> Unit,
     onEpg: () -> Unit,
-    onRefresh: () -> Unit,
-    onChangePlaylist: () -> Unit,
     onOpenLiveMatches: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -99,6 +94,7 @@ internal fun MainActionGrid(
             icon = StreamiaIconGlyph.Search,
             subtitle = "Tout le catalogue",
             modifier = Modifier.weight(1f).fillMaxHeight()
+                .then(if (firstFocus != null && !liveTileEnabled) Modifier.focusRequester(firstFocus) else Modifier)
                 .gridFocus(gridFocusRequester, focusTarget == HomeFocusTarget.Search),
             onClick = onSearch,
             enabled = !catalogLoading,
@@ -113,40 +109,14 @@ internal fun MainActionGrid(
             enabled = !catalogLoading && liveCount > 0,
         )
 
-        Column(
-            Modifier.width(SideColumnWidth).fillMaxHeight(),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                HomeAction(
-                    "Paramètres",
-                    onSettings,
-                    Modifier.weight(1f)
-                        .then(if (firstFocus != null && !liveTileEnabled) Modifier.focusRequester(firstFocus) else Modifier)
-                        .gridFocus(gridFocusRequester, focusTarget == HomeFocusTarget.Settings),
-                )
-                HomeAction(
-                    if (busy || catalogLoading) "Chargement…" else "Actualiser",
-                    onRefresh,
-                    Modifier.weight(1f).gridFocus(gridFocusRequester, focusTarget == HomeFocusTarget.Refresh),
-                    enabled = !busy && !catalogLoading,
-                )
-            }
-            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                HomeAction(
-                    "Matchs du jour",
-                    onOpenLiveMatches,
-                    Modifier.weight(1f).gridFocus(gridFocusRequester, focusTarget == HomeFocusTarget.LiveMatches),
-                )
-                HomeAction(
-                    "Changer de liste",
-                    onChangePlaylist,
-                    Modifier.weight(1f)
-                        .focusRequester(changePlaylistFocusRequester)
-                        .gridFocus(gridFocusRequester, focusTarget == HomeFocusTarget.ChangePlaylist),
-                )
-            }
-        }
+        HomeTile(
+            title = "Matchs du jour",
+            icon = StreamiaIconGlyph.Trophy,
+            subtitle = "en direct",
+            modifier = Modifier.weight(1f).fillMaxHeight()
+                .gridFocus(gridFocusRequester, focusTarget == HomeFocusTarget.LiveMatches),
+            onClick = onOpenLiveMatches,
+        )
     }
 }
 
@@ -189,20 +159,6 @@ private fun HomeTile(
             Spacer(Modifier.weight(1f))
             Text(title, color = Ink, fontSize = 20.sp, fontWeight = HeadingWeight, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(subtitle, color = MutedInk, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-    }
-}
-
-@Composable
-private fun HomeAction(
-    title: String,
-    onClick: () -> Unit,
-    modifier: Modifier,
-    enabled: Boolean = true,
-) {
-    FocusableSurface(onClick = onClick, enabled = enabled, idleBackground = Color.White.copy(alpha = 0.07f), modifier = modifier.fillMaxHeight()) {
-        Box(Modifier.fillMaxSize().padding(horizontal = 8.dp), contentAlignment = Alignment.Center) {
-            Text(title, color = Ink, fontSize = 15.sp, lineHeight = 18.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, maxLines = 2)
         }
     }
 }

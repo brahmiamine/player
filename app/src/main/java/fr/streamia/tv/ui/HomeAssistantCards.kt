@@ -82,7 +82,7 @@ internal fun AiAssistantRow(
 }
 
 @Composable
-private fun TonightHomeCard(answers: TonightAnswers, modifier: Modifier, onClick: () -> Unit) {
+internal fun TonightHomeCard(answers: TonightAnswers, modifier: Modifier, onClick: () -> Unit) {
     FocusableSurface(onClick = onClick, focusScale = 1.02f, idleBackground = Color.White.copy(alpha = 0.06f), modifier = modifier) {
         Column(
             Modifier

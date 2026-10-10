@@ -59,14 +59,17 @@ internal fun HomeCardRow(
     restoreItemKey: String?,
     onEntryClick: (MediaEntry) -> Unit,
     compact: Boolean = false,
+    showTitle: Boolean = true,
 ) {
     val rowState = rememberLazyListState()
     val restoreFocus = remember { FocusRequester() }
     val restoreIndex = rememberRowFocusRestore(rowState, restoreItemKey, entries.map { (entry, _) -> entry.key }, restoreFocus)
 
     Column(Modifier.fillMaxWidth()) {
-        SectionLabel(title, fontSize = 16.sp)
-        Spacer(Modifier.height(10.dp))
+        if (showTitle) {
+            SectionLabel(title, fontSize = 16.sp)
+            Spacer(Modifier.height(10.dp))
+        }
         LazyRow(state = rowState, modifier = Modifier.focusRestorer(), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             itemsIndexed(entries, key = { _, (entry, _) -> entry.key }) { index, (entry, progress) ->
                 val cardModifier = when {
@@ -128,6 +131,7 @@ internal fun HomeRecommendationRow(
     restoreItemKey: String?,
     /** Raisons écrites par l'assistant IA (clé du contenu ↦ phrase) : celle de la carte focalisée s'affiche sous la rangée. */
     aiReasons: Map<String, String> = emptyMap(),
+    showTitle: Boolean = true,
     onOpenRecommendation: (MediaEntry) -> Unit,
 ) {
     var focusedKey by remember { mutableStateOf<String?>(null) }
@@ -136,8 +140,10 @@ internal fun HomeRecommendationRow(
     val restoreIndex = rememberRowFocusRestore(rowState, restoreItemKey, row.items.map { it.entry.key }, restoreFocus)
 
     Column(Modifier.fillMaxWidth()) {
-        SectionLabel(row.title, fontSize = 16.sp)
-        Spacer(Modifier.height(10.dp))
+        if (showTitle) {
+            SectionLabel(row.title, fontSize = 16.sp)
+            Spacer(Modifier.height(10.dp))
+        }
         LazyRow(state = rowState, modifier = Modifier.focusRestorer(), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             itemsIndexed(row.items, key = { _, recommended -> recommended.entry.key }) { index, recommended ->
                 val cardModifier = when {

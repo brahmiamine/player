@@ -1,6 +1,14 @@
 package fr.streamia.tv.ui
 
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import fr.streamia.tv.ui.theme.RadiusPill
 import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -100,3 +108,42 @@ internal fun WeatherAndPrayers(place: HomePlace?, weather: CurrentWeather?, meth
 // DateTimeFormatter + fuseau lu à chaque affichage : un SimpleDateFormat global figeait le fuseau
 // de sa création (changement d'heure ou de fuseau de la TV ignoré jusqu'au redémarrage de l'app).
 private val PrayerTimeFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm", Locale.getDefault())
+
+/** Actions rares de l'accueil en boutons ronds : télécommande téléphone (si l'assistant est actif), Actualiser, Changer de liste, Paramètres. */
+@Composable
+internal fun HomeHeaderActions(
+    showRemote: Boolean,
+    refreshEnabled: Boolean,
+    focusTarget: HomeFocusTarget?,
+    gridFocusRequester: FocusRequester,
+    changePlaylistFocusRequester: FocusRequester,
+    onRemote: () -> Unit,
+    onRefresh: () -> Unit,
+    onChangePlaylist: () -> Unit,
+    onSettings: () -> Unit,
+) {
+    fun Modifier.target(t: HomeFocusTarget) = if (focusTarget == t) focusRequester(gridFocusRequester) else this
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (showRemote) {
+            FocusableSurface(onClick = onRemote, contentDescription = "Télécommande téléphone", wrapContent = true, radius = RadiusPill, modifier = Modifier.size(HeaderButtonSize)) {
+                Box(Modifier.size(HeaderButtonSize), contentAlignment = Alignment.Center) {
+                    Text("QR", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+        HeaderIconButton(StreamiaIconGlyph.Refresh, "Actualiser", onRefresh, Modifier.target(HomeFocusTarget.Refresh), enabled = refreshEnabled)
+        HeaderIconButton(StreamiaIconGlyph.Swap, "Changer de liste", onChangePlaylist, Modifier.focusRequester(changePlaylistFocusRequester).target(HomeFocusTarget.ChangePlaylist))
+        HeaderIconButton(StreamiaIconGlyph.Settings, "Paramètres", onSettings, Modifier.target(HomeFocusTarget.Settings))
+    }
+}
+
+private val HeaderButtonSize = 52.dp
+
+@Composable
+private fun HeaderIconButton(glyph: StreamiaIconGlyph, description: String, onClick: () -> Unit, modifier: Modifier, enabled: Boolean = true) {
+    FocusableSurface(onClick = onClick, enabled = enabled, contentDescription = description, wrapContent = true, radius = RadiusPill, modifier = modifier.size(HeaderButtonSize)) {
+        Box(Modifier.size(HeaderButtonSize), contentAlignment = Alignment.Center) {
+            StreamiaIcon(glyph, tint = Ink, size = 26.dp)
+        }
+    }
+}

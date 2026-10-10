@@ -123,7 +123,7 @@ internal fun LiveMatchesRow(
 }
 
 @Composable
-private fun LiveMatchCardContent(card: LiveMatchCard) {
+internal fun LiveMatchCardContent(card: LiveMatchCard) {
     val match = card.match.match
     Column(Modifier.fillMaxSize().padding(10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {

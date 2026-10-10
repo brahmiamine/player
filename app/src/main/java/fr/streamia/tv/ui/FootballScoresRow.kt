@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -22,6 +24,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -230,8 +235,9 @@ internal fun saveFootballDiskCache(file: File, fetchedAt: Long, matches: List<Fo
  */
 @Volatile private var footballFailedAtReconnection: Int? = null
 
+/** Scores du jour (cache mémoire/disque + réseau, app visible seulement) et « premier chargement fait ». */
 @Composable
-internal fun FootballScoresRow(modifier: Modifier = Modifier) {
+private fun rememberFootballScores(): Pair<List<FootballMatch>, Boolean> {
     var matches by remember { mutableStateOf(footballCache?.second.orEmpty()) }
     // Squelette seulement avant le tout premier chargement de la session (cache mémoire vide).
     var firstLoadDone by remember { mutableStateOf(footballCache != null) }
@@ -276,6 +282,13 @@ internal fun FootballScoresRow(modifier: Modifier = Modifier) {
             }
         }
     }
+    return matches to firstLoadDone
+}
+
+/** Scores seuls (accueil mobile). */
+@Composable
+internal fun FootballScoresRow(modifier: Modifier = Modifier) {
+    val (matches, firstLoadDone) = rememberFootballScores()
     if (!firstLoadDone) {
         SkeletonRow("Scores football", modifier) { FootballCardSkeleton() }
         return
@@ -289,6 +302,47 @@ internal fun FootballScoresRow(modifier: Modifier = Modifier) {
             horizontalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             items(matches, key = FootballMatch::id) { FootballMatchCard(it) }
+        }
+    }
+}
+
+/**
+ * Rangée « Foot » : les matchs en direct (ouvrent la chaîne) puis les scores du jour, dans un seul défilement.
+ * Rien n'est affiché s'il n'y a ni match en direct ni score ; squelette tant que rien n'a été chargé.
+ */
+@Composable
+internal fun FootRow(
+    cards: List<LiveMatchCard>,
+    liveMatchesPending: Boolean,
+    scoresEnabled: Boolean,
+    restoreItemKey: String?,
+    onOpen: (LiveMatchCard) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val (scores, scoresLoaded) = if (scoresEnabled) rememberFootballScores() else emptyList<FootballMatch>() to true
+    val rowState = rememberLazyListState()
+    val restoreFocus = remember { FocusRequester() }
+    val restoreIndex = rememberRowFocusRestore(rowState, restoreItemKey, cards.map(LiveMatchCard::key), restoreFocus)
+    if (cards.isEmpty() && scores.isEmpty()) {
+        if (liveMatchesPending || !scoresLoaded) SkeletonRow("Foot", modifier) { LiveMatchCardSkeleton() }
+        return
+    }
+    Column(modifier.fillMaxWidth()) {
+        SectionLabel("Foot", fontSize = 16.sp)
+        Spacer(Modifier.height(10.dp))
+        LazyRow(
+            state = rowState,
+            modifier = Modifier.focusRestorer(),
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            itemsIndexed(cards, key = { _, card -> "live-" + card.key }) { index, card ->
+                val cardModifier = if (index == restoreIndex) Modifier.focusRequester(restoreFocus) else Modifier
+                FocusableSurface(onClick = { onOpen(card) }, modifier = cardModifier.width(260.dp).height(170.dp)) {
+                    LiveMatchCardContent(card)
+                }
+            }
+            items(scores, key = { "score-" + it.id }) { FootballMatchCard(it) }
         }
     }
 }

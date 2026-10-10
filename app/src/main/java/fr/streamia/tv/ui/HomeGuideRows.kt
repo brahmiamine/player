@@ -18,7 +18,10 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -257,6 +260,109 @@ private fun ProgrammeCard(
                 ChannelLogo(channel.iconUrl, channel.displayName, Modifier.width(44.dp).height(44.dp), imagePadding = 2)
                 Spacer(Modifier.width(7.dp))
                 Text(channel.displayName, color = MutedInk, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
+}
+
+// --- Rangée unique « Programme TV » : Maintenant | Ce soir × Tout | France | beIN Sports | UK ---
+
+private enum class GuideMode(val label: String) { Now("Maintenant"), Next("Ce soir") }
+
+private enum class GuideSource(val label: String) { All("Tout"), Fr("France"), Bein("beIN Sports"), Uk("UK") }
+
+private class GuideEntry(
+    val key: String,
+    val source: GuideSource,
+    val title: String,
+    val timeLabel: String,
+    val imageUrl: String?,
+    val category: String?,
+    val badge: ProgrammeBadge,
+    val progressAt: ((Long) -> Float?)?,
+    val channel: MediaEntry,
+)
+
+/**
+ * Les six rangées de guides (FR, beIN, UK × en direct / ce soir) en une seule. La clé de retour porte la bascule
+ * (« Now|Bein~~empreinte ») pour que l'accueil rouvre la même vue ; [onOpen] reçoit la chaîne et cette clé.
+ */
+@Composable
+internal fun TvGuideRow(
+    tvNow: List<ResolvedTvProgrammeNowItem>,
+    tvTonight: List<ResolvedTvProgrammeItem>,
+    beinNow: List<ResolvedBeinProgrammeItem>,
+    beinNext: List<ResolvedBeinProgrammeItem>,
+    ukNow: List<ResolvedUkProgrammeItem>,
+    ukNext: List<ResolvedUkProgrammeItem>,
+    nowMillis: () -> Long,
+    ukTime: (Long) -> LocalTime,
+    restoreItemKey: String?,
+    onOpen: (MediaEntry, String) -> Unit,
+) {
+    val byMode = remember(tvNow, tvTonight, beinNow, beinNext, ukNow, ukNext) {
+        mapOf(
+            GuideMode.Now to buildList {
+                tvNow.mapTo(this) { GuideEntry("fr-" + it.fingerprint, GuideSource.Fr, it.programme.title, it.programme.timeRangeLabel, it.programme.imageUrl, null, ProgrammeBadge.Live, { ms -> it.programme.progressAt(ms) }, it.channel) }
+                beinNow.mapTo(this) { GuideEntry("bein-" + it.fingerprint, GuideSource.Bein, it.programme.title, it.programme.timeRangeLabel, it.programme.imageUrl, it.programme.category, ProgrammeBadge.Live, { ms -> it.programme.progressAt(ms) }, it.channel) }
+                ukNow.mapTo(this) { GuideEntry("uk-" + it.fingerprint, GuideSource.Uk, it.programme.title, it.programme.timeRangeLabel, it.programme.imageUrl, null, ProgrammeBadge.Live, { ms -> it.programme.progressAt(ukTime(ms)) }, it.channel) }
+            },
+            GuideMode.Next to buildList {
+                tvTonight.mapTo(this) { GuideEntry("fr-" + it.fingerprint, GuideSource.Fr, it.programme.title, it.programme.time, it.programme.imageUrl, null, ProgrammeBadge.None, null, it.channel) }
+                beinNext.mapTo(this) { GuideEntry("bein-" + it.fingerprint, GuideSource.Bein, it.programme.title, it.programme.timeRangeLabel, it.programme.imageUrl, it.programme.category, ProgrammeBadge.Next, null, it.channel) }
+                ukNext.mapTo(this) { GuideEntry("uk-" + it.fingerprint, GuideSource.Uk, it.programme.title, it.programme.timeRangeLabel, it.programme.imageUrl, null, ProgrammeBadge.Next, null, it.channel) }
+            },
+        )
+    }
+    val modes = GuideMode.entries.filter { byMode.getValue(it).isNotEmpty() }
+    if (modes.isEmpty()) return
+
+    val restoreTab = restoreItemKey?.tabPart()?.split('|')
+    var mode by remember {
+        mutableStateOf(restoreTab?.getOrNull(0)?.let { n -> GuideMode.entries.firstOrNull { it.name == n } } ?: modes.first())
+    }
+    var source by remember {
+        mutableStateOf(restoreTab?.getOrNull(1)?.let { n -> GuideSource.entries.firstOrNull { it.name == n } } ?: GuideSource.All)
+    }
+    val effectiveMode = if (mode in modes) mode else modes.first()
+    val modeEntries = byMode.getValue(effectiveMode)
+    val sources = buildList {
+        if (modeEntries.map { it.source }.distinct().size > 1) add(GuideSource.All)
+        GuideSource.entries.filter { s -> s != GuideSource.All && modeEntries.any { it.source == s } }.forEach(::add)
+    }
+    val effectiveSource = if (source in sources) source else sources.first()
+    val shown = if (effectiveSource == GuideSource.All) modeEntries else modeEntries.filter { it.source == effectiveSource }
+    val tab = effectiveMode.name + "|" + effectiveSource.name
+
+    val rowState = rememberLazyListState()
+    val restoreFocus = remember { FocusRequester() }
+    val restoreIndex = rememberRowFocusRestore(rowState, restoreItemKey?.keyPart(), shown.map { it.key }, restoreFocus)
+    // Nouvelle vue : on revient au début de la rangée.
+    androidx.compose.runtime.LaunchedEffect(tab) { if (restoreItemKey == null) rowState.scrollToItem(0) }
+
+    Column(Modifier.fillMaxWidth()) {
+        TabbedRowHeader(
+            title = "Programme TV",
+            tabs = modes.map { it.label },
+            selected = modes.indexOf(effectiveMode),
+            onSelect = { mode = modes[it] },
+            secondTabs = sources.map { it.label },
+            secondSelected = sources.indexOf(effectiveSource),
+            onSelectSecond = { source = sources[it] },
+        )
+        LazyRow(state = rowState, modifier = Modifier.focusRestorer(), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            itemsIndexed(shown, key = { _, entry -> entry.key }) { index, entry ->
+                ProgrammeCard(
+                    title = entry.title,
+                    timeLabel = entry.timeLabel,
+                    imageUrl = entry.imageUrl,
+                    badge = entry.badge,
+                    channel = entry.channel,
+                    category = entry.category,
+                    progress = entry.progressAt?.invoke(nowMillis()),
+                    onClick = { onOpen(entry.channel, tabItemKey(tab, entry.key)) },
+                    modifier = if (index == restoreIndex) Modifier.focusRequester(restoreFocus) else Modifier,
+                )
             }
         }
     }
