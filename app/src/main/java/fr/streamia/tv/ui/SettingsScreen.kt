@@ -109,6 +109,8 @@ fun SettingsScreen(
     onSetHomePlace: (HomePlace?) -> Unit,
     onSetPrayerMethod: (PrayerMethod) -> Unit,
     onToggleAi: () -> Unit = {},
+    onToggleAiBilingual: () -> Unit = {},
+    onToggleAiNightly: () -> Unit = {},
     onSetAiLanguage: (String) -> Unit = {},
     onLoadAiUsage: suspend () -> List<AiUsage> = { emptyList() },
     onResetAiUsage: () -> Unit = {},
@@ -807,6 +809,27 @@ fun SettingsScreen(
                         "Requêtes, tokens, quotas",
                         { aiUsageDialog = true },
                         Modifier.weight(1f),
+                    )
+                    Spacer(Modifier.weight(2f))
+                }
+                Row(Modifier.fillMaxWidth().height(88.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    SettingsTile(
+                        StreamiaIconGlyph.Guide,
+                        "Sous-titres bilingues",
+                        if (settings.aiBilingualSubtitles) "Original sous la traduction" else "Traduction seule",
+                        onToggleAiBilingual,
+                        Modifier.weight(1f),
+                        enabled = settings.aiEnabled,
+                        selected = settings.aiBilingualSubtitles,
+                    )
+                    SettingsTile(
+                        StreamiaIconGlyph.Refresh,
+                        "Pré-calcul de nuit",
+                        if (settings.aiNightly) "Activé · traductions et collections" else "Désactivé",
+                        onToggleAiNightly,
+                        Modifier.weight(1f),
+                        enabled = settings.aiEnabled,
+                        selected = settings.aiNightly,
                     )
                     Spacer(Modifier.weight(2f))
                 }

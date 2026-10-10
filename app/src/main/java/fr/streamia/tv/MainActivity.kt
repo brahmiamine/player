@@ -23,6 +23,7 @@ import fr.streamia.tv.ui.StreamiaViewModelFactory
 import fr.streamia.tv.ui.mobile.DeviceKind
 import fr.streamia.tv.ui.mobile.detectDeviceKind
 import fr.streamia.tv.work.EpgSyncScheduler
+import fr.streamia.tv.work.AiNightlyWorker
 import fr.streamia.tv.work.MetadataEnrichmentWorker
 
 class MainActivity : ComponentActivity() {
@@ -56,6 +57,7 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch(Dispatchers.Default) {
             EpgSyncScheduler.schedule(applicationContext)
             MetadataEnrichmentWorker.schedule(applicationContext)
+            AiNightlyWorker.schedule(applicationContext)
         }
 
         WindowCompat.setDecorFitsSystemWindows(window, false)

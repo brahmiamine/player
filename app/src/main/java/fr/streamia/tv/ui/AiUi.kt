@@ -10,10 +10,17 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -32,9 +39,11 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
+import fr.streamia.tv.data.AiReview
 import fr.streamia.tv.recommendation.RecommendedMedia
 import fr.streamia.tv.ui.theme.AccentPink
 import fr.streamia.tv.ui.theme.AccentPinkLight
+import fr.streamia.tv.ui.theme.FocusBlueBright
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
 import kotlinx.coroutines.delay
@@ -101,3 +110,86 @@ private const val AI_INDICATOR_DELAY_MS = 250L
 
 /** Début du statut de recherche de sous-titres pendant leur traduction par l'IA (le lecteur y ajoute l'icône animée). */
 const val AI_SUBTITLE_STATUS_PREFIX = "Traduction IA"
+
+/**
+ * Contenu d'un bouton qui lance une fonction de l'assistant : l'icône IA animée tourne à la place de l'étincelle
+ * fixe tant que la réponse est attendue.
+ */
+@Composable
+fun AiButtonLabel(label: String, loading: Boolean, modifier: Modifier = Modifier) {
+    Row(modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+        if (loading) AiSparkle(size = 22.dp) else Text("✦", color = Ink, fontSize = 18.sp)
+        Spacer(Modifier.width(10.dp))
+        Text(label, color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+/** Avis rapide de l'IA sur une fiche : pour qui, ambiance, à savoir. Chargement : l'icône IA animée. */
+@Composable
+fun AiReviewCard(review: AiReview?, loading: Boolean, modifier: Modifier = Modifier) {
+    Column(modifier) {
+        AiLoadingIndicator("Avis rapide de l'IA…", loading)
+        if (review != null) {
+            GlassSurface(modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("✦ Avis rapide", color = FocusBlueBright, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    ReviewLine("Pour qui", review.audience)
+                    ReviewLine("Ambiance", review.mood)
+                    ReviewLine("À savoir", review.caution)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReviewLine(label: String, value: String) {
+    if (value.isBlank()) return
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+        Text(label, color = MutedInk, fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(110.dp))
+        Text(value, color = Ink, fontSize = 14.sp, lineHeight = 20.sp, modifier = Modifier.weight(1f))
+    }
+}
+
+/**
+ * « Précédemment dans… » d'une série : le résumé s'il est prêt, l'icône IA pendant son calcul, sinon (épisodes vus
+ * et de quoi les résumer) un bouton pour le demander.
+ */
+@Composable
+fun AiRecapCard(
+    recap: String?,
+    loading: Boolean,
+    available: Boolean,
+    error: String?,
+    onRequest: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier) {
+        AiLoadingIndicator("Résumé des épisodes déjà vus…", loading)
+        when {
+            recap != null -> GlassSurface(modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("✦ Précédemment dans…", color = FocusBlueBright, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Text(recap, color = Ink, fontSize = 15.sp, lineHeight = 22.sp)
+                }
+            }
+            available && !loading -> {
+                FocusableSurface(onClick = onRequest, modifier = Modifier.width(300.dp).height(48.dp)) {
+                    AiButtonLabel("Précédemment dans…", loading = false)
+                }
+                if (error != null) Text(error, color = MutedInk, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
+            }
+        }
+    }
+}
+
+/** Raison d'une recommandation (« parce que vous avez aimé… »), précédée de l'étincelle ; rien tant qu'elle manque. */
+@Composable
+fun AiReasonLine(reason: String?, modifier: Modifier = Modifier) {
+    if (reason.isNullOrBlank()) return
+    Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text("✦", color = FocusBlueBright, fontSize = 13.sp)
+        Spacer(Modifier.width(6.dp))
+        Text(reason, color = MutedInk, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}

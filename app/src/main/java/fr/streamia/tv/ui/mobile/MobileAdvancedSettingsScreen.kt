@@ -85,6 +85,8 @@ fun MobileAdvancedSettingsScreen(
     onSetHomePlace: (HomePlace?) -> Unit,
     onSetPrayerMethod: (PrayerMethod) -> Unit,
     onToggleAi: () -> Unit,
+    onToggleAiBilingual: () -> Unit = {},
+    onToggleAiNightly: () -> Unit = {},
     onSetAiLanguage: (String) -> Unit,
     onLoadAiUsage: suspend () -> List<AiUsage>,
     onResetAiUsage: () -> Unit,
@@ -161,6 +163,8 @@ fun MobileAdvancedSettingsScreen(
                     SettingsLink("Clé d'API", if (keySet) "Enregistrée" else "Non définie") { sheet = AdvancedSheet.ApiKey }
                     if (keySet) SettingsLink("Modèle", settings.aiModels[settings.aiProvider] ?: "Aucun choisi") { sheet = AdvancedSheet.Model }
                     SettingsLink("Langue des descriptions", AiLanguages.name(settings.aiLanguage)) { sheet = AdvancedSheet.Language }
+                    SettingsToggle("Sous-titres bilingues", "L'original reste affiché sous la traduction", settings.aiBilingualSubtitles, onToggleAiBilingual)
+                    SettingsToggle("Pré-calcul de nuit", "Traduit les nouveautés et prépare les collections", settings.aiNightly, onToggleAiNightly)
                 }
                 SettingsLink("Consommation IA", "Requêtes, tokens, quotas") { sheet = AdvancedSheet.Usage }
             }

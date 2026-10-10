@@ -43,7 +43,11 @@ import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
 import fr.streamia.tv.data.PlaybackHistoryItem
 import fr.streamia.tv.data.isResumable
+import fr.streamia.tv.data.AiReview
 import fr.streamia.tv.domain.MediaDetails
+import fr.streamia.tv.ui.AiLoadingIndicator
+import fr.streamia.tv.ui.AiRecapCard
+import fr.streamia.tv.ui.AiReviewCard
 import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.domain.SeriesDetails
@@ -89,6 +93,15 @@ fun MobileDetailsScreen(
     onOpenSimilar: (MediaEntry) -> Unit,
     onRetry: () -> Unit,
     onBack: () -> Unit,
+    aiPlotLoading: Boolean = false,
+    aiSimilarLoading: Boolean = false,
+    aiReview: AiReview? = null,
+    aiReviewLoading: Boolean = false,
+    aiRecap: String? = null,
+    aiRecapLoading: Boolean = false,
+    aiRecapAvailable: Boolean = false,
+    aiRecapError: String? = null,
+    onRequestRecap: () -> Unit = {},
 ) {
     BackHandler(onBack = onBack)
     val isSeries = entry.type == MediaType.Series
@@ -182,6 +195,9 @@ fun MobileDetailsScreen(
                     Spacer(Modifier.height(18.dp))
                     Text(plot, color = Ink, fontSize = 15.sp, lineHeight = 22.sp)
                 }
+                AiLoadingIndicator("Traduction de la description par l'IA…", aiPlotLoading, Modifier.padding(top = 8.dp))
+                AiReviewCard(aiReview, aiReviewLoading, Modifier.padding(top = 12.dp))
+                if (isSeries) AiRecapCard(aiRecap, aiRecapLoading, aiRecapAvailable, aiRecapError, onRequestRecap, Modifier.padding(top = 12.dp))
                 val lines = listOf(
                     "Réalisateur" to details?.director,
                     "Distribution" to details?.cast,
@@ -252,6 +268,7 @@ fun MobileDetailsScreen(
             }
 
             if (otherVersions.isNotEmpty()) SimilarRow("Autres versions", otherVersions, onOpenSimilar)
+            AiLoadingIndicator("Classement des similaires par l'IA…", aiSimilarLoading, Modifier.padding(start = MobileGutter, top = 16.dp))
             if (similarMedia.isNotEmpty()) SimilarRow(if (isSeries) "Séries similaires" else "Films similaires", similarMedia, onOpenSimilar)
         }
     }

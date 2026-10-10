@@ -64,6 +64,19 @@ Streamia TV est un lecteur Android TV natif, rapide et entièrement pilotable à
 - identifiants chiffrés localement avec Android Keystore ;
 - ouverture sur la dernière page consultée, splash screen, icône adaptative et bannière Android TV.
 
+### Assistant IA (facultatif)
+
+Tout est coupé dès que l'assistant est désactivé (Paramètres › Assistant IA) : aucune requête, travaux annulés, écrans fermés. Chaque fonction tient en **une requête JSON**, construite à partir d'une liste courte de candidats réels de la playlist ; seuls des contenus existants, jamais masqués ni verrouillés, sont affichés. Une icône IA animée signale chaque chargement.
+
+- **Recherche en langage naturel** (« un film d'action des années 90 », au clavier, à la voix sur mobile) : l'IA produit des filtres (genre, région, période) appliqués à l'index local ; ses titres proposés ne sont montrés que s'ils existent dans le catalogue.
+- **Ce soir ?** : humeur, durée, compagnie → cinq propositions avec la raison, mêlant films, séries et programmes TV du soir.
+- **Collections** : sagas (dans l'ordre) et thèmes du catalogue. **Raisons des recommandations** sous les rangées de l'accueil.
+- **Fiches** : avis rapide (public, ambiance, points sensibles) et « Précédemment dans… » sans spoiler pour les séries reprises.
+- **Quoi de neuf maintenant ?** : résumé des matchs et programmes en direct, avec accès à la chaîne.
+- **Lecteur** : sous-titres bilingues, glossaire de noms propres cohérent entre épisodes, « Conseil de lecture » d'après les mesures du lecteur.
+- **Télécommande téléphone** : page web locale (QR code) pour écrire « mets beIN Sports 1 », « reprends ma série », « trouve le match du PSG ».
+- **Économie d'appels** : cache disque, pré-calcul de nuit (traductions des nouveautés, collections), cache de prompt chez Claude pour les longs messages, aucune requête à la frappe.
+
 ## Commandes de la télécommande
 
 | Écran | Touche | Action |

@@ -30,6 +30,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
+import fr.streamia.tv.data.AiReview
 import fr.streamia.tv.domain.MediaDetails
 import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.recommendation.RecommendedMedia
@@ -55,6 +56,8 @@ fun MovieDetailsScreen(
     translatedPlot: String? = null,
     aiPlotLoading: Boolean = false,
     aiSimilarLoading: Boolean = false,
+    aiReview: AiReview? = null,
+    aiReviewLoading: Boolean = false,
     similarMedia: List<RecommendedMedia> = emptyList(),
     similarLoading: Boolean = false,
     otherVersions: List<RecommendedMedia> = emptyList(),
@@ -153,6 +156,7 @@ fun MovieDetailsScreen(
                 Text(translatedPlot ?: details?.plot ?: movie.plot.orEmpty(), color = Ink, fontSize = TypeBody, lineHeight = TypeBodyLineHeight)
             }
             AiLoadingIndicator("Traduction de la description par l'IA…", aiPlotLoading)
+            AiReviewCard(aiReview, aiReviewLoading)
             val hasDetailLines = listOf(details?.director, details?.cast, details?.country, details?.tmdbId)
                 .any { !it.isNullOrBlank() }
             if (hasDetailLines) {

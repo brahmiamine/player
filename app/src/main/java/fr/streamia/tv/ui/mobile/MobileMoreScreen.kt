@@ -42,8 +42,12 @@ fun MobileMoreScreen(
     onOrganizer: () -> Unit,
     onSettings: () -> Unit,
     onChangePlaylist: () -> Unit,
+    aiActive: Boolean = false,
+    onAssistant: (fr.streamia.tv.ui.AssistantMode) -> Unit = {},
 ) {
-    val rows = listOf(
+    val rows = (if (aiActive) fr.streamia.tv.ui.AssistantMode.entries.map { mode ->
+        MoreRow("✦ ${mode.title}", "Assistant IA", StreamiaIconGlyph.Search) { onAssistant(mode) }
+    } else emptyList()) + listOf(
         MoreRow("Recherche", "Tout le catalogue, filtrable", StreamiaIconGlyph.Search, onSearch),
         MoreRow("Guide TV", "Grille EPG, jour par jour", StreamiaIconGlyph.Guide, onEpg),
         MoreRow("Matchs du jour", "Scores et chaînes", StreamiaIconGlyph.Trophy, onLiveMatches),

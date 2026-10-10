@@ -38,6 +38,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
+import fr.streamia.tv.data.AiReview
 import fr.streamia.tv.data.PlaybackHistoryItem
 import fr.streamia.tv.data.isResumable
 import fr.streamia.tv.domain.MediaType
@@ -70,6 +71,13 @@ fun SeriesScreen(
     translatedPlot: String? = null,
     aiPlotLoading: Boolean = false,
     aiSimilarLoading: Boolean = false,
+    aiReview: AiReview? = null,
+    aiReviewLoading: Boolean = false,
+    aiRecap: String? = null,
+    aiRecapLoading: Boolean = false,
+    aiRecapAvailable: Boolean = false,
+    aiRecapError: String? = null,
+    onRequestRecap: () -> Unit = {},
     similarMedia: List<RecommendedMedia> = emptyList(),
     similarLoading: Boolean = false,
     otherVersions: List<RecommendedMedia> = emptyList(),
@@ -181,6 +189,8 @@ fun SeriesScreen(
                 Text(plot, color = MutedInk, fontSize = TypeBody, lineHeight = TypeBodyLineHeight, maxLines = 12, overflow = TextOverflow.Ellipsis)
             }
             AiLoadingIndicator("Traduction de la description par l'IA…", aiPlotLoading, Modifier.padding(top = 10.dp))
+            AiReviewCard(aiReview, aiReviewLoading, Modifier.padding(top = 10.dp))
+            AiRecapCard(aiRecap, aiRecapLoading, aiRecapAvailable, aiRecapError, onRequestRecap, Modifier.padding(top = 10.dp))
             SeriesInfoLine("Réalisateur", info?.director)
             SeriesInfoLine("Distribution", info?.cast)
             SeriesInfoLine("Pays", info?.country)

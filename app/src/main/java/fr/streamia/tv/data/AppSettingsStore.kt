@@ -88,6 +88,10 @@ data class AppSettings(
     val aiModels: Map<AiProvider, String> = emptyMap(),
     /** Langue des descriptions traduites par l'IA (code : fr, en, es…). */
     val aiLanguage: String = "ar",
+    /** Sous-titres traduits par l'IA : l'original reste affiché en italique sous la traduction (pour apprendre une langue). */
+    val aiBilingualSubtitles: Boolean = false,
+    /** Pré-calcul de nuit : l'assistant traduit à l'avance les nouveautés et prépare les collections (une poignée de requêtes par jour). */
+    val aiNightly: Boolean = true,
 ) {
     val vodSeekStepMs: Long
         get() = vodSeekStepSeconds * 1_000L
@@ -220,6 +224,8 @@ class AppSettingsStore(context: Context) {
         }.getOrDefault(emptyMap()),
         aiLanguage = preferences.getString(KEY_AI_LANGUAGE, null)
             ?.takeIf { code -> AiLanguages.all.any { it.first == code } } ?: "ar",
+        aiBilingualSubtitles = preferences.getBoolean(KEY_AI_BILINGUAL, false),
+        aiNightly = preferences.getBoolean(KEY_AI_NIGHTLY, true),
     )
 
     fun save(settings: AppSettings) {
@@ -249,6 +255,8 @@ class AppSettingsStore(context: Context) {
             .putBoolean(KEY_AI_ENABLED, settings.aiEnabled)
             .putString(KEY_AI_PROVIDER, settings.aiProvider.name)
             .putString(KEY_AI_LANGUAGE, settings.aiLanguage)
+            .putBoolean(KEY_AI_BILINGUAL, settings.aiBilingualSubtitles)
+            .putBoolean(KEY_AI_NIGHTLY, settings.aiNightly)
             .putString(KEY_AI_MODELS, JSONObject(settings.aiModels.mapKeys { it.key.name }).toString())
             .apply()
     }
@@ -353,6 +361,8 @@ class AppSettingsStore(context: Context) {
         const val KEY_AI_ENABLED = "ai_enabled"
         const val KEY_AI_PROVIDER = "ai_provider"
         const val KEY_AI_LANGUAGE = "ai_language"
+        const val KEY_AI_BILINGUAL = "ai_bilingual_subtitles"
+        const val KEY_AI_NIGHTLY = "ai_nightly"
         const val KEY_AI_MODELS = "ai_models"
         const val KEY_PARENTAL_PIN_SALT = "parental_pin_salt"
         const val KEY_PARENTAL_PIN_HASH = "parental_pin_hash"
@@ -461,4 +471,6 @@ fun appSettingsFromBackupJson(json: JSONObject, fallback: AppSettings): AppSetti
     aiProvider = fallback.aiProvider,
     aiModels = fallback.aiModels,
     aiLanguage = fallback.aiLanguage,
+    aiBilingualSubtitles = fallback.aiBilingualSubtitles,
+    aiNightly = fallback.aiNightly,
 )

@@ -129,6 +129,31 @@ class CatalogCache(context: Context) {
         }
     }
 
+    /** Voir [CatalogDatabase.searchInCategories] ; les contenus déplacés par l'utilisateur gardent leur nouvelle catégorie. */
+    suspend fun searchInCategories(
+        profileId: String,
+        categories: Map<MediaType, Set<String>>,
+        sort: SearchSort,
+        limit: Int,
+    ): List<MediaEntry> = withContext(Dispatchers.IO) {
+        ensureMigrated(profileId)
+        val moves = libraryStore.snapshot(profileId).movedEntries
+        fun wanted(entry: MediaEntry): Boolean = categories[entry.type]?.let { it.isEmpty() || entry.categoryId in it } ?: false
+        // La base filtre sur la catégorie d'origine : on écarte les contenus déplacés ailleurs, puis on ajoute ceux déplacés ici.
+        val fromIndex = database.searchInCategories(profileId, categories, sort, limit)
+            .map { entry -> moves[entry.key]?.let { destination -> entry.copy(categoryId = destination) } ?: entry }
+            .filter(::wanted)
+        val movedIn = moves.filter { (_, destination) -> categories.values.any { destination in it } }.keys
+            .let { keys -> if (keys.isEmpty()) emptyList() else database.loadEntriesByKeys(profileId, keys.toSet()) }
+            .map { entry -> entry.copy(categoryId = moves.getValue(entry.key)) }
+            .filter(::wanted)
+        (fromIndex + movedIn).distinctBy(MediaEntry::key).let { merged ->
+            if (movedIn.isEmpty()) merged
+            else if (sort == SearchSort.Recent) merged.sortedByDescending { it.addedAtEpochSeconds ?: 0L }
+            else merged.sortedByDescending { it.rating ?: -1.0 }
+        }.take(limit)
+    }
+
     suspend fun loadEntriesByKeys(profileId: String, keys: Set<String>): List<MediaEntry> = withContext(Dispatchers.IO) {
         ensureMigrated(profileId)
         database.loadEntriesByKeys(profileId, keys)

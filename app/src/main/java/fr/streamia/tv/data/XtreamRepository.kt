@@ -167,6 +167,14 @@ class XtreamRepository private constructor(context: Context) {
     suspend fun search(profileId: String, query: String, type: MediaType?, limit: Int = 600): List<MediaEntry> =
         cache.search(profileId, query, type, limit)
 
+    /** Contenus de catégories choisies (voir [CatalogDatabase.searchInCategories]), pour la recherche en langage naturel. */
+    suspend fun searchInCategories(
+        profileId: String,
+        categories: Map<MediaType, Set<String>>,
+        sort: SearchSort,
+        limit: Int = 600,
+    ): List<MediaEntry> = cache.searchInCategories(profileId, categories, sort, limit)
+
     /** Prépare les index d'un catalogue massif hors du thread d'interface. */
     suspend fun prepareCatalogPresentation(
         profileId: String,

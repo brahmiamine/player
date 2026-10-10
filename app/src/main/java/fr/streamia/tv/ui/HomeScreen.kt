@@ -82,6 +82,10 @@ fun HomeScreen(
     pendingBlocks: Set<HomeBlock> = emptySet(),
     liveMatchesPending: Boolean = false,
     liveMatchesResolving: Boolean = false,
+    /** Assistant IA actif : la rangée d'accès à ses écrans apparaît, et les raisons des recommandations avec elle. */
+    aiActive: Boolean = false,
+    aiReasons: Map<String, String> = emptyMap(),
+    onOpenAssistant: (AssistantMode) -> Unit = {},
     restoreContext: ContentReturnContext? = null,
     focusTarget: HomeFocusTarget? = null,
     onFocusConsumed: () -> Unit = {},
@@ -103,6 +107,7 @@ fun HomeScreen(
 ) {
     val firstFocus = remember { FocusRequester() }
     val gridFocusRequester = remember { FocusRequester() }
+    val assistantFocus = remember { FocusRequester() }
     val restoringHome = restoreContext?.origin == ContentReturnOrigin.Home
     // À l'arrivée seulement : la cible de retour, une fois consommée, ne doit pas renvoyer le focus à la grille.
     LaunchedEffect(Unit) {
@@ -254,8 +259,11 @@ fun HomeScreen(
         footballScoresEnabled,
         liveMatchesPending,
         pendingBlocks,
+        aiActive,
     ) {
         buildList {
+            // Même ordre que la LazyColumn : la rangée de l'assistant vient juste après la grille d'actions.
+            if (aiActive) add(AI_ASSISTANT_ROW_KEY)
             if (resumeCards.isNotEmpty()) add(HomeRowKey.Resume)
             if (favoriteCards.isNotEmpty()) add(HomeRowKey.Favorites)
             if (recentChannelCards.isNotEmpty()) add(HomeRowKey.RecentChannels)
@@ -294,9 +302,10 @@ fun HomeScreen(
             onFocusConsumed()
             return@LaunchedEffect
         }
-        homeListState.scrollToItem(gridListIndex)
+        val toAssistant = focusTarget == HomeFocusTarget.Assistant && aiActive
+        homeListState.scrollToItem(if (toAssistant) gridListIndex + 1 else gridListIndex)
         delay(RESTORE_FOCUS_DELAY_MS)
-        runCatching { gridFocusRequester.requestFocus() }
+        runCatching { (if (toAssistant) assistantFocus else gridFocusRequester).requestFocus() }
         onFocusConsumed()
     }
 
@@ -372,6 +381,15 @@ fun HomeScreen(
                 modifier = Modifier.fillMaxWidth().height(MainGridHeight),
             )
             Spacer(Modifier.height(CardRowSpacing))
+        }
+
+        if (aiActive) {
+            item(key = AI_ASSISTANT_ROW_KEY, contentType = "ai-assistant") {
+                Column(Modifier.fillMaxWidth()) {
+                    AiAssistantRow(onOpen = onOpenAssistant, firstFocus = assistantFocus)
+                    Spacer(Modifier.height(CardRowSpacing))
+                }
+            }
         }
 
         if (resumeCards.isNotEmpty()) {
@@ -658,6 +676,7 @@ fun HomeScreen(
             Column(Modifier.fillMaxWidth()) {
                 HomeRecommendationRow(
                     row = row,
+                    aiReasons = if (aiActive) aiReasons else emptyMap(),
                     firstFocusRequester = null,
                     restoreItemKey = restoreTarget
                         ?.takeIf { it.homeRowKey == HomeRowKey.recommendation(row.kind) }

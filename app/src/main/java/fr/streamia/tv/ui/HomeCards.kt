@@ -20,12 +20,16 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -120,8 +124,11 @@ internal fun HomeRecommendationRow(
     row: RecommendationRow,
     firstFocusRequester: FocusRequester?,
     restoreItemKey: String?,
+    /** Raisons écrites par l'assistant IA (clé du contenu ↦ phrase) : celle de la carte focalisée s'affiche sous la rangée. */
+    aiReasons: Map<String, String> = emptyMap(),
     onOpenRecommendation: (MediaEntry) -> Unit,
 ) {
+    var focusedKey by remember { mutableStateOf<String?>(null) }
     val rowState = rememberLazyListState()
     val restoreFocus = remember { FocusRequester() }
     val restoreIndex = rememberRowFocusRestore(rowState, restoreItemKey, row.items.map { it.entry.key }, restoreFocus)
@@ -139,9 +146,16 @@ internal fun HomeRecommendationRow(
                 HomeRecommendationCard(
                     recommended = recommended,
                     onClick = { onOpenRecommendation(recommended.entry) },
-                    modifier = cardModifier,
+                    modifier = cardModifier.onFocusChanged { if (it.hasFocus) focusedKey = recommended.entry.key },
                 )
             }
+        }
+        // Place réservée dès qu'une raison existe : la rangée ne saute pas quand le focus passe d'une carte à l'autre.
+        if (aiReasons.isNotEmpty()) {
+            AiReasonLine(
+                aiReasons[focusedKey] ?: aiReasons[row.items.firstOrNull()?.entry?.key],
+                Modifier.padding(horizontal = 14.dp).height(20.dp),
+            )
         }
     }
 }
@@ -248,5 +262,31 @@ private fun HomeProgressBar(progress: Float, modifier: Modifier = Modifier) {
                 .clip(RoundedCornerShape(2.dp))
                 .background(FocusBlueBright),
         )
+    }
+}
+
+internal const val AI_ASSISTANT_ROW_KEY = "ai-assistant"
+
+/** Accès aux écrans de l'assistant IA depuis l'accueil (visible seulement quand l'assistant est actif). */
+@Composable
+internal fun AiAssistantRow(onOpen: (AssistantMode) -> Unit, firstFocus: FocusRequester) {
+    Column(Modifier.fillMaxWidth()) {
+        SectionLabel("✦ Assistant IA", fontSize = 16.sp)
+        Spacer(Modifier.height(10.dp))
+        androidx.compose.foundation.layout.Row(
+            Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            AssistantMode.entries.forEachIndexed { index, mode ->
+                FocusableSurface(
+                    onClick = { onOpen(mode) },
+                    modifier = Modifier.width(250.dp).height(56.dp).then(if (index == 0) Modifier.focusRequester(firstFocus) else Modifier),
+                ) {
+                    androidx.compose.foundation.layout.Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
+                        Text("✦ ${mode.title}", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+            }
+        }
     }
 }

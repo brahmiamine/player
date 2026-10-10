@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import fr.streamia.tv.data.AiProvider
+import fr.streamia.tv.data.FicheInfo
 import fr.streamia.tv.data.AiUsage
 import fr.streamia.tv.data.AppSettings
 import fr.streamia.tv.data.CatalogSource
@@ -71,6 +72,15 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     )
     private val homeGuides = HomeGuidesController(host)
     private val recommendations = RecommendationsController(host)
+    private val aiFeatures = AiController(
+        host,
+        openLive = { entry -> openRemoteEntry(entry) },
+        resumeEntry = { entry -> resumeHomePlayback(entry) },
+        openSearch = { query -> openSearchWith(query) },
+    )
+
+    /** Fonctions de l'assistant IA qui ont leur propre écran (voir [AiUiState]). */
+    val aiState: StateFlow<AiUiState> = aiFeatures.state.asStateFlow()
     private val weather = WeatherController(host)
     private val updates = UpdateController(host)
     private val library = LibraryController(
@@ -98,6 +108,42 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     fun installPendingUpdate() = updates.installPendingUpdate()
     fun openUpdateInstallPermission() = updates.openUpdateInstallPermission()
     fun resumePendingUpdateInstall() = updates.resumePendingUpdateInstall()
+
+    // Assistant IA : chaque fonction est une action de l'utilisateur, jamais un appel automatique à la frappe
+    fun searchWithAi(query: String, type: MediaType?) = aiFeatures.searchWithAi(query, type)
+    fun clearAiSearch() = aiFeatures.clearAiSearch()
+    fun startTonight(answers: fr.streamia.tv.data.TonightAnswers) = aiFeatures.startTonight(answers)
+    fun resetTonight() = aiFeatures.resetTonight()
+    fun loadCollections() = aiFeatures.loadCollections()
+    fun loadBrief(force: Boolean = false) = aiFeatures.loadBrief(force)
+    fun loadRecap() = aiFeatures.loadRecap()
+    fun showAssistant(mode: AssistantMode) {
+        if (!fr.streamia.tv.data.AiGate.active.value) return
+        navigateToMenu(StreamiaScreen.Assistant(mode), HomeFocusTarget.Assistant)
+    }
+
+    /** Message du téléphone (voir [fr.streamia.tv.data.PhoneChatServer]) ; bloquant, appelé hors du thread principal. */
+    fun handleRemoteMessage(text: String): String = kotlinx.coroutines.runBlocking { aiFeatures.handleRemote(text) }
+
+    private fun openRemoteEntry(entry: MediaEntry) {
+        liveZap.zapList = null
+        detailsTrail.clear()
+        _uiState.update { it.copy(contentReturnContext = null) }
+        openEntryInternal(entry)
+    }
+
+    private fun openSearchWith(query: String) {
+        showSearch()
+        _uiState.update { it.copy(searchQuery = query, searchType = null) }
+    }
+
+    /** Contenu ouvert depuis un écran de l'assistant : Retour y ramène (voir [ContentReturnOrigin.Assistant]). */
+    fun openAssistantEntry(entry: MediaEntry, mode: AssistantMode) {
+        liveZap.zapList = null
+        detailsTrail.clear()
+        _uiState.update { it.copy(contentReturnContext = ContentReturnContext.assistant(mode, entry.key)) }
+        openEntryInternal(entry)
+    }
 
     // Accueil : météo et matchs du jour
     fun refreshWeatherIfStale() = weather.refreshWeatherIfStale()
@@ -814,6 +860,14 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         updateAppSettings { it.copy(aiEnabled = !it.aiEnabled) }
     }
 
+    fun toggleAiBilingual() {
+        updateAppSettings { it.copy(aiBilingualSubtitles = !it.aiBilingualSubtitles) }
+    }
+
+    fun toggleAiNightly() {
+        updateAppSettings { it.copy(aiNightly = !it.aiNightly) }
+    }
+
     fun setAiLanguage(code: String) {
         updateAppSettings { it.copy(aiLanguage = code) }
     }
@@ -1029,7 +1083,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             it.copy(
                 screen = it.contentReturnContext?.destinationScreen() ?: StreamiaScreen.Browser,
                 mediaDetails = null,
-                similarMedia = emptyList(), aiPlot = null, aiSimilarKeys = null, aiPlotLoading = false, aiSimilarLoading = false,
+                similarMedia = emptyList(), aiPlot = null, aiSimilarKeys = null, aiPlotLoading = false, aiSimilarLoading = false, aiReview = null, aiReviewLoading = false, aiRecap = null, aiRecapLoading = false, aiRecapAvailable = false, aiRecapError = null,
                 similarLoading = false,
                 message = null,
             )
@@ -1038,7 +1092,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     /** Fiche ouverte depuis une autre fiche (contenu similaire) : Retour rouvre la précédente. */
     private fun reopenPreviousDetails(): Boolean {
         val previous = detailsTrail.removeLastOrNull() ?: return false
-        _uiState.update { it.copy(mediaDetails = null, seriesDetails = null, similarMedia = emptyList(), aiPlot = null, aiSimilarKeys = null, aiPlotLoading = false, aiSimilarLoading = false, similarLoading = false, message = null) }
+        _uiState.update { it.copy(mediaDetails = null, seriesDetails = null, similarMedia = emptyList(), aiPlot = null, aiSimilarKeys = null, aiPlotLoading = false, aiSimilarLoading = false, aiReview = null, aiReviewLoading = false, aiRecap = null, aiRecapLoading = false, aiRecapAvailable = false, aiRecapError = null, similarLoading = false, message = null) }
         openEntryInternal(previous)
         return true
     }
@@ -1049,7 +1103,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             it.copy(
                 screen = it.contentReturnContext?.destinationScreen() ?: StreamiaScreen.Browser,
                 seriesDetails = null,
-                similarMedia = emptyList(), aiPlot = null, aiSimilarKeys = null, aiPlotLoading = false, aiSimilarLoading = false,
+                similarMedia = emptyList(), aiPlot = null, aiSimilarKeys = null, aiPlotLoading = false, aiSimilarLoading = false, aiReview = null, aiReviewLoading = false, aiRecap = null, aiRecapLoading = false, aiRecapAvailable = false, aiRecapError = null,
                 similarLoading = false,
                 message = null,
             )
@@ -1136,7 +1190,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             it.copy(
                 busy = true,
                 mediaDetails = null,
-                similarMedia = emptyList(), aiPlot = null, aiSimilarKeys = null, aiPlotLoading = false, aiSimilarLoading = false,
+                similarMedia = emptyList(), aiPlot = null, aiSimilarKeys = null, aiPlotLoading = false, aiSimilarLoading = false, aiReview = null, aiReviewLoading = false, aiRecap = null, aiRecapLoading = false, aiRecapAvailable = false, aiRecapError = null,
                 similarLoading = profileId != null,
                 screen = StreamiaScreen.MovieDetails(movie),
                 message = null,
@@ -1160,7 +1214,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 resolvedDetails?.let { runCatching { repository.cacheRecommendationDetails(profileId, it) } }
                 recommendations.loadSimilarMedia(profileId, movie, resolvedDetails)
                 endSimilarLoading(movie)
-                enrichWithAi(movie, resolvedDetails?.plot ?: movie.plot)
+                enrichWithAi(movie, resolvedDetails?.plot ?: movie.plot, resolvedDetails)
             }
         }
     }
@@ -1173,7 +1227,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 busy = true,
                 message = null,
                 seriesDetails = null,
-                similarMedia = emptyList(), aiPlot = null, aiSimilarKeys = null, aiPlotLoading = false, aiSimilarLoading = false,
+                similarMedia = emptyList(), aiPlot = null, aiSimilarKeys = null, aiPlotLoading = false, aiSimilarLoading = false, aiReview = null, aiReviewLoading = false, aiRecap = null, aiRecapLoading = false, aiRecapAvailable = false, aiRecapError = null,
                 similarLoading = profileId != null,
                 screen = StreamiaScreen.Series(series),
             )
@@ -1189,16 +1243,18 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                 }
                 .onFailure { error -> _uiState.update { it.copy(busy = false, message = error.safeMessage()) } }
             endSimilarLoading(series)
-            enrichWithAi(series, _uiState.value.seriesDetails?.details?.plot ?: series.plot)
+            val loaded = _uiState.value.seriesDetails
+            aiFeatures.prepareRecap(series, loaded)
+            enrichWithAi(series, loaded?.details?.plot ?: series.plot, loaded?.details)
         }
     }
 
     /**
-     * Fonctions IA d'une fiche Film/Série, dans l'ordre : description traduite, similaires
-     * reclassés. Sans effet si l'assistant est désactivé ; un résultat qui arrive après la fermeture de la
-     * fiche (ou la désactivation) est jeté.
+     * Fonctions IA d'une fiche Film/Série en **une seule requête** : description traduite, similaires reclassés et avis
+     * rapide. Sans effet si l'assistant est désactivé ; un résultat qui arrive après la fermeture de la fiche (ou la
+     * désactivation) est jeté.
      */
-    private suspend fun enrichWithAi(entry: MediaEntry, plot: String?) {
+    private suspend fun enrichWithAi(entry: MediaEntry, plot: String?, details: MediaDetails? = null) {
         if (!repository.ai.isActive()) return
         fun onSameEntry(state: StreamiaUiState) = when (val screen = state.screen) {
             is StreamiaScreen.MovieDetails -> screen.movie.key == entry.key
@@ -1206,18 +1262,35 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             else -> false
         }
         val similar = _uiState.value.similarMedia.map { it.entry }
-        if (plot.isNullOrBlank() && similar.isEmpty()) return
+        val info = FicheInfo(
+            genre = details?.genre,
+            year = details?.releaseDate?.take(4),
+            director = details?.director,
+            cast = details?.cast,
+            country = details?.country,
+            rating = details?.rating ?: entry.rating,
+            plot = plot,
+        ).takeIf(FicheInfo::hasMaterial)
+        if (plot.isNullOrBlank() && similar.isEmpty() && info == null) return
         _uiState.update {
-            if (onSameEntry(it)) it.copy(aiPlotLoading = !plot.isNullOrBlank(), aiSimilarLoading = similar.isNotEmpty()) else it
+            if (onSameEntry(it)) {
+                it.copy(aiPlotLoading = !plot.isNullOrBlank(), aiSimilarLoading = similar.isNotEmpty(), aiReviewLoading = info != null)
+            } else {
+                it
+            }
         }
         try {
-            // Une seule requête pour la traduction et les similaires quand les deux manquent au cache.
-            val result = repository.ai.enrichFiche(entry, plot, similar)
+            // Une seule requête pour la traduction, les similaires et l'avis quand plusieurs manquent au cache.
+            val result = repository.ai.enrichFiche(entry, plot, similar, info)
             _uiState.update {
-                if (onSameEntry(it)) it.copy(aiPlot = result.plot ?: it.aiPlot, aiSimilarKeys = result.similarKeys ?: it.aiSimilarKeys) else it
+                if (onSameEntry(it)) {
+                    it.copy(aiPlot = result.plot ?: it.aiPlot, aiSimilarKeys = result.similarKeys ?: it.aiSimilarKeys, aiReview = result.review ?: it.aiReview)
+                } else {
+                    it
+                }
             }
         } finally {
-            _uiState.update { if (onSameEntry(it)) it.copy(aiPlotLoading = false, aiSimilarLoading = false) else it }
+            _uiState.update { if (onSameEntry(it)) it.copy(aiPlotLoading = false, aiSimilarLoading = false, aiReviewLoading = false) else it }
         }
     }
 
@@ -1371,6 +1444,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         _playerState.value = PlayerUiState()
         epg.reset()
         recommendations.reset()
+        aiFeatures.reset()
         homeGuides.resetAll()
         resetUiState(StreamiaUiState(
             booting = false,

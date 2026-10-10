@@ -1,6 +1,7 @@
 package fr.streamia.tv.ui
 
 import fr.streamia.tv.beinsports.ResolvedBeinProgrammeItem
+import fr.streamia.tv.data.AiReview
 import fr.streamia.tv.data.AppSettings
 import fr.streamia.tv.data.CurrentWeather
 import fr.streamia.tv.data.HomeBlock
@@ -62,6 +63,14 @@ data class StreamiaUiState(
     val aiPlotLoading: Boolean = false,
     /** Reclassement des similaires par l'IA en cours (icône animée sur la fiche). */
     val aiSimilarLoading: Boolean = false,
+    /** Avis rapide de l'IA sur la fiche ouverte (public, ambiance, points sensibles). */
+    val aiReview: AiReview? = null,
+    val aiReviewLoading: Boolean = false,
+    /** « Précédemment dans… » de la série ouverte, et vrai quand on peut le demander (épisodes vus avec de quoi les résumer). */
+    val aiRecap: String? = null,
+    val aiRecapLoading: Boolean = false,
+    val aiRecapAvailable: Boolean = false,
+    val aiRecapError: String? = null,
     /** Premier calcul de « Films/Séries similaires » en cours pour la fiche ouverte (cartes fantômes). */
     val similarLoading: Boolean = false,
     val resumePositionMs: Long = 0,
@@ -146,6 +155,8 @@ sealed interface StreamiaScreen {
     data object Epg : StreamiaScreen
     data object Organizer : StreamiaScreen
     data object LiveMatches : StreamiaScreen
+    /** Écrans de l'assistant IA : Ce soir, Collections, Quoi de neuf, Télécommande téléphone (voir [AssistantMode]). */
+    data class Assistant(val mode: AssistantMode) : StreamiaScreen
     /** Menu « Plus » de l'interface mobile (recherche, guide, matchs, organiser, paramètres…). */
     data object More : StreamiaScreen
     data class MovieDetails(val movie: MediaEntry) : StreamiaScreen

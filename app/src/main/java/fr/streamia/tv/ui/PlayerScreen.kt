@@ -450,10 +450,12 @@ fun PlayerScreen(
                 text = withContext(Dispatchers.IO) { file.readText() },
                 vtt = vtt,
                 sourceLanguage = normalizeLanguage(result.language),
+                bilingual = appSettings.aiBilingualSubtitles,
+                glossaryKey = seriesTitle ?: entry.name,
             ) { done, total -> onlineSubtitleStatus = "$AI_SUBTITLE_STATUS_PREFIX ${done + 1}/$total…".takeIf { done < total } }
             onlineSubtitleStatus = null
             if (translated != null && AiGate.active.value) {
-                shown = java.io.File(directory, "ai-${file.nameWithoutExtension}-${appSettings.aiLanguage}.${file.extension}")
+                shown = java.io.File(directory, "ai-${file.nameWithoutExtension}-${appSettings.aiLanguage}${if (appSettings.aiBilingualSubtitles) "-bi" else ""}.${file.extension}")
                 withContext(Dispatchers.IO) { shown.writeText(translated, Charsets.UTF_8) }
                 val originalLabel = label
                 label = "${AiLanguages.name(appSettings.aiLanguage)} (IA) · ${result.provider}.${file.extension}"
@@ -534,6 +536,33 @@ fun PlayerScreen(
                 }.getOrNull()
             }
             if (copy != null) loadExternalSubtitle(Uri.fromFile(copy), displayName, base = copy) else loadExternalSubtitle(uri, displayName)
+        }
+    }
+
+    // Conseil de lecture de l'assistant : une requête sur demande, à partir des mesures du lecteur (rien d'autre n'est envoyé).
+    var adviceText by remember(entry.key) { mutableStateOf<String?>(null) }
+    var adviceLoading by remember(entry.key) { mutableStateOf(false) }
+    LaunchedEffect(aiActive) { if (!aiActive) { adviceText = null; adviceLoading = false } }
+    fun requestAdvice() {
+        if (adviceLoading || !AiGate.active.value) return
+        adviceLoading = true
+        val report = buildString {
+            append(if (entry.type == MediaType.Live) "Flux : direct" else "Flux : vidéo à la demande")
+            append("\nRésolution : ").append(technicalInfo.resolutionText)
+            append("\nImages par seconde annoncées : ").append(technicalInfo.fpsText)
+            append("\nCodec : ").append(technicalInfo.codec ?: "inconnu")
+            append("\nDébit : ").append(technicalInfo.bitrateText)
+            append("\nTransport : ").append(streamTransportLabel(activeStreamUrl))
+            append("\nDiagnostic : ").append(diagnosticsText(diagnostics))
+            append("\nStabilité du flux réglée sur : ").append(appSettings.bufferMode.name)
+            append("\nFormat Live : ").append(appSettings.liveStreamFormat.name)
+            append("\nSecours automatique : ").append(if (appSettings.liveVersionFailover) "activé" else "désactivé")
+            playbackError?.let { append("\nErreur : ").append(it.take(120)) }
+        }
+        subtitleScope.launch {
+            val advice = aiAssistant.playbackAdvice(report)
+            adviceLoading = false
+            if (AiGate.active.value) adviceText = advice ?: "Conseil indisponible pour l'instant."
         }
     }
 
@@ -1671,6 +1700,10 @@ fun PlayerScreen(
                 onShiftSubtitle = { subtitleOffsetMs += it },
                 onResetSubtitleShift = { subtitleOffsetMs = 0L },
                 aiTranslateLanguage = AiLanguages.name(appSettings.aiLanguage).replaceFirstChar(Char::uppercase).takeIf { aiActive },
+                adviceAvailable = aiActive,
+                adviceText = adviceText,
+                adviceLoading = adviceLoading,
+                onRequestAdvice = ::requestAdvice,
                 onPickExternalSubtitleFile = {
                     // Les fournisseurs de documents décrivent rarement .srt/.vtt avec un type MIME
                     // fiable (souvent text/plain ou application/octet-stream) : on filtre large côté

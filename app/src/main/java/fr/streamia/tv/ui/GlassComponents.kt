@@ -160,6 +160,11 @@ fun glassBlobsFor(screen: StreamiaScreen): List<GlassBlob> = when (screen) {
         GlassBlob(Offset(0.13f, 0.12f), 0.234f, Color(0xFFFF375F)),
         GlassBlob(Offset(0.93f, 0.56f), 0.208f, Color(0xFF5E5CE6)),
     )
+    // L'assistant IA : halos violet et rose, les teintes de son icône.
+    is StreamiaScreen.Assistant -> listOf(
+        GlassBlob(Offset(0.88f, 0.10f), 0.234f, Color(0xFFBF5AF2)),
+        GlassBlob(Offset(0.09f, 0.92f), 0.182f, Color(0xFFFF375F)),
+    )
 }
 
 /** Bouton d'action principale : pilule dégradé accent avec lueur, texte blanc gras — l'équivalent

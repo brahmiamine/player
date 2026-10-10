@@ -9,8 +9,17 @@ enum class AiFeature(val label: String) {
     Translation("Traductions"),
     Similar("Similaires"),
     Subtitles("Sous-titres"),
-    /** Traduction et similaires d'une fiche demandés ensemble (une requête au lieu de deux). */
+    /** Traduction, avis rapide et similaires d'une fiche demandés ensemble (une requête au lieu de trois). */
     Fiche("Fiches"),
+    Search("Recherche"),
+    Tonight("Ce soir"),
+    Collections("Collections"),
+    Explain("Explications"),
+    Recap("Résumés"),
+    Brief("Quoi de neuf"),
+    Advice("Conseils de lecture"),
+    Remote("Télécommande"),
+    Nightly("Pré-calcul"),
 }
 
 /** Ce que le fournisseur annonce d'un modèle dans sa liste `/models` (tout est facultatif). */

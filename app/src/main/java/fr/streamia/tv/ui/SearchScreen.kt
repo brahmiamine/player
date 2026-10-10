@@ -57,9 +57,18 @@ fun SearchScreen(
     onOpenEntry: (MediaEntry) -> Unit,
     onToggleEntryFavorite: (MediaEntry) -> Unit,
     onBack: () -> Unit,
+    /** Assistant actif : un bouton comprend une demande en phrase (« un film d'action des années 90 ») et montre ses résultats. */
+    aiActive: Boolean = false,
+    aiSearch: AiSearchUiState = AiSearchUiState(),
+    onAiSearch: (String, MediaType?) -> Unit = { _, _ -> },
+    onClearAiSearch: () -> Unit = {},
 ) {
     BackHandler(onBack = onBack)
     val needle = query.trim().lowercase()
+    // Résultats de l'assistant seulement pour le texte exact qu'il a traité ; le champ modifié, ils s'effacent.
+    val aiForQuery = aiSearch.takeIf { aiActive && it.query == query.trim() && it.type == type }
+    val aiEntries = aiForQuery?.result?.entries.orEmpty()
+    val showAi = aiEntries.isNotEmpty()
     // Les résultats précédents restent affichés pendant la frappe, avec « Recherche… » : un
     // produceState repartait d'une liste vide et affichait « Aucun résultat » avant la réponse.
     var entries by remember { mutableStateOf(emptyList<MediaEntry>()) }
@@ -75,18 +84,20 @@ fun SearchScreen(
         entries = search(needle, type)
         searching = false
     }
-    val capped = entries.size >= SEARCH_RESULT_LIMIT
+    val shown = if (showAi) aiEntries else entries
+    val capped = !showAi && entries.size >= SEARCH_RESULT_LIMIT
     val resultLabel = when {
         needle.isBlank() -> ""
-        searching -> "Recherche…"
+        aiForQuery?.loading == true -> "L'assistant cherche…"
+        searching && !showAi -> "Recherche…"
         capped -> "$SEARCH_RESULT_LIMIT+ résultats"
-        entries.size == 1 -> "1 résultat"
-        else -> "${entries.size} résultats"
+        shown.size == 1 -> "1 résultat"
+        else -> "${shown.size} résultats"
     }
     val resultListState = rememberLazyListState()
     val restoreFocus = remember { FocusRequester() }
-    LaunchedEffect(restoreEntryKey, entries) {
-        val targetIndex = entries.indexOfFirst { it.key == restoreEntryKey }
+    LaunchedEffect(restoreEntryKey, shown) {
+        val targetIndex = shown.indexOfFirst { it.key == restoreEntryKey }
         if (targetIndex >= 0) {
             resultListState.scrollToItem(targetIndex)
             delay(RESTORE_SEARCH_FOCUS_DELAY_MS)
@@ -123,6 +134,27 @@ fun SearchScreen(
             MediaType.entries.forEach { mediaType ->
                 SearchFilter(mediaType.displayName, type == mediaType) { onTypeChange(mediaType) }
             }
+            if (aiActive && needle.length >= MIN_AI_QUERY_CHARS) {
+                Spacer(Modifier.weight(1f))
+                FocusableSurface(
+                    onClick = { onAiSearch(query.trim(), type) },
+                    enabled = aiForQuery?.loading != true,
+                    accent = true,
+                    modifier = Modifier.width(290.dp).height(46.dp),
+                ) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        AiButtonLabel("Chercher avec l'IA", aiForQuery?.loading == true)
+                    }
+                }
+            }
+        }
+        if (aiForQuery != null) {
+            Spacer(Modifier.height(8.dp))
+            AiLoadingIndicator("L'assistant comprend votre recherche…", aiForQuery.loading)
+            aiForQuery.result?.plan?.summary?.takeIf(String::isNotBlank)?.let { summary ->
+                Text("✦ $summary", color = FocusBlueBright, fontSize = TypeLabel, fontWeight = FontWeight.SemiBold)
+            }
+            aiForQuery.error?.let { Text(it, color = MutedInk, fontSize = TypeLabel) }
         }
         Spacer(Modifier.height(18.dp))
 
@@ -146,9 +178,15 @@ fun SearchScreen(
             }
         } else {
             Column(Modifier.fillMaxSize()) {
-                SectionLabel(if (capped) "Contenus ($SEARCH_RESULT_LIMIT premiers — précisez la recherche)" else "Contenus (${entries.size})")
+                SectionLabel(
+                    when {
+                        showAi -> "Sélection de l'assistant (${shown.size})"
+                        capped -> "Contenus ($SEARCH_RESULT_LIMIT premiers — précisez la recherche)"
+                        else -> "Contenus (${entries.size})"
+                    },
+                )
                 Spacer(Modifier.height(10.dp))
-                if (entries.isEmpty() && !searching) {
+                if (shown.isEmpty() && !searching && aiForQuery?.loading != true) {
                     GlassSurface(modifier = Modifier.fillMaxWidth()) {
                         Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
                             Text("Aucun résultat pour « $query ».", color = MutedInk, fontSize = TypeBody)
@@ -156,7 +194,7 @@ fun SearchScreen(
                     }
                 }
                 LazyColumn(state = resultListState, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(entries, key = MediaEntry::key) { entry ->
+                    items(shown, key = MediaEntry::key) { entry ->
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             FocusableSurface(
                                 onClick = { onOpenEntry(entry) },
@@ -215,6 +253,9 @@ private fun SearchFilter(label: String, selected: Boolean, onClick: () -> Unit) 
 }
 
 private const val RESTORE_SEARCH_FOCUS_DELAY_MS = 60L
+
+/** En dessous, la demande est trop courte pour être une phrase à comprendre. */
+private const val MIN_AI_QUERY_CHARS = 4
 
 /** Plafond de [fr.streamia.tv.data.XtreamRepository.search] : au-delà, l'utilisateur est invité à préciser. */
 private const val SEARCH_RESULT_LIMIT = 600
