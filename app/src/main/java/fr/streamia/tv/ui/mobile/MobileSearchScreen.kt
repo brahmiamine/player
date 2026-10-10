@@ -2,6 +2,7 @@ package fr.streamia.tv.ui.mobile
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -35,6 +36,9 @@ import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
 import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.MediaType
+import fr.streamia.tv.ui.AiButtonLabel
+import fr.streamia.tv.ui.AiLoadingIndicator
+import fr.streamia.tv.ui.AiSearchUiState
 import fr.streamia.tv.ui.ChannelLogo
 import fr.streamia.tv.ui.StreamiaIcon
 import fr.streamia.tv.ui.StreamiaIconGlyph
@@ -64,9 +68,29 @@ fun MobileSearchScreen(
     onOpenEntry: (MediaEntry) -> Unit,
     onToggleEntryFavorite: (MediaEntry) -> Unit,
     onBack: () -> Unit,
+    /** Assistant actif : recherche en phrase (au clavier ou à la voix), résultats vérifiés dans la playlist. */
+    aiActive: Boolean = false,
+    aiSearch: AiSearchUiState = AiSearchUiState(),
+    onAiSearch: (String, MediaType?) -> Unit = { _, _ -> },
+    onClearAiSearch: () -> Unit = {},
 ) {
     BackHandler(onBack = onBack)
     val needle = query.trim().lowercase()
+    val aiForQuery = aiSearch.takeIf { aiActive && it.query == query.trim() }
+    val aiEntries = aiForQuery?.result?.entries.orEmpty()
+    val showAi = aiEntries.isNotEmpty()
+    // Voix : le micro du clavier de reconnaissance du téléphone remplit le champ, puis l'assistant comprend la phrase.
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val speech = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()) { result ->
+        val spoken = result.data?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()?.trim().orEmpty()
+        if (spoken.isNotEmpty()) {
+            onQueryChange(spoken)
+            onAiSearch(spoken, type)
+        }
+    }
+    val canSpeak = remember {
+        context.packageManager.queryIntentActivities(android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH), 0).isNotEmpty()
+    }
     var entries by remember { mutableStateOf(emptyList<MediaEntry>()) }
     var searching by remember { mutableStateOf(false) }
     var actions by remember { mutableStateOf<MediaEntry?>(null) }
@@ -75,9 +99,10 @@ fun MobileSearchScreen(
     val targetKey = remember { restoreEntryKey }
     var restored by remember { mutableStateOf(false) }
     // Les résultats sont relancés au retour : une fois la liste revenue, on se replace sur l'élément ouvert (après l'en-tête).
-    LaunchedEffect(entries) {
+    val shown = if (showAi) aiEntries else entries
+    LaunchedEffect(shown) {
         if (targetKey == null || restored) return@LaunchedEffect
-        val index = entries.indexOfFirst { it.key == targetKey }
+        val index = shown.indexOfFirst { it.key == targetKey }
         if (index >= 0) {
             listState.scrollToItem(index + 1)
             restored = true
@@ -104,7 +129,30 @@ fun MobileSearchScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 MobileIconButton(StreamiaIconGlyph.ArrowBack, onClick = onBack)
-                TvTextField(query, onQueryChange, "Chaîne, film ou série", Modifier.weight(1f))
+                TvTextField(query, onQueryChange, if (aiActive) "Chaîne, film, série… ou une phrase" else "Chaîne, film ou série", Modifier.weight(1f))
+                if (aiActive && canSpeak) {
+                    MobileIconButton(StreamiaIconGlyph.Mic, onClick = {
+                        speech.launch(
+                            android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+                                .putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                                .putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, "Que voulez-vous regarder ?"),
+                        )
+                    })
+                }
+            }
+            if (aiActive && needle.length >= MIN_AI_QUERY_CHARS) {
+                Spacer(Modifier.height(6.dp))
+                Row(Modifier.fillMaxWidth().padding(horizontal = MobileGutter), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Box(
+                        Modifier.clip(RoundedCornerShape(50)).background(AccentPink).clickable(enabled = aiForQuery?.loading != true) { onAiSearch(query.trim(), type) }
+                            .padding(horizontal = 16.dp, vertical = 9.dp),
+                    ) { AiButtonLabel("Chercher avec l'IA", aiForQuery?.loading == true) }
+                    AiLoadingIndicator("L'assistant comprend…", aiForQuery?.loading == true)
+                }
+                aiForQuery?.result?.plan?.summary?.takeIf(String::isNotBlank)?.let { summary ->
+                    Text("✦ $summary", color = AccentPinkText, fontSize = 12.sp, modifier = Modifier.padding(horizontal = MobileGutter, vertical = 4.dp))
+                }
+                aiForQuery?.error?.let { Text(it, color = MutedInk, fontSize = 12.sp, modifier = Modifier.padding(horizontal = MobileGutter, vertical = 4.dp)) }
             }
             Spacer(Modifier.height(8.dp))
             MobileChipRow {
@@ -116,8 +164,8 @@ fun MobileSearchScreen(
             Spacer(Modifier.height(10.dp))
             when {
                 needle.isBlank() -> MobileEmptyState("Tapez quelques lettres pour rechercher dans tout le catalogue.")
-                entries.isEmpty() && searching -> MobileEmptyState("Recherche…")
-                entries.isEmpty() -> MobileEmptyState("Aucun résultat pour « $query ».")
+                shown.isEmpty() && (searching || aiForQuery?.loading == true) -> MobileEmptyState("Recherche…")
+                shown.isEmpty() -> MobileEmptyState("Aucun résultat pour « $query ».")
                 else -> LazyColumn(
                     Modifier.fillMaxSize(),
                     state = listState,
@@ -126,13 +174,13 @@ fun MobileSearchScreen(
                 ) {
                     item {
                         Text(
-                            if (searching) "Recherche…" else if (entries.size == 1) "1 résultat" else "${entries.size} résultats",
+                            if (showAi) "Sélection de l'assistant · ${shown.size}" else if (searching) "Recherche…" else if (shown.size == 1) "1 résultat" else "${shown.size} résultats",
                             color = MutedInk,
                             fontSize = 12.sp,
                             modifier = Modifier.padding(horizontal = 4.dp),
                         )
                     }
-                    items(entries, key = { it.key }) { entry ->
+                    items(shown, key = { it.key }) { entry ->
                         MobileCard(
                             Modifier.fillMaxWidth().then(
                                 if (entry.key == targetKey) Modifier.border(2.dp, fr.streamia.tv.ui.theme.AccentPink, RoundedCornerShape(fr.streamia.tv.ui.theme.RadiusTile)) else Modifier,
@@ -186,3 +234,6 @@ fun MobileSearchScreen(
         }
     }
 }
+
+/** En dessous, la demande est trop courte pour être une phrase à comprendre. */
+private const val MIN_AI_QUERY_CHARS = 4

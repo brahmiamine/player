@@ -30,7 +30,7 @@ import kotlin.math.sin
 enum class StreamiaIconGlyph {
     Live, Movie, Series, Search, Guide, Settings, Refresh, Swap,
     Star, StarOutline, ChevronUp, ChevronDown, CheckboxOn, CheckboxOff, ArrowBack, ArrowForward,
-    Reorder, Delete, Lock, Eye, EyeOff, Home, Menu, Trophy, Close,
+    Reorder, Delete, Lock, Eye, EyeOff, Home, Menu, Trophy, Close, Mic,
 }
 
 @Composable
@@ -72,6 +72,7 @@ fun StreamiaIcon(
             StreamiaIconGlyph.Menu -> drawMenu(tint, stroke)
             StreamiaIconGlyph.Trophy -> drawTrophy(tint, stroke)
             StreamiaIconGlyph.Close -> drawClose(tint, stroke)
+            StreamiaIconGlyph.Mic -> drawMic(tint, stroke)
         }
     }
 }
@@ -317,6 +318,28 @@ private fun DrawScope.drawLock(tint: Color, stroke: Stroke) {
         cornerRadius = CornerRadius(size.minDimension * 0.10f),
         style = Fill,
     )
+}
+
+/** Micro : capsule pleine, arceau ouvert dessous, pied. */
+private fun DrawScope.drawMic(tint: Color, stroke: Stroke) {
+    drawRoundRect(
+        tint,
+        topLeft = pt(0.37f, 0.10f),
+        size = Size(size.width * 0.26f, size.height * 0.46f),
+        cornerRadius = CornerRadius(size.minDimension * 0.13f),
+        style = Fill,
+    )
+    drawArc(
+        tint,
+        startAngle = 0f,
+        sweepAngle = 180f,
+        useCenter = false,
+        topLeft = pt(0.25f, 0.28f),
+        size = Size(size.width * 0.50f, size.height * 0.40f),
+        style = stroke,
+    )
+    drawLine(tint, pt(0.50f, 0.68f), pt(0.50f, 0.86f), strokeWidth = stroke.width, cap = StrokeCap.Round)
+    drawLine(tint, pt(0.36f, 0.88f), pt(0.64f, 0.88f), strokeWidth = stroke.width, cap = StrokeCap.Round)
 }
 
 private fun DrawScope.drawCheckbox(tint: Color, stroke: Stroke, checked: Boolean) {

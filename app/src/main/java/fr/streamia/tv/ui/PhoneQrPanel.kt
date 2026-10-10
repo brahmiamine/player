@@ -65,7 +65,7 @@ fun PhoneQrPanel(onSubmit: (Map<String, String>) -> Unit) {
     }
 }
 
-private fun qrBitmap(text: String): Bitmap {
+internal fun qrBitmap(text: String): Bitmap {
     val m = QRCodeWriter().encode(text, BarcodeFormat.QR_CODE, 0, 0)
     val quiet = 2 // marge blanche, indispensable pour la détection
     val size = m.width + 2 * quiet

@@ -129,6 +129,20 @@ class CatalogCache(context: Context) {
         }
     }
 
+    /** Voir [CatalogDatabase.searchInCategories] ; les contenus déplacés par l'utilisateur gardent leur nouvelle catégorie. */
+    suspend fun searchInCategories(
+        profileId: String,
+        categories: Map<MediaType, Set<String>>,
+        sort: SearchSort,
+        limit: Int,
+    ): List<MediaEntry> = withContext(Dispatchers.IO) {
+        ensureMigrated(profileId)
+        val moves = libraryStore.snapshot(profileId).movedEntries
+        database.searchInCategories(profileId, categories, sort, limit).map { entry ->
+            moves[entry.key]?.let { destination -> entry.copy(categoryId = destination) } ?: entry
+        }
+    }
+
     suspend fun loadEntriesByKeys(profileId: String, keys: Set<String>): List<MediaEntry> = withContext(Dispatchers.IO) {
         ensureMigrated(profileId)
         database.loadEntriesByKeys(profileId, keys)

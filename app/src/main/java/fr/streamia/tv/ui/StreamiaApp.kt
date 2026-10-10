@@ -130,6 +130,8 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
     // État de l'accueil (guides, matchs, recommandations, météo) : flux séparé, lu (.value)
     // seulement dans les écrans qui l'affichent — ses mises à jour ne recomposent pas les autres.
     val homeStateHolder = viewModel.homeState.collectAsStateWithLifecycle()
+    // Assistant IA (recherche naturelle, Ce soir, collections…) : lu (.value) seulement par les écrans concernés.
+    val aiStateHolder = viewModel.aiState.collectAsStateWithLifecycle()
     val liveOnSatMatchesHolder = viewModel.visibleLiveOnSatMatches.collectAsStateWithLifecycle()
     val liveEpgProgramsHolder = viewModel.liveEpgPrograms.collectAsStateWithLifecycle()
 
@@ -305,6 +307,10 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                         ?.itemKey,
                     onRestoreConsumed = viewModel::consumeSearchRestore,
                     search = viewModel::searchCatalog,
+                    aiActive = aiActive,
+                    aiSearch = aiStateHolder.value.search,
+                    onAiSearch = viewModel::searchWithAi,
+                    onClearAiSearch = viewModel::clearAiSearch,
                     onQueryChange = viewModel::updateSearchQuery,
                     onTypeChange = viewModel::updateSearchType,
                     onOpenEntry = viewModel::openSearchEntry,
@@ -341,6 +347,10 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                         watched = movie.key in state.library.watchedEntries,
                         resumePositionMs = resume,
                         translatedPlot = state.aiPlot.takeIf { aiActive },
+                        aiReview = state.aiReview.takeIf { aiActive },
+                        aiReviewLoading = aiActive && state.aiReviewLoading,
+                        aiPlotLoading = aiActive && state.aiPlotLoading,
+                        aiSimilarLoading = aiActive && state.aiSimilarLoading,
                         similarMedia = state.similarMedia.withAiOrder(state.aiSimilarKeys.takeIf { aiActive }),
                         otherVersions = otherVersions.orEmpty(),
                         episodeHistory = emptyList(),
@@ -368,6 +378,15 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                         watched = series.key in state.library.watchedEntries,
                         resumePositionMs = 0L,
                         translatedPlot = state.aiPlot.takeIf { aiActive },
+                        aiReview = state.aiReview.takeIf { aiActive },
+                        aiReviewLoading = aiActive && state.aiReviewLoading,
+                        aiPlotLoading = aiActive && state.aiPlotLoading,
+                        aiSimilarLoading = aiActive && state.aiSimilarLoading,
+                        aiRecap = state.aiRecap.takeIf { aiActive },
+                        aiRecapLoading = aiActive && state.aiRecapLoading,
+                        aiRecapAvailable = aiActive && state.aiRecapAvailable,
+                        aiRecapError = state.aiRecapError.takeIf { aiActive },
+                        onRequestRecap = viewModel::loadRecap,
                         similarMedia = state.similarMedia.withAiOrder(state.aiSimilarKeys.takeIf { aiActive }),
                         otherVersions = otherVersions.orEmpty(),
                         episodeHistory = state.library.history,
@@ -509,6 +528,9 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                   }
                   HomeScreen(
                     catalog = state.catalog!!,
+                    aiActive = aiActive,
+                    aiReasons = aiStateHolder.value.reasons,
+                    onOpenAssistant = viewModel::showAssistant,
                     weatherPlace = homeState.weatherPlace,
                     weather = homeState.weather,
                     prayerMethod = state.appSettings.prayerMethod,
@@ -699,6 +721,10 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                         ?.takeIf { it.origin == ContentReturnOrigin.Search }
                         ?.itemKey,
                     search = viewModel::searchCatalog,
+                    aiActive = aiActive,
+                    aiSearch = aiStateHolder.value.search,
+                    onAiSearch = viewModel::searchWithAi,
+                    onClearAiSearch = viewModel::clearAiSearch,
                     onQueryChange = viewModel::updateSearchQuery,
                     onTypeChange = viewModel::updateSearchType,
                     onOpenEntry = viewModel::openSearchEntry,
@@ -761,6 +787,45 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onBack = viewModel::closeOrganizer,
                 )
 
+                state.screen is StreamiaScreen.Assistant -> {
+                    val mode = (state.screen as StreamiaScreen.Assistant).mode
+                    val ai = aiStateHolder.value
+                    // Assistant coupé (Paramètres, ou depuis le téléphone) : ses écrans se ferment, rien ne reste en route.
+                    LaunchedEffect(aiActive) { if (!aiActive) viewModel.backFromMenu() }
+                    if (aiActive) {
+                        when (mode) {
+                            AssistantMode.Tonight -> TonightScreen(
+                                state = ai.tonight,
+                                onStart = viewModel::startTonight,
+                                onOpen = { entry -> viewModel.openAssistantEntry(entry, mode) },
+                                onBack = viewModel::backFromMenu,
+                            )
+                            AssistantMode.Collections -> {
+                                LaunchedEffect(Unit) { viewModel.loadCollections() }
+                                CollectionsScreen(
+                                    state = ai.collections,
+                                    onOpen = { entry -> viewModel.openAssistantEntry(entry, mode) },
+                                    onBack = viewModel::backFromMenu,
+                                )
+                            }
+                            AssistantMode.WhatsNew -> {
+                                LaunchedEffect(Unit) { viewModel.loadBrief() }
+                                WhatsNewScreen(
+                                    state = ai.brief,
+                                    onRefresh = { viewModel.loadBrief(force = true) },
+                                    onOpen = { entry -> viewModel.openAssistantEntry(entry, mode) },
+                                    onBack = viewModel::backFromMenu,
+                                )
+                            }
+                            AssistantMode.Remote -> RemoteScreen(
+                                state = ai.remote,
+                                onMessage = viewModel::handleRemoteMessage,
+                                onBack = viewModel::backFromMenu,
+                            )
+                        }
+                    }
+                }
+
                 state.screen is StreamiaScreen.MovieDetails -> {
                     val movie = (state.screen as StreamiaScreen.MovieDetails).movie
                     // Film terminé (ou presque) : pas de « Reprendre à 1:52:00 », comme la rangée Reprendre.
@@ -775,6 +840,8 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                         watched = movie.key in state.library.watchedEntries,
                         resumePositionMs = resume,
                         translatedPlot = state.aiPlot.takeIf { aiActive },
+                        aiReview = state.aiReview.takeIf { aiActive },
+                        aiReviewLoading = aiActive && state.aiReviewLoading,
                         aiPlotLoading = aiActive && state.aiPlotLoading,
                         aiSimilarLoading = aiActive && state.aiSimilarLoading,
                         similarMedia = state.similarMedia.withAiOrder(state.aiSimilarKeys.takeIf { aiActive }),
@@ -801,6 +868,13 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                         favorite = series.key in state.library.favoriteEntries,
                         watched = series.key in state.library.watchedEntries,
                         translatedPlot = state.aiPlot.takeIf { aiActive },
+                        aiReview = state.aiReview.takeIf { aiActive },
+                        aiReviewLoading = aiActive && state.aiReviewLoading,
+                        aiRecap = state.aiRecap.takeIf { aiActive },
+                        aiRecapLoading = aiActive && state.aiRecapLoading,
+                        aiRecapAvailable = aiActive && state.aiRecapAvailable,
+                        aiRecapError = state.aiRecapError.takeIf { aiActive },
+                        onRequestRecap = viewModel::loadRecap,
                         aiPlotLoading = aiActive && state.aiPlotLoading,
                         aiSimilarLoading = aiActive && state.aiSimilarLoading,
                         similarMedia = state.similarMedia.withAiOrder(state.aiSimilarKeys.takeIf { aiActive }),

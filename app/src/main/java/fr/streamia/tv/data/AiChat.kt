@@ -158,7 +158,7 @@ internal object AiChatClient {
                 }
             }
             AiFormat.Messages -> body.put("max_tokens", maxTokens)
-                .put("system", system)
+                .put("system", messagesSystem(provider, system))
                 .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", user)))
             AiFormat.Responses -> body.put("max_output_tokens", maxTokens)
                 .put("instructions", system)
@@ -223,6 +223,21 @@ internal object AiChatClient {
             )
         }
     }
+
+    /** En dessous, le fournisseur ne met de toute façon rien en cache (≈ 1 024 tokens minimum) : inutile d'alourdir la requête. */
+    internal const val PROMPT_CACHE_MIN_CHARS = 3_600
+
+    /**
+     * Message système du format Anthropic. Un long message stable (liste de candidats, consignes détaillées) est marqué
+     * `cache_control` chez Claude : les requêtes suivantes qui commencent par le même texte le relisent à prix réduit
+     * et plus vite. Les passerelles tierces gardent la chaîne simple, qu'elles acceptent toutes.
+     */
+    internal fun messagesSystem(provider: AiProvider, system: String): Any =
+        if (provider == AiProvider.Claude && system.length >= PROMPT_CACHE_MIN_CHARS) {
+            JSONArray().put(JSONObject().put("type", "text").put("text", system).put("cache_control", JSONObject().put("type", "ephemeral")))
+        } else {
+            system
+        }
 
     /** Message d'erreur du fournisseur (`error.message`, `message` ou début du corps), raccourci. */
     private fun errorDetail(body: String): String {

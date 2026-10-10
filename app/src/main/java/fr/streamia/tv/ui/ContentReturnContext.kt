@@ -8,6 +8,8 @@ enum class ContentReturnOrigin {
     Search,
     LiveMatches,
     Epg,
+    /** Écrans de l'assistant IA (Ce soir, Collections, Quoi de neuf). */
+    Assistant,
 }
 
 /**
@@ -25,6 +27,7 @@ enum class HomeFocusTarget {
     Refresh,
     LiveMatches,
     ChangePlaylist,
+    Assistant,
 }
 
 data class ContentReturnContext(
@@ -32,6 +35,7 @@ data class ContentReturnContext(
     val homeRowKey: String? = null,
     val itemKey: String? = null,
     val liveMatchKey: String? = null,
+    val assistantMode: AssistantMode? = null,
 ) {
     fun destinationScreen(): StreamiaScreen = when (origin) {
         ContentReturnOrigin.Browser -> StreamiaScreen.Browser
@@ -39,6 +43,7 @@ data class ContentReturnContext(
         ContentReturnOrigin.Search -> StreamiaScreen.Search
         ContentReturnOrigin.LiveMatches -> StreamiaScreen.LiveMatches
         ContentReturnOrigin.Epg -> StreamiaScreen.Epg
+        ContentReturnOrigin.Assistant -> StreamiaScreen.Assistant(assistantMode ?: AssistantMode.Tonight)
     }
 
     companion object {
@@ -61,6 +66,12 @@ data class ContentReturnContext(
         fun search(itemKey: String) = ContentReturnContext(
             origin = ContentReturnOrigin.Search,
             itemKey = itemKey,
+        )
+
+        fun assistant(mode: AssistantMode, itemKey: String) = ContentReturnContext(
+            origin = ContentReturnOrigin.Assistant,
+            itemKey = itemKey,
+            assistantMode = mode,
         )
 
         fun liveMatches(matchKey: String, itemKey: String) = ContentReturnContext(

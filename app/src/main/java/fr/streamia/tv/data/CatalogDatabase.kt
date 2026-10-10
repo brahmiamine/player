@@ -407,6 +407,39 @@ internal class CatalogDatabase(context: Context) :
         return searchLike(profileId, query, type, limit)
     }
 
+    /**
+     * Contenus de certaines catégories (liste vide pour un type = tout le type), les mieux notés ou les plus récents
+     * d'abord : base de la recherche en langage naturel, qui choisit les catégories d'après leur nom. Tout reste dans
+     * l'index (pas de parcours du catalogue en mémoire) ; au plus [MAX_SEARCH_RESULTS] lignes.
+     */
+    fun searchInCategories(profileId: String, categories: Map<MediaType, Set<String>>, sort: SearchSort, limit: Int): List<MediaEntry> {
+        if (categories.isEmpty()) return emptyList()
+        val clauses = ArrayList<String>()
+        val args = ArrayList<String>().apply { add(profileId) }
+        categories.forEach { (type, ids) ->
+            if (ids.isEmpty()) {
+                clauses += "(media_type = ?)"
+                args += type.name
+            } else {
+                val bounded = ids.take(MAX_CATEGORY_IDS_PER_TYPE)
+                clauses += "(media_type = ? AND category_id IN (${bounded.joinToString(",") { "?" }}))"
+                args += type.name
+                args += bounded
+            }
+        }
+        args += limit.coerceIn(1, MAX_SEARCH_RESULTS).toString()
+        val order = if (sort == SearchSort.Recent) "added_rank DESC" else "rating_rank DESC"
+        return readableDatabase.rawQuery(
+            """
+            SELECT ${LIST_COLUMNS.joinToString()} FROM catalog_entries
+            WHERE profile_id = ? AND navigable = 1 AND (${clauses.joinToString(" OR ")})
+            ORDER BY $order, media_id
+            LIMIT ?
+            """.trimIndent(),
+            args.toTypedArray(),
+        ).use(::readEntries)
+    }
+
     private fun searchIndexed(profileId: String, matchQuery: String, type: MediaType?, limit: Int): List<MediaEntry> {
         if (!hasSearchTable(readableDatabase)) return emptyList()
         val typeClause = if (type == null) "" else " AND media_type = ?"
@@ -640,6 +673,7 @@ internal class CatalogDatabase(context: Context) :
         const val DEFAULT_RECENT_PER_TYPE = 8
         const val MAX_PAGE_SIZE = 500
         const val MAX_SEARCH_RESULTS = 1_000
+        const val MAX_CATEGORY_IDS_PER_TYPE = 300
         /** Sous la limite historique de 999 paramètres par requête SQLite (2 déjà pris). */
         const val KEYS_PER_QUERY = 500
         val ENTRY_COLUMNS = listOf(

@@ -1,5 +1,6 @@
 package fr.streamia.tv.data
 
+import org.json.JSONObject
 import java.io.File
 
 /** Un sous-titre : sa ligne de temps d'origine (jamais envoyée à l'IA) et ses lignes de texte. */
@@ -63,6 +64,18 @@ internal fun parseTranslatedLines(answer: String): Map<Int, List<String>> {
     return result
 }
 
+/**
+ * Lignes d'un sous-titre bilingue : la traduction, puis l'original en italique sur une ligne (pour apprendre une
+ * langue). Sans différence entre les deux, ou sans original, la traduction seule.
+ */
+internal fun bilingualLines(translated: List<String>, original: List<String>): List<String> {
+    val source = original.joinToString(" ") { it.replace(MARKUP_TAGS, "").trim() }.trim()
+    if (source.isEmpty() || translated == original) return translated
+    return translated + "<i>$source</i>"
+}
+
+private val MARKUP_TAGS = Regex("<[^>]*>|\\{[^}]*\\}")
+
 internal const val LINE_BREAK = " // "
 internal const val SUBTITLE_BATCH_CHARS = 6_000
 internal const val SUBTITLE_BATCH_CUES = 150
@@ -82,3 +95,51 @@ internal class AiSubtitleCache(private val root: File) {
         const val TTL_MS = 7 * 24 * 3_600_000L
     }
 }
+
+/** Ligne de glossaire que le modèle ajoute après les lignes traduites : « #GLOSSAIRE: Nom=Traduction; Autre=Autre ». */
+internal const val GLOSSARY_MARKER = "#GLOSSAIRE:"
+
+/** Paires « nom d'origine ↦ traduction » de la ligne de glossaire d'une réponse ; vide s'il n'y en a pas. */
+internal fun parseGlossary(answer: String): Map<String, String> {
+    val line = answer.lineSequence().firstOrNull { it.trimStart().startsWith(GLOSSARY_MARKER, ignoreCase = true) } ?: return emptyMap()
+    val result = LinkedHashMap<String, String>()
+    line.substringAfter(':').split(';', '\u061B').forEach { pair ->
+        val name = pair.substringBefore('=').trim()
+        val translation = pair.substringAfter('=', "").trim()
+        if (name.length in 2..40 && translation.length in 1..40 && name != translation) result[name] = translation
+    }
+    return result
+}
+
+/** Glossaire d'une série (ou d'un film) : les noms propres traduits une fois, reproduits à l'identique d'un épisode et d'un lot à l'autre. */
+internal class AiGlossaryStore(private val root: File) {
+    init {
+        root.mkdirs()
+        root.listFiles()?.forEach { if (it.lastModified() < System.currentTimeMillis() - TTL_MS) it.delete() }
+    }
+
+    private fun file(key: String) = File(root, key.hashCode().toUInt().toString(16) + ".json")
+
+    @Synchronized
+    fun load(key: String): Map<String, String> = runCatching {
+        val json = JSONObject(file(key).readText())
+        json.keys().asSequence().associateWith { json.getString(it) }
+    }.getOrDefault(emptyMap())
+
+    @Synchronized
+    fun merge(key: String, additions: Map<String, String>): Map<String, String> {
+        if (additions.isEmpty()) return load(key)
+        val merged = LinkedHashMap(load(key))
+        additions.forEach { (name, translation) -> if (merged.size < MAX_ENTRIES || name in merged) merged.putIfAbsent(name, translation) }
+        runCatching { file(key).writeText(JSONObject(merged as Map<*, *>).toString()) }
+        return merged
+    }
+
+    private companion object {
+        const val TTL_MS = 90 * 24 * 3_600_000L
+        const val MAX_ENTRIES = 60
+    }
+}
+
+internal fun glossaryPrompt(glossary: Map<String, String>): String =
+    if (glossary.isEmpty()) "" else " Glossaire à respecter exactement pour ces noms : " + glossary.entries.joinToString("; ") { "${it.key}=${it.value}" } + "."
