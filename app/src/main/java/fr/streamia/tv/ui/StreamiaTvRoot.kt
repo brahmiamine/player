@@ -160,6 +160,7 @@ fun StreamiaTvRoot(viewModel: StreamiaViewModel) {
             "live_matches" -> viewModel.showLiveMatches()
             "epg" -> viewModel.showEpg()
             "settings" -> viewModel.showSettings()
+            "more" -> viewModel.showMore()
             else -> page?.removePrefix("browser:")?.takeIf { page.startsWith("browser:") }
                 ?.let { type -> MediaType.entries.firstOrNull { it.name == type } }
                 ?.let(viewModel::openSection)
@@ -260,6 +261,7 @@ private fun persistedNavigationOf(state: StreamiaUiState): PersistedNavigation {
         StreamiaScreen.LiveMatches -> "live_matches"
         StreamiaScreen.Epg -> "epg"
         StreamiaScreen.Settings -> "settings"
+        StreamiaScreen.More -> "more"
         else -> null
     }
     val playerScreen = state.screen as? StreamiaScreen.Player

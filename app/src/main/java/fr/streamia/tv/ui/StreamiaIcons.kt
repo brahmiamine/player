@@ -30,7 +30,7 @@ import kotlin.math.sin
 enum class StreamiaIconGlyph {
     Live, Movie, Series, Search, Guide, Settings, Refresh, Swap,
     Star, StarOutline, ChevronUp, ChevronDown, CheckboxOn, CheckboxOff, ArrowBack, ArrowForward,
-    Reorder, Delete, Lock, Eye, EyeOff,
+    Reorder, Delete, Lock, Eye, EyeOff, Home, Menu, Trophy, Close,
 }
 
 @Composable
@@ -68,6 +68,10 @@ fun StreamiaIcon(
             StreamiaIconGlyph.Lock -> drawLock(tint, stroke)
             StreamiaIconGlyph.Eye -> drawEye(tint, stroke, slashed = false)
             StreamiaIconGlyph.EyeOff -> drawEye(tint, stroke, slashed = true)
+            StreamiaIconGlyph.Home -> drawHome(tint, stroke)
+            StreamiaIconGlyph.Menu -> drawMenu(tint, stroke)
+            StreamiaIconGlyph.Trophy -> drawTrophy(tint, stroke)
+            StreamiaIconGlyph.Close -> drawClose(tint, stroke)
         }
     }
 }
@@ -126,6 +130,47 @@ private fun DrawScope.drawSearch(tint: Color, stroke: Stroke) {
     drawCircle(tint, radius = radius, center = center, style = stroke)
     val handleStart = center + Offset(radius * 0.74f, radius * 0.74f)
     drawLine(tint, handleStart, pt(0.84f, 0.84f), stroke.width, cap = StrokeCap.Round)
+}
+
+private fun DrawScope.drawHome(tint: Color, stroke: Stroke) {
+    val path = Path().apply {
+        moveTo(pt(0.14f, 0.48f).x, pt(0.14f, 0.48f).y)
+        lineTo(pt(0.50f, 0.16f).x, pt(0.50f, 0.16f).y)
+        lineTo(pt(0.86f, 0.48f).x, pt(0.86f, 0.48f).y)
+        moveTo(pt(0.24f, 0.42f).x, pt(0.24f, 0.42f).y)
+        lineTo(pt(0.24f, 0.82f).x, pt(0.24f, 0.82f).y)
+        lineTo(pt(0.76f, 0.82f).x, pt(0.76f, 0.82f).y)
+        lineTo(pt(0.76f, 0.42f).x, pt(0.76f, 0.42f).y)
+    }
+    drawPath(path, tint, style = stroke)
+    drawLine(tint, pt(0.42f, 0.82f), pt(0.42f, 0.60f), stroke.width, cap = StrokeCap.Round)
+    drawLine(tint, pt(0.58f, 0.82f), pt(0.58f, 0.60f), stroke.width, cap = StrokeCap.Round)
+    drawLine(tint, pt(0.42f, 0.60f), pt(0.58f, 0.60f), stroke.width, cap = StrokeCap.Round)
+}
+
+private fun DrawScope.drawMenu(tint: Color, stroke: Stroke) {
+    val w = stroke.width
+    drawLine(tint, pt(0.18f, 0.28f), pt(0.82f, 0.28f), w, cap = StrokeCap.Round)
+    drawLine(tint, pt(0.18f, 0.50f), pt(0.82f, 0.50f), w, cap = StrokeCap.Round)
+    drawLine(tint, pt(0.18f, 0.72f), pt(0.82f, 0.72f), w, cap = StrokeCap.Round)
+}
+
+private fun DrawScope.drawTrophy(tint: Color, stroke: Stroke) {
+    val cup = Path().apply {
+        moveTo(pt(0.28f, 0.16f).x, pt(0.28f, 0.16f).y)
+        lineTo(pt(0.72f, 0.16f).x, pt(0.72f, 0.16f).y)
+        lineTo(pt(0.72f, 0.38f).x, pt(0.72f, 0.38f).y)
+        cubicTo(pt(0.72f, 0.54f).x, pt(0.72f, 0.54f).y, pt(0.28f, 0.54f).x, pt(0.28f, 0.54f).y, pt(0.28f, 0.38f).x, pt(0.28f, 0.38f).y)
+        close()
+    }
+    drawPath(cup, tint, style = stroke)
+    drawLine(tint, pt(0.5f, 0.52f), pt(0.5f, 0.74f), stroke.width, cap = StrokeCap.Round)
+    drawLine(tint, pt(0.34f, 0.84f), pt(0.66f, 0.84f), stroke.width, cap = StrokeCap.Round)
+}
+
+private fun DrawScope.drawClose(tint: Color, stroke: Stroke) {
+    drawLine(tint, pt(0.26f, 0.26f), pt(0.74f, 0.74f), stroke.width, cap = StrokeCap.Round)
+    drawLine(tint, pt(0.74f, 0.26f), pt(0.26f, 0.74f), stroke.width, cap = StrokeCap.Round)
 }
 
 private fun DrawScope.drawGuide(tint: Color, stroke: Stroke) {

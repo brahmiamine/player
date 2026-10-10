@@ -10,7 +10,8 @@
     <!-- Android 14+ : Streamia reste propriétaire de ses mises à jour (setRequestUpdateOwnership). -->
     <uses-permission android:name="android.permission.ENFORCE_UPDATE_OWNERSHIP" />
 
-    <uses-feature android:name="android.software.leanback" android:required="true" />
+    <!-- Android TV et téléphones/tablettes : l'interface (télécommande ou tactile) est choisie au lancement. -->
+    <uses-feature android:name="android.software.leanback" android:required="false" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
     <uses-feature android:name="android.hardware.faketouch" android:required="false" />
 
@@ -38,7 +39,8 @@
             android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|screenLayout|smallestScreenSize|uiMode"
             android:exported="true"
             android:launchMode="singleTask"
-            android:screenOrientation="landscape">
+            android:screenOrientation="unspecified"
+            android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />

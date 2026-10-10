@@ -722,6 +722,11 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         }
     }
 
+    /** Onglet « Plus » du mobile : racine de navigation, la pile des menus repart de zéro. */
+    fun showMore() {
+        _uiState.update { it.copy(screen = StreamiaScreen.More, menuBackStack = emptyList(), message = null) }
+    }
+
     fun showSettings() = navigateToMenu(StreamiaScreen.Settings, HomeFocusTarget.Settings)
     fun showAbout() = navigateToMenu(StreamiaScreen.About)
 

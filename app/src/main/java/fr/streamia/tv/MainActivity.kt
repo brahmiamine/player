@@ -3,6 +3,7 @@ package fr.streamia.tv
 import android.content.Intent
 import android.os.Bundle
 import android.os.StrictMode
+import android.content.pm.ActivityInfo
 import androidx.activity.ComponentActivity
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
@@ -19,6 +20,8 @@ import fr.streamia.tv.ui.StreamiaTvRoot
 import fr.streamia.tv.ui.trimArtworkCache
 import fr.streamia.tv.ui.StreamiaViewModel
 import fr.streamia.tv.ui.StreamiaViewModelFactory
+import fr.streamia.tv.ui.mobile.DeviceKind
+import fr.streamia.tv.ui.mobile.detectDeviceKind
 import fr.streamia.tv.work.EpgSyncScheduler
 import fr.streamia.tv.work.MetadataEnrichmentWorker
 
@@ -40,6 +43,13 @@ class MainActivity : ComponentActivity() {
             )
         }
 
+        // TV : toujours paysage. Mobile : portrait au démarrage ; l'interface passe en paysage pour le lecteur.
+        requestedOrientation = if (detectDeviceKind(this) == DeviceKind.Tv) {
+            ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        } else {
+            ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        }
+
         CrashReporter.initialize(applicationContext)
         // WorkManager crée et ouvre sa base à la première utilisation : hors du thread principal,
         // pour ne pas retarder le premier affichage.
@@ -49,8 +59,10 @@ class MainActivity : ComponentActivity() {
         }
 
         WindowCompat.setDecorFitsSystemWindows(window, false)
+        // TV : barres système toujours masquées. Mobile : barres visibles (masquées seulement par le
+        // lecteur plein écran, voir StreamiaApp), le contenu respecte leurs marges.
         WindowInsetsControllerCompat(window, window.decorView).apply {
-            hide(WindowInsetsCompat.Type.systemBars())
+            if (detectDeviceKind(this@MainActivity) == DeviceKind.Tv) hide(WindowInsetsCompat.Type.systemBars())
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
 

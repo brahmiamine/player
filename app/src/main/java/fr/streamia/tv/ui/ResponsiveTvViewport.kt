@@ -23,7 +23,7 @@ import kotlin.math.min
  * sans devoir dupliquer des variantes pour chaque téléviseur.
  */
 @Composable
-fun ResponsiveTvViewport(content: @Composable () -> Unit) {
+fun ResponsiveTvViewport(nativeDensity: Boolean = false, content: @Composable () -> Unit) {
     val systemDensity = LocalDensity.current
     val context = LocalContext.current
     // Téléphone ou tablette (pas d'Android TV) : écran tenu en main, regardé de près. Surface de
@@ -33,7 +33,8 @@ fun ResponsiveTvViewport(content: @Composable () -> Unit) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val widthScale = maxWidth.value / (REFERENCE_WIDTH_DP * referenceScale)
         val heightScale = maxHeight.value / (REFERENCE_HEIGHT_DP * referenceScale)
-        val viewportScale = min(widthScale, heightScale).coerceIn(MIN_SCALE, MAX_SCALE)
+        // Écrans mobiles refaits en portrait : dp réels de l'appareil, sans surface de référence 1280x720.
+        val viewportScale = if (nativeDensity) 1f else min(widthScale, heightScale).coerceIn(MIN_SCALE, MAX_SCALE)
         val responsiveDensity = Density(
             density = systemDensity.density * viewportScale,
             fontScale = systemDensity.fontScale,

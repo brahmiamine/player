@@ -1,6 +1,25 @@
 package fr.streamia.tv.ui
 
+import android.app.Activity
+import android.content.pm.ActivityInfo
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import fr.streamia.tv.ui.mobile.DeviceKind
+import fr.streamia.tv.ui.mobile.LocalDeviceKind
+import fr.streamia.tv.ui.mobile.MobileBrowserScreen
+import fr.streamia.tv.ui.mobile.MobileHomeScreen
+import fr.streamia.tv.ui.mobile.MobileMoreScreen
+import fr.streamia.tv.ui.mobile.MobileScaffold
+import fr.streamia.tv.ui.mobile.MobileTab
+import fr.streamia.tv.ui.mobile.detectDeviceKind
+import fr.streamia.tv.ui.mobile.isMobileNative
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -54,6 +73,26 @@ import androidx.media3.ui.PlayerView
 @Composable
 fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackSession) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    // TV (télécommande) ou mobile (tactile), détecté une fois. Les écrans refaits pour le mobile
+    // s'affichent en portrait aux dp réels ; les autres gardent la mise en page TV, en paysage.
+    val context = LocalContext.current
+    val deviceKind = remember(context) { detectDeviceKind(context) }
+    val mobile = deviceKind == DeviceKind.Mobile
+    val mobileNative = mobile && state.screen.isMobileNative()
+    val playerOpen = state.screen is StreamiaScreen.Player
+    LaunchedEffect(mobile, mobileNative, playerOpen) {
+        val activity = context as? Activity ?: return@LaunchedEffect
+        activity.requestedOrientation = when {
+            !mobile -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            mobileNative -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            else -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        }
+        if (mobile) {
+            // Mobile : barres système visibles, sauf pendant la lecture plein écran.
+            val controller = WindowInsetsControllerCompat(activity.window, activity.window.decorView)
+            if (playerOpen) controller.hide(WindowInsetsCompat.Type.systemBars()) else controller.show(WindowInsetsCompat.Type.systemBars())
+        }
+    }
     val aiActive by fr.streamia.tv.data.AiGate.active.collectAsStateWithLifecycle()
     // Vidéo du Direct : une seule vue, posée une fois sous tous les écrans. Le lecteur plein écran et
     // la liste catégories/chaînes ne font que la réclamer (liveVideoSurface). Avant, la vue passait
@@ -69,8 +108,19 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
     val liveOnSatMatchesHolder = viewModel.visibleLiveOnSatMatches.collectAsStateWithLifecycle()
     val liveEpgProgramsHolder = viewModel.liveEpgPrograms.collectAsStateWithLifecycle()
 
+    val onMobileTab: (MobileTab) -> Unit = { tab ->
+        when (tab) {
+            MobileTab.Home -> viewModel.showHome()
+            MobileTab.Live -> viewModel.openSection(MediaType.Live)
+            MobileTab.Movies -> viewModel.openSection(MediaType.Movie)
+            MobileTab.Series -> viewModel.openSection(MediaType.Series)
+            MobileTab.More -> viewModel.showMore()
+        }
+    }
+
     StreamiaTheme {
-        ResponsiveTvViewport {
+      CompositionLocalProvider(LocalDeviceKind provides deviceKind) {
+        ResponsiveTvViewport(nativeDensity = mobileNative) {
             Box(Modifier.fillMaxSize()) {
               // Lecteur : fond noir plein écran sous la vidéo, les dégradés y seraient dessinés pour rien
               // à chaque rafraîchissement du HUD. Ailleurs, la liste ne change qu'avec le type d'écran.
@@ -97,10 +147,97 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                       modifier = Modifier.fillMaxSize().background(Color.Black),
                   )
               }
+              Box(if (mobile && !playerOpen) Modifier.fillMaxSize().systemBarsPadding() else Modifier.fillMaxSize()) {
               when {
                 // Texte selon ce qui charge réellement : l'ancien « Ouverture de votre dernière
                 // lecture… » s'affichait aussi à l'ouverture d'une liste, sans aucune reprise.
                 shouldShowStartupGate(state) -> BootScreen(if (state.booting) "Démarrage…" else "Chargement de votre liste…")
+
+
+                // ---- Mobile : écrans refaits pour le tactile (portrait, barre d'onglets) ----
+                mobileNative && state.screen is StreamiaScreen.Home && state.catalog != null -> {
+                    val homeState = homeStateHolder.value
+                    val settings = state.appSettings
+                    MobileScaffold(MobileTab.Home, onSelect = onMobileTab) {
+                        MobileHomeScreen(
+                            catalog = state.catalog!!,
+                            library = state.library,
+                            weatherPlace = homeState.weatherPlace,
+                            weather = homeState.weather,
+                            liveMatches = liveOnSatMatchesHolder.value.ifDisabled(HomeBlock.LiveMatches, settings),
+                            liveMatchesResolving = homeState.liveOnSatResolving,
+                            offline = state.offline,
+                            busy = state.busy,
+                            parentalControlEnabled = settings.parentalControlEnabled,
+                            parentalUnlocked = state.parentalUnlocked,
+                            resumeRowEnabled = HomeBlock.Resume !in settings.disabledHomeBlocks,
+                            favoritesRowEnabled = HomeBlock.Favorites !in settings.disabledHomeBlocks,
+                            recentChannelsEnabled = HomeBlock.RecentChannels !in settings.disabledHomeBlocks,
+                            liveMatchesEnabled = HomeBlock.LiveMatches !in settings.disabledHomeBlocks,
+                            onOpenSection = viewModel::openSection,
+                            onSettings = viewModel::showSettings,
+                            onSearch = viewModel::showSearch,
+                            onEpg = viewModel::showEpg,
+                            onRefresh = viewModel::refresh,
+                            onOpenLiveMatches = viewModel::showLiveMatches,
+                            onChangePlaylist = viewModel::logout,
+                            onResumePlayback = viewModel::resumeHomePlayback,
+                            onOpenHomeEntry = viewModel::openHomeEntry,
+                            onOpenLiveMatchChannel = viewModel::openLiveMatchChannel,
+                            onRefreshWeather = viewModel::refreshWeatherIfStale,
+                            onRefreshLiveMatches = viewModel::refreshLiveOnSatIfStale,
+                        )
+                    }
+                }
+
+                mobileNative && state.screen is StreamiaScreen.Browser && state.catalog != null -> {
+                    val type = state.browserType ?: MediaType.Live
+                    MobileScaffold(type.mobileTab(), onSelect = onMobileTab) {
+                        BackHandler { viewModel.showHome() }
+                        MobileBrowserScreen(
+                            catalog = state.catalog!!,
+                            epgPrograms = liveEpgProgramsHolder.value,
+                            library = state.library,
+                            appSettings = state.appSettings,
+                            loadingCategoryKeys = state.loadingCategoryKeys,
+                            vodPages = state.vodPages,
+                            categoryLoadErrors = state.categoryLoadErrors,
+                            parentalUnlocked = state.parentalUnlocked,
+                            offline = state.offline,
+                            busy = state.busy,
+                            message = state.message,
+                            type = type,
+                            initialCategoryId = state.browserCategoryId,
+                            onEntrySelected = viewModel::openEntry,
+                            onLiveEntrySelected = viewModel::openLiveFromList,
+                            onToggleEntryFavorite = viewModel::toggleEntryFavorite,
+                            onToggleEntryHidden = viewModel::toggleEntryHidden,
+                            onVerifyParentalPin = viewModel::verifyParentalPin,
+                            onLocationChanged = viewModel::rememberBrowserLocation,
+                            onEnsureCategoryLoaded = viewModel::ensureCategoryLoaded,
+                            onLoadMoreInCategory = viewModel::loadMoreInCategory,
+                            onRefresh = viewModel::refresh,
+                            onSearch = viewModel::showSearch,
+                            onDismissMessage = viewModel::dismissMessage,
+                        )
+                    }
+                }
+
+                mobileNative && state.screen is StreamiaScreen.More -> {
+                    MobileScaffold(MobileTab.More, onSelect = onMobileTab) {
+                        BackHandler { viewModel.showHome() }
+                        MobileMoreScreen(
+                            playlistName = state.profiles.firstOrNull { it.id == state.activeProfileId }?.name,
+                            versionName = BuildConfig.VERSION_NAME,
+                            onSearch = viewModel::showSearch,
+                            onEpg = viewModel::showEpg,
+                            onLiveMatches = viewModel::showLiveMatches,
+                            onOrganizer = viewModel::showOrganizer,
+                            onSettings = viewModel::showSettings,
+                            onChangePlaylist = viewModel::logout,
+                        )
+                    }
+                }
 
                 state.screen is StreamiaScreen.Login -> LoginScreen(
                     profiles = state.profiles,
@@ -434,9 +571,11 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     // faisaient recomposer tout le lecteur dès qu'une tâche de fond publiait quelque
                     // chose (guides, recommandations, historique), sans rien changer pour lui.
                     val latestReturnOrigin by rememberUpdatedState(state.contentReturnContext?.origin)
-                    val onPlayerBack = remember(playerScreen.entry, livePlaybackSession) {
+                    val onPlayerBack = remember(playerScreen.entry, livePlaybackSession, mobile) {
                         {
                             val origin = latestReturnOrigin
+                            // Mobile : pas d'aperçu vidéo dans la liste, le flux s'arrête avec le lecteur.
+                            if (mobile && playerScreen.entry.type == MediaType.Live) livePlaybackSession.stop(clearSession = true)
                             if (origin == null || origin == ContentReturnOrigin.Browser) {
                                 LiveBrowserReturnState.remember(playerScreen.entry)
                             } else if (playerScreen.entry.type == MediaType.Live) {
@@ -482,8 +621,10 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
 
                 else -> BootScreen("Chargement…")
               }
+              }
             }
         }
+      }
     }
 }
 
@@ -558,3 +699,9 @@ private fun rememberOtherVersions(viewModel: StreamiaViewModel, entry: MediaEntr
         val query = versionSearchQuery(entry)
         value = if (query.isBlank()) emptyList() else otherVersionsOf(entry, viewModel.searchCatalog(query, entry.type))
     }.value
+
+private fun MediaType.mobileTab(): MobileTab = when (this) {
+    MediaType.Live -> MobileTab.Live
+    MediaType.Movie -> MobileTab.Movies
+    MediaType.Series -> MobileTab.Series
+}
