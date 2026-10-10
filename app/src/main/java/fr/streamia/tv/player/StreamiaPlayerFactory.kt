@@ -32,6 +32,9 @@ private fun targetBufferBytes(context: Context): Int {
     return bufferBytesForHeap(activityManager.largeMemoryClass)
 }
 
+/** Lecture déjà passée gardée en mémoire (VOD), à partir de l'image clé qui la précède. */
+private const val VOD_BACK_BUFFER_MS = 10_000
+
 object StreamiaPlayerFactory {
     // Client partagé avec l'API et les images : la connexion au serveur du fournisseur (TCP, TLS)
     // est souvent déjà ouverte au moment du zap.
@@ -56,6 +59,14 @@ object StreamiaPlayerFactory {
             // s'arrête désormais à une part de la mémoire allouée à l'app.
             .setTargetBufferBytes(targetBufferBytes(context))
             .setPrioritizeTimeOverSizeThresholds(false)
+            .apply {
+                // Films/séries : quelques secondes déjà vues gardées depuis l'image clé précédente.
+                // Activer une piste de sous-titres intégrée oblige ExoPlayer à repositionner le flux :
+                // sans image clé en mémoire, il coupait la connexion et retéléchargeait depuis le
+                // serveur (image figée, longue reconnexion). Avec elle, le repositionnement se fait
+                // en mémoire (un court rafraîchissement du décodeur). Sert aussi aux petits retours arrière.
+                if (mediaType != MediaType.Live) setBackBuffer(VOD_BACK_BUFFER_MS, true)
+            }
             .build()
         // Mode tunnel : le boîtier synchronise lui-même image et son (4K HDR plus fluide sur les
         // TV qui le gèrent). Ignoré automatiquement quand le décodeur ou l'audio ne le permettent pas.

@@ -30,6 +30,8 @@ internal data class TrackChoice(
     val group: TrackGroup? = null,
     val trackIndex: Int = 0,
     val forced: Boolean = false,
+    /** Sous-titre externe (.srt/.vtt) affiché par l'application, hors des pistes du lecteur. */
+    val external: Boolean = false,
 )
 
 /** Tag de langue "indéterminée" (BCP-47) posé sur tout sous-titre externe chargé manuellement. */

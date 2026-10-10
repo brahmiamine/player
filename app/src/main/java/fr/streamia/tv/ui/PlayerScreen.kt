@@ -67,7 +67,6 @@ import fr.streamia.tv.data.DisplayModeSwitch
 import fr.streamia.tv.data.LiveVersionStatsStore
 import fr.streamia.tv.data.NetworkMonitor
 import fr.streamia.tv.data.SavedSubtitleStore
-import fr.streamia.tv.data.shiftSubtitleTimings
 import fr.streamia.tv.player.unsupportedFormatMessage
 import fr.streamia.tv.player.isDecoderError
 import fr.streamia.tv.player.MAX_STREAM_RECOVERY_ATTEMPTS
@@ -329,10 +328,11 @@ fun PlayerScreen(
     // persistance entre relectures, il repart à null à chaque nouvelle entrée (remember(entry.key)).
     var externalSubtitle by remember(entry.key) { mutableStateOf<MediaItem.SubtitleConfiguration?>(null) }
     var externalSubtitleError by remember(entry.key) { mutableStateOf<String?>(null) }
-    // Une fois le sous-titre externe demandé, le prochain onTracksChanged doit pointer subtitleIndex
-    // sur la piste "und" qui vient d'apparaître, sinon le HUD/Réglages continuent d'afficher
-    // "Désactivés" bien que le sous-titre externe soit réellement actif dans le lecteur.
-    var externalSubtitlePendingSync by remember(entry.key) { mutableStateOf(false) }
+    // Répliques du sous-titre externe, affichées par l'application au-dessus de la vidéo
+    // (ExternalSubtitleOverlay) : le charger, le choisir ou le décaler ne touche jamais au flux.
+    var externalCues by remember(entry.key) { mutableStateOf<ExternalSubtitleCues?>(null) }
+    var externalSubtitleShown by remember(entry.key) { mutableStateOf(false) }
+    var externalSubtitleLoads by remember(entry.key) { mutableIntStateOf(0) }
 
     // Recherche de sous-titres en ligne (SubDL, OpenSubtitles, Podnapisi, Wyzie) : le meilleur résultat
     // est chargé tout seul, les autres restent consultables dans une liste.
@@ -344,10 +344,8 @@ fun PlayerScreen(
     var onlineSubtitleResults by remember(entry.key) { mutableStateOf<List<SubtitleResult>>(emptyList()) }
     var onlineSubtitleQuery by remember(entry.key) { mutableStateOf<SubtitleQuery?>(null) }
     var onlineSubtitlesListOpen by remember(entry.key) { mutableStateOf(false) }
-    // Décalage manuel : le sous-titre chargé depuis un fichier local est réécrit avec les temps décalés puis rechargé.
-    var shiftBase by remember(entry.key) { mutableStateOf<Pair<java.io.File, String>?>(null) }
+    // Décalage du sous-titre externe (+ = plus tard), appliqué à l'affichage : instantané, sans rechargement.
     var subtitleOffsetMs by remember(entry.key) { mutableLongStateOf(0L) }
-    var appliedOffsetMs by remember(entry.key) { mutableLongStateOf(0L) }
 
     fun startCandidate(url: String, positionMs: Long = 0L) {
         activeStreamUrl = url
@@ -359,13 +357,9 @@ fun PlayerScreen(
         }
         runCatching {
             player.stop()
-            // Un MediaItem.SubtitleConfiguration ne peut être attaché qu'à la construction du
-            // MediaItem : on le réinjecte ici pour que le sous-titre externe survive à un
-            // changement de candidat ou à une reconnexion du watchdog sur ce même flux.
-            val mediaItem = MediaItem.Builder().setUri(url).setMediaMetadata(entry.playbackMetadata()).apply {
-                externalSubtitle?.let { setSubtitleConfigurations(listOf(it)) }
-            }.build()
-            player.setMediaItem(mediaItem)
+            // Le sous-titre externe n'est plus attaché au MediaItem (affiché par l'application) :
+            // il survit tel quel aux changements d'URL et aux reconnexions.
+            player.setMediaItem(MediaItem.Builder().setUri(url).setMediaMetadata(entry.playbackMetadata()).build())
             if (positionMs > 0 && entry.type != MediaType.Live) player.seekTo(positionMs)
             player.prepare()
             player.play()
@@ -385,42 +379,64 @@ fun PlayerScreen(
                 .build()
         }
 
-    // "Désactivés" (aucune piste embarquée choisie) désactive tout le type TRACK_TYPE_TEXT dans
-    // les TrackSelectionParameters au premier onTracksChanged. Sans réactivation explicite ici,
-    // ExoPlayer ignore le sous-titre externe même marqué SELECTION_FLAG_DEFAULT : le type entier
-    // du renderer resterait coupé.
-    fun enableExternalSubtitleTracks() {
+    // Piste de sous-titre intégrée coupée pendant l'affichage du sous-titre externe (pas de double
+    // texte). Couper une piste ne demande rien au flux ; seule son activation peut le faire.
+    fun disableEmbeddedSubtitles() {
         player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
-            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
-            .setPreferredTextLanguage(EXTERNAL_SUBTITLE_LANGUAGE_TAG)
+            .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
             .build()
-        externalSubtitlePendingSync = true
     }
 
-    fun loadExternalSubtitle(subtitleUri: Uri, displayName: String, base: java.io.File? = null, keepOffset: Boolean = false) {
-        if (sharedLivePlayer) return
+    /** Liste des sous-titres avec le sous-titre externe chargé en dernier choix. */
+    fun withExternalChoice(tracks: List<TrackChoice>): List<TrackChoice> {
+        val embedded = tracks.filterNot(TrackChoice::external)
+        val label = externalSubtitle?.label ?: return embedded
+        return embedded + TrackChoice("Externe · $label", null, external = true)
+    }
+
+    fun showExternalSubtitle() {
+        externalSubtitleShown = true
+        disableEmbeddedSubtitles()
+        subtitleTracks = withExternalChoice(subtitleTracks)
+        subtitleIndex = subtitleTracks.indexOfFirst(TrackChoice::external).coerceAtLeast(0)
+        subtitlePreferencePending = false
+    }
+
+    /** Lit le sous-titre puis l'affiche ; `false` s'il est illisible (la vidéo n'est jamais interrompue). */
+    suspend fun showExternalSubtitleFrom(subtitleUri: Uri, displayName: String, base: java.io.File? = null): Boolean {
+        if (sharedLivePlayer) return false
         val configuration = subtitleConfiguration(subtitleUri, displayName)
-        if (configuration == null) {
+        val mimeType = configuration?.mimeType
+        if (configuration == null || mimeType == null) {
             externalSubtitleError = "Format non reconnu : utilisez un fichier .srt ou .vtt."
-            return
+            return false
         }
         externalSubtitleError = null
-        shiftBase = base?.let { it to displayName }
-        if (!keepOffset) {
-            subtitleOffsetMs = 0L
-            appliedOffsetMs = 0L
-            // Retenu pour la reprise de ce film : rechargé tout seul à la prochaine lecture.
-            if (entry.type != MediaType.Live) {
-                val key = entry.key
-                when {
-                    base != null -> subtitleScope.launch(Dispatchers.IO) { runCatching { savedSubtitles.saveFile(key, base, displayName) } }
-                    subtitleUri.scheme == "http" || subtitleUri.scheme == "https" -> savedSubtitles.saveUrl(key, subtitleUri.toString(), displayName)
-                }
-            }
+        val load = ++externalSubtitleLoads
+        val cues = runCatching { loadExternalSubtitleCues(context.applicationContext, subtitleUri, mimeType) }.getOrNull()
+        if (load != externalSubtitleLoads) return false
+        if (cues == null) {
+            externalSubtitleError = "Sous-titre illisible : choisissez un autre fichier ou résultat."
+            return false
         }
         externalSubtitle = configuration
-        enableExternalSubtitleTracks()
-        startCandidate(activeStreamUrl, player.currentPosition.coerceAtLeast(0L))
+        externalCues = cues
+        subtitleOffsetMs = 0L
+        showExternalSubtitle()
+        // Retenu pour la reprise de ce film : rechargé tout seul à la prochaine lecture.
+        if (entry.type != MediaType.Live) {
+            val key = entry.key
+            when {
+                base != null -> subtitleScope.launch(Dispatchers.IO) { runCatching { savedSubtitles.saveFile(key, base, displayName) } }
+                subtitleUri.scheme == "http" || subtitleUri.scheme == "https" -> savedSubtitles.saveUrl(key, subtitleUri.toString(), displayName)
+            }
+        }
+        return true
+    }
+
+    fun loadExternalSubtitle(subtitleUri: Uri, displayName: String, base: java.io.File? = null) {
+        subtitleScope.launch { showExternalSubtitleFrom(subtitleUri, displayName, base) }
     }
 
     val aiAssistant = remember { XtreamRepository.get(context).ai }
@@ -464,8 +480,8 @@ fun PlayerScreen(
                 externalSubtitleError = "Traduction IA indisponible : sous-titre d'origine chargé."
             }
         }
-        loadExternalSubtitle(Uri.fromFile(shown), label, base = shown)
-    }.isSuccess
+        showExternalSubtitleFrom(Uri.fromFile(shown), label, base = shown)
+    }.getOrDefault(false)
 
     fun searchOnlineSubtitles() {
         if (sharedLivePlayer || onlineSubtitleBusy) return
@@ -505,20 +521,11 @@ fun PlayerScreen(
         }
     }
 
-    // Quelques instants après le dernier appui sur −/+, le sous-titre est décalé d'un coup (un rechargement, pas un par appui).
+    // Le décalage s'applique tout de suite à l'écran ; il est retenu pour la reprise une fois les appuis terminés.
     LaunchedEffect(subtitleOffsetMs) {
-        val (file, label) = shiftBase ?: return@LaunchedEffect
-        if (subtitleOffsetMs == appliedOffsetMs) return@LaunchedEffect
+        if (externalSubtitle == null) return@LaunchedEffect
         delay(800)
-        val offset = subtitleOffsetMs
-        val shifted = withContext(Dispatchers.IO) {
-            java.io.File(context.cacheDir, "online-subtitles").apply { mkdirs() }.let { dir ->
-                java.io.File(dir, "shift$offset-${file.name}").also { it.writeText(shiftSubtitleTimings(file.readText(), offset), Charsets.UTF_8) }
-            }
-        }
-        appliedOffsetMs = offset
-        savedSubtitles.saveOffset(entry.key, offset)
-        loadExternalSubtitle(Uri.fromFile(shifted), label, base = file, keepOffset = true)
+        savedSubtitles.saveOffset(entry.key, subtitleOffsetMs)
     }
 
     val pickSubtitleFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -592,6 +599,11 @@ fun PlayerScreen(
     }
 
     fun applySubtitle(choice: TrackChoice) {
+        if (choice.external) {
+            showExternalSubtitle()
+            return
+        }
+        externalSubtitleShown = false
         val builder = player.trackSelectionParameters.buildUpon().clearOverridesOfType(C.TRACK_TYPE_TEXT)
         if (choice.language == null && choice.group == null) {
             builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
@@ -655,7 +667,7 @@ fun PlayerScreen(
             override fun onTracksChanged(tracks: Tracks) {
                 if (sharedLivePlayer) livePlaybackSession.recoverAudio(tracks)
                 audioTracks = listOf(TrackChoice("Auto", null)) + extractChoices(tracks, C.TRACK_TYPE_AUDIO)
-                subtitleTracks = listOf(TrackChoice("Désactivés", null)) + extractChoices(tracks, C.TRACK_TYPE_TEXT)
+                subtitleTracks = withExternalChoice(listOf(TrackChoice("Désactivés", null)) + extractChoices(tracks, C.TRACK_TYPE_TEXT))
                 // Les pistes arrivent souvent en plusieurs fois (sous-titres MKV/HLS annoncés après
                 // l'audio et la vidéo) : la préférence enregistrée reste en attente jusqu'à ce qu'une
                 // piste de la bonne langue apparaisse, au lieu d'être tranchée au premier appel.
@@ -669,14 +681,9 @@ fun PlayerScreen(
                     }
                 }
                 audioIndex = audioIndex.coerceIn(0, audioTracks.lastIndex.coerceAtLeast(0))
-                val externalIndex = if (externalSubtitlePendingSync) {
-                    subtitleTracks.indexOfFirst { it.language == EXTERNAL_SUBTITLE_LANGUAGE_TAG }
-                } else {
-                    -1
-                }
+                val externalIndex = if (externalSubtitleShown) subtitleTracks.indexOfFirst(TrackChoice::external) else -1
                 if (externalIndex >= 0) {
                     subtitleIndex = externalIndex
-                    externalSubtitlePendingSync = false
                     subtitlePreferencePending = false
                 } else if (subtitlePreferencePending) {
                     // Piste complète plutôt que « forcés » (quelques répliques seulement) pour la même langue.
@@ -840,30 +847,25 @@ fun PlayerScreen(
             player.videoFormat?.let(::liveTechnicalInfo)?.let { technicalInfo = it }
         } else {
             val url = streamCandidates.firstOrNull() ?: baseUrl
-            // Reprise : le dernier sous-titre externe de ce film est attaché dès le premier démarrage (pas de rechargement).
+            startCandidate(url, resumePositionMs)
+            // Reprise : le dernier sous-titre externe de ce film est relu pendant que la vidéo démarre
+            // (il est affiché par l'application : rien à rattacher au flux, aucun redémarrage).
             if (entry.type != MediaType.Live && externalSubtitle == null) {
                 val saved = withContext(Dispatchers.IO) { savedSubtitles.load(entry.key) }
-                if (saved != null) {
-                    val uri = if (saved.file == null) saved.url?.toUri() else if (saved.offsetMs == 0L) Uri.fromFile(saved.file) else {
-                        withContext(Dispatchers.IO) {
-                            java.io.File(context.cacheDir, "online-subtitles").apply { mkdirs() }.let { dir ->
-                                java.io.File(dir, "shift${saved.offsetMs}-${saved.file.name}").also {
-                                    it.writeText(shiftSubtitleTimings(saved.file.readText(), saved.offsetMs), Charsets.UTF_8)
-                                }
-                            }
-                        }.let(Uri::fromFile)
-                    }
-                    val configuration = uri?.let { subtitleConfiguration(it, saved.label) }
-                    if (configuration != null) {
+                val uri = saved?.let { it.file?.let(Uri::fromFile) ?: it.url?.toUri() }
+                val configuration = if (saved != null && uri != null) subtitleConfiguration(uri, saved.label) else null
+                val mimeType = configuration?.mimeType
+                if (saved != null && uri != null && configuration != null && mimeType != null) {
+                    val load = ++externalSubtitleLoads
+                    val cues = runCatching { loadExternalSubtitleCues(context.applicationContext, uri, mimeType) }.getOrNull()
+                    if (cues != null && load == externalSubtitleLoads && externalSubtitle == null) {
                         externalSubtitle = configuration
-                        shiftBase = saved.file?.let { it to saved.label }
+                        externalCues = cues
                         subtitleOffsetMs = saved.offsetMs
-                        appliedOffsetMs = saved.offsetMs
-                        enableExternalSubtitleTracks()
+                        showExternalSubtitle()
                     }
                 }
             }
-            startCandidate(url, resumePositionMs)
         }
     }
 
@@ -1389,6 +1391,17 @@ fun PlayerScreen(
                 },
                 modifier = Modifier.fillMaxSize(),
             )
+            val cues = externalCues
+            if (cues != null && externalSubtitleShown) {
+                ExternalSubtitleOverlay(
+                    player = player,
+                    cues = cues,
+                    offsetMs = subtitleOffsetMs,
+                    sizeScale = appSettings.subtitleSizeScale,
+                    backgroundEnabled = appSettings.subtitleBackgroundEnabled,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
         }
 
         // Chargement : un anneau seul, sans texte. Seule une relance automatique ajoute une ligne discrète.
@@ -1691,9 +1704,11 @@ fun PlayerScreen(
                     subtitleIndex = selectedIndex.coerceIn(subtitleTracks.indices)
                     applySubtitle(subtitleTracks[subtitleIndex])
                     subtitlePreferencePending = false
-                    trackPreferenceStore.saveSubtitle(subtitleTracks[subtitleIndex].language)
                     // Le choix explicite d'une autre piste (ou « Désactivés ») remplace le sous-titre externe retenu.
-                    if (subtitleTracks[subtitleIndex].language != EXTERNAL_SUBTITLE_LANGUAGE_TAG) savedSubtitles.clear(entry.key)
+                    if (!subtitleTracks[subtitleIndex].external) {
+                        trackPreferenceStore.saveSubtitle(subtitleTracks[subtitleIndex].language)
+                        savedSubtitles.clear(entry.key)
+                    }
                 },
                 onNextAspect = if (portrait) { { portraitAspect = VideoAspect.entries[(portraitAspect.ordinal + 1) % VideoAspect.entries.size] } } else onCycleVideoAspect,
                 onClose = { settingsOpen = false; versionsOpen = false; rootFocus.requestFocus() },
@@ -1705,7 +1720,7 @@ fun PlayerScreen(
                 onlineSubtitleStatus = onlineSubtitleStatus,
                 onlineSubtitleResultCount = onlineSubtitleResults.size,
                 onShowOnlineSubtitleResults = { onlineSubtitlesListOpen = true },
-                subtitleOffsetMs = subtitleOffsetMs.takeIf { shiftBase != null },
+                subtitleOffsetMs = subtitleOffsetMs.takeIf { externalCues != null && externalSubtitleShown },
                 onShiftSubtitle = { subtitleOffsetMs += it },
                 onResetSubtitleShift = { subtitleOffsetMs = 0L },
                 aiTranslateLanguage = AiLanguages.name(appSettings.aiLanguage).replaceFirstChar(Char::uppercase).takeIf { aiActive },
