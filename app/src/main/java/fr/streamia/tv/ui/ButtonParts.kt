@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.Text
+import fr.streamia.tv.ui.theme.AccentPink
 import fr.streamia.tv.ui.theme.Ink
 
 /** « ← Retour » des boutons de retour : la flèche est une icône centrée sur le texte (le glyphe « ← » flottait sous la ligne). */
@@ -49,6 +50,25 @@ fun ButtonSpinner(modifier: Modifier = Modifier, size: Dp = 20.dp, color: Color 
         drawArc(
             color = color, startAngle = turn, sweepAngle = 100f, useCenter = false,
             topLeft = Offset(width / 2, width / 2), size = Size(this.size.width - width, this.size.height - width), style = Stroke(width, cap = StrokeCap.Round),
+        )
+    }
+}
+
+/** Chargement d'une lecture (Direct, film, série, reprise) : un anneau rose seul, sans texte. */
+@Composable
+fun PlaybackLoader(modifier: Modifier = Modifier, size: Dp = 84.dp) {
+    val turn by rememberInfiniteTransition(label = "playback-loader").animateFloat(0f, 360f, infiniteRepeatable(tween(1000, easing = LinearEasing)), label = "turn")
+    Canvas(modifier.size(size)) {
+        val width = this.size.minDimension * 0.048f
+        val arcSize = Size(this.size.width - width, this.size.height - width)
+        val topLeft = Offset(width / 2, width / 2)
+        drawArc(
+            color = Color.White.copy(alpha = 0.14f), startAngle = 0f, sweepAngle = 360f, useCenter = false,
+            topLeft = topLeft, size = arcSize, style = Stroke(width),
+        )
+        drawArc(
+            color = AccentPink, startAngle = turn, sweepAngle = 90f, useCenter = false,
+            topLeft = topLeft, size = arcSize, style = Stroke(width, cap = StrokeCap.Round),
         )
     }
 }

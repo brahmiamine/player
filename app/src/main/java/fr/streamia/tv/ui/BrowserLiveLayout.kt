@@ -655,7 +655,7 @@ private fun LivePreview(
             if (showingVideo) {
                 liveVideoSurface(LiveVideoSurfacePlacement(Modifier.fillMaxSize()))
                 if (buffering) {
-                    Text("Chargement…", color = Ink, fontSize = TypeBody, modifier = Modifier.align(Alignment.Center))
+                    PlaybackLoader(Modifier.align(Alignment.Center), size = 56.dp)
                 }
                 if (error) {
                     Text(if (unsupportedFormat) "Format non supporté par ce boîtier" else "Aperçu indisponible", color = MutedInk, fontSize = TypeBody, modifier = Modifier.align(Alignment.Center))

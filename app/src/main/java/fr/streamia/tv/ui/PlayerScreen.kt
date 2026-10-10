@@ -1391,32 +1391,20 @@ fun PlayerScreen(
             )
         }
 
+        // Chargement : un anneau seul, sans texte. Seule une relance automatique ajoute une ligne discrète.
         if (returningToBrowser) {
-            Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
-                StatusDot(diameter = 24.dp)
-                Spacer(Modifier.height(12.dp))
-                Text("Retour à la liste des chaînes…", color = Ink, fontSize = 18.sp)
-            }
+            PlaybackLoader(Modifier.align(Alignment.Center))
         } else if (buffering) {
             Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
-                StatusDot(diameter = 24.dp)
-                Spacer(Modifier.height(12.dp))
-                if (!sharedLivePlayer && recoveryAttempt > 0) {
-                    Text("Reconnexion en cours… (tentative $recoveryAttempt/$MAX_STREAM_RECOVERY_ATTEMPTS)", color = Ink, fontSize = 18.sp)
-                    Spacer(Modifier.height(6.dp))
-                    Text("Le serveur a interrompu la lecture, nouvelle tentative automatique", color = MutedInk, fontSize = 13.sp)
-                } else if (!sharedLivePlayer && watchdogRecoveryCount > 0) {
-                    // Distingue une reconnexion automatique après un flux figé (watchdog) du
-                    // chargement initial générique : même habillage visuel, message différent.
-                    Text("Reconnexion en cours… (tentative $watchdogRecoveryCount/2)", color = Ink, fontSize = 18.sp)
-                    Spacer(Modifier.height(6.dp))
-                    Text("Le flux s'est interrompu, nouvelle tentative automatique", color = MutedInk, fontSize = 13.sp)
-                } else {
-                    Text("Chargement de ${entry.displayName}…", color = Ink, fontSize = 18.sp)
-                    if (resumePositionMs > 0 && entry.type != MediaType.Live) {
-                        Spacer(Modifier.height(6.dp))
-                        Text("Reprise de la lecture", color = MutedInk, fontSize = 13.sp)
-                    }
+                PlaybackLoader()
+                val retry = when {
+                    !sharedLivePlayer && recoveryAttempt > 0 -> "Reconnexion · $recoveryAttempt/$MAX_STREAM_RECOVERY_ATTEMPTS"
+                    !sharedLivePlayer && watchdogRecoveryCount > 0 -> "Reconnexion · $watchdogRecoveryCount/2"
+                    else -> null
+                }
+                if (retry != null) {
+                    Spacer(Modifier.height(16.dp))
+                    Text(retry, color = MutedInk, fontSize = 14.sp)
                 }
             }
         }
