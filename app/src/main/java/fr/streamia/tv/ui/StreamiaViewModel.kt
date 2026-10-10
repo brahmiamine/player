@@ -695,6 +695,13 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         }
     }
 
+    /** Consommé par la recherche mobile une fois la liste replacée sur le résultat ouvert. */
+    fun consumeSearchRestore() {
+        _uiState.update {
+            if (it.contentReturnContext?.origin == ContentReturnOrigin.Search) it.copy(contentReturnContext = null) else it
+        }
+    }
+
     /** Consommé par le navigateur une fois le contenu rouvert refocalisé (retour depuis une fiche). */
     fun consumeBrowserRestore() {
         _uiState.update {

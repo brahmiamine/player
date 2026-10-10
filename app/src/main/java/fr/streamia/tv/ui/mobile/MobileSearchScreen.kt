@@ -2,6 +2,7 @@ package fr.streamia.tv.ui.mobile
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -54,6 +55,9 @@ fun MobileSearchScreen(
     favoriteEntries: Set<String>,
     query: String,
     type: MediaType?,
+    /** Résultat ouvert avant le retour : la liste défile jusqu'à lui et le met en évidence. */
+    restoreEntryKey: String?,
+    onRestoreConsumed: () -> Unit,
     search: suspend (String, MediaType?) -> List<MediaEntry>,
     onQueryChange: (String) -> Unit,
     onTypeChange: (MediaType?) -> Unit,
@@ -66,6 +70,20 @@ fun MobileSearchScreen(
     var entries by remember { mutableStateOf(emptyList<MediaEntry>()) }
     var searching by remember { mutableStateOf(false) }
     var actions by remember { mutableStateOf<MediaEntry?>(null) }
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    // Clé gardée localement : le contexte de retour est consommé dès la liste replacée, le liseré doit rester.
+    val targetKey = remember { restoreEntryKey }
+    var restored by remember { mutableStateOf(false) }
+    // Les résultats sont relancés au retour : une fois la liste revenue, on se replace sur l'élément ouvert (après l'en-tête).
+    LaunchedEffect(entries) {
+        if (targetKey == null || restored) return@LaunchedEffect
+        val index = entries.indexOfFirst { it.key == targetKey }
+        if (index >= 0) {
+            listState.scrollToItem(index + 1)
+            restored = true
+            onRestoreConsumed()
+        }
+    }
     LaunchedEffect(needle, type) {
         if (needle.isBlank()) {
             entries = emptyList()
@@ -102,6 +120,7 @@ fun MobileSearchScreen(
                 entries.isEmpty() -> MobileEmptyState("Aucun résultat pour « $query ».")
                 else -> LazyColumn(
                     Modifier.fillMaxSize(),
+                    state = listState,
                     contentPadding = PaddingValues(start = MobileGutter, end = MobileGutter, bottom = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
@@ -114,7 +133,12 @@ fun MobileSearchScreen(
                         )
                     }
                     items(entries, key = { it.key }) { entry ->
-                        MobileCard(Modifier.fillMaxWidth(), onClick = { onOpenEntry(entry) }, onLongClick = { actions = entry }) {
+                        MobileCard(
+                            Modifier.fillMaxWidth().then(
+                                if (entry.key == targetKey) Modifier.border(2.dp, fr.streamia.tv.ui.theme.AccentPink, RoundedCornerShape(fr.streamia.tv.ui.theme.RadiusTile)) else Modifier,
+                            ),
+                            onClick = { onOpenEntry(entry) }, onLongClick = { actions = entry },
+                        ) {
                             Row(
                                 Modifier.fillMaxWidth().padding(start = 10.dp, end = 14.dp, top = 10.dp, bottom = 10.dp),
                                 verticalAlignment = Alignment.CenterVertically,

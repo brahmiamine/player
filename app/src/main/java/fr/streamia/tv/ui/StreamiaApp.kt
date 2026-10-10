@@ -300,6 +300,10 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     favoriteEntries = state.library.favoriteEntries,
                     query = state.searchQuery,
                     type = state.searchType,
+                    restoreEntryKey = state.contentReturnContext
+                        ?.takeIf { it.origin == ContentReturnOrigin.Search }
+                        ?.itemKey,
+                    onRestoreConsumed = viewModel::consumeSearchRestore,
                     search = viewModel::searchCatalog,
                     onQueryChange = viewModel::updateSearchQuery,
                     onTypeChange = viewModel::updateSearchType,
