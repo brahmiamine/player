@@ -2,6 +2,7 @@ package fr.streamia.tv.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -42,9 +43,13 @@ internal fun TabbedRowHeader(
     secondSelected: Int = 0,
     onSelectSecond: (Int) -> Unit = {},
 ) {
-    Row(modifier.padding(bottom = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-        SectionLabel(title, fontSize = 16.sp)
-        if (tabs.size > 1) SegmentedPills(tabs, selected, onSelect, accent = true)
+    // Deux lignes quand il y a des filtres : ◀ ▶ restent dans un groupe, ▲ ▼ passent de l'un à l'autre,
+    // sinon « Maintenant » + « beIN » seraient inatteignables ensemble (on traverserait « Ce soir »).
+    Column(modifier.padding(bottom = 6.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+            SectionLabel(title, fontSize = 16.sp)
+            if (tabs.size > 1) SegmentedPills(tabs, selected, onSelect, accent = true)
+        }
         if (secondTabs.size > 1) SegmentedPills(secondTabs, secondSelected, onSelectSecond, accent = false)
     }
 }
