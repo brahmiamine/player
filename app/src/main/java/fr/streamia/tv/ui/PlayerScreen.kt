@@ -252,6 +252,10 @@ fun PlayerScreen(
     // ignoré alors que le retour est en réalité déjà programmé et va aboutir.
     var returningToBrowser by remember(entry.key) { mutableStateOf(false) }
     var hudVisible by remember { mutableStateOf(true) }
+    // Picture-in-picture : la fenêtre réduite n'affiche que la vidéo, sans bandeau ni commandes.
+    val inPip by fr.streamia.tv.player.PipState.active
+    LaunchedEffect(inPip) { if (inPip) { hudVisible = false; settingsOpen = false; guideOpen = false } }
+
     // Chaque appui sur une commande au doigt relance le délai de masquage du bandeau.
     var hudTouchTick by remember { mutableIntStateOf(0) }
     // Téléphone et dernière saisie au doigt : commandes tactiles visibles. Jamais sur TV (télécommande seule).
@@ -287,7 +291,11 @@ fun PlayerScreen(
         }
         onPlayNextEpisode()
     }
-    val aspect = when (appSettings.videoAspect) {
+    // Téléphone en portrait : « Ajuster » par défaut, à chaque retour en portrait, quel que soit le format choisi en paysage.
+    // Le bouton de format y change seulement la session portrait en cours (le réglage enregistré reste celui du paysage).
+    val portrait = handheld && androidx.compose.ui.platform.LocalConfiguration.current.orientation == android.content.res.Configuration.ORIENTATION_PORTRAIT
+    var portraitAspect by remember(portrait) { mutableStateOf(VideoAspect.Fit) }
+    val aspect = if (portrait) portraitAspect else when (appSettings.videoAspect) {
         VideoAspectSetting.Fit -> VideoAspect.Fit
         VideoAspectSetting.Fill -> VideoAspect.Fill
         VideoAspectSetting.Zoom -> VideoAspect.Zoom
@@ -1232,7 +1240,7 @@ fun PlayerScreen(
         }
     }
     LaunchedEffect(hudVisible, guideOpen, settingsOpen, entry.key, returningToBrowser, hudTouchTick) {
-        if (hudVisible && !guideOpen && !settingsOpen && !returningToBrowser) {
+        if (hudVisible && !inPip && !guideOpen && !settingsOpen && !returningToBrowser) {
             delay(6_000)
             hudVisible = false
         }
@@ -1497,7 +1505,7 @@ fun PlayerScreen(
             }
         }
 
-        if (hudVisible && !guideOpen && !settingsOpen && !returningToBrowser) {
+        if (hudVisible && !inPip && !guideOpen && !settingsOpen && !returningToBrowser) {
             PlayerInfoBand(
                 entry = entry,
                 categoryName = categoryName,
@@ -1519,7 +1527,7 @@ fun PlayerScreen(
             )
         }
 
-        if (touchInput && hudVisible && playbackError == null && !guideOpen && !settingsOpen && !returningToBrowser && !showNextEpisodePrompt) {
+        if (touchInput && hudVisible && !inPip && playbackError == null && !guideOpen && !settingsOpen && !returningToBrowser && !showNextEpisodePrompt) {
             PlayerTouchControls(
                 title = entry.displayName,
                 live = entry.type == MediaType.Live,
@@ -1529,6 +1537,15 @@ fun PlayerScreen(
                 durationMs = { durationState.longValue },
                 onBack = { hudTouchTick++; handleBack() },
                 onSettings = { versionsOpen = false; settingsOpen = true },
+                otherVersionsCount = (liveVersions.size - 1).coerceAtLeast(0),
+                onVersions = { versionsOpen = true; settingsOpen = true },
+                onRotate = {
+                    hudTouchTick++
+                    (context as? android.app.Activity)?.let {
+                        it.requestedOrientation = if (it.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_PORTRAIT)
+                            android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE else android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                    }
+                },
                 onTogglePlayback = { hudTouchTick++; togglePlayback() },
                 onSeekBackward = { hudTouchTick++; seekRelative(forward = false) },
                 onSeekForward = { hudTouchTick++; seekRelative(forward = true) },
@@ -1640,7 +1657,7 @@ fun PlayerScreen(
                     // Le choix explicite d'une autre piste (ou « Désactivés ») remplace le sous-titre externe retenu.
                     if (subtitleTracks[subtitleIndex].language != EXTERNAL_SUBTITLE_LANGUAGE_TAG) savedSubtitles.clear(entry.key)
                 },
-                onNextAspect = onCycleVideoAspect,
+                onNextAspect = if (portrait) { { portraitAspect = VideoAspect.entries[(portraitAspect.ordinal + 1) % VideoAspect.entries.size] } } else onCycleVideoAspect,
                 onClose = { settingsOpen = false; versionsOpen = false; rootFocus.requestFocus() },
                 externalSubtitleAvailable = !sharedLivePlayer,
                 externalSubtitleLabel = externalSubtitle?.label,

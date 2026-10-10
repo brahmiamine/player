@@ -89,6 +89,24 @@ class MainActivity : ComponentActivity() {
         fr.streamia.tv.player.UserActivity.onInteraction()
     }
 
+    // Mobile : quitter l'appli (bouton Accueil) pendant la lecture la réduit en picture-in-picture.
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (!::viewModel.isInitialized || detectDeviceKind(this) != DeviceKind.Mobile) return
+        if (viewModel.uiState.value.screen !is fr.streamia.tv.ui.StreamiaScreen.Player) return
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.O) return
+        runCatching {
+            enterPictureInPictureMode(
+                android.app.PictureInPictureParams.Builder().setAspectRatio(android.util.Rational(16, 9)).build(),
+            )
+        }
+    }
+
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: android.content.res.Configuration) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        fr.streamia.tv.player.PipState.active.value = isInPictureInPictureMode
+    }
+
     override fun onPause() {
         super.onPause()
         jankReporter?.setTracking(false)

@@ -143,18 +143,21 @@ internal fun PlayerInfoBand(
         }
     }
 
+    // Téléphone en portrait : bandeau resserré, logo plus petit, colonne technique réduite à une ligne.
+    val compact = LocalHandheld.current &&
+        androidx.compose.ui.platform.LocalConfiguration.current.orientation == android.content.res.Configuration.ORIENTATION_PORTRAIT
     Column(
         modifier
             .fillMaxWidth()
-            .padding(horizontal = 24.dp, vertical = 22.dp)
+            .padding(horizontal = if (compact) 12.dp else 24.dp, vertical = if (compact) 14.dp else 22.dp)
             .clip(androidx.compose.foundation.shape.RoundedCornerShape(RadiusCard))
             .background(Night.copy(alpha = 0.68f))
             .border(BorderStroke(1.dp, GlassBorder), androidx.compose.foundation.shape.RoundedCornerShape(RadiusCard))
             .padding(horizontal = 22.dp, vertical = 16.dp),
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            ChannelLogo(entry.iconUrl, entry.displayName, Modifier.size(74.dp))
-            Spacer(Modifier.width(16.dp))
+            ChannelLogo(entry.iconUrl, entry.displayName, Modifier.size(if (compact) 56.dp else 74.dp))
+            Spacer(Modifier.width(if (compact) 12.dp else 16.dp))
             Column(Modifier.weight(1f)) {
                 val prefix = if (entry.type == MediaType.Live) "${entry.number} · " else ""
                 Text(
@@ -218,8 +221,8 @@ internal fun PlayerInfoBand(
                 }
             }
 
-            Spacer(Modifier.width(20.dp))
-            Column(Modifier.width(500.dp), horizontalAlignment = Alignment.End) {
+            if (!compact) Spacer(Modifier.width(20.dp))
+            if (!compact) Column(Modifier.width(500.dp), horizontalAlignment = Alignment.End) {
                 Text(
                     "${technicalInfo.qualityLabel} · ${technicalInfo.resolutionText} · ${technicalInfo.fpsText}",
                     color = Ink,
@@ -260,11 +263,24 @@ internal fun PlayerInfoBand(
             }
         }
 
+        if (compact) {
+            // Portrait mobile : une seule ligne technique, sans l'aide télécommande.
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "${technicalInfo.qualityLabel} · ${technicalInfo.resolutionText} · ${technicalInfo.fpsText} · $transport",
+                color = FocusBlueBright, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+        }
+
         if (entry.type != MediaType.Live && durationMs() > 0L) {
             Spacer(Modifier.height(12.dp))
             PlaybackTimeline(positionMs, durationMs)
         }
 
+        if (compact) {
+            if (numberBuffer.isNotBlank()) Text("CH $numberBuffer", color = FocusBlueBright, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            return@Column
+        }
         Spacer(Modifier.height(12.dp))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(if (isPlaying) "⏸ Lecture" else "▶ Pause", color = Ink, fontSize = 13.sp)

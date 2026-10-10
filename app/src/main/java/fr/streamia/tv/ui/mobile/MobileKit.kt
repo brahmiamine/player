@@ -3,6 +3,7 @@ package fr.streamia.tv.ui.mobile
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
@@ -182,8 +183,12 @@ fun MobileSectionLabel(text: String, modifier: Modifier = Modifier, hint: String
 @Composable
 fun MobileChip(label: String, selected: Boolean, onClick: () -> Unit, locked: Boolean = false, modifier: Modifier = Modifier) {
     val shape = RoundedCornerShape(RadiusPill)
+    // Pastille sélectionnée toujours ramenée à l'écran (retour sur la catégorie d'une chaîne, par exemple).
+    val bringIntoView = remember { androidx.compose.foundation.relocation.BringIntoViewRequester() }
+    androidx.compose.runtime.LaunchedEffect(selected) { if (selected) bringIntoView.bringIntoView() }
     Row(
         modifier
+            .bringIntoViewRequester(bringIntoView)
             .height(40.dp)
             .clip(shape)
             .background(if (selected) AccentPink else Color.White.copy(alpha = 0.09f))

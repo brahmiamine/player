@@ -34,13 +34,20 @@ fun ResponsiveTvViewport(nativeDensity: Boolean = false, content: @Composable ()
         val widthScale = maxWidth.value / (REFERENCE_WIDTH_DP * referenceScale)
         val heightScale = maxHeight.value / (REFERENCE_HEIGHT_DP * referenceScale)
         // Écrans mobiles refaits en portrait : dp réels de l'appareil, sans surface de référence 1280x720.
-        val viewportScale = if (nativeDensity) 1f else min(widthScale, heightScale).coerceIn(MIN_SCALE, MAX_SCALE)
+        // Lecteur mobile en portrait : la surface 1280x720 ramènerait tout à ~0,35 (textes illisibles). On
+        // cale plutôt la largeur sur 700 dp logiques, soit ~0,57 sur un téléphone ; les écrans l'adaptent (voir PlayerInfoBand).
+        val portraitHandheld = handheld && maxHeight > maxWidth
+        val viewportScale = when {
+            nativeDensity -> 1f
+            portraitHandheld -> (maxWidth.value / PORTRAIT_REFERENCE_WIDTH_DP).coerceIn(MIN_SCALE, MAX_SCALE)
+            else -> min(widthScale, heightScale).coerceIn(MIN_SCALE, MAX_SCALE)
+        }
         val responsiveDensity = Density(
             density = systemDensity.density * viewportScale,
             fontScale = systemDensity.fontScale,
         )
 
-        CompositionLocalProvider(LocalDensity provides responsiveDensity, LocalHandheld provides handheld) {
+        CompositionLocalProvider(LocalDensity provides responsiveDensity, LocalHandheld provides handheld, LocalSystemDensity provides systemDensity) {
             Box(Modifier.fillMaxSize()) { content() }
         }
     }
@@ -52,9 +59,13 @@ fun ResponsiveTvViewport(nativeDensity: Boolean = false, content: @Composable ()
  */
 val LocalHandheld = staticCompositionLocalOf { false }
 
+/** Densité réelle de l'appareil, avant la mise à l'échelle TV : pour les feuilles du bas du lecteur. */
+val LocalSystemDensity = staticCompositionLocalOf<Density?> { null }
+
 private const val REFERENCE_WIDTH_DP = 1280f
 private const val REFERENCE_HEIGHT_DP = 720f
 /** 1138x640 au lieu de 1280x720 sur téléphone : les écrans défilent déjà verticalement. */
 private const val HANDHELD_REFERENCE_RATIO = 0.89f
+private const val PORTRAIT_REFERENCE_WIDTH_DP = 700f
 private const val MIN_SCALE = 0.45f
 private const val MAX_SCALE = 1.80f

@@ -15,6 +15,9 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import fr.streamia.tv.ui.mobile.DeviceKind
 import fr.streamia.tv.ui.mobile.LocalDeviceKind
+import fr.streamia.tv.ui.mobile.MobileAboutScreen
+import fr.streamia.tv.ui.mobile.MobileAdvancedSettingsScreen
+import fr.streamia.tv.ui.mobile.MobileParentalControlScreen
 import fr.streamia.tv.ui.mobile.MobileBrowserScreen
 import fr.streamia.tv.ui.mobile.MobileHomeScreen
 import fr.streamia.tv.ui.mobile.MobileDetailsScreen
@@ -87,16 +90,26 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
     val context = LocalContext.current
     val deviceKind = remember(context) { detectDeviceKind(context) }
     val mobile = deviceKind == DeviceKind.Mobile
-    // « Réglages avancés » (ville, IA, sauvegarde, mises à jour) ouvre la page Paramètres de la TV, en paysage.
+    // « Réglages avancés » (ville, IA, sauvegarde, mises à jour) : sous-page des Paramètres mobiles.
     var advancedSettings by remember { mutableStateOf(false) }
     LaunchedEffect(state.screen) { if (state.screen !is StreamiaScreen.Settings) advancedSettings = false }
-    val mobileNative = mobile && state.screen.isMobileNative() && !(state.screen is StreamiaScreen.Settings && advancedSettings)
+    val mobileNative = mobile && state.screen.isMobileNative()
     val playerOpen = state.screen is StreamiaScreen.Player
+    // Mobile : pas d'aperçu vidéo hors du lecteur, le flux Direct (lecteur partagé) s'arrête dès qu'on le quitte,
+    // quel que soit le chemin de sortie (Retour, liste des chaînes…). Films et séries s'arrêtent avec le lecteur.
+    // Lecture en arrière-plan (écran verrouillé, appli quittée) : service de premier plan tant que le lecteur est ouvert.
+    val playingTitle = (state.screen as? StreamiaScreen.Player)?.entry?.displayName
+    LaunchedEffect(playingTitle != null, mobile) {
+        if (!mobile) return@LaunchedEffect
+        if (playingTitle != null) fr.streamia.tv.player.PlaybackForegroundService.start(context, playingTitle)
+        else fr.streamia.tv.player.PlaybackForegroundService.stop(context)
+    }
+    LaunchedEffect(playerOpen, mobile) { if (mobile && !playerOpen) livePlaybackSession.stop(clearSession = true) }
     LaunchedEffect(mobile, mobileNative, playerOpen) {
         val activity = context as? Activity ?: return@LaunchedEffect
         activity.requestedOrientation = when {
             !mobile -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-            mobileNative -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            mobileNative || playerOpen -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT // lecteur : portrait au départ, paysage via le bouton de rotation
             else -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
         }
         if (mobile) {
@@ -186,6 +199,16 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                             favoritesRowEnabled = HomeBlock.Favorites !in settings.disabledHomeBlocks,
                             recentChannelsEnabled = HomeBlock.RecentChannels !in settings.disabledHomeBlocks,
                             liveMatchesEnabled = HomeBlock.LiveMatches !in settings.disabledHomeBlocks,
+                            footballScoresEnabled = HomeBlock.FootballScores !in settings.disabledHomeBlocks,
+                            recommendationRows = remember(homeState.homeRecommendationRows, homeState.homeJustWatchRows, settings.disabledHomeBlocks) {
+                                (homeState.homeRecommendationRows + homeState.homeJustWatchRows).filter { it.kind.homeBlock !in settings.disabledHomeBlocks }
+                            },
+                            tvProgrammeNow = homeState.homeTvProgrammeNow.ifDisabled(HomeBlock.TvProgrammeNow, settings),
+                            tvProgrammeTonight = homeState.homeTvProgrammeTonight.ifDisabled(HomeBlock.TvProgrammeTonight, settings),
+                            beinSportsNow = homeState.homeBeinSportsNow.ifDisabled(HomeBlock.BeinSportsNow, settings),
+                            beinSportsNext = homeState.homeBeinSportsNext.ifDisabled(HomeBlock.BeinSportsNext, settings),
+                            ukGuideNow = homeState.homeUkGuideNow.ifDisabled(HomeBlock.UkGuideNow, settings),
+                            ukGuideNext = homeState.homeUkGuideNext.ifDisabled(HomeBlock.UkGuideNext, settings),
                             onOpenSection = viewModel::openSection,
                             onSettings = viewModel::showSettings,
                             onSearch = viewModel::showSearch,
@@ -198,6 +221,9 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                             onOpenLiveMatchChannel = viewModel::openLiveMatchChannel,
                             onRefreshWeather = viewModel::refreshWeatherIfStale,
                             onRefreshLiveMatches = viewModel::refreshLiveOnSatIfStale,
+                            onRefreshTvProgrammeNow = viewModel::refreshTvProgrammeNow,
+                            onRefreshBeinSportsGuide = viewModel::refreshBeinSportsGuide,
+                            onRefreshUkGuide = viewModel::refreshUkGuide,
                         )
                     }
                 }
@@ -352,6 +378,33 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     )
                 }
 
+
+                mobileNative && state.screen is StreamiaScreen.Settings && advancedSettings -> MobileAdvancedSettingsScreen(
+                    settings = state.appSettings,
+                    detectedPlaceName = homeStateHolder.value.weatherPlace?.name,
+                    currentVersion = BuildConfig.VERSION_NAME,
+                    updateChecking = state.updateChecking,
+                    updateCheck = state.updateCheck,
+                    onCheckForUpdate = viewModel::checkForUpdate,
+                    onDismissUpdateCheck = viewModel::dismissUpdateCheck,
+                    onInstallUpdate = viewModel::installPendingUpdate,
+                    onAllowUpdateInstall = viewModel::openUpdateInstallPermission,
+                    onExportBackup = viewModel::exportBackup,
+                    onImportBackup = viewModel::importBackup,
+                    onSearchCities = viewModel::searchCities,
+                    onSetHomePlace = viewModel::setHomePlace,
+                    onSetPrayerMethod = viewModel::setPrayerMethod,
+                    onToggleAi = viewModel::toggleAi,
+                    onSetAiLanguage = viewModel::setAiLanguage,
+                    onLoadAiUsage = viewModel::loadAiUsage,
+                    onResetAiUsage = viewModel::resetAiUsage,
+                    onSetAiProvider = viewModel::setAiProvider,
+                    onSetAiModel = viewModel::setAiModel,
+                    hasAiKey = viewModel::hasAiKey,
+                    onSaveAiKey = viewModel::saveAiKey,
+                    onLoadAiModels = viewModel::loadAiModels,
+                    onBack = { advancedSettings = false },
+                )
 
                 mobileNative && state.screen is StreamiaScreen.Settings -> MobileSettingsScreen(
                     settings = state.appSettings,
@@ -604,6 +657,21 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onBack = viewModel::backFromMenu,
                 )
 
+                mobileNative && state.screen is StreamiaScreen.ParentalControl -> MobileParentalControlScreen(
+                    enabled = state.appSettings.parentalControlEnabled,
+                    onSetPin = viewModel::setParentalPin,
+                    onVerifyPin = viewModel::verifyParentalPin,
+                    onDisable = viewModel::disableParentalControl,
+                    onBack = viewModel::backFromMenu,
+                )
+
+                mobileNative && state.screen is StreamiaScreen.About -> MobileAboutScreen(
+                    versionName = BuildConfig.VERSION_NAME,
+                    onLoadCacheSize = viewModel::cacheSizeBytes,
+                    onLoadEpgCacheSize = viewModel::epgCacheSizeBytes,
+                    onBack = viewModel::backFromMenu,
+                )
+
                 state.screen is StreamiaScreen.ParentalControl -> ParentalControlScreen(
                     enabled = state.appSettings.parentalControlEnabled,
                     onSetPin = viewModel::setParentalPin,
@@ -758,6 +826,8 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                             val origin = latestReturnOrigin
                             // Mobile : pas d'aperçu vidéo dans la liste, le flux s'arrête avec le lecteur.
                             if (mobile && playerScreen.entry.type == MediaType.Live) livePlaybackSession.stop(clearSession = true)
+                            // Mobile : la liste du Direct rouvrira sur la catégorie et la chaîne jouées, d'où qu'elle ait été lancée.
+                            if (mobile && playerScreen.entry.type == MediaType.Live) LiveBrowserReturnState.remember(playerScreen.entry)
                             if (origin == null || origin == ContentReturnOrigin.Browser) {
                                 LiveBrowserReturnState.remember(playerScreen.entry)
                             } else if (playerScreen.entry.type == MediaType.Live) {

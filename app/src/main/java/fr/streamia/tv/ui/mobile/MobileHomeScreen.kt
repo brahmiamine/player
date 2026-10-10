@@ -46,6 +46,19 @@ import fr.streamia.tv.domain.Catalog
 import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.data.weatherEmoji
+import fr.streamia.tv.beinsports.ResolvedBeinProgrammeItem
+import fr.streamia.tv.recommendation.RecommendationRow
+import fr.streamia.tv.tvprogramme.ResolvedTvProgrammeItem
+import fr.streamia.tv.tvprogramme.ResolvedTvProgrammeNowItem
+import fr.streamia.tv.ukguide.ResolvedUkProgrammeItem
+import fr.streamia.tv.ui.BeinSportsProgrammeRow
+import fr.streamia.tv.ui.FootballScoresRow
+import fr.streamia.tv.ui.HomeRecommendationRow
+import fr.streamia.tv.ui.TV_PROGRAMME_DATA_REFRESH_MS
+import fr.streamia.tv.ui.TvProgrammeNowRow
+import fr.streamia.tv.ui.TvProgrammeTonightRow
+import fr.streamia.tv.ui.UK_GUIDE_ZONE
+import fr.streamia.tv.ui.UkGuideProgrammeRow
 import fr.streamia.tv.ui.ChannelLogo
 import fr.streamia.tv.ui.HomeRowKey
 import fr.streamia.tv.ui.LiveMatchCard
@@ -64,6 +77,7 @@ import fr.streamia.tv.ui.theme.RadiusCard
 import fr.streamia.tv.ui.theme.RadiusTile
 import kotlinx.coroutines.delay
 import java.time.LocalDateTime
+import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
@@ -88,6 +102,14 @@ fun MobileHomeScreen(
     favoritesRowEnabled: Boolean,
     recentChannelsEnabled: Boolean,
     liveMatchesEnabled: Boolean,
+    footballScoresEnabled: Boolean,
+    recommendationRows: List<RecommendationRow>,
+    tvProgrammeNow: List<ResolvedTvProgrammeNowItem>,
+    tvProgrammeTonight: List<ResolvedTvProgrammeItem>,
+    beinSportsNow: List<ResolvedBeinProgrammeItem>,
+    beinSportsNext: List<ResolvedBeinProgrammeItem>,
+    ukGuideNow: List<ResolvedUkProgrammeItem>,
+    ukGuideNext: List<ResolvedUkProgrammeItem>,
     onOpenSection: (MediaType) -> Unit,
     onSettings: () -> Unit,
     onSearch: () -> Unit,
@@ -100,10 +122,21 @@ fun MobileHomeScreen(
     onOpenLiveMatchChannel: (MediaEntry, String) -> Unit,
     onRefreshWeather: () -> Unit,
     onRefreshLiveMatches: () -> Unit,
+    onRefreshTvProgrammeNow: () -> Unit,
+    onRefreshBeinSportsGuide: () -> Unit,
+    onRefreshUkGuide: () -> Unit,
 ) {
     LaunchedEffect(Unit) {
         onRefreshWeather()
         onRefreshLiveMatches()
+        // Guides FR, beIN et UK : rechargés toutes les 2 minutes tant que l'accueil est affiché.
+        while (true) {
+            delay(TV_PROGRAMME_DATA_REFRESH_MS)
+            onRefreshTvProgrammeNow()
+            onRefreshBeinSportsGuide()
+            onRefreshUkGuide()
+            onRefreshLiveMatches()
+        }
     }
 
     // Catégories masquées, ou verrouillées et pas encore déverrouillées : exclues de l'accueil.
@@ -217,8 +250,43 @@ fun MobileHomeScreen(
             if (matchCards.isNotEmpty()) item {
                 MatchRow(matchCards, onOpenLiveMatches, onOpenLiveMatchChannel)
             }
+            if (footballScoresEnabled) item(key = "football-scores") {
+                FootballScoresRow(Modifier.padding(top = 26.dp, start = MobileGutter - 12.dp))
+            }
+            val openProgramme = { channel: MediaEntry, rowKey: String, itemKey: String -> onOpenHomeEntry(channel, rowKey, itemKey) }
+            val nowMillis: () -> Long = { nowSeconds * 1000 }
+            if (tvProgrammeNow.isNotEmpty()) item(key = HomeRowKey.TvProgrammeNow) {
+                GuideBlock { TvProgrammeNowRow(tvProgrammeNow, nowMillis, null, null) { openProgramme(it.channel, HomeRowKey.TvProgrammeNow, it.fingerprint) } }
+            }
+            if (tvProgrammeTonight.isNotEmpty()) item(key = HomeRowKey.TvProgrammeTonight) {
+                GuideBlock { TvProgrammeTonightRow(tvProgrammeTonight, null, null) { openProgramme(it.channel, HomeRowKey.TvProgrammeTonight, it.fingerprint) } }
+            }
+            if (beinSportsNow.isNotEmpty()) item(key = HomeRowKey.BeinSportsNow) {
+                GuideBlock { BeinSportsProgrammeRow("beIN Sports en direct", beinSportsNow, nowMillis, true, null, null) { openProgramme(it.channel, HomeRowKey.BeinSportsNow, it.fingerprint) } }
+            }
+            if (beinSportsNext.isNotEmpty()) item(key = HomeRowKey.BeinSportsNext) {
+                GuideBlock { BeinSportsProgrammeRow("beIN Sports suivant", beinSportsNext, nowMillis, false, null, null) { openProgramme(it.channel, HomeRowKey.BeinSportsNext, it.fingerprint) } }
+            }
+            val ukNow: () -> LocalTime = { java.time.Instant.ofEpochSecond(nowSeconds).atZone(UK_GUIDE_ZONE).toLocalTime() }
+            if (ukGuideNow.isNotEmpty()) item(key = HomeRowKey.UkGuideNow) {
+                GuideBlock { UkGuideProgrammeRow("UK en direct", ukGuideNow, ukNow, true, null, null) { openProgramme(it.channel, HomeRowKey.UkGuideNow, it.fingerprint) } }
+            }
+            if (ukGuideNext.isNotEmpty()) item(key = HomeRowKey.UkGuideNext) {
+                GuideBlock { UkGuideProgrammeRow("UK suivant", ukGuideNext, ukNow, false, null, null) { openProgramme(it.channel, HomeRowKey.UkGuideNext, it.fingerprint) } }
+            }
+            items(recommendationRows, key = { HomeRowKey.recommendation(it.kind) }) { row ->
+                GuideBlock {
+                    HomeRecommendationRow(row, null, null) { entry -> onOpenHomeEntry(entry, HomeRowKey.recommendation(row.kind), entry.key) }
+                }
+            }
         }
     }
+}
+
+/** Rangée reprise telle quelle de l'accueil TV, calée sur la marge mobile. */
+@Composable
+private fun GuideBlock(content: @Composable () -> Unit) {
+    Column(Modifier.padding(top = 26.dp, start = MobileGutter - 12.dp).fillMaxWidth()) { content() }
 }
 
 @Composable

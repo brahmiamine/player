@@ -2,6 +2,7 @@ package fr.streamia.tv.ui.mobile
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,6 +28,8 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.foundation.border
+import fr.streamia.tv.ui.LiveBrowserReturnState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -76,6 +79,7 @@ import kotlinx.coroutines.withContext
 private sealed interface BrowserSheet {
     data class EntryActions(val entry: MediaEntry) : BrowserSheet
     data object Sort : BrowserSheet
+    data object Categories : BrowserSheet
     data object Numpad : BrowserSheet
     data class Pin(val category: MediaCategory) : BrowserSheet
 }
@@ -114,8 +118,14 @@ fun MobileBrowserScreen(
     onDismissMessage: () -> Unit,
 ) {
     val isLive = type == MediaType.Live
+    // Retour d'une chaîne jouée (liste, recherche…) : on rouvre sa catégorie et on la met en évidence dans la liste.
+    val returnEntry = remember(type) {
+        if (!isLive) null else LiveBrowserReturnState.consume()?.let(catalog::entry)?.takeIf { entry ->
+            !(appSettings.parentalControlEnabled && !parentalUnlocked && Catalog.categoryKey(type, entry.categoryId) in library.lockedCategories)
+        }
+    }
     var selectedCategoryId by remember(type) {
-        mutableStateOf(initialCategoryId ?: defaultCategoryId(catalog, type))
+        mutableStateOf(returnEntry?.categoryId ?: initialCategoryId ?: defaultCategoryId(catalog, type))
     }
     var vodSort by remember(type, selectedCategoryId, appSettings.vodSortOrder) { mutableStateOf(appSettings.vodSortOrder) }
     var liveSort by remember(appSettings.liveChannelSortOrder) { mutableStateOf(appSettings.liveChannelSortOrder) }
@@ -236,6 +246,7 @@ fun MobileBrowserScreen(
                         favorites = library.favoriteEntries,
                         lockedIds = lockedIds,
                         paged = false,
+                        highlightKey = returnEntry?.key,
                         onOpen = { onLiveEntrySelected(it, entries) },
                         onLongPress = { sheet = BrowserSheet.EntryActions(it) },
                         onNearEnd = {},
@@ -256,8 +267,43 @@ fun MobileBrowserScreen(
             }
         }
 
+        // Direct : bouton flottant pour changer de catégorie depuis la liste des chaînes, sans remonter aux pastilles.
+        if (isLive && sheet == null) {
+            fr.streamia.tv.ui.AccentPill(
+                Modifier.align(Alignment.BottomEnd).padding(end = MobileGutter, bottom = 16.dp).height(52.dp)
+                    .clickable(onClickLabel = "Catégories") { sheet = BrowserSheet.Categories },
+            ) {
+                Row(Modifier.height(52.dp).padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    StreamiaIcon(StreamiaIconGlyph.Reorder, tint = Ink, size = 20.dp)
+                    Text("Catégories", color = Ink, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold)
+                }
+            }
+        }
+
         when (val current = sheet) {
             null -> Unit
+            BrowserSheet.Categories -> MobileBottomSheet("Catégories", "${categories.size} au total", onDismiss = { sheet = null }) {
+                Column(Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState())) {
+                    categories.forEach { category ->
+                        val locked = appSettings.parentalControlEnabled && !parentalUnlocked && category.key in library.lockedCategories
+                        val on = category.id == selectedCategoryId
+                        Row(
+                            Modifier.fillMaxWidth().height(52.dp)
+                                .clickable { sheet = null; selectCategory(category) }
+                                .padding(horizontal = 20.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            if (locked) StreamiaIcon(StreamiaIconGlyph.Lock, tint = WarmSignal, size = 16.dp)
+                            Text(
+                                category.name, color = if (on) AccentPink else Ink, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                fontWeight = if (on) FontWeight.ExtraBold else FontWeight.SemiBold, modifier = Modifier.weight(1f),
+                            )
+                            if (on) Text("✓", color = AccentPink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
             is BrowserSheet.EntryActions -> {
                 val entry = current.entry
                 val favorite = entry.key in library.favoriteEntries
@@ -343,12 +389,23 @@ private fun LiveList(
     favorites: Set<String>,
     lockedIds: Set<String>,
     paged: Boolean,
+    highlightKey: String?,
     onOpen: (MediaEntry) -> Unit,
     onLongPress: (MediaEntry) -> Unit,
     onNearEnd: () -> Unit,
 ) {
     val state = rememberLazyListState()
     NearEndEffect(state, entries.size, paged, onNearEnd)
+    // Défilement jusqu'à la chaîne de retour, une seule fois, dès qu'elle est dans la liste affichée.
+    var scrolled by remember(highlightKey) { mutableStateOf(false) }
+    LaunchedEffect(highlightKey, entries) {
+        if (highlightKey == null || scrolled) return@LaunchedEffect
+        val index = entries.indexOfFirst { it.key == highlightKey }
+        if (index >= 0) {
+            state.scrollToItem((index - 1).coerceAtLeast(0))
+            scrolled = true
+        }
+    }
     // Programme en cours recalculé toutes les 30 s.
     val nowSeconds by produceState(System.currentTimeMillis() / 1000) {
         while (true) {
@@ -371,7 +428,10 @@ private fun LiveList(
                 val end = it.endEpochSeconds
                 if (start != null && end != null && end > start) ((nowSeconds - start).toFloat() / (end - start)).coerceIn(0f, 1f) else null
             }
-            MobileCard(onClick = { onOpen(entry) }, onLongClick = { onLongPress(entry) }) {
+            MobileCard(
+                Modifier.then(if (entry.key == highlightKey) Modifier.border(2.dp, AccentPink, RoundedCornerShape(RadiusTile)) else Modifier),
+                onClick = { onOpen(entry) }, onLongClick = { onLongPress(entry) },
+            ) {
                 Row(
                     Modifier.fillMaxWidth().padding(start = 10.dp, end = 14.dp, top = 10.dp, bottom = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,

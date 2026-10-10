@@ -166,7 +166,7 @@ fun MobileSettingsScreen(
                 }
                 Group("Application") {
                     SettingsLink("Contrôle parental", "Code à 4 chiffres et catégories verrouillées", onParentalControl)
-                    SettingsLink("Ville, assistant IA, sauvegarde, mises à jour", "Page de réglages complète (paysage)", onAdvanced)
+                    SettingsLink("Ville, assistant IA, sauvegarde, mises à jour", "Ville, IA, sauvegarde, mises à jour", onAdvanced)
                     SettingsLink("À propos", "Streamia v$currentVersion", onAbout)
                 }
             }
@@ -181,7 +181,7 @@ fun MobileSettingsScreen(
 }
 
 @Composable
-private fun Group(title: String, rows: @Composable () -> Unit) {
+internal fun Group(title: String, rows: @Composable () -> Unit) {
     Column {
         Text(
             title.uppercase(java.util.Locale.FRENCH),
@@ -198,7 +198,7 @@ private fun Group(title: String, rows: @Composable () -> Unit) {
 }
 
 @Composable
-private fun SettingsRow(title: String, subtitle: String?, onClick: () -> Unit, trailing: @Composable () -> Unit) {
+internal fun SettingsRow(title: String, subtitle: String?, onClick: () -> Unit, trailing: @Composable () -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -217,7 +217,7 @@ private fun SettingsRow(title: String, subtitle: String?, onClick: () -> Unit, t
 }
 
 @Composable
-private fun SettingsToggle(title: String, subtitle: String?, on: Boolean, onToggle: () -> Unit) {
+internal fun SettingsToggle(title: String, subtitle: String?, on: Boolean, onToggle: () -> Unit) {
     SettingsRow(title, subtitle, onToggle) {
         Box(
             Modifier.width(46.dp).height(28.dp).clip(RoundedCornerShape(RadiusPill)).background(if (on) AccentPink else Color.White.copy(alpha = 0.3f)),
@@ -234,7 +234,7 @@ private fun SettingsToggle(title: String, subtitle: String?, on: Boolean, onTogg
 }
 
 @Composable
-private fun SettingsValue(title: String, value: String, onCycle: () -> Unit) {
+internal fun SettingsValue(title: String, value: String, onCycle: () -> Unit) {
     SettingsRow(title, null, onCycle) {
         Text(value, color = MutedInk, fontSize = 13.sp)
         StreamiaIcon(StreamiaIconGlyph.ArrowForward, tint = MutedInk, size = 16.dp)
@@ -242,6 +242,6 @@ private fun SettingsValue(title: String, value: String, onCycle: () -> Unit) {
 }
 
 @Composable
-private fun SettingsLink(title: String, subtitle: String?, onClick: () -> Unit) {
+internal fun SettingsLink(title: String, subtitle: String?, onClick: () -> Unit) {
     SettingsRow(title, subtitle, onClick) { StreamiaIcon(StreamiaIconGlyph.ArrowForward, tint = MutedInk, size = 16.dp) }
 }

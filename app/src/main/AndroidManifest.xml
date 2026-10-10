@@ -10,6 +10,11 @@
     <!-- Android 14+ : Streamia reste propriétaire de ses mises à jour (setRequestUpdateOwnership). -->
     <uses-permission android:name="android.permission.ENFORCE_UPDATE_OWNERSHIP" />
 
+    <!-- Lecture qui continue écran verrouillé ou appli quittée (mobile) : service de premier plan « média ». -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <!-- Android TV et téléphones/tablettes : l'interface (télécommande ou tactile) est choisie au lancement. -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
@@ -40,6 +45,7 @@
             android:exported="true"
             android:launchMode="singleTask"
             android:screenOrientation="unspecified"
+            android:supportsPictureInPicture="true"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -53,6 +59,11 @@
                 <data android:scheme="streamia" android:host="resume" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name=".player.PlaybackForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
 
         <!-- Résultat de l'installation de mise à jour (session PackageInstaller, voir UpdateInstaller). -->
         <receiver

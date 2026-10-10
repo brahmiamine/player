@@ -66,6 +66,18 @@ internal fun BoxScope.PlayerSettings(
     /** Langue des réglages IA (« Français ») quand l'assistant est actif : bouton « Traduire par IA » en tête. */
     aiTranslateLanguage: String? = null,
 ) {
+    // Smartphone : feuille du bas au lieu du panneau latéral de la TV.
+    if (LocalHandheld.current) {
+        fr.streamia.tv.ui.mobile.MobilePlayerSettingsSheet(
+            audioTracks, audioIndex, subtitleTracks, subtitleIndex, aspect, dolbyVisionLabel, dolbyAtmosLabel,
+            onAudioSelected, onSubtitleSelected, onNextAspect, onClose,
+            externalSubtitleAvailable, externalSubtitleLabel, externalSubtitleError,
+            onPickExternalSubtitleFile, onLoadExternalSubtitleUrl, onSearchOnlineSubtitles,
+            onlineSubtitleBusy, onlineSubtitleStatus, onlineSubtitleResultCount, onShowOnlineSubtitleResults,
+            subtitleOffsetMs, onShiftSubtitle, onResetSubtitleShift, aiTranslateLanguage,
+        )
+        return
+    }
     // Audio / sous-titres : choix dans une fenêtre à cases à cocher (sélection unique), au lieu
     // d'une liste déroulante dans le panneau. Le focus revient sur la ligne à la fermeture.
     var picker by remember { mutableStateOf<TrackPicker?>(null) }

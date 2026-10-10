@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -65,6 +66,7 @@ fun PlayerTouchControls(
     durationMs: () -> Long,
     onBack: () -> Unit,
     onSettings: () -> Unit,
+    onRotate: () -> Unit,
     onTogglePlayback: () -> Unit,
     onSeekBackward: () -> Unit,
     onSeekForward: () -> Unit,
@@ -72,6 +74,9 @@ fun PlayerTouchControls(
     onChannelUp: () -> Unit,
     onChannelDown: () -> Unit,
     onChannelList: () -> Unit,
+    /** Autres versions de la chaîne (HD, 4K, autres pays…) : bouton « Versions » seulement si > 0. */
+    otherVersionsCount: Int = 0,
+    onVersions: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Box(
@@ -93,6 +98,18 @@ fun PlayerTouchControls(
                 Spacer(Modifier.width(16.dp))
                 TouchButton(onChannelList, "Liste des chaînes") { StreamiaIcon(StreamiaIconGlyph.Guide, tint = Ink, size = 44.dp) }
             }
+            if (live && otherVersionsCount > 0) {
+                Spacer(Modifier.width(16.dp))
+                Box {
+                    TouchButton(onVersions, "Versions de la chaîne") { StreamiaIcon(StreamiaIconGlyph.Swap, tint = Ink, size = 44.dp) }
+                    Text(
+                        otherVersionsCount.toString(), color = Ink, fontSize = 20.sp, fontWeight = FontWeight.Bold,
+                        modifier = Modifier.align(Alignment.TopEnd).clip(CircleShape).background(AccentPink).padding(horizontal = 12.dp, vertical = 2.dp),
+                    )
+                }
+            }
+            Spacer(Modifier.width(16.dp))
+            TouchButton(onRotate, "Pivoter l'écran") { StreamiaIcon(StreamiaIconGlyph.Refresh, tint = Ink, size = 44.dp) }
             Spacer(Modifier.width(16.dp))
             TouchButton(onSettings, "Réglages de lecture") { StreamiaIcon(StreamiaIconGlyph.Settings, tint = Ink, size = 44.dp) }
         }
@@ -119,7 +136,7 @@ fun PlayerTouchControls(
             }
             if (!live) {
                 Spacer(Modifier.height(30.dp))
-                TouchSeekBar(positionMs, durationMs, onSeekTo, Modifier.width(820.dp))
+                TouchSeekBar(positionMs, durationMs, onSeekTo, Modifier.fillMaxWidth(0.92f).widthIn(max = 820.dp))
             }
         }
     }

@@ -76,6 +76,14 @@ internal fun BoxScope.LiveVersionsPanel(
     onCancelScan: () -> Unit,
     onOpenPlaybackSettings: () -> Unit,
 ) {
+    // Smartphone : feuille du bas au lieu du panneau latéral de la TV.
+    if (LocalHandheld.current) {
+        fr.streamia.tv.ui.mobile.MobileLiveVersionsSheet(
+            channelName, options, currentLoading, currentFailed, currentProblem, scanProgress, scanCount,
+            onSelect, onClose, onStartScan, onCancelScan, onOpenPlaybackSettings,
+        )
+        return
+    }
     val scanning = scanProgress != null
     val listState = rememberLazyListState()
     val currentFocus = remember { FocusRequester() }

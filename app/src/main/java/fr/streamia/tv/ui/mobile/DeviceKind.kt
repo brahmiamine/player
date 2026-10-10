@@ -30,7 +30,7 @@ val LocalDeviceKind = staticCompositionLocalOf { DeviceKind.Tv }
 fun StreamiaScreen.isMobileNative(): Boolean = when (this) {
     StreamiaScreen.Home, StreamiaScreen.Browser, StreamiaScreen.More,
     StreamiaScreen.Login, StreamiaScreen.Search, StreamiaScreen.LiveMatches, StreamiaScreen.Settings,
-    StreamiaScreen.Epg, StreamiaScreen.Organizer -> true
+    StreamiaScreen.Epg, StreamiaScreen.Organizer, StreamiaScreen.ParentalControl, StreamiaScreen.About -> true
     is StreamiaScreen.MovieDetails, is StreamiaScreen.Series -> true
     else -> false
 }
