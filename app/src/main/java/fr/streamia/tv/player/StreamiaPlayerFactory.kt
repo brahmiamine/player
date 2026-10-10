@@ -35,6 +35,9 @@ private fun targetBufferBytes(context: Context): Int {
 /** Lecture déjà passée gardée en mémoire (VOD), à partir de l'image clé qui la précède. */
 private const val VOD_BACK_BUFFER_MS = 10_000
 
+/** Plus longue attente imposée après des coupures répétées. */
+private const val MAX_REBUFFER_MARGIN_MS = 12_000
+
 object StreamiaPlayerFactory {
     // Client partagé avec l'API et les images : la connexion au serveur du fournisseur (TCP, TLS)
     // est souvent déjà ouverte au moment du zap.
@@ -47,9 +50,15 @@ object StreamiaPlayerFactory {
         tunneling: Boolean = false,
     ): ExoPlayer {
         val profile = PlaybackTuning.forType(mediaType, bufferMode)
-        val loadControl = DefaultLoadControl.Builder()
+        val bufferBytes = targetBufferBytes(context)
+        val defaultLoadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                profile.minBufferMs,
+                // Minimum = maximum : chargement continu par petites touches. Avec un écart (25 s →
+                // 90 s), le lecteur cessait de lire la connexion jusqu'à redescendre au minimum,
+                // souvent plus d'une minute en 4K (mémoire pleine avant 90 s) : le serveur IPTV
+                // coupait cette connexion inactive, d'où coupures et reconnexions après quelques
+                // minutes de lecture. Sur le Direct, ne plus lire le flux fait aussi décrocher le serveur.
+                profile.maxBufferMs,
                 profile.maxBufferMs,
                 profile.bufferForPlaybackMs,
                 profile.bufferForPlaybackAfterRebufferMs,
@@ -57,7 +66,7 @@ object StreamiaPlayerFactory {
             // La durée ne passe plus avant la taille : 90 s d'un film 4K à 50 Mbit/s représentaient
             // plus de 500 Mo en mémoire (coupures, voire plantage sur un boîtier à 2 Go). Le tampon
             // s'arrête désormais à une part de la mémoire allouée à l'app.
-            .setTargetBufferBytes(targetBufferBytes(context))
+            .setTargetBufferBytes(bufferBytes)
             .setPrioritizeTimeOverSizeThresholds(false)
             .apply {
                 // Films/séries : quelques secondes déjà vues gardées depuis l'image clé précédente.
@@ -68,6 +77,13 @@ object StreamiaPlayerFactory {
                 if (mediaType != MediaType.Live) setBackBuffer(VOD_BACK_BUFFER_MS, true)
             }
             .build()
+        // Coupures répétées : marge de reprise doublée à chaque fois (plafonnée sous le tampon maximal).
+        val loadControl = AdaptiveRebufferLoadControl(
+            delegate = defaultLoadControl,
+            baseRebufferMarginMs = profile.bufferForPlaybackAfterRebufferMs,
+            maxRebufferMarginMs = (profile.maxBufferMs / 2).coerceAtMost(MAX_REBUFFER_MARGIN_MS),
+            targetBufferBytes = bufferBytes,
+        )
         // Mode tunnel : le boîtier synchronise lui-même image et son (4K HDR plus fluide sur les
         // TV qui le gèrent). Ignoré automatiquement quand le décodeur ou l'audio ne le permettent pas.
         val trackSelector = DefaultTrackSelector(context).apply {
@@ -89,11 +105,13 @@ object StreamiaPlayerFactory {
                 )
             }
         }
+        val liveErrorPolicy = if (mediaType == MediaType.Live) LiveLoadErrorPolicy() else null
         val mediaSourceFactory = DefaultMediaSourceFactory(context, extractorsFactory)
             .setDataSourceFactory(dataSourceFactory)
             // Le Direct a sa propre bascule d'URL (TS/HLS, HTTP→HTTPS) : 5 relances par URL avant d'y
             // passer laissaient l'écran noir plusieurs dizaines de secondes sur une chaîne morte.
-            .setLoadErrorHandlingPolicy(DefaultLoadErrorHandlingPolicy(if (mediaType == MediaType.Live) 1 else 5))
+            // Une fois l'image affichée, les relances passent à 6 (voir LiveLoadErrorPolicy).
+            .setLoadErrorHandlingPolicy(liveErrorPolicy ?: DefaultLoadErrorHandlingPolicy(5))
         val renderersFactory = DefaultRenderersFactory(context)
             .setEnableDecoderFallback(true)
             // Décodeurs du boîtier d'abord, FFmpeg seulement pour les formats audio qu'il ne sait pas lire.
@@ -115,6 +133,18 @@ object StreamiaPlayerFactory {
                 playWhenReady = true
                 setHandleAudioBecomingNoisy(true)
             }
+
+        if (liveErrorPolicy != null) {
+            player.addListener(
+                object : Player.Listener {
+                    override fun onRenderedFirstFrame() { liveErrorPolicy.playing = true }
+                    override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) { liveErrorPolicy.playing = false }
+                    override fun onPlaybackStateChanged(playbackState: Int) {
+                        if (playbackState == Player.STATE_IDLE) liveErrorPolicy.playing = false
+                    }
+                },
+            )
+        }
 
         var trackedUrl = ""
         var bufferStarts = 0
