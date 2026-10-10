@@ -76,7 +76,7 @@ fun MobileSearchScreen(
 ) {
     BackHandler(onBack = onBack)
     val needle = query.trim().lowercase()
-    val aiForQuery = aiSearch.takeIf { aiActive && it.query == query.trim() }
+    val aiForQuery = aiSearch.takeIf { aiActive && it.query == query.trim() && it.type == type }
     val aiEntries = aiForQuery?.result?.entries.orEmpty()
     val showAi = aiEntries.isNotEmpty()
     // Voix : le micro du clavier de reconnaissance du téléphone remplit le champ, puis l'assistant comprend la phrase.

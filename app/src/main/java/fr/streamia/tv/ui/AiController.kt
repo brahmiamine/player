@@ -115,14 +115,14 @@ internal class AiController(
         val text = query.trim()
         if (!AiGate.active.value || text.length < MIN_QUERY_CHARS) return
         searchJob?.cancel()
-        state.update { it.copy(search = AiSearchUiState(query = text, loading = true)) }
+        state.update { it.copy(search = AiSearchUiState(query = text, type = type, loading = true)) }
         searchJob = viewModelScope.launch {
             val outcome = runCatching { naturalSearch(text, type) }
             if (outcome.exceptionOrNull() is CancellationException || !AiGate.active.value) return@launch
             state.update {
                 it.copy(
-                    search = outcome.getOrNull()?.let { result -> AiSearchUiState(query = text, result = result) }
-                        ?: AiSearchUiState(query = text, error = "L'assistant n'a pas compris cette demande. Reformulez-la ou précisez le genre, la langue ou l'époque."),
+                    search = outcome.getOrNull()?.let { result -> AiSearchUiState(query = text, type = type, result = result) }
+                        ?: AiSearchUiState(query = text, type = type, error = "L'assistant n'a pas compris cette demande. Reformulez-la ou précisez le genre, la langue ou l'époque."),
                 )
             }
         }

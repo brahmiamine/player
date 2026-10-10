@@ -98,6 +98,13 @@ class AiFeaturesTest {
     }
 
     @Test
+    fun discardedCollectionDoesNotReserveItsItems() {
+        val ids = setOf("F1", "F2", "F3", "F4")
+        val answer = """{"collections":[{"title":"","ids":["F1","F2"]},{"title":"Valide","ids":["F1","F2","F3","F4"]}]}"""
+        assertEquals(listOf("F1", "F2", "F3", "F4"), parseCollections(answer, ids)!!.single().ids)
+    }
+
+    @Test
     fun briefDropsUnknownReferences() {
         val brief = parseBrief("""{"headline":"Soirée foot","items":[{"ref":"M1","text":"PSG - OM"},{"ref":"M7","text":"inventé"}]}""", setOf("M1"))!!
         assertEquals(1, brief.items.size)

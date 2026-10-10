@@ -66,7 +66,7 @@ fun SearchScreen(
     BackHandler(onBack = onBack)
     val needle = query.trim().lowercase()
     // Résultats de l'assistant seulement pour le texte exact qu'il a traité ; le champ modifié, ils s'effacent.
-    val aiForQuery = aiSearch.takeIf { aiActive && it.query == query.trim() }
+    val aiForQuery = aiSearch.takeIf { aiActive && it.query == query.trim() && it.type == type }
     val aiEntries = aiForQuery?.result?.entries.orEmpty()
     val showAi = aiEntries.isNotEmpty()
     // Les résultats précédents restent affichés pendant la frappe, avec « Recherche… » : un

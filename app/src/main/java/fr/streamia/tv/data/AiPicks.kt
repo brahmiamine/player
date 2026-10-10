@@ -90,9 +90,14 @@ internal fun parseCollections(answer: String, validIds: Set<String>): List<AiCol
     val result = ArrayList<AiCollection>()
     for (index in 0 until array.length()) {
         val item = array.optJSONObject(index) ?: continue
-        val ids = item.stringList("ids", 12).filter { it in validIds && used.add(it) }
+        val ids = item.stringList("ids", 12).filter { it in validIds && it !in used }.distinct()
         val title = shorten(item.optString("title"), 60)
-        if (title.isNotEmpty() && ids.size >= MIN_COLLECTION_SIZE) result += AiCollection(title, item.optBoolean("ordered", false), ids.take(10))
+        // Les identifiants ne sont réservés qu'une fois la collection acceptée : une collection écartée n'en prive pas une valide.
+        if (title.isNotEmpty() && ids.size >= MIN_COLLECTION_SIZE) {
+            val kept = ids.take(10)
+            used += kept
+            result += AiCollection(title, item.optBoolean("ordered", false), kept)
+        }
         if (result.size >= 5) break
     }
     return result.takeIf { it.isNotEmpty() }

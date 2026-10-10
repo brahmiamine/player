@@ -26,6 +26,8 @@ data class RemoteUiState(val busy: Boolean = false, val log: List<RemoteExchange
 data class AiSearchUiState(
     /** Demande à laquelle correspondent [result] ou [error] ; un autre texte dans le champ les rend caducs. */
     val query: String = "",
+    /** Filtre Direct/Films/Séries sous lequel la recherche a été faite : en changer rend le résultat caduc. */
+    val type: fr.streamia.tv.domain.MediaType? = null,
     val loading: Boolean = false,
     val result: AiSearchResult? = null,
     val error: String? = null,
