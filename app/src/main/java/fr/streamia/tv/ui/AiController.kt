@@ -5,7 +5,6 @@ import fr.streamia.tv.data.AiGate
 import fr.streamia.tv.data.AiPoolBuilder
 import fr.streamia.tv.data.AiSearchPlan
 import fr.streamia.tv.data.AiSearchResult
-import fr.streamia.tv.data.SearchSort
 import fr.streamia.tv.data.RECAP_AUTO_GAP_MS
 import fr.streamia.tv.data.RemoteAction
 import fr.streamia.tv.data.isResumable

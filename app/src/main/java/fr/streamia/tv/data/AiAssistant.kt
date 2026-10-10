@@ -426,12 +426,12 @@ class AiAssistant(context: Context, private val keyStore: AiKeyStore, val usage:
             system = "Tu fais ${if (sections.size > 1) "plusieurs tâches" else "une tâche"} pour la fiche d'un film ou d'une série. " +
                 "Réponds exactement sous cette forme, sans rien d'autre, avec uniquement ces sections et dans cet ordre :\n" + sections.joinToString("\n"),
             user = buildString {
-                append(reviewInfo?.asPrompt(source.displayName) ?: "Référence : ${source.displayName}")
+                append(reviewInfo?.let { if (needPlot) it.copy(plot = null) else it }?.asPrompt(source.displayName) ?: "Référence : ${source.displayName}")
                 if (needRank) {
                     append("\nCandidats :\n")
                     append(items!!.mapIndexed { index, entry -> "${index + 1}. ${entry.displayName}" }.joinToString("\n"))
                 }
-                if (needPlot) append("\n\nDescription à traduire :\n").append(text!!.take(MAX_PLOT_CHARS))
+                if (needPlot) append("\n\nDescription (à traduire, et base de l'avis) :\n").append(text!!.take(MAX_PLOT_CHARS))
             },
             maxTokens = (if (needPlot) 1_500 else 0) + (if (needRank) 150 else 0) + (if (needReview) 250 else 0),
         ) ?: return FicheAi(cachedPlot, cachedKeys, cachedReview)
