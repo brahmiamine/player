@@ -28,7 +28,10 @@ val LocalDeviceKind = staticCompositionLocalOf { DeviceKind.Tv }
  * gardent pour l'instant la mise en page TV adaptée au téléphone, en paysage.
  */
 fun StreamiaScreen.isMobileNative(): Boolean = when (this) {
-    StreamiaScreen.Home, StreamiaScreen.Browser, StreamiaScreen.More -> true
+    StreamiaScreen.Home, StreamiaScreen.Browser, StreamiaScreen.More,
+    StreamiaScreen.Login, StreamiaScreen.Search, StreamiaScreen.LiveMatches, StreamiaScreen.Settings,
+    StreamiaScreen.Epg, StreamiaScreen.Organizer -> true
+    is StreamiaScreen.MovieDetails, is StreamiaScreen.Series -> true
     else -> false
 }
 

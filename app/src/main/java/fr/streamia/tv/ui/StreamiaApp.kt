@@ -6,6 +6,8 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.view.WindowCompat
@@ -15,6 +17,13 @@ import fr.streamia.tv.ui.mobile.DeviceKind
 import fr.streamia.tv.ui.mobile.LocalDeviceKind
 import fr.streamia.tv.ui.mobile.MobileBrowserScreen
 import fr.streamia.tv.ui.mobile.MobileHomeScreen
+import fr.streamia.tv.ui.mobile.MobileDetailsScreen
+import fr.streamia.tv.ui.mobile.MobileLoginScreen
+import fr.streamia.tv.ui.mobile.MobileMatchesScreen
+import fr.streamia.tv.ui.mobile.MobileSearchScreen
+import fr.streamia.tv.ui.mobile.MobileSettingsScreen
+import fr.streamia.tv.ui.mobile.MobileEpgScreen
+import fr.streamia.tv.ui.mobile.MobileOrganizerScreen
 import fr.streamia.tv.ui.mobile.MobileMoreScreen
 import fr.streamia.tv.ui.mobile.MobileScaffold
 import fr.streamia.tv.ui.mobile.MobileTab
@@ -78,7 +87,10 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
     val context = LocalContext.current
     val deviceKind = remember(context) { detectDeviceKind(context) }
     val mobile = deviceKind == DeviceKind.Mobile
-    val mobileNative = mobile && state.screen.isMobileNative()
+    // « Réglages avancés » (ville, IA, sauvegarde, mises à jour) ouvre la page Paramètres de la TV, en paysage.
+    var advancedSettings by remember { mutableStateOf(false) }
+    LaunchedEffect(state.screen) { if (state.screen !is StreamiaScreen.Settings) advancedSettings = false }
+    val mobileNative = mobile && state.screen.isMobileNative() && !(state.screen is StreamiaScreen.Settings && advancedSettings)
     val playerOpen = state.screen is StreamiaScreen.Player
     LaunchedEffect(mobile, mobileNative, playerOpen) {
         val activity = context as? Activity ?: return@LaunchedEffect
@@ -238,6 +250,176 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                         )
                     }
                 }
+
+
+                mobileNative && state.screen is StreamiaScreen.Login -> MobileLoginScreen(
+                    profiles = state.profiles,
+                    busy = state.busy,
+                    testingConnection = state.testingConnection,
+                    testSucceeded = state.testSucceeded,
+                    message = state.message,
+                    onOpenProfile = viewModel::openProfile,
+                    onSignIn = viewModel::signIn,
+                    onTestConnection = viewModel::testConnection,
+                    onImportM3u = viewModel::importM3u,
+                    onImportM3uUrl = viewModel::importM3uUrl,
+                    onSaveM3uSettings = viewModel::saveM3uSettings,
+                    onRenameProfile = viewModel::renameProfile,
+                    onDeleteProfile = viewModel::deleteProfile,
+                    onDismissMessage = viewModel::dismissMessage,
+                    onReturnToList = if (state.returnProfileId != null) viewModel::returnToPreviousList else null,
+                )
+
+                mobileNative && state.screen is StreamiaScreen.Search && state.catalog != null -> MobileSearchScreen(
+                    favoriteEntries = state.library.favoriteEntries,
+                    query = state.searchQuery,
+                    type = state.searchType,
+                    search = viewModel::searchCatalog,
+                    onQueryChange = viewModel::updateSearchQuery,
+                    onTypeChange = viewModel::updateSearchType,
+                    onOpenEntry = viewModel::openSearchEntry,
+                    onToggleEntryFavorite = viewModel::toggleEntryFavorite,
+                    onBack = viewModel::backFromMenu,
+                )
+
+                mobileNative && state.screen is StreamiaScreen.LiveMatches -> {
+                    val homeState = homeStateHolder.value
+                    MobileMatchesScreen(
+                        matches = liveOnSatMatchesHolder.value,
+                        loading = homeState.liveOnSatLoading,
+                        resolvingChannels = homeState.liveOnSatResolving,
+                        error = homeState.liveOnSatError,
+                        fetchedAtEpochMillis = homeState.liveOnSatFetchedAtEpochMillis,
+                        onOpenChannel = viewModel::openLiveMatchChannel,
+                        onRefresh = viewModel::refreshLiveOnSatMatches,
+                        onRefreshIfStale = viewModel::refreshLiveOnSatIfStale,
+                        onBack = viewModel::backFromMenu,
+                    )
+                }
+
+                mobileNative && state.screen is StreamiaScreen.MovieDetails -> {
+                    val movie = (state.screen as StreamiaScreen.MovieDetails).movie
+                    val resume = state.library.history.firstOrNull { it.entry.key == movie.key }?.takeIf { it.isResumable() }?.positionMs ?: 0L
+                    val otherVersions = rememberOtherVersions(viewModel, movie)
+                    MobileDetailsScreen(
+                        entry = movie,
+                        movieDetails = state.mediaDetails,
+                        seriesDetails = null,
+                        busy = state.busy,
+                        message = state.message,
+                        favorite = movie.key in state.library.favoriteEntries,
+                        watched = movie.key in state.library.watchedEntries,
+                        resumePositionMs = resume,
+                        translatedPlot = state.aiPlot.takeIf { aiActive },
+                        similarMedia = state.similarMedia.withAiOrder(state.aiSimilarKeys.takeIf { aiActive }),
+                        otherVersions = otherVersions.orEmpty(),
+                        episodeHistory = emptyList(),
+                        onPlay = { viewModel.playMovie(movie) },
+                        onPlayFromStart = { viewModel.playMovie(movie, fromStart = true) },
+                        onEpisodeSelected = {},
+                        onToggleFavorite = { viewModel.toggleEntryFavorite(movie) },
+                        onToggleWatched = { viewModel.toggleEntryWatched(movie) },
+                        onOpenSimilar = viewModel::openEntry,
+                        onRetry = {},
+                        onBack = viewModel::closeDetails,
+                    )
+                }
+
+                mobileNative && state.screen is StreamiaScreen.Series && state.credentials != null -> {
+                    val series = (state.screen as StreamiaScreen.Series).series
+                    val otherVersions = rememberOtherVersions(viewModel, series)
+                    MobileDetailsScreen(
+                        entry = series,
+                        movieDetails = null,
+                        seriesDetails = state.seriesDetails,
+                        busy = state.busy,
+                        message = state.message,
+                        favorite = series.key in state.library.favoriteEntries,
+                        watched = series.key in state.library.watchedEntries,
+                        resumePositionMs = 0L,
+                        translatedPlot = state.aiPlot.takeIf { aiActive },
+                        similarMedia = state.similarMedia.withAiOrder(state.aiSimilarKeys.takeIf { aiActive }),
+                        otherVersions = otherVersions.orEmpty(),
+                        episodeHistory = state.library.history,
+                        onPlay = {},
+                        onPlayFromStart = {},
+                        onEpisodeSelected = { episode -> viewModel.playEpisode(series, episode) },
+                        onToggleFavorite = { viewModel.toggleEntryFavorite(series) },
+                        onToggleWatched = { viewModel.toggleEntryWatched(series) },
+                        onOpenSimilar = viewModel::openEntry,
+                        onRetry = { viewModel.openEntry(series) },
+                        onBack = viewModel::closeSeries,
+                    )
+                }
+
+
+                mobileNative && state.screen is StreamiaScreen.Settings -> MobileSettingsScreen(
+                    settings = state.appSettings,
+                    playlistName = state.profiles.firstOrNull { it.id == state.activeProfileId }?.name,
+                    accountExpiresAtEpochSeconds = state.catalog?.account?.expiresAtEpochSeconds,
+                    currentVersion = BuildConfig.VERSION_NAME,
+                    liveHistoryCount = state.library.history.count { it.entry.type == MediaType.Live },
+                    movieHistoryCount = state.library.history.count { it.entry.type == MediaType.Movie },
+                    seriesHistoryCount = state.library.history.count { it.entry.type == MediaType.Series },
+                    onToggleLivePreview = viewModel::toggleLivePreview,
+                    onCycleLivePreviewDelay = viewModel::cycleLivePreviewDelay,
+                    onCycleVodSeekStep = viewModel::cycleVodSeekStep,
+                    onCycleVideoAspect = viewModel::cycleVideoAspect,
+                    onCycleBufferMode = viewModel::cycleBufferMode,
+                    onCycleDisplayModeSwitch = viewModel::cycleDisplayModeSwitch,
+                    onToggleTunneling = viewModel::toggleTunneling,
+                    onCycleLiveStreamFormat = viewModel::cycleLiveStreamFormat,
+                    onCycleLiveChannelSortOrder = viewModel::cycleLiveChannelSortOrder,
+                    onCycleVodSortOrder = viewModel::cycleVodSortOrder,
+                    onCycleEpgTimeOffset = viewModel::cycleEpgTimeOffset,
+                    onToggleAutoPlayNextEpisode = viewModel::toggleAutoPlayNextEpisode,
+                    onToggleLiveVersionFailover = viewModel::toggleLiveVersionFailover,
+                    onCycleSubtitleSizeScale = viewModel::cycleSubtitleSizeScale,
+                    onToggleSubtitleBackground = viewModel::toggleSubtitleBackground,
+                    onToggleHomeBlock = viewModel::toggleHomeBlock,
+                    onOrganizer = viewModel::showOrganizer,
+                    onRefresh = viewModel::refresh,
+                    onClearLiveHistory = { viewModel.clearHistory(MediaType.Live) },
+                    onClearMovieHistory = { viewModel.clearHistory(MediaType.Movie) },
+                    onClearSeriesHistory = { viewModel.clearHistory(MediaType.Series) },
+                    onClearAllHistory = { viewModel.clearHistory() },
+                    onChangePlaylist = viewModel::logout,
+                    onParentalControl = viewModel::showParentalControl,
+                    onAbout = viewModel::showAbout,
+                    onAdvanced = { advancedSettings = true },
+                    onBack = viewModel::backFromMenu,
+                )
+
+
+                mobileNative && state.screen is StreamiaScreen.Epg && state.catalog != null -> MobileEpgScreen(
+                    catalog = state.catalog!!,
+                    guide = state.epgGuide,
+                    hiddenCategories = state.library.hiddenCategories,
+                    hiddenEntries = state.library.hiddenEntries,
+                    lockedCategories = state.library.lockedCategories,
+                    parentalControlEnabled = state.appSettings.parentalControlEnabled,
+                    parentalUnlocked = state.parentalUnlocked,
+                    availableDates = state.epgAvailableDates,
+                    selectedDate = state.epgSelectedDate,
+                    loading = state.epgLoading,
+                    message = state.message,
+                    onOpenChannel = viewModel::openEntry,
+                    onSelectDate = viewModel::selectEpgDate,
+                    onReload = viewModel::reloadEpg,
+                    loadDescription = viewModel::epgDescription,
+                    onBack = viewModel::backFromMenu,
+                )
+
+                mobileNative && state.screen is StreamiaScreen.Organizer && state.catalog != null -> MobileOrganizerScreen(
+                    catalog = state.catalog!!,
+                    hiddenCategories = state.library.hiddenCategories,
+                    lockedCategories = state.library.lockedCategories,
+                    parentalControlEnabled = state.appSettings.parentalControlEnabled,
+                    onCategoryOrderChanged = viewModel::setCategoryOrder,
+                    onToggleCategoryHidden = viewModel::toggleCategoryHidden,
+                    onToggleCategoryLocked = viewModel::toggleCategoryLocked,
+                    onBack = viewModel::closeOrganizer,
+                )
 
                 state.screen is StreamiaScreen.Login -> LoginScreen(
                     profiles = state.profiles,

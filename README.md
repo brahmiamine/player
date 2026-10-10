@@ -123,7 +123,7 @@ adb connect ADRESSE_IP_TV:5555
 adb install -r app-debug.apk
 ```
 
-L'application détecte au lancement s'il s'agit d'une TV ou d'un téléphone/tablette (`UiModeManager` et `android.software.leanback`, voir `ui/mobile/DeviceKind.kt`) : la TV garde l'interface pilotée à la télécommande en paysage ; le mobile affiche l'interface tactile en portrait (barre d'onglets Accueil / Direct / Films / Séries / Plus, tirer pour actualiser, appui long, feuilles du bas, pavé numérique) et passe en paysage pour le lecteur. Écrans déjà refaits pour le mobile : Accueil, Direct/Films/Séries et Plus ; les autres gardent pour l'instant la mise en page TV adaptée au téléphone.
+L'application détecte au lancement s'il s'agit d'une TV ou d'un téléphone/tablette (`UiModeManager` et `android.software.leanback`, voir `ui/mobile/DeviceKind.kt`) : la TV garde l'interface pilotée à la télécommande en paysage ; le mobile affiche l'interface tactile en portrait (barre d'onglets Accueil / Direct / Films / Séries / Plus, tirer pour actualiser, appui long, feuilles du bas, pavé numérique) et passe en paysage pour le lecteur. Écrans mobiles : Mes listes, Accueil, Direct/Films/Séries, Plus, fiches film/série, Recherche, Guide TV, Matchs du jour, Paramètres, Organiser (catégories), et dans le lecteur : balayage pour zapper, luminosité/volume sur les bords, glisser pour chercher, double-tap ±pas. Contrôle parental, À propos et « Réglages avancés » (ville, IA, sauvegarde, mises à jour) gardent la mise en page TV, en paysage.
 
 ## Confidentialité et usage légal
 

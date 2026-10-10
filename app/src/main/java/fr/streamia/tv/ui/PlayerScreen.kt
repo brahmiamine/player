@@ -10,6 +10,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -1362,20 +1365,114 @@ fun PlayerScreen(
 
         // Toucher l'image : affiche ou masque le bandeau ; double toucher à gauche / à droite d'un film ou
         // d'un épisode : recul / avance. Posé sous les panneaux, qui gardent leurs propres touchers.
-        if (handheld) Box(
-            Modifier
-                .fillMaxSize()
-                .pointerInput(entry.type) {
-                    // En Direct, pas de double toucher : le simple toucher répond sans attendre.
-                    val doubleTap: ((Offset) -> Unit)? = if (entry.type == MediaType.Live) null else { offset ->
-                        if (!guideOpen && !settingsOpen) touchSeek(offset.x > size.width / 2f)
+        if (handheld) {
+            // Gestes du lecteur mobile : balayage vertical au centre = chaîne suivante / précédente (Direct),
+            // sur les bords = luminosité (gauche) et volume (droite), glisser horizontalement = chercher (film).
+            var gestureFeedback by remember { mutableStateOf<String?>(null) }
+            LaunchedEffect(gestureFeedback) {
+                if (gestureFeedback != null) {
+                    delay(900)
+                    gestureFeedback = null
+                }
+            }
+            val currentZap by rememberUpdatedState(onZap)
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .pointerInput(entry.type) {
+                        // En Direct, pas de double toucher : le simple toucher répond sans attendre.
+                        val doubleTap: ((Offset) -> Unit)? = if (entry.type == MediaType.Live) null else { offset ->
+                            if (!guideOpen && !settingsOpen) touchSeek(offset.x > size.width / 2f)
+                        }
+                        detectTapGestures(
+                            onTap = { if (!guideOpen && !settingsOpen) hudVisible = !hudVisible },
+                            onDoubleTap = doubleTap,
+                        )
                     }
-                    detectTapGestures(
-                        onTap = { if (!guideOpen && !settingsOpen) hudVisible = !hudVisible },
-                        onDoubleTap = doubleTap,
-                    )
-                },
-        )
+                    .pointerInput(entry.type) {
+                        val audio = context.getSystemService(android.content.Context.AUDIO_SERVICE) as? android.media.AudioManager
+                        var zone = 0
+                        var axis = 0
+                        var zapped = false
+                        var accumulated = Offset.Zero
+                        var startPosition = 0L
+                        var pendingSeek: Long? = null
+                        var level = 0f
+                        detectDragGestures(
+                            onDragStart = { start ->
+                                zone = when {
+                                    start.x < size.width * 0.3f -> -1
+                                    start.x > size.width * 0.7f -> 1
+                                    else -> 0
+                                }
+                                axis = 0
+                                zapped = false
+                                accumulated = Offset.Zero
+                                startPosition = player.currentPosition.coerceAtLeast(0L)
+                                pendingSeek = null
+                                level = when (zone) {
+                                    -1 -> activity?.window?.attributes?.screenBrightness?.takeIf { it >= 0f } ?: 0.5f
+                                    1 -> audio?.let { it.getStreamVolume(android.media.AudioManager.STREAM_MUSIC).toFloat() / it.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC) } ?: 0.5f
+                                    else -> 0f
+                                }
+                            },
+                            onDragEnd = {
+                                pendingSeek?.let { target ->
+                                    player.seekTo(target)
+                                    positionMs = target
+                                }
+                                pendingSeek = null
+                            },
+                            onDragCancel = { pendingSeek = null },
+                        ) { change, drag ->
+                            if (guideOpen || settingsOpen) return@detectDragGestures
+                            change.consume()
+                            accumulated += drag
+                            if (axis == 0 && kotlin.math.max(kotlin.math.abs(accumulated.x), kotlin.math.abs(accumulated.y)) > 12f) {
+                                axis = if (kotlin.math.abs(accumulated.y) > kotlin.math.abs(accumulated.x)) 1 else 2
+                            }
+                            if (axis == 1) {
+                                when (zone) {
+                                    -1 -> {
+                                        level = (level - drag.y / size.height * 1.4f).coerceIn(0.05f, 1f)
+                                        activity?.window?.let { window ->
+                                            val attributes = window.attributes
+                                            attributes.screenBrightness = level
+                                            window.attributes = attributes
+                                        }
+                                        gestureFeedback = "Luminosité ${(level * 100).toInt()} %"
+                                    }
+                                    1 -> {
+                                        level = (level - drag.y / size.height * 1.4f).coerceIn(0f, 1f)
+                                        audio?.let {
+                                            val max = it.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
+                                            it.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, (level * max).toInt(), 0)
+                                        }
+                                        gestureFeedback = "Volume ${(level * 100).toInt()} %"
+                                    }
+                                    else -> if (entry.type == MediaType.Live && !zapped && kotlin.math.abs(accumulated.y) > 60f) {
+                                        zapped = true
+                                        hudTouchTick++
+                                        currentZap(if (accumulated.y < 0f) 1 else -1)
+                                    }
+                                }
+                            } else if (axis == 2 && entry.type != MediaType.Live) {
+                                val duration = player.duration.takeIf { it > 0L && it != C.TIME_UNSET } ?: 0L
+                                if (duration > 0L) {
+                                    val target = (startPosition + (accumulated.x / size.width * 120_000f).toLong()).coerceIn(0L, duration)
+                                    pendingSeek = target
+                                    gestureFeedback = formatDuration(target)
+                                }
+                            }
+                        }
+                    },
+            )
+            gestureFeedback?.let { label ->
+                Box(Modifier.align(Alignment.Center).clip(RoundedCornerShape(24.dp)).background(Color.Black.copy(alpha = 0.7f)).padding(horizontal = 22.dp, vertical = 14.dp)) {
+                    Text(label, color = Ink, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
 
         if (playbackError != null) {
             FocusableSurface(
