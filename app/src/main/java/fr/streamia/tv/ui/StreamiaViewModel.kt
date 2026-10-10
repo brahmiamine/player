@@ -118,12 +118,28 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     fun searchWithAi(query: String, type: MediaType?) = aiFeatures.searchWithAi(query, type)
     fun clearAiSearch() = aiFeatures.clearAiSearch()
     fun startTonight(answers: fr.streamia.tv.data.TonightAnswers) = aiFeatures.startTonight(answers)
+    fun replaceTonightPick(index: Int) = aiFeatures.replaceTonightPick(index)
     fun resetTonight() = aiFeatures.resetTonight()
     fun loadBrief(force: Boolean = false) = aiFeatures.loadBrief(force)
     fun loadRecap() = aiFeatures.loadRecap()
     fun showAssistant(mode: AssistantMode) {
         if (!fr.streamia.tv.data.AiGate.active.value) return
         navigateToMenu(StreamiaScreen.Assistant(mode), HomeFocusTarget.Assistant)
+    }
+
+    /**
+     * Carte de l'accueil (« Commencer ») : ouvre l'écran et, pour « Ce soir ? » sans proposition en cours, lance
+     * tout de suite la demande avec les dernières réponses (modifiables ensuite sur l'écran).
+     */
+    fun startAssistant(mode: AssistantMode) {
+        if (!fr.streamia.tv.data.AiGate.active.value) return
+        when (mode) {
+            AssistantMode.Tonight -> {
+                val tonight = aiState.value.tonight
+                if (tonight.picks.isEmpty() && !tonight.loading) startTonight(tonight.answers)
+            }
+        }
+        showAssistant(mode)
     }
 
     /** Page de chat du téléphone (QR code de l'accueil) : démarrée une fois, tant que l'assistant est actif. */

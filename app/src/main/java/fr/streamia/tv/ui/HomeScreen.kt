@@ -87,6 +87,8 @@ fun HomeScreen(
     aiReasons: Map<String, String> = emptyMap(),
     aiBrief: BriefUiState = BriefUiState(),
     aiRemote: RemoteUiState = RemoteUiState(),
+    /** Dernières réponses de « Ce soir ? », résumées sur sa carte. */
+    aiTonightAnswers: fr.streamia.tv.data.TonightAnswers = DefaultTonightAnswers,
     onOpenAssistant: (AssistantMode) -> Unit = {},
     onRefreshAiBrief: () -> Unit = {},
     restoreContext: ContentReturnContext? = null,
@@ -392,7 +394,7 @@ fun HomeScreen(
         if (aiActive) {
             item(key = AI_ASSISTANT_ROW_KEY, contentType = "ai-assistant") {
                 Column(Modifier.fillMaxWidth()) {
-                    AiAssistantRow(remote = aiRemote, onOpen = onOpenAssistant, firstFocus = assistantFocus)
+                    AiAssistantRow(answers = aiTonightAnswers, remote = aiRemote, onOpen = onOpenAssistant, firstFocus = assistantFocus)
                     Spacer(Modifier.height(CardRowSpacing))
                 }
             }

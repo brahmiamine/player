@@ -1,6 +1,10 @@
 package fr.streamia.tv.ui
 
 import fr.streamia.tv.data.AiSearchResult
+import fr.streamia.tv.data.TonightAnswers
+import fr.streamia.tv.data.TonightCompany
+import fr.streamia.tv.data.TonightLength
+import fr.streamia.tv.data.TonightMood
 import fr.streamia.tv.domain.MediaEntry
 
 /**
@@ -36,10 +40,20 @@ data class AiSearchUiState(
 /** Une proposition de « Ce soir ? » : le contenu (ou la chaîne d'un programme TV), la raison et un détail (« TF1 · 21:10 », « Film · 7,4 »). */
 data class TonightPick(val entry: MediaEntry, val why: String, val detail: String?)
 
+/** Réponses par défaut de « Ce soir ? », avant toute demande : Détente · Un film · Seul. */
+val DefaultTonightAnswers = TonightAnswers(TonightMood.Relax, TonightLength.Film, TonightCompany.Alone)
+
+/** Résumé des réponses, tel que l'accueil et la pastille « Modifier » l'affichent. */
+val TonightAnswers.labels: List<String> get() = listOf(mood.label, length.label, company.label)
+
 data class TonightUiState(
     val loading: Boolean = false,
     val picks: List<TonightPick> = emptyList(),
     val error: String? = null,
+    /** Dernières réponses données (gardées entre deux visites : l'accueil les résume sur la carte « Ce soir ? »). */
+    val answers: TonightAnswers = DefaultTonightAnswers,
+    /** Position de la proposition en cours de remplacement (« Autre proposition »), sinon null. */
+    val replacing: Int? = null,
 )
 
 /** Un point de « Quoi de neuf ? » avec, quand la TV peut l'ouvrir, la chaîne à lancer. */
@@ -51,6 +65,8 @@ data class BriefUiState(
     val headline: String? = null,
     val items: List<BriefItemUi> = emptyList(),
     val error: String? = null,
+    /** Heure du dernier résumé obtenu (« Mis à jour à 14:09 »), null tant qu'aucun n'est arrivé. */
+    val updatedAtMillis: Long? = null,
 )
 
 /** Écrans de l'assistant (accessibles seulement quand l'IA est active). */

@@ -31,7 +31,7 @@ fun StreamiaScreen.isMobileNative(): Boolean = when (this) {
     StreamiaScreen.Home, StreamiaScreen.Browser, StreamiaScreen.More,
     StreamiaScreen.Login, StreamiaScreen.Search, StreamiaScreen.LiveMatches, StreamiaScreen.Settings,
     StreamiaScreen.Epg, StreamiaScreen.Organizer, StreamiaScreen.ParentalControl, StreamiaScreen.About -> true
-    is StreamiaScreen.MovieDetails, is StreamiaScreen.Series -> true
+    is StreamiaScreen.MovieDetails, is StreamiaScreen.Series, is StreamiaScreen.Assistant -> true
     else -> false
 }
 

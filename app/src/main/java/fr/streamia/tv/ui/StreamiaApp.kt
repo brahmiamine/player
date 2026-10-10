@@ -199,6 +199,8 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                             catalog = state.catalog!!,
                             aiBrief = aiStateHolder.value.brief.takeIf { aiActive } ?: BriefUiState(),
                             onRefreshAiBrief = { viewModel.loadBrief(force = true) },
+                            aiActive = aiActive,
+                            onStartTonight = { viewModel.startAssistant(AssistantMode.Tonight) },
                             library = state.library,
                             weatherPlace = homeState.weatherPlace,
                             weather = homeState.weather,
@@ -292,6 +294,23 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     }
                 }
 
+
+                mobileNative && state.screen is StreamiaScreen.Assistant -> {
+                    val mode = (state.screen as StreamiaScreen.Assistant).mode
+                    // Assistant coupé (Paramètres, ou depuis un autre appareil) : ses écrans se ferment.
+                    LaunchedEffect(aiActive) { if (!aiActive) viewModel.backFromMenu() }
+                    if (aiActive) {
+                        when (mode) {
+                            AssistantMode.Tonight -> fr.streamia.tv.ui.mobile.MobileTonightScreen(
+                                state = aiStateHolder.value.tonight,
+                                onStart = viewModel::startTonight,
+                                onReplace = viewModel::replaceTonightPick,
+                                onOpen = { entry -> viewModel.openAssistantEntry(entry, mode) },
+                                onBack = viewModel::backFromMenu,
+                            )
+                        }
+                    }
+                }
 
                 mobileNative && state.screen is StreamiaScreen.Login -> MobileLoginScreen(
                     profiles = state.profiles,
@@ -559,7 +578,8 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     aiReasons = aiStateHolder.value.reasons,
                     aiBrief = aiStateHolder.value.brief,
                     aiRemote = aiStateHolder.value.remote,
-                    onOpenAssistant = viewModel::showAssistant,
+                    aiTonightAnswers = aiStateHolder.value.tonight.answers,
+                    onOpenAssistant = viewModel::startAssistant,
                     onRefreshAiBrief = { viewModel.loadBrief(force = true) },
                     weatherPlace = homeState.weatherPlace,
                     weather = homeState.weather,
@@ -829,6 +849,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                             AssistantMode.Tonight -> TonightScreen(
                                 state = ai.tonight,
                                 onStart = viewModel::startTonight,
+                                onReplace = viewModel::replaceTonightPick,
                                 onOpen = { entry -> viewModel.openAssistantEntry(entry, mode) },
                                 onBack = viewModel::backFromMenu,
                             )

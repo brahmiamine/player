@@ -187,7 +187,7 @@ internal class AiController(
     fun startTonight(answers: TonightAnswers) {
         if (!AiGate.active.value) return
         tonightJob?.cancel()
-        state.update { it.copy(tonight = TonightUiState(loading = true)) }
+        state.update { it.copy(tonight = TonightUiState(loading = true, answers = answers)) }
         tonightJob = viewModelScope.launch {
             val outcome = runCatching { computeTonight(answers) }
             if (outcome.exceptionOrNull() is CancellationException || !AiGate.active.value) return@launch
@@ -195,26 +195,51 @@ internal class AiController(
             state.update {
                 it.copy(
                     tonight = if (picks.isEmpty()) {
-                        TonightUiState(error = "Pas de proposition pour l'instant. Vérifiez la connexion à l'assistant et réessayez.")
+                        TonightUiState(error = "Pas de proposition pour l'instant. Vérifiez la connexion à l'assistant et réessayez.", answers = answers)
                     } else {
-                        TonightUiState(picks = picks)
+                        TonightUiState(picks = picks, answers = answers)
                     },
                 )
             }
         }
     }
 
-    fun resetTonight() {
+    /**
+     * « Autre proposition » : remplace la seule proposition [index] par une nouvelle, avec les mêmes réponses. Les contenus
+     * déjà affichés sont retirés des candidats ; sans nouvelle proposition, la liste reste telle quelle.
+     */
+    fun replaceTonightPick(index: Int) {
+        if (!AiGate.active.value) return
+        val current = state.value.tonight
+        if (current.loading || current.replacing != null || index !in current.picks.indices) return
         tonightJob?.cancel()
-        state.update { if (it.tonight == TonightUiState()) it else it.copy(tonight = TonightUiState()) }
+        state.update { it.copy(tonight = it.tonight.copy(replacing = index)) }
+        tonightJob = viewModelScope.launch {
+            val shown = current.picks.mapTo(HashSet()) { it.entry.key }
+            val outcome = runCatching { computeTonight(current.answers, exclude = shown) }
+            if (outcome.exceptionOrNull() is CancellationException || !AiGate.active.value) return@launch
+            val fresh = outcome.getOrNull().orEmpty().firstOrNull { it.entry.key !in shown }
+            state.update {
+                val picks = it.tonight.picks
+                val replaced = if (fresh != null && index in picks.indices) picks.toMutableList().also { list -> list[index] = fresh } else picks
+                it.copy(tonight = it.tonight.copy(picks = replaced, replacing = null))
+            }
+        }
     }
 
-    private suspend fun computeTonight(answers: TonightAnswers): List<TonightPick> {
+    fun resetTonight() {
+        tonightJob?.cancel()
+        // Les réponses restent : l'accueil continue de les résumer.
+        state.update { if (it.tonight == TonightUiState(answers = it.tonight.answers)) it else it.copy(tonight = TonightUiState(answers = it.tonight.answers)) }
+    }
+
+    private suspend fun computeTonight(answers: TonightAnswers, exclude: Set<String> = emptySet()): List<TonightPick> {
         val snapshot = _uiState.value
         val profileId = snapshot.activeProfileId ?: return emptyList()
         val categories = snapshot.catalog?.categories.orEmpty()
         val library = snapshot.library
-        val allowed = allowedEntries(categories, library, snapshot.appSettings.parentalControlEnabled, snapshot.parentalUnlocked)
+        val visible = allowedEntries(categories, library, snapshot.appSettings.parentalControlEnabled, snapshot.parentalUnlocked)
+        val allowed: (MediaEntry) -> Boolean = { visible(it) && it.key !in exclude }
         val recommended = _homeState.value.homeRecommendationRows.flatMap { row -> row.items.map { it.entry } }.distinctBy(MediaEntry::key)
         val media = pools.tonightPool(profileId, answers, categories, library, recommended, allowed)
         // Programmes TV de ce soir, rapprochés des chaînes de la playlist.
@@ -293,6 +318,7 @@ internal class AiController(
             loaded = true,
             headline = brief.headline.takeIf(String::isNotBlank),
             items = brief.items.map { BriefItemUi(it.text, targets[it.ref]) },
+            updatedAtMillis = System.currentTimeMillis(),
         )
     }
 

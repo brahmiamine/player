@@ -3,7 +3,13 @@ package fr.streamia.tv.ui.mobile
 import fr.streamia.tv.ui.visibleOnHome
 import fr.streamia.tv.ui.BriefUiState
 import fr.streamia.tv.ui.AiLoadingIndicator
-import fr.streamia.tv.ui.AiButtonLabel
+import fr.streamia.tv.ui.AiSparkle
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.semantics.Role
+import fr.streamia.tv.ui.theme.RadiusPanel
+import fr.streamia.tv.ui.theme.RadiusPill
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -112,6 +118,9 @@ fun MobileHomeScreen(
     /** Assistant IA : résumé « Quoi de neuf maintenant ? » (vide ou absent quand l'assistant est coupé). */
     aiBrief: BriefUiState = BriefUiState(),
     onRefreshAiBrief: () -> Unit = {},
+    /** Assistant actif : cartes « Ce soir ? » et « Télécommande téléphone ». */
+    aiActive: Boolean = false,
+    onStartTonight: () -> Unit = {},
     tvProgrammeNow: List<ResolvedTvProgrammeNowItem>,
     tvProgrammeTonight: List<ResolvedTvProgrammeItem>,
     beinSportsNow: List<ResolvedBeinProgrammeItem>,
@@ -204,64 +213,34 @@ fun MobileHomeScreen(
             item { HomeTopBar(offline, onSettings) }
             item { HomeInfoCard(weatherPlace, weather) }
             item {
-                MobileAccentCard(
-                    Modifier.fillMaxWidth().padding(start = MobileGutter, end = MobileGutter, top = 12.dp).height(92.dp),
-                    onClick = { onOpenSection(MediaType.Live) },
-                ) {
-                    Row(
-                        Modifier.fillMaxSize().padding(horizontal = 20.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    ) {
-                        StreamiaIcon(StreamiaIconGlyph.Live, tint = Ink, size = 38.dp)
-                        Column(Modifier.weight(1f)) {
-                            Text("TV en direct", color = Ink, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold)
-                            Text("${catalog.count(MediaType.Live)} chaînes", color = Ink.copy(alpha = 0.85f), fontSize = 14.sp)
-                        }
-                        StreamiaIcon(StreamiaIconGlyph.ArrowForward, tint = Ink, size = 22.dp)
-                    }
-                }
-            }
-            item {
-                Column(Modifier.padding(start = MobileGutter, end = MobileGutter, top = 10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        HomeTile("Films", "${catalog.count(MediaType.Movie)} contenus", StreamiaIconGlyph.Movie, Modifier.weight(1f)) { onOpenSection(MediaType.Movie) }
-                        HomeTile("Séries", "${catalog.count(MediaType.Series)} contenus", StreamiaIconGlyph.Series, Modifier.weight(1f)) { onOpenSection(MediaType.Series) }
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        HomeTile("Recherche", "Tout le catalogue", StreamiaIconGlyph.Search, Modifier.weight(1f), onSearch)
-                        HomeTile("Guide TV", "EPG", StreamiaIconGlyph.Guide, Modifier.weight(1f), onEpg)
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        QuickAction("Actualiser", StreamiaIconGlyph.Refresh, Modifier.weight(1f), onRefresh)
-                        QuickAction("Matchs du jour", StreamiaIconGlyph.Trophy, Modifier.weight(1f), onOpenLiveMatches)
-                        QuickAction("Changer de liste", StreamiaIconGlyph.Swap, Modifier.weight(1f), onChangePlaylist)
-                    }
-                }
-            }
-            if (aiBrief.visibleOnHome()) item(key = HomeRowKey.AiBrief) {
-                Column(Modifier.padding(start = MobileGutter, end = MobileGutter, top = 14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        MobileSectionLabel("✦ Quoi de neuf maintenant ?")
-                        Spacer(Modifier.weight(1f))
-                        Box(Modifier.clip(RoundedCornerShape(50)).clickable(enabled = !aiBrief.loading, onClick = onRefreshAiBrief).padding(horizontal = 10.dp, vertical = 4.dp)) {
-                            AiButtonLabel("Actualiser", aiBrief.loading)
-                        }
-                    }
-                    aiBrief.headline?.let { Text(it, color = MutedInk, fontSize = 13.sp, maxLines = 2) }
-                    aiBrief.error?.takeIf { !aiBrief.loading }?.let { Text(it, color = MutedInk, fontSize = 13.sp) }
-                    AiLoadingIndicator("L'assistant résume ce qui passe en ce moment…", aiBrief.loading)
-                    aiBrief.items.forEach { item ->
-                        val channel = item.channel ?: return@forEach
-                        MobileCard(Modifier.fillMaxWidth(), onClick = { onOpenHomeEntry(channel, HomeRowKey.AiBrief, channel.key) }) {
-                            Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                ChannelLogo(channel.iconUrl, channel.displayName, Modifier.size(46.dp).clip(RoundedCornerShape(14.dp)), imagePadding = 4)
-                                Column(Modifier.weight(1f)) {
-                                    Text(item.text, color = Ink, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 3, overflow = TextOverflow.Ellipsis)
-                                    Text(channel.displayName, color = AccentPinkText, fontSize = 12.sp, maxLines = 1)
-                                }
+                Column(Modifier.padding(start = MobileGutter, end = MobileGutter, top = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    MobileAccentCard(Modifier.fillMaxWidth().height(76.dp), onClick = { onOpenSection(MediaType.Live) }) {
+                        Row(
+                            Modifier.fillMaxSize().padding(horizontal = 20.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text("TV en direct", color = Ink, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
+                                Text("${catalog.count(MediaType.Live).grouped()} chaînes", color = Ink.copy(alpha = 0.9f), fontSize = 13.sp)
                             }
+                            Text("▶", color = Ink, fontSize = 24.sp)
                         }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        HomeTile("Films", Modifier.weight(1f)) { onOpenSection(MediaType.Movie) }
+                        HomeTile("Séries", Modifier.weight(1f)) { onOpenSection(MediaType.Series) }
+                    }
+                }
+            }
+            if (aiActive) item(key = "ai-assistant") {
+                Column(Modifier.padding(top = 18.dp)) {
+                    MobileSectionLabel("✦ Assistant IA")
+                    Column(Modifier.padding(start = MobileGutter, end = MobileGutter, top = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        TonightCard(onStartTonight)
+                        if (aiBrief.visibleOnHome()) {
+                            BriefCard(aiBrief, onRefreshAiBrief) { channel -> onOpenHomeEntry(channel, HomeRowKey.AiBrief, channel.key) }
+                        }
+                        RemoteCard()
                     }
                 }
             }
@@ -376,24 +355,122 @@ private fun HomeInfoCard(place: HomePlace?, weather: CurrentWeather?) {
 }
 
 @Composable
-private fun HomeTile(title: String, subtitle: String, glyph: StreamiaIconGlyph, modifier: Modifier, onClick: () -> Unit) {
-    MobileCard(modifier.height(92.dp), onClick = onClick) {
-        Column(Modifier.fillMaxSize().padding(14.dp), verticalArrangement = Arrangement.SpaceBetween) {
-            StreamiaIcon(glyph, tint = AccentPink, size = 26.dp)
-            Column {
-                Text(title, color = Ink, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
-                Text(subtitle, color = MutedInk, fontSize = 12.sp, maxLines = 1)
+private fun HomeTile(title: String, modifier: Modifier, onClick: () -> Unit) {
+    MobileCard(modifier.height(60.dp), onClick = onClick) {
+        Box(Modifier.fillMaxSize().padding(horizontal = 16.dp), contentAlignment = Alignment.CenterStart) {
+            Text(title, color = Ink, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
+        }
+    }
+}
+
+/** « 55 940 » : séparateur de milliers à la française. */
+private fun Int.grouped(): String = java.text.NumberFormat.getIntegerInstance(Locale.FRENCH).format(this)
+
+/** Carte principale de l'assistant : « ✦ Ce soir ? » et « Commencer ». */
+@Composable
+private fun TonightCard(onStart: () -> Unit) {
+    val shape = RoundedCornerShape(RadiusCard)
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(Color.White.copy(alpha = 0.06f))
+            .background(Brush.linearGradient(listOf(AccentPink.copy(alpha = 0.34f), Color(0x47BF5AF2))))
+            .border(1.dp, Color.White.copy(alpha = 0.22f), shape)
+            .clickable(role = Role.Button, onClick = onStart)
+            .padding(18.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text("✦ Ce soir ?", color = Ink, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold)
+        Text("Trois questions, cinq propositions faites pour vous.", color = Ink.copy(alpha = 0.88f), fontSize = 14.sp, lineHeight = 19.sp)
+        Box(
+            Modifier.fillMaxWidth().height(48.dp).clip(RoundedCornerShape(RadiusPill)).background(AccentPink).clickable(role = Role.Button, onClick = onStart),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("Commencer", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
+        }
+    }
+}
+
+/** « ✦ Quoi de neuf ? » : résumé en direct, ↻ pour actualiser, puis la ou les chaînes en cours (▶ les ouvre). */
+@Composable
+private fun BriefCard(brief: BriefUiState, onRefresh: () -> Unit, onOpen: (MediaEntry) -> Unit) {
+    MobileCard(Modifier.fillMaxWidth(), radius = RadiusPanel) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("✦ Quoi de neuf ?", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f))
+                Box(
+                    Modifier.size(36.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.12f))
+                        .clickable(enabled = !brief.loading, role = Role.Button, onClick = onRefresh),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (brief.loading) AiSparkle(size = 18.dp) else Text("↻", color = Ink, fontSize = 16.sp)
+                }
+            }
+            val items = brief.items.filter { it.channel != null }
+            val summary = if (brief.error != null && !brief.loading) brief.error else brief.headline ?: items.firstOrNull()?.text
+            summary?.let { Text(it, color = Ink.copy(alpha = 0.88f), fontSize = 14.sp, lineHeight = 19.sp) }
+            AiLoadingIndicator("L'assistant résume ce qui passe en ce moment…", brief.loading)
+            items.forEach { item ->
+                val channel = item.channel ?: return@forEach
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Color.White.copy(alpha = 0.08f))
+                        .clickable(role = Role.Button) { onOpen(channel) }.padding(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    ChannelLogo(channel.iconUrl, channel.displayName, Modifier.size(44.dp).clip(RoundedCornerShape(12.dp)), imagePadding = 4)
+                    Column(Modifier.weight(1f)) {
+                        Text(item.text, color = Ink, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text("EN DIRECT · ${channel.displayName}", color = AccentPinkText, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    Box(Modifier.size(40.dp).clip(CircleShape).background(AccentPink), contentAlignment = Alignment.Center) {
+                        Text("▶", color = Ink, fontSize = 14.sp)
+                    }
+                }
             }
         }
     }
 }
 
+/**
+ * Carte secondaire « ✦ Télécommande téléphone » : le QR code s'affiche sur l'accueil de la TV ; un appui explique
+ * comment s'en servir depuis ce téléphone. QR en vignette d'attente pour l'instant.
+ */
 @Composable
-private fun QuickAction(label: String, glyph: StreamiaIconGlyph, modifier: Modifier, onClick: () -> Unit) {
-    MobileCard(modifier.height(68.dp), onClick = onClick) {
-        Column(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.SpaceBetween) {
-            StreamiaIcon(glyph, tint = AccentPink, size = 19.dp)
-            Text(label, color = Ink, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+private fun RemoteCard() {
+    var help by remember { mutableStateOf(false) }
+    MobileCard(Modifier.fillMaxWidth(), onClick = { help = true }, radius = RadiusPanel) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            Box(Modifier.size(52.dp).clip(RoundedCornerShape(12.dp)).background(Color.White.copy(alpha = 0.9f)), contentAlignment = Alignment.Center) {
+                Text("QR", color = Color(0xFF333333), fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            }
+            Column(Modifier.weight(1f)) {
+                Text("✦ Télécommande téléphone", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
+                Text("Écrivez à la TV depuis ce téléphone", color = MutedInk, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
+            }
+            Text("›", color = MutedInk, fontSize = 18.sp)
+        }
+    }
+    if (help) {
+        androidx.compose.ui.window.Dialog(onDismissRequest = { help = false }) {
+            MobileCard(Modifier.fillMaxWidth(), radius = RadiusCard) {
+                Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("✦ Télécommande téléphone", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
+                    Text(
+                        "Sur la TV, le QR code est affiché sur l'accueil, à côté de « Ce soir ? ». Scannez-le avec l'appareil photo de ce téléphone, " +
+                            "puis écrivez : « mets beIN Sports 1 », « reprends ma série ».",
+                        color = Ink.copy(alpha = 0.85f), fontSize = 14.sp, lineHeight = 20.sp,
+                    )
+                    Box(
+                        Modifier.fillMaxWidth().height(MobileMinTouch).clip(RoundedCornerShape(RadiusPill)).background(Color.White.copy(alpha = 0.12f))
+                            .clickable(role = Role.Button) { help = false },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text("OK", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
         }
     }
 }

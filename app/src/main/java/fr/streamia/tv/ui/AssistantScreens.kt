@@ -3,6 +3,8 @@ package fr.streamia.tv.ui
 import android.annotation.SuppressLint
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.rememberUpdatedState
@@ -15,7 +17,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -24,11 +25,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -50,12 +47,15 @@ import fr.streamia.tv.data.TonightLength
 import fr.streamia.tv.data.TonightMood
 import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.MediaType
-import fr.streamia.tv.ui.theme.FocusBlueBright
+import fr.streamia.tv.ui.theme.AccentPinkText
 import fr.streamia.tv.ui.theme.HeadingWeight
+import fr.streamia.tv.ui.theme.HeroWeight
 import fr.streamia.tv.ui.theme.Ink
+import fr.streamia.tv.ui.theme.KickerLetterSpacing
 import fr.streamia.tv.ui.theme.MutedInk
 import fr.streamia.tv.ui.theme.RadiusPill
 import fr.streamia.tv.ui.theme.TypeBody
+import fr.streamia.tv.ui.theme.TypeHero
 import fr.streamia.tv.ui.theme.TypeLabel
 import fr.streamia.tv.ui.theme.TypeScreenTitle
 
@@ -81,8 +81,8 @@ private fun AssistantFrame(title: String, subtitle: String, onBack: () -> Unit, 
 
 @Composable
 private fun AssistantChip(label: String, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    FocusableSurface(onClick = onClick, selected = selected, accent = selected, wrapContent = true, modifier = modifier.height(46.dp)) {
-        Text(label, color = Ink, fontSize = TypeLabel, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 16.dp))
+    FocusableSurface(onClick = onClick, selected = selected, accent = selected, wrapContent = true, modifier = modifier.height(44.dp)) {
+        Text(label, color = Ink, fontSize = TypeBody, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 16.dp))
     }
 }
 
@@ -95,7 +95,7 @@ private fun <T> ChoiceGroup(
     onSelect: (T) -> Unit,
     firstFocus: FocusRequester? = null,
 ) {
-    Text(title, color = MutedInk, fontSize = TypeLabel, fontWeight = FontWeight.Bold)
+    Text(title.uppercase(java.util.Locale.FRENCH), color = MutedInk, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = KickerLetterSpacing)
     Spacer(Modifier.height(8.dp))
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         options.forEachIndexed { index, option ->
@@ -108,53 +108,33 @@ private fun <T> ChoiceGroup(
     Spacer(Modifier.height(18.dp))
 }
 
-/** Ligne d'un contenu proposé : affiche, titre, détail (« Film · ★ 7,4 ») et, si l'IA en donne une, sa raison. */
-@Composable
-private fun AssistantEntryRow(entry: MediaEntry, detail: String?, why: String?, onClick: () -> Unit) {
-    FocusableSurface(onClick = onClick, focusScale = 1.01f, modifier = Modifier.fillMaxWidth().height(if (why != null) 96.dp else 78.dp)) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (entry.type == MediaType.Live) {
-                ChannelLogo(entry.iconUrl, entry.displayName, Modifier.width(64.dp).height(64.dp))
-            } else {
-                MediaArtwork(entry.iconUrl, entry.displayName, Modifier.width(52.dp).height(72.dp))
-            }
-            Spacer(Modifier.width(14.dp))
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Text(entry.displayName, color = Ink, fontSize = TypeBody, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                if (!detail.isNullOrBlank()) Text(detail, color = FocusBlueBright, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                if (why != null) {
-                    Row(verticalAlignment = Alignment.Top) {
-                        Text("✦", color = FocusBlueBright, fontSize = 13.sp)
-                        Spacer(Modifier.width(6.dp))
-                        Text(why, color = Ink.copy(alpha = 0.85f), fontSize = 13.sp, lineHeight = 17.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    }
-                }
-            }
-        }
-    }
-}
-
 // ---------- Ce soir ? ----------
 
+/**
+ * « Ce soir ? » sur TV : questions à gauche, proposition n°1 en grand (Regarder, Autre proposition), les quatre
+ * autres en grille 2 × 2 dessous.
+ */
 @Composable
 fun TonightScreen(
     state: TonightUiState,
     onStart: (TonightAnswers) -> Unit,
+    onReplace: (Int) -> Unit,
     onOpen: (MediaEntry) -> Unit,
     onBack: () -> Unit,
 ) {
     BackHandler(onBack = onBack)
-    var mood by remember { mutableStateOf(TonightMood.Relax) }
-    var length by remember { mutableStateOf(TonightLength.Film) }
-    var company by remember { mutableStateOf(TonightCompany.Alone) }
+    var mood by remember { mutableStateOf(state.answers.mood) }
+    var length by remember { mutableStateOf(state.answers.length) }
+    var company by remember { mutableStateOf(state.answers.company) }
     val firstFocus = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { firstFocus.requestFocus() } }
     AssistantFrame("Ce soir ?", "Trois questions, cinq propositions", onBack) {
-        Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(26.dp)) {
-            Column(Modifier.width(500.dp).fillMaxHeight().verticalScroll(rememberScrollState())) {
+        Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(28.dp)) {
+            Column(Modifier.width(340.dp).fillMaxHeight()) {
                 ChoiceGroup("Votre humeur", TonightMood.entries, mood, TonightMood::label, { mood = it }, firstFocus)
                 ChoiceGroup("Combien de temps ?", TonightLength.entries, length, TonightLength::label, { length = it })
                 ChoiceGroup("Avec qui ?", TonightCompany.entries, company, TonightCompany::label, { company = it })
+                Spacer(Modifier.weight(1f))
                 FocusableSurface(
                     onClick = { onStart(TonightAnswers(mood, length, company)) },
                     enabled = !state.loading,
@@ -177,9 +157,20 @@ fun TonightScreen(
                     state.picks.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text("Répondez aux trois questions pour recevoir vos propositions.", color = MutedInk, fontSize = TypeBody)
                     }
-                    else -> LazyColumn(contentPadding = PaddingValues(vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        items(state.picks, key = { it.entry.key + it.why }) { pick ->
-                            AssistantEntryRow(pick.entry, pick.detail, pick.why) { onOpen(pick.entry) }
+                    else -> Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                        val first = state.picks.first()
+                        TonightHeroCard(first, replacing = state.replacing == 0, onOpen = { onOpen(first.entry) }, onReplace = { onReplace(0) })
+                        val rest = state.picks.drop(1).take(4)
+                        Column(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                            rest.chunked(2).forEach { pair ->
+                                Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                                    pair.forEach { pick ->
+                                        TonightGridCard(pick, Modifier.weight(1f).fillMaxHeight()) { onOpen(pick.entry) }
+                                    }
+                                    if (pair.size == 1) Spacer(Modifier.weight(1f))
+                                }
+                            }
+                            if (rest.size <= 2) Spacer(Modifier.weight(1f))
                         }
                     }
                 }
@@ -188,3 +179,58 @@ fun TonightScreen(
     }
 }
 
+/** Affiche d'une proposition ; un programme TV montre le logo de sa chaîne. */
+@Composable
+private fun TonightArtwork(entry: MediaEntry, modifier: Modifier, radius: androidx.compose.ui.unit.Dp) {
+    val shaped = modifier.clip(RoundedCornerShape(radius))
+    if (entry.type == MediaType.Live) {
+        Box(shaped.background(androidx.compose.ui.graphics.Color.White.copy(alpha = 0.08f)), contentAlignment = Alignment.Center) {
+            ChannelLogo(entry.iconUrl, entry.displayName, Modifier.fillMaxSize(), imagePadding = 14)
+        }
+    } else {
+        MediaArtwork(entry.iconUrl, entry.displayName, shaped)
+    }
+}
+
+/** Proposition n°1 : grande affiche, raison de l'assistant, Regarder et Autre proposition. */
+@Composable
+private fun TonightHeroCard(pick: TonightPick, replacing: Boolean, onOpen: () -> Unit, onReplace: () -> Unit) {
+    GlassSurface(modifier = Modifier.fillMaxWidth().height(236.dp)) {
+        Row(Modifier.fillMaxSize().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(22.dp)) {
+            TonightArtwork(pick.entry, Modifier.width(140.dp).fillMaxHeight(), 16.dp)
+            Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterVertically)) {
+                Text("N°1 POUR VOUS", color = AccentPinkText, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = KickerLetterSpacing)
+                Text(pick.entry.displayName, color = Ink, fontSize = TypeHero, lineHeight = 33.sp, fontWeight = HeroWeight, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (!pick.detail.isNullOrBlank()) Text(pick.detail, color = AccentPinkText, fontSize = TypeBody, fontWeight = FontWeight.Bold, maxLines = 1)
+                Text("✦ ${pick.why}", color = Ink.copy(alpha = 0.88f), fontSize = 17.sp, lineHeight = 23.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    FocusableSurface(onClick = onOpen, accent = true, wrapContent = true, modifier = Modifier.height(46.dp)) {
+                        Text("▶  Regarder", color = Ink, fontSize = TypeBody, fontWeight = HeroWeight, modifier = Modifier.padding(horizontal = 24.dp))
+                    }
+                    FocusableSurface(onClick = onReplace, enabled = !replacing, wrapContent = true, modifier = Modifier.height(46.dp)) {
+                        if (replacing) {
+                            AiButtonLabel("Autre proposition", loading = true)
+                        } else {
+                            Text("↻  Autre proposition", color = Ink, fontSize = TypeBody, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 20.dp))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Propositions 2 à 5 : affiche, titre, détail et raison ; OK ouvre le contenu. */
+@Composable
+private fun TonightGridCard(pick: TonightPick, modifier: Modifier, onClick: () -> Unit) {
+    FocusableSurface(onClick = onClick, focusScale = 1.02f, modifier = modifier) {
+        Row(Modifier.fillMaxSize().padding(12.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            TonightArtwork(pick.entry, Modifier.width(76.dp).fillMaxHeight(), 12.dp)
+            Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterVertically)) {
+                Text(pick.entry.displayName, color = Ink, fontSize = 19.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (!pick.detail.isNullOrBlank()) Text(pick.detail, color = AccentPinkText, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                Text("✦ ${pick.why}", color = Ink.copy(alpha = 0.8f), fontSize = 15.sp, lineHeight = 20.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
+}
