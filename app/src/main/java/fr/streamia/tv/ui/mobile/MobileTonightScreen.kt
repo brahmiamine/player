@@ -2,6 +2,7 @@ package fr.streamia.tv.ui.mobile
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -146,6 +147,7 @@ private fun AnswersPill(answers: TonightAnswers, modifier: Modifier, onClick: ()
             .height(MobileMinTouch)
             .clip(shape)
             .background(Color.White.copy(alpha = 0.09f))
+            .border(1.dp, Color.White.copy(alpha = 0.16f), shape)
             .clickable(role = Role.Button, onClick = onClick)
             .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically,

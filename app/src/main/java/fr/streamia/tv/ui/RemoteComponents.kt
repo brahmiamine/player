@@ -86,6 +86,8 @@ fun FocusableSurface(
     wrapContent: Boolean = false,
     // Agrandissement au focus : à réduire pour les lignes pleine largeur, où 6 % déborde de l'écran.
     focusScale: Float = 1.06f,
+    // Arrondi des coins : RadiusPill pour les pilules (pastilles, boutons), RadiusTile par défaut.
+    radius: androidx.compose.ui.unit.Dp = RadiusTile,
     content: @Composable () -> Unit,
 ) {
     var hasFocus by remember { mutableStateOf(false) }
@@ -108,7 +110,7 @@ fun FocusableSurface(
         accent -> 10.dp
         else -> 0.dp
     }
-    val shape = RoundedCornerShape(RadiusTile)
+    val shape = RoundedCornerShape(radius)
     val background = when {
         focused -> FocusBlue
         selected -> RaisedSurface
@@ -189,7 +191,7 @@ fun FocusableSurface(
                 }
                 // Halo dessiné (anneaux translucides mis en cache) plutôt qu'une ombre colorée :
                 // l'ombre était recalculée par le GPU à chaque déplacement du focus.
-                .then(if (elevation > 0.dp) Modifier.focusHalo(glowColor, elevation, RadiusTile) else Modifier)
+                .then(if (elevation > 0.dp) Modifier.focusHalo(glowColor, elevation, radius) else Modifier)
                 .clip(shape)
                 .then(
                     if (accent) {
@@ -213,7 +215,7 @@ fun FocusableSurface(
 internal fun Modifier.focusHalo(color: Color, spread: androidx.compose.ui.unit.Dp, radius: androidx.compose.ui.unit.Dp): Modifier =
     drawWithCache {
         val spreadPx = spread.toPx() * HALO_SPREAD_RATIO
-        val radiusPx = radius.toPx()
+        val radiusPx = minOf(radius.toPx(), size.minDimension / 2)
         val ringWidth = spreadPx / HALO_RINGS
         onDrawBehind {
             for (ring in 0 until HALO_RINGS) {

@@ -47,7 +47,10 @@ import fr.streamia.tv.data.TonightLength
 import fr.streamia.tv.data.TonightMood
 import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.MediaType
+import androidx.compose.ui.graphics.Color
+import fr.streamia.tv.ui.theme.AccentPink
 import fr.streamia.tv.ui.theme.AccentPinkText
+import fr.streamia.tv.ui.theme.RadiusPanel
 import fr.streamia.tv.ui.theme.HeadingWeight
 import fr.streamia.tv.ui.theme.HeroWeight
 import fr.streamia.tv.ui.theme.Ink
@@ -65,13 +68,22 @@ import fr.streamia.tv.ui.theme.TypeScreenTitle
 @Composable
 private fun AssistantFrame(title: String, subtitle: String, onBack: () -> Unit, content: @Composable () -> Unit) {
     Column(Modifier.fillMaxSize().padding(28.dp)) {
-        GlassSurface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(RadiusPill)) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                FocusableSurface(onClick = onBack, modifier = Modifier.width(120.dp).height(52.dp)) { BackLabel(TypeLabel, 14.dp) }
+        GlassSurface(modifier = Modifier.fillMaxWidth().height(64.dp), shape = RoundedCornerShape(RadiusPill)) {
+            Row(Modifier.fillMaxSize().padding(horizontal = 22.dp), verticalAlignment = Alignment.CenterVertically) {
+                FocusableSurface(
+                    onClick = onBack,
+                    radius = RadiusPill,
+                    idleBackground = Color.White.copy(alpha = 0.12f),
+                    modifier = Modifier.width(110.dp).height(44.dp),
+                ) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("‹ Retour", color = Ink, fontSize = TypeBody, fontWeight = FontWeight.Bold)
+                    }
+                }
                 Spacer(Modifier.width(18.dp))
                 Text("✦ $title", color = Ink, fontSize = TypeScreenTitle, fontWeight = HeadingWeight)
                 Spacer(Modifier.weight(1f))
-                Text(subtitle, color = MutedInk, fontSize = TypeLabel)
+                Text(subtitle, color = MutedInk, fontSize = TypeBody, modifier = Modifier.padding(end = 60.dp))
             }
         }
         Spacer(Modifier.height(18.dp))
@@ -81,7 +93,14 @@ private fun AssistantFrame(title: String, subtitle: String, onBack: () -> Unit, 
 
 @Composable
 private fun AssistantChip(label: String, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    FocusableSurface(onClick = onClick, selected = selected, accent = selected, wrapContent = true, modifier = modifier.height(44.dp)) {
+    // Sélection en aplat rose (comme MobileChip), pas en dégradé lumineux : seul le focus porte la lueur.
+    FocusableSurface(
+        onClick = onClick,
+        idleBackground = if (selected) AccentPink else Color.White.copy(alpha = 0.09f),
+        wrapContent = true,
+        radius = RadiusPill,
+        modifier = modifier.height(44.dp),
+    ) {
         Text(label, color = Ink, fontSize = TypeBody, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 16.dp))
     }
 }
@@ -139,6 +158,7 @@ fun TonightScreen(
                     onClick = { onStart(TonightAnswers(mood, length, company)) },
                     enabled = !state.loading,
                     accent = true,
+                    radius = RadiusPill,
                     modifier = Modifier.fillMaxWidth().height(58.dp),
                 ) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -184,7 +204,7 @@ fun TonightScreen(
 private fun TonightArtwork(entry: MediaEntry, modifier: Modifier, radius: androidx.compose.ui.unit.Dp) {
     val shaped = modifier.clip(RoundedCornerShape(radius))
     if (entry.type == MediaType.Live) {
-        Box(shaped.background(androidx.compose.ui.graphics.Color.White.copy(alpha = 0.08f)), contentAlignment = Alignment.Center) {
+        Box(shaped.background(Color.White.copy(alpha = 0.08f)), contentAlignment = Alignment.Center) {
             ChannelLogo(entry.iconUrl, entry.displayName, Modifier.fillMaxSize(), imagePadding = 14)
         }
     } else {
@@ -204,10 +224,10 @@ private fun TonightHeroCard(pick: TonightPick, replacing: Boolean, onOpen: () ->
                 if (!pick.detail.isNullOrBlank()) Text(pick.detail, color = AccentPinkText, fontSize = TypeBody, fontWeight = FontWeight.Bold, maxLines = 1)
                 Text("✦ ${pick.why}", color = Ink.copy(alpha = 0.88f), fontSize = 17.sp, lineHeight = 23.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    FocusableSurface(onClick = onOpen, accent = true, wrapContent = true, modifier = Modifier.height(46.dp)) {
+                    FocusableSurface(onClick = onOpen, accent = true, wrapContent = true, radius = RadiusPill, modifier = Modifier.height(46.dp)) {
                         Text("▶  Regarder", color = Ink, fontSize = TypeBody, fontWeight = HeroWeight, modifier = Modifier.padding(horizontal = 24.dp))
                     }
-                    FocusableSurface(onClick = onReplace, enabled = !replacing, wrapContent = true, modifier = Modifier.height(46.dp)) {
+                    FocusableSurface(onClick = onReplace, enabled = !replacing, idleBackground = Color.White.copy(alpha = 0.12f), wrapContent = true, radius = RadiusPill, modifier = Modifier.height(46.dp)) {
                         if (replacing) {
                             AiButtonLabel("Autre proposition", loading = true)
                         } else {
@@ -223,7 +243,7 @@ private fun TonightHeroCard(pick: TonightPick, replacing: Boolean, onOpen: () ->
 /** Propositions 2 à 5 : affiche, titre, détail et raison ; OK ouvre le contenu. */
 @Composable
 private fun TonightGridCard(pick: TonightPick, modifier: Modifier, onClick: () -> Unit) {
-    FocusableSurface(onClick = onClick, focusScale = 1.02f, modifier = modifier) {
+    FocusableSurface(onClick = onClick, focusScale = 1.02f, idleBackground = Color.White.copy(alpha = 0.07f), radius = RadiusPanel, modifier = modifier) {
         Row(Modifier.fillMaxSize().padding(12.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             TonightArtwork(pick.entry, Modifier.width(76.dp).fillMaxHeight(), 12.dp)
             Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterVertically)) {
