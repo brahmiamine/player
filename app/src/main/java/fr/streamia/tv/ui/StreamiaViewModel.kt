@@ -1,5 +1,7 @@
 package fr.streamia.tv.ui
 
+import fr.streamia.tv.player.PlaybackActivity
+
 import fr.streamia.tv.data.WatchNextPublisher
 import android.net.Uri
 import androidx.lifecycle.ViewModel
@@ -1332,6 +1334,9 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
 
     private suspend fun refreshSilently(profileId: String) {
         // Liste quittée pendant l'attente : rien à télécharger pour elle.
+        if (_uiState.value.activeProfileId != profileId) return
+        // Pas pendant une lecture (bande passante et mémoire du flux), sauf après une longue attente.
+        PlaybackActivity.awaitIdle()
         if (_uiState.value.activeProfileId != profileId) return
         // Une seule actualisation à la fois (retour du réseau, nouvel essai, actualisation
         // différée de l'ouverture) : un second téléchargement du catalogue n'apporterait rien.

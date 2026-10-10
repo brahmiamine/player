@@ -232,6 +232,10 @@ internal class EpgController(
         epgSyncProfileId = profileId
         epgSyncJob = viewModelScope.launch {
             try {
+                // Guide à retélécharger pendant une lecture : attend qu'elle se termine (voir
+                // PlaybackActivity.awaitIdle). Une demande explicite (force) part tout de suite.
+                if (!force && !repository.isEpgFresh(profileId)) fr.streamia.tv.player.PlaybackActivity.awaitIdle()
+                if (_uiState.value.activeProfileId != profileId) return@launch
                 val changed = repository.refreshEpg(
                     profileId = profileId,
                     credentials = credentials,

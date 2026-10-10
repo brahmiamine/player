@@ -411,81 +411,112 @@ private fun LiveChannelList(
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 items(entries, key = MediaEntry::key) { entry ->
-                    FocusableSurface(
-                        onClick = { onConfirm(entry) },
-                        onLongClick = { onToggleFavorite(entry) },
+                    val nowProgram = remember(epgPrograms, entry.key, nowEpochSeconds) {
+                        epgPrograms[entry.key]?.epgNowContextAt(nowEpochSeconds)?.current
+                    }
+                    // Ligne isolée : un changement d'aperçu ou de chaîne focalisable ne recompose que
+                    // les deux lignes concernées, pas toutes celles à l'écran.
+                    LiveChannelRow(
+                        entry = entry,
                         selected = previewKey == entry.key,
                         enabled = !fullscreenPending,
-                        idleBackground = Color.Transparent,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(66.dp)
-                            .onPreviewKeyEvent { event ->
-                                if (
-                                    event.type == KeyEventType.KeyDown &&
-                                    event.nativeKeyEvent.keyCode == android.view.KeyEvent.KEYCODE_DPAD_LEFT
-                                ) {
-                                    onLeft(entry)
-                                    true
-                                } else false
-                            }
-                            .then(if (focusTargetKey == entry.key) Modifier.focusRequester(channelFocus) else Modifier),
-                    ) {
-                        Row(
-                            Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
+                        favorite = entry.key in favoriteEntries,
+                        numberColumnWidth = numberColumnWidth,
+                        programTitle = nowProgram?.title,
+                        programProgress = nowProgram?.let { liveProgramProgress(it, nowEpochSeconds) },
+                        focusRequester = channelFocus.takeIf { focusTargetKey == entry.key },
+                        onClick = { onConfirm(entry) },
+                        onLongClick = { onToggleFavorite(entry) },
+                        onLeft = { onLeft(entry) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LiveChannelRow(
+    entry: MediaEntry,
+    selected: Boolean,
+    enabled: Boolean,
+    favorite: Boolean,
+    numberColumnWidth: Dp,
+    programTitle: String?,
+    programProgress: Float?,
+    focusRequester: FocusRequester?,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    onLeft: () -> Unit,
+) {
+    FocusableSurface(
+        onClick = onClick,
+        onLongClick = onLongClick,
+        selected = selected,
+        enabled = enabled,
+        idleBackground = Color.Transparent,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(66.dp)
+            .onPreviewKeyEvent { event ->
+                if (
+                    event.type == KeyEventType.KeyDown &&
+                    event.nativeKeyEvent.keyCode == android.view.KeyEvent.KEYCODE_DPAD_LEFT
+                ) {
+                    onLeft()
+                    true
+                } else false
+            }
+            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                entry.number.toString(),
+                color = MutedInk,
+                fontSize = 13.sp,
+                maxLines = 1,
+                softWrap = false,
+                modifier = Modifier.width(numberColumnWidth),
+            )
+            ChannelLogo(entry.iconUrl, entry.displayName, Modifier.size(42.dp))
+            Spacer(Modifier.width(8.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    entry.displayName,
+                    color = Ink,
+                    fontSize = 15.sp,
+                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (programTitle != null) {
+                    Text(
+                        programTitle,
+                        color = MutedInk,
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    programProgress?.let { progress ->
+                        Spacer(Modifier.height(3.dp))
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .height(3.dp)
+                                .clip(RoundedCornerShape(2.dp))
+                                .background(MutedInk.copy(alpha = 0.24f)),
                         ) {
-                            Text(
-                                entry.number.toString(),
-                                color = MutedInk,
-                                fontSize = 13.sp,
-                                maxLines = 1,
-                                softWrap = false,
-                                modifier = Modifier.width(numberColumnWidth),
-                            )
-                            ChannelLogo(entry.iconUrl, entry.displayName, Modifier.size(42.dp))
-                            Spacer(Modifier.width(8.dp))
-                            val nowProgram = remember(epgPrograms, entry.key, nowEpochSeconds) {
-                                epgPrograms[entry.key]?.epgNowContextAt(nowEpochSeconds)?.current
-                            }
-                            Column(Modifier.weight(1f)) {
-                                Text(
-                                    entry.displayName,
-                                    color = Ink,
-                                    fontSize = 15.sp,
-                                    fontWeight = if (previewKey == entry.key) FontWeight.Bold else FontWeight.Medium,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                if (nowProgram != null) {
-                                    Text(
-                                        nowProgram.title,
-                                        color = MutedInk,
-                                        fontSize = 12.sp,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                    liveProgramProgress(nowProgram, nowEpochSeconds)?.let { progress ->
-                                        Spacer(Modifier.height(3.dp))
-                                        Box(
-                                            Modifier
-                                                .fillMaxWidth()
-                                                .height(3.dp)
-                                                .clip(RoundedCornerShape(2.dp))
-                                                .background(MutedInk.copy(alpha = 0.24f)),
-                                        ) {
-                                            Box(Modifier.fillMaxWidth(progress).height(3.dp).background(FocusBlueBright))
-                                        }
-                                    }
-                                }
-                            }
-                            if (entry.key in favoriteEntries) {
-                                Spacer(Modifier.width(5.dp))
-                                StreamiaIcon(StreamiaIconGlyph.Star, size = 18.dp)
-                            }
+                            Box(Modifier.fillMaxWidth(progress).height(3.dp).background(FocusBlueBright))
                         }
                     }
                 }
+            }
+            if (favorite) {
+                Spacer(Modifier.width(5.dp))
+                StreamiaIcon(StreamiaIconGlyph.Star, size = 18.dp)
             }
         }
     }

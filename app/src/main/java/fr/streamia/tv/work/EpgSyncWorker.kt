@@ -20,6 +20,8 @@ class EpgSyncWorker(context: Context, params: WorkerParameters) : CoroutineWorke
     override suspend fun doWork(): Result = withContext(BackgroundWork.dispatcher) { sync() }
 
     private suspend fun sync(): Result {
+        // Vidéo en cours : le guide (souvent des dizaines de Mo) attendra le prochain passage horaire.
+        if (fr.streamia.tv.player.PlaybackActivity.isPlaying) return Result.success()
         val profileId = PlaybackSessionStore(applicationContext).loadActiveProfileId() ?: return Result.success()
         val repository = XtreamRepository.get(applicationContext)
         val profile = repository.profile(profileId) ?: return Result.success()

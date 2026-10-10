@@ -15,6 +15,22 @@ object PlaybackActivity {
     internal fun update(playerId: Int, isPlaying: Boolean) {
         if (isPlaying) playing += playerId else playing -= playerId
     }
+
+    /**
+     * Attend qu'aucune vidéo ne joue (au plus [maxWaitMs]) avant un gros travail réseau : catalogue
+     * complet, guide XMLTV (souvent des dizaines de Mo). Lancés pendant une lecture, ils prenaient
+     * la bande passante et la mémoire du flux : coupures en 4K quelques minutes après le démarrage.
+     * Le plafond évite qu'une soirée entière devant la TV laisse le catalogue et le guide périmés.
+     */
+    suspend fun awaitIdle(maxWaitMs: Long = MAX_DEFER_MS, pollMs: Long = POLL_MS) {
+        val startedAt = android.os.SystemClock.elapsedRealtime()
+        while (isPlaying && android.os.SystemClock.elapsedRealtime() - startedAt < maxWaitMs) {
+            kotlinx.coroutines.delay(pollMs)
+        }
+    }
+
+    private const val MAX_DEFER_MS = 45 * 60_000L
+    private const val POLL_MS = 15_000L
 }
 
 /**

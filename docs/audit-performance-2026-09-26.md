@@ -670,3 +670,40 @@ ViewModel, dont l'API publique (celle qu'utilisent `StreamiaApp` et `MainActivit
 | `RecommendationStore.readEntry` | Pas une copie : un type inconnu y retombe sur Film (Direct dans le catalogue). |
 | Caches disque beIN / UK presque identiques | Formats de fichier propres à chaque source ; un parent commun toucherait la sérialisation sans gain mesurable. |
 | Profils de base régénérés | Toujours besoin d'un appareil : `./gradlew :app:generateBaselineProfile` rendra les règles manuelles redondantes. |
+
+## 17. Troisième passe — fluidité pendant la lecture (octobre 2026)
+
+Objectif : rien ne doit ralentir le flux en cours ni l'interface, en particulier en 4K. Analyse
+ciblée sur ce qui tourne **pendant** une lecture ou une navigation (tâches de fond, boucles,
+recompositions, mémoire). Compilé, `testDebugUnitTest` et `lintDebug` verts ; **non mesuré sur
+boîtier**.
+
+### Trouvé et corrigé
+
+| Constat | Effet | Correction |
+|---|---|---|
+| Sous-titre externe chargé ou décalé : `stop()` + nouveau `MediaItem` | Flux coupé et reconnecté à chaque réglage | Sous-titres lus et affichés par l'app (`ExternalSubtitles.kt`), décalage appliqué à l'affichage |
+| Piste de sous-titres intégrée activée sans image clé en mémoire | ExoPlayer coupait la connexion et retéléchargeait | 10 s de tampon arrière depuis l'image clé (VOD) |
+| Tampon min 25 s / max 90 s (4 s / 20 s en Direct) | Connexion inactive plus d'une minute en 4K → coupée par le serveur IPTV → coupures après quelques minutes | Minimum = maximum : chargement continu |
+| Direct : 1 seule relance réseau, même en pleine lecture | Une micro-coupure TCP relançait tout le flux | 6 relances rapides une fois l'image affichée (1 au zap) |
+| Reprise après coupure toujours à 1,5 s / 3 s de marge | Rafales de micro-coupures sur un débit limite | Marge doublée à chaque coupure rapprochée (plafond 12 s) |
+| Actualisation du catalogue 20 s après l'ouverture, y compris en reprise directe dans le lecteur | Téléchargement + parsing + écriture SQLite pendant la vidéo : bande passante et mémoire prises au flux | `PlaybackActivity.awaitIdle()` : reportée tant qu'une vidéo joue (45 min au plus) |
+| Synchronisation XMLTV (dans l'app et `EpgSyncWorker` horaire) sans tenir compte de la lecture | Idem, souvent des dizaines de Mo | Reportée pendant la lecture ; une demande explicite (Actualiser) part tout de suite |
+| Liste des chaînes : chaque ligne lisait `previewKey` / `focusTargetKey` dans le bloc `items` | Toutes les lignes visibles recomposées à chaque changement d'aperçu | `LiveChannelRow` isolée : seules les deux lignes concernées se recomposent |
+
+### Vérifié, sans problème
+
+- Boucles du lecteur (position VOD, contrôle d'image, chien de garde, stats de versions) : 1 à
+  60 s, rien qui s'accumule ; `PlaybackDiagnosticsTracker` à taille fixe.
+- Animations infinies (anneaux, étincelle IA) : lues dans la phase de dessin, pas de recomposition par image.
+- Bascule HDMI : jamais réappliquée si le mode visé est déjà actif, jamais vers une résolution plus basse.
+- Images : 6 chargements simultanés au plus, décodage à la taille d'affichage, bitmaps matérielles, cache des échecs.
+- Gros téléchargements Xtream lus en flux (`JsonReader`), pas en mémoire d'un bloc.
+- Enrichissement des fiches et tâche IA nocturne : déjà en pause pendant la lecture.
+
+### Reste à surveiller (hors code ou à mesurer)
+
+- Débit du fournisseur, Wi-Fi, chauffe du boîtier : aucun réglage logiciel ne compense un flux
+  plus lent que son débit.
+- Son TrueHD / DTS-HD décodé par FFmpeg (processeur) sur les films UHD « Remux ».
+- Baseline profile toujours à régénérer sur appareil (`./gradlew :app:generateBaselineProfile`).
