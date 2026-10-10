@@ -9,6 +9,7 @@ import fr.streamia.tv.data.RECAP_AUTO_GAP_MS
 import fr.streamia.tv.data.RemoteAction
 import fr.streamia.tv.data.isResumable
 import fr.streamia.tv.data.normalizeForMatch
+import fr.streamia.tv.data.PhoneChatServer
 import fr.streamia.tv.data.TonightAnswers
 import fr.streamia.tv.data.recapInputOf
 import fr.streamia.tv.data.watchedEpisodesOf
@@ -68,6 +69,8 @@ internal class AiController(
     private var searchJob: Job? = null
     private var tonightJob: Job? = null
     private var briefJob: Job? = null
+    private var remoteServer: PhoneChatServer? = null
+    private val remoteStarting = java.util.concurrent.atomic.AtomicBoolean(false)
 
     init {
         viewModelScope.launch {
@@ -90,6 +93,7 @@ internal class AiController(
         tonightJob?.cancel()
         briefJob?.cancel()
         recapJob?.cancel()
+        stopRemote()
         state.value = AiUiState()
         // Fiche ouverte : ce que l'assistant y avait mis disparaît avec lui.
         _uiState.update {
@@ -238,12 +242,13 @@ internal class AiController(
         if (current.loading) return
         if (!force && current.loaded && System.currentTimeMillis() - briefAtMillis < BRIEF_REUSE_MS) return
         briefJob?.cancel()
-        state.update { it.copy(brief = BriefUiState(loading = true)) }
+        state.update { it.copy(brief = it.brief.copy(loading = true, error = null)) }
         briefJob = viewModelScope.launch {
             val outcome = runCatching { computeBrief() }
             if (outcome.exceptionOrNull() is CancellationException || !AiGate.active.value) return@launch
             val brief = outcome.getOrNull()
-            briefAtMillis = System.currentTimeMillis()
+            // Rien à résumer (guides pas encore chargés) : pas de délai de réutilisation, le prochain appel réessaie sans coût.
+            briefAtMillis = if (brief != null) System.currentTimeMillis() else 0L
             state.update {
                 it.copy(
                     brief = when {
@@ -304,6 +309,33 @@ internal class AiController(
     // ---------- Télécommande téléphone ----------
 
     /**
+     * Démarre (une seule fois) la page de chat du téléphone : elle vit tant que l'assistant est actif, quel que soit l'écran,
+     * pour que le QR code de l'accueil reste valable. Sans réseau local, l'adresse reste vide et un prochain appel réessaie.
+     */
+    fun startRemote(logo: ByteArray?) {
+        if (!AiGate.active.value || remoteServer != null || !remoteStarting.compareAndSet(false, true)) return
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val server = PhoneChatServer(logo) { text -> kotlinx.coroutines.runBlocking { handleRemote(text) } }
+                val url = runCatching { server.start() }.getOrNull()
+                if (url == null || !AiGate.active.value) {
+                    server.close()
+                    return@launch
+                }
+                remoteServer = server
+                state.update { it.copy(remote = it.remote.copy(url = url)) }
+            } finally {
+                remoteStarting.set(false)
+            }
+        }
+    }
+
+    private fun stopRemote() {
+        remoteServer?.close()
+        remoteServer = null
+    }
+
+    /**
      * Message écrit depuis le téléphone (voir [fr.streamia.tv.data.PhoneChatServer]) : une requête au modèle pour comprendre
      * ce que veut l'utilisateur, puis la TV exécute l'action avec ses données locales. Retourne la réponse pour le téléphone.
      */
@@ -316,7 +348,7 @@ internal class AiController(
             state.update { it.copy(remote = it.remote.copy(busy = false)) }
         }
         if (!AiGate.active.value) return "L'assistant IA a été désactivé sur la TV."
-        state.update { it.copy(remote = RemoteUiState(false, (it.remote.log + RemoteExchange(message, reply)).takeLast(MAX_REMOTE_LOG))) }
+        state.update { it.copy(remote = it.remote.copy(busy = false, log = (it.remote.log + RemoteExchange(message, reply)).takeLast(MAX_REMOTE_LOG))) }
         return reply
     }
 
@@ -481,7 +513,7 @@ internal class AiController(
         const val MAX_PROGRAMME_LINES = 8
         const val MATCH_PAST_SECONDS = 150L * 60
         const val MATCH_AHEAD_SECONDS = 6L * 3_600
-        const val BRIEF_REUSE_MS = 5 * 60_000L
+        const val BRIEF_REUSE_MS = 15 * 60_000L
         const val EXPLAIN_DELAY_MS = 1_500L
         const val MAX_EXPLAINED = 12
         const val MIN_TASTES = 2

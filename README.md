@@ -72,9 +72,9 @@ Tout est coupé dès que l'assistant est désactivé (Paramètres › Assistant 
 - **Ce soir ?** : humeur, durée, compagnie → cinq propositions avec la raison, mêlant films, séries et programmes TV du soir.
 - **Raisons des recommandations** sous les rangées de l'accueil.
 - **Fiches** : avis rapide (public, ambiance, points sensibles) et « Précédemment dans… » sans spoiler pour les séries reprises.
-- **Quoi de neuf maintenant ?** : résumé des matchs et programmes en direct, avec accès à la chaîne.
+- **Quoi de neuf maintenant ?** : rubrique de l'accueil, avant « Reprendre la lecture » : résumé des matchs et programmes en direct, une carte par chaîne.
 - **Lecteur** : sous-titres bilingues, glossaire de noms propres cohérent entre épisodes, « Conseil de lecture » d'après les mesures du lecteur.
-- **Télécommande téléphone** : page web locale (QR code) pour écrire « mets beIN Sports 1 », « reprends ma série », « trouve le match du PSG ».
+- **Télécommande téléphone** : QR code toujours affiché sur l'accueil (page web locale, active tant que l'assistant l'est) pour écrire « mets beIN Sports 1 », « reprends ma série », « trouve le match du PSG ».
 - **Économie d'appels** : cache disque, pré-calcul de nuit (traductions des nouveautés), cache de prompt chez Claude pour les longs messages, aucune requête à la frappe.
 
 ## Commandes de la télécommande

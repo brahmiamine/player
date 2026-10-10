@@ -59,7 +59,7 @@ import fr.streamia.tv.ui.theme.TypeBody
 import fr.streamia.tv.ui.theme.TypeLabel
 import fr.streamia.tv.ui.theme.TypeScreenTitle
 
-// Écrans de l'assistant IA sur TV : Ce soir ?, Quoi de neuf maintenant ?
+// Écrans de l'assistant IA sur TV : Ce soir ?
 // Ils ne sont atteignables que quand l'assistant est actif (voir StreamiaApp : l'assistant coupé les ferme).
 
 @Composable
@@ -188,107 +188,3 @@ fun TonightScreen(
     }
 }
 
-// ---------- Quoi de neuf maintenant ? ----------
-
-@Composable
-fun WhatsNewScreen(
-    state: BriefUiState,
-    onRefresh: () -> Unit,
-    onOpen: (MediaEntry) -> Unit,
-    onBack: () -> Unit,
-) {
-    BackHandler(onBack = onBack)
-    val firstFocus = remember { FocusRequester() }
-    LaunchedEffect(state.loading) { if (!state.loading) runCatching { firstFocus.requestFocus() } }
-    AssistantFrame("Quoi de neuf maintenant ?", "Matchs et programmes en direct", onBack) {
-        Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                FocusableSurface(onClick = onRefresh, enabled = !state.loading, modifier = Modifier.width(240.dp).height(52.dp).focusRequester(firstFocus)) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { AiButtonLabel("Actualiser", state.loading) }
-                }
-                Spacer(Modifier.width(18.dp))
-                if (state.headline != null) {
-                    Text(state.headline, color = Ink, fontSize = TypeBody, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                }
-            }
-            when {
-                state.loading || !state.loaded -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    AiLoadingIndicator("L'assistant résume ce qui passe en ce moment…", visible = true)
-                }
-                state.items.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(state.error ?: "Rien à signaler pour l'instant.", color = MutedInk, fontSize = TypeBody)
-                }
-                else -> LazyColumn(contentPadding = PaddingValues(vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    items(state.items.size, key = { state.items[it].text }) { index ->
-                        val item = state.items[index]
-                        val channel = item.channel
-                        if (channel != null) {
-                            AssistantEntryRow(channel, "Regarder sur ${channel.displayName}", item.text) { onOpen(channel) }
-                        } else {
-                            GlassSurface(modifier = Modifier.fillMaxWidth()) {
-                                Text("✦ ${item.text}", color = Ink, fontSize = TypeBody, modifier = Modifier.padding(18.dp))
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-// ---------- Télécommande téléphone ----------
-
-/**
- * Chat avec la TV depuis le téléphone : QR code vers une page web locale (voir [PhoneChatServer]). Le serveur ne vit que
- * pendant cet écran ; chaque message coûte une requête à l'assistant, avec l'icône IA animée tant que la réponse est attendue.
- */
-// Le logo est un fichier image (webp) lu tel quel pour la page du téléphone : openRawResource convient, malgré l'alerte lint.
-@SuppressLint("ResourceType")
-@Composable
-fun RemoteScreen(state: RemoteUiState, onMessage: (String) -> String, onBack: () -> Unit) {
-    BackHandler(onBack = onBack)
-    val latest = rememberUpdatedState(onMessage)
-    val resources = LocalContext.current.resources
-    val server = remember {
-        val logo = runCatching { resources.openRawResource(R.drawable.streamia_logo_mark).use { it.readBytes() } }.getOrNull()
-        PhoneChatServer(logo) { text -> latest.value(text) }
-    }
-    val url = remember { runCatching { server.start() }.getOrNull() }
-    DisposableEffect(Unit) { onDispose { server.close() } }
-    val qr = remember(url) { url?.let(::qrBitmap) }
-    val backFocus = remember { FocusRequester() }
-    LaunchedEffect(Unit) { runCatching { backFocus.requestFocus() } }
-    AssistantFrame("Télécommande téléphone", "Écrivez à la TV depuis votre téléphone", onBack) {
-        Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(26.dp)) {
-            GlassSurface(modifier = Modifier.width(360.dp).fillMaxHeight()) {
-                Column(Modifier.fillMaxSize().padding(22.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    if (qr != null) {
-                        Image(qr.asImageBitmap(), "QR code", Modifier.size(220.dp), filterQuality = FilterQuality.None)
-                        Spacer(Modifier.height(14.dp))
-                        Text("Scannez ce code avec votre téléphone (même réseau que la TV).", color = Ink, fontSize = TypeLabel, lineHeight = 20.sp)
-                    } else {
-                        Text("Aucun réseau local détecté : connectez la TV au Wi-Fi ou à l'Ethernet.", color = MutedInk, fontSize = TypeBody)
-                    }
-                    Spacer(Modifier.height(14.dp))
-                    FocusableSurface(onClick = onBack, modifier = Modifier.fillMaxWidth().height(48.dp).focusRequester(backFocus)) {
-                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { BackLabel(TypeLabel, 14.dp) }
-                    }
-                }
-            }
-            Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Essayez : « mets beIN Sports 1 », « reprends ma série », « trouve le match du PSG ce soir », « un film d'action des années 90 ».", color = MutedInk, fontSize = TypeLabel, lineHeight = 20.sp)
-                AiLoadingIndicator("L'assistant traite votre message…", state.busy)
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    items(state.log.asReversed(), key = { it.message + it.reply }) { exchange ->
-                        GlassSurface(modifier = Modifier.fillMaxWidth()) {
-                            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text(exchange.message, color = MutedInk, fontSize = TypeLabel)
-                                Text("✦ ${exchange.reply}", color = Ink, fontSize = TypeBody)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}

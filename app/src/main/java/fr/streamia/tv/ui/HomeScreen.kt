@@ -85,7 +85,10 @@ fun HomeScreen(
     /** Assistant IA actif : la rangée d'accès à ses écrans apparaît, et les raisons des recommandations avec elle. */
     aiActive: Boolean = false,
     aiReasons: Map<String, String> = emptyMap(),
+    aiBrief: BriefUiState = BriefUiState(),
+    aiRemote: RemoteUiState = RemoteUiState(),
     onOpenAssistant: (AssistantMode) -> Unit = {},
+    onRefreshAiBrief: () -> Unit = {},
     restoreContext: ContentReturnContext? = null,
     focusTarget: HomeFocusTarget? = null,
     onFocusConsumed: () -> Unit = {},
@@ -241,6 +244,7 @@ fun HomeScreen(
     // initial : le direct est à un appui sur OK, les rangées de contenu défilent en dessous.
     val preferGridFocus = focusTarget != null && !restoringHome
 
+    val showAiBrief = aiBrief.visibleOnHome()
     val homeListState = rememberLazyListState()
     val restoreTarget = restoreContext?.takeIf { it.origin == ContentReturnOrigin.Home }
     val effectiveRestoreRowKey = restoreTarget?.homeRowKey
@@ -260,10 +264,12 @@ fun HomeScreen(
         liveMatchesPending,
         pendingBlocks,
         aiActive,
+        showAiBrief,
     ) {
         buildList {
             // Même ordre que la LazyColumn : la rangée de l'assistant vient juste après la grille d'actions.
             if (aiActive) add(AI_ASSISTANT_ROW_KEY)
+            if (aiActive && showAiBrief) add(HomeRowKey.AiBrief)
             if (resumeCards.isNotEmpty()) add(HomeRowKey.Resume)
             if (favoriteCards.isNotEmpty()) add(HomeRowKey.Favorites)
             if (recentChannelCards.isNotEmpty()) add(HomeRowKey.RecentChannels)
@@ -386,7 +392,22 @@ fun HomeScreen(
         if (aiActive) {
             item(key = AI_ASSISTANT_ROW_KEY, contentType = "ai-assistant") {
                 Column(Modifier.fillMaxWidth()) {
-                    AiAssistantRow(onOpen = onOpenAssistant, firstFocus = assistantFocus)
+                    AiAssistantRow(remote = aiRemote, onOpen = onOpenAssistant, firstFocus = assistantFocus)
+                    Spacer(Modifier.height(CardRowSpacing))
+                }
+            }
+        }
+
+        // « Quoi de neuf maintenant ? » juste avant « Reprendre la lecture ».
+        if (aiActive && showAiBrief) {
+            item(key = HomeRowKey.AiBrief, contentType = "ai-brief") {
+                Column(Modifier.fillMaxWidth()) {
+                    AiBriefRow(
+                        brief = aiBrief,
+                        restoreItemKey = restoreTarget?.takeIf { it.homeRowKey == HomeRowKey.AiBrief }?.itemKey,
+                        onOpen = { channel -> onOpenHomeEntry(channel, HomeRowKey.AiBrief, channel.key) },
+                        onRefresh = onRefreshAiBrief,
+                    )
                     Spacer(Modifier.height(CardRowSpacing))
                 }
             }

@@ -193,3 +193,8 @@ fun AiReasonLine(reason: String?, modifier: Modifier = Modifier) {
         Text(reason, color = MutedInk, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
+
+/** Logo de l'application pour la page web du téléphone (fichier image lu tel quel : openRawResource convient, malgré l'alerte lint). */
+@android.annotation.SuppressLint("ResourceType")
+internal fun readRemoteLogo(context: android.content.Context): ByteArray? =
+    runCatching { context.resources.openRawResource(fr.streamia.tv.R.drawable.streamia_logo_mark).use { it.readBytes() } }.getOrNull()

@@ -6,6 +6,8 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.CompositionLocalProvider
@@ -186,8 +188,13 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     val homeState = homeStateHolder.value
                     val settings = state.appSettings
                     MobileScaffold(MobileTab.Home, onSelect = onMobileTab) {
+                        LaunchedEffect(aiActive, homeState.liveOnSatMatches.size, homeState.homeTvProgrammeNow.size, homeState.homeBeinSportsNow.size) {
+                            if (aiActive) viewModel.loadBrief()
+                        }
                         MobileHomeScreen(
                             catalog = state.catalog!!,
+                            aiBrief = aiStateHolder.value.brief.takeIf { aiActive } ?: BriefUiState(),
+                            onRefreshAiBrief = { viewModel.loadBrief(force = true) },
                             library = state.library,
                             weatherPlace = homeState.weatherPlace,
                             weather = homeState.weather,
@@ -530,11 +537,22 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                   val homePendingBlocks = remember(homeState.homePendingBlocks, state.appSettings.disabledHomeBlocks) {
                       homeState.homePendingBlocks - state.appSettings.disabledHomeBlocks
                   }
+                  // Assistant actif : le QR code de la télécommande téléphone et « Quoi de neuf ? » se préparent dès l'accueil.
+                  // « Quoi de neuf ? » se recalcule quand les guides arrivent ; sans résumé à faire, aucune requête ne part.
+                  LaunchedEffect(aiActive, state.activeProfileId) {
+                      if (aiActive) viewModel.startRemote(withContext(Dispatchers.IO) { readRemoteLogo(context) })
+                  }
+                  LaunchedEffect(aiActive, homeState.liveOnSatMatches.size, homeState.homeTvProgrammeNow.size, homeState.homeBeinSportsNow.size) {
+                      if (aiActive) viewModel.loadBrief()
+                  }
                   HomeScreen(
                     catalog = state.catalog!!,
                     aiActive = aiActive,
                     aiReasons = aiStateHolder.value.reasons,
+                    aiBrief = aiStateHolder.value.brief,
+                    aiRemote = aiStateHolder.value.remote,
                     onOpenAssistant = viewModel::showAssistant,
+                    onRefreshAiBrief = { viewModel.loadBrief(force = true) },
                     weatherPlace = homeState.weatherPlace,
                     weather = homeState.weather,
                     prayerMethod = state.appSettings.prayerMethod,
@@ -804,20 +822,6 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                                 state = ai.tonight,
                                 onStart = viewModel::startTonight,
                                 onOpen = { entry -> viewModel.openAssistantEntry(entry, mode) },
-                                onBack = viewModel::backFromMenu,
-                            )
-                            AssistantMode.WhatsNew -> {
-                                LaunchedEffect(Unit) { viewModel.loadBrief() }
-                                WhatsNewScreen(
-                                    state = ai.brief,
-                                    onRefresh = { viewModel.loadBrief(force = true) },
-                                    onOpen = { entry -> viewModel.openAssistantEntry(entry, mode) },
-                                    onBack = viewModel::backFromMenu,
-                                )
-                            }
-                            AssistantMode.Remote -> RemoteScreen(
-                                state = ai.remote,
-                                onMessage = viewModel::handleRemoteMessage,
                                 onBack = viewModel::backFromMenu,
                             )
                         }

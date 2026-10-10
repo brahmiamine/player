@@ -84,6 +84,7 @@ data class ContentReturnContext(
 
 internal object HomeRowKey {
     const val Resume = "resume"
+    const val AiBrief = "ai-brief"
     const val Favorites = "favorites"
     const val LiveMatches = "live-matches"
     const val RecentChannels = "recent-channels"

@@ -20,7 +20,8 @@ data class AiUiState(
 /** Un échange de la télécommande téléphone : ce que l'utilisateur a écrit et ce que la TV a répondu. */
 data class RemoteExchange(val message: String, val reply: String)
 
-data class RemoteUiState(val busy: Boolean = false, val log: List<RemoteExchange> = emptyList())
+/** [url] : adresse de la page de chat servie sur le réseau local (null tant que le serveur n'est pas prêt ou sans réseau local). */
+data class RemoteUiState(val busy: Boolean = false, val log: List<RemoteExchange> = emptyList(), val url: String? = null)
 
 data class AiSearchUiState(
     /** Demande à laquelle correspondent [result] ou [error] ; un autre texte dans le champ les rend caducs. */
@@ -55,6 +56,4 @@ data class BriefUiState(
 /** Écrans de l'assistant (accessibles seulement quand l'IA est active). */
 enum class AssistantMode(val title: String) {
     Tonight("Ce soir ?"),
-    WhatsNew("Quoi de neuf maintenant ?"),
-    Remote("Télécommande téléphone"),
 }
