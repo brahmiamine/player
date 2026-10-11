@@ -90,6 +90,16 @@ internal fun BoxScope.PlayerSettings(
     // d'une liste déroulante dans le panneau. Le focus revient sur la ligne à la fermeture.
     var picker by remember { mutableStateOf<TrackPicker?>(null) }
     val subtitleFocus = remember { FocusRequester() }
+    // Focus rendu à la ligne après la fermeture de la fenêtre de choix : attendu d'une image, la fenêtre
+    // (et son focus) a disparu, sinon la demande tombait dans le vide et le panneau restait bloqué.
+    var pendingRefocus by remember { mutableStateOf<FocusRequester?>(null) }
+    LaunchedEffect(pendingRefocus) {
+        val target = pendingRefocus ?: return@LaunchedEffect
+        kotlinx.coroutines.yield()
+        kotlinx.coroutines.delay(60)
+        runCatching { target.requestFocus() }
+        pendingRefocus = null
+    }
     val ownAudioFocus = remember { FocusRequester() }
     val aiButton = aiTranslateLanguage != null && onSearchOnlineSubtitles != null &&
         externalSubtitleAvailable && onPickExternalSubtitleFile != null && onLoadExternalSubtitleUrl != null
@@ -170,7 +180,7 @@ internal fun BoxScope.PlayerSettings(
         val rowFocus = if (audio) audioFocus else subtitleFocus
         fun close() {
             picker = null
-            runCatching { rowFocus.requestFocus() }
+            pendingRefocus = rowFocus
         }
         ChoiceDialog(
             title = if (audio) "Piste audio" else "Sous-titres",

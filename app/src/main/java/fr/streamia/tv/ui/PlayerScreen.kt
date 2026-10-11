@@ -41,7 +41,9 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.InputMode
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
@@ -241,6 +243,8 @@ fun PlayerScreen(
 
     var guideOpen by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
+    // Vrai quand la racine elle-même (pas un bouton du panneau) a le focus.
+    var rootFocused by remember { mutableStateOf(false) }
     // Panneau « Versions » affiché à la place du panneau « Lecture » (settingsOpen reste vrai).
     var versionsOpen by remember { mutableStateOf(false) }
     // OK/gauche/menu/retour sur le Live ne rouvrent plus un sélecteur superposé : ils demandent un
@@ -1341,7 +1345,17 @@ fun PlayerScreen(
             // Direct : la vidéo est posée sous l'écran par StreamiaApp, un fond ici la masquerait.
             .then(if (sharedLivePlayer) Modifier else Modifier.background(Color.Black))
             .focusRequester(rootFocus)
+            .onFocusChanged { rootFocused = it.isFocused }
             .focusable()
+            // Panneau « Lecture » ouvert mais le focus est retombé sur la racine (après un choix de piste, une
+            // recherche de sous-titre…) : une flèche ou OK le redonne au panneau au lieu de rester sans effet.
+            .onKeyEvent { event ->
+                val nav = event.nativeKeyEvent.keyCode in PANEL_NAV_KEYS
+                if (rootFocused && settingsOpen && !versionsOpen && !onlineSubtitlesListOpen && nav) {
+                    if (event.type == KeyEventType.KeyDown) runCatching { settingsFocus.requestFocus() }
+                    true
+                } else false
+            }
             .onPreviewKeyEvent { event ->
                 if (event.type != KeyEventType.KeyDown || guideOpen || settingsOpen || returningToBrowser || showNextEpisodePrompt) return@onPreviewKeyEvent false
                 val keyCode = event.nativeKeyEvent.keyCode
@@ -1825,3 +1839,9 @@ private tailrec fun android.content.Context.findActivity(): android.app.Activity
 
 /** Lecture continue exigée avant de remettre à zéro les compteurs de relance. */
 private const val STABLE_PLAYBACK_MS = 15_000L
+
+private val PANEL_NAV_KEYS = setOf(
+    AndroidKeyEvent.KEYCODE_DPAD_UP, AndroidKeyEvent.KEYCODE_DPAD_DOWN,
+    AndroidKeyEvent.KEYCODE_DPAD_LEFT, AndroidKeyEvent.KEYCODE_DPAD_RIGHT,
+    AndroidKeyEvent.KEYCODE_DPAD_CENTER, AndroidKeyEvent.KEYCODE_ENTER,
+)
