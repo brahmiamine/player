@@ -31,6 +31,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.foundation.layout.FlowRow
+import fr.streamia.tv.data.RecentSearchStore
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -78,6 +81,9 @@ fun SearchScreen(
     // produceState repartait d'une liste vide et affichait « Aucun résultat » avant la réponse.
     var entries by remember { mutableStateOf(emptyList<MediaEntry>()) }
     var searching by remember { mutableStateOf(false) }
+    val recentStore = RecentSearchStore(LocalContext.current)
+    var recents by remember { mutableStateOf(recentStore.load()) }
+    val resultListState = rememberLazyListState()
     LaunchedEffect(needle, type) {
         if (needle.isBlank()) {
             entries = emptyList()
@@ -88,6 +94,8 @@ fun SearchScreen(
         delay(220)
         entries = search(needle, type)
         searching = false
+        // Nouvelle recherche : la liste repart du premier résultat (pas de retour depuis une fiche en cours).
+        if (restoreEntryKey == null) resultListState.scrollToItem(0)
     }
     val shown = if (showAi) aiEntries else entries
     val capped = !showAi && entries.size >= SEARCH_RESULT_LIMIT
@@ -99,7 +107,6 @@ fun SearchScreen(
         shown.size == 1 -> "1 résultat"
         else -> "${shown.size} résultats"
     }
-    val resultListState = rememberLazyListState()
     val restoreFocus = remember { FocusRequester() }
     LaunchedEffect(restoreEntryKey, shown) {
         val targetIndex = shown.indexOfFirst { it.key == restoreEntryKey }
@@ -126,24 +133,16 @@ fun SearchScreen(
             }
         }
         Spacer(Modifier.height(18.dp))
-        TvTextField(
-            value = query,
-            onValueChange = onQueryChange,
-            label = "Rechercher une chaîne, un film ou une série",
-            supportingText = "Le clavier Android TV peut être utilisé. Recherche instantanée dans tout le catalogue.",
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
             SearchFilter("Tout", type == null) { onTypeChange(null) }
             MediaType.entries.forEach { mediaType ->
                 SearchFilter(mediaType.displayName, type == mediaType) { onTypeChange(mediaType) }
             }
-            if (aiActive && needle.length >= MIN_AI_QUERY_CHARS) {
+            if (aiActive) {
                 Spacer(Modifier.weight(1f))
                 FocusableSurface(
                     onClick = { onAiSearch(query.trim(), type) },
-                    enabled = aiForQuery?.loading != true,
+                    enabled = aiForQuery?.loading != true && needle.length >= MIN_AI_QUERY_CHARS,
                     accent = true,
                     modifier = Modifier.width(290.dp).height(ButtonHeight),
                 ) {
@@ -153,6 +152,14 @@ fun SearchScreen(
                 }
             }
         }
+        Spacer(Modifier.height(12.dp))
+        TvTextField(
+            value = query,
+            onValueChange = onQueryChange,
+            label = "Rechercher une chaîne, un film ou une série",
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(12.dp))
         if (aiForQuery != null) {
             Spacer(Modifier.height(8.dp))
             AiLoadingIndicator("L'assistant comprend votre recherche…", aiForQuery.loading)
@@ -164,7 +171,7 @@ fun SearchScreen(
         Spacer(Modifier.height(18.dp))
 
         if (needle.isBlank()) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(Modifier.fillMaxWidth().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
                 GlassSurface {
                     Column(
                         Modifier.width(420.dp).padding(24.dp),
@@ -181,6 +188,15 @@ fun SearchScreen(
                     }
                 }
             }
+            if (recents.isNotEmpty()) {
+                Column(Modifier.fillMaxWidth().padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    SectionLabel("Recherches récentes")
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(9.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                        recents.forEach { recent -> SearchFilter(recent, false) { onQueryChange(recent) } }
+                        SearchFilter("Effacer", false) { recentStore.clear(); recents = emptyList() }
+                    }
+                }
+            }
         } else {
             Column(Modifier.fillMaxSize()) {
                 SectionLabel(
@@ -190,6 +206,7 @@ fun SearchScreen(
                         else -> "Contenus (${entries.size})"
                     },
                 )
+                Text("Appui long sur OK : ajouter aux favoris", color = MutedInk, fontSize = 12.sp)
                 Spacer(Modifier.height(10.dp))
                 if (shown.isEmpty() && !searching && aiForQuery?.loading != true) {
                     GlassSurface(modifier = Modifier.fillMaxWidth()) {
@@ -200,47 +217,30 @@ fun SearchScreen(
                 }
                 LazyColumn(state = resultListState, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(shown, key = MediaEntry::key) { entry ->
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            FocusableSurface(
-                                onClick = { onOpenEntry(entry) },
-                                focusScale = 1.01f,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(76.dp)
-                                    .then(
-                                        if (entry.key == restoreEntryKey) Modifier.focusRequester(restoreFocus)
-                                        else Modifier,
-                                    ),
-                            ) {
-                                Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    ChannelLogo(entry.iconUrl, entry.displayName, Modifier.size(64.dp))
-                                    Spacer(Modifier.width(12.dp))
-                                    Column(Modifier.weight(1f)) {
-                                        Text(entry.displayName, color = Ink, fontSize = TypeBody, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                        Text(
-                                            "${entry.type.displayName} · ${if (entry.type == MediaType.Live) "CH ${entry.number}" else entry.extension.uppercase()}",
-                                            color = MutedInk,
-                                            fontSize = 12.sp,
-                                        )
-                                    }
-                                }
-                            }
-                            FocusableSurface(
-                                onClick = { onToggleEntryFavorite(entry) },
-                                selected = entry.key in favoriteEntries,
-                                modifier = Modifier.width(64.dp).height(76.dp),
-                                contentDescription = if (entry.key in favoriteEntries) {
-                                    "Retirer ${entry.displayName} des favoris"
-                                } else {
-                                    "Ajouter ${entry.displayName} aux favoris"
-                                },
-                            ) {
-                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                    StreamiaIcon(
-                                        if (entry.key in favoriteEntries) StreamiaIconGlyph.Star else StreamiaIconGlyph.StarOutline,
-                                        size = 30.dp,
+                        FocusableSurface(
+                            onClick = { recents = recentStore.add(query); onOpenEntry(entry) },
+                            onLongClick = { onToggleEntryFavorite(entry) },
+                            focusScale = 1.01f,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(76.dp)
+                                .then(
+                                    if (entry.key == restoreEntryKey) Modifier.focusRequester(restoreFocus)
+                                    else Modifier,
+                                ),
+                        ) {
+                            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                ChannelLogo(entry.iconUrl, entry.displayName, Modifier.size(64.dp))
+                                Spacer(Modifier.width(12.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(entry.displayName, color = Ink, fontSize = TypeBody, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text(
+                                        "${entry.type.displayName} · ${if (entry.type == MediaType.Live) "CH ${entry.number}" else entry.extension.uppercase()}",
+                                        color = MutedInk,
+                                        fontSize = 12.sp,
                                     )
                                 }
+                                if (entry.key in favoriteEntries) StreamiaIcon(StreamiaIconGlyph.Star, size = 30.dp)
                             }
                         }
                     }

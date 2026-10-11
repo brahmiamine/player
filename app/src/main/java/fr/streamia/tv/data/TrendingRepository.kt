@@ -36,6 +36,13 @@ class TrendingRepository internal constructor(
         }.getOrNull()
     }
 
+    /** Date du plus ancien rapprochement gardé sur disque parmi [sections] ; null si l'une n'a jamais été chargée. */
+    suspend fun lastJustWatchRefresh(profileId: String, sections: List<JustWatchSection>): Long? = withContext(Dispatchers.IO) {
+        sections.map { section ->
+            runCatching { JSONObject(justWatchFile(profileId, section).readText()).getLong("at") }.getOrNull() ?: return@withContext null
+        }.minOrNull()
+    }
+
     private fun justWatchTitlesFile(section: JustWatchSection) = File(appContext.filesDir, "justwatch-titles-${section.name}.json")
 
     /** Titres encore frais sur disque (horodatage d'origine gardé), sinon null. */
@@ -67,11 +74,11 @@ class TrendingRepository internal constructor(
         File(appContext.filesDir, "justwatch-$profileId-${section.name}.json")
 
     /** Section JustWatch (cache mémoire 6 h) réduite aux titres présents dans le catalogue, ordre JustWatch. */
-    suspend fun justWatch(profileId: String, section: JustWatchSection, limit: Int): List<MediaEntry> {
+    suspend fun justWatch(profileId: String, section: JustWatchSection, limit: Int, forceRefresh: Boolean = false): List<MediaEntry> {
         val now = System.currentTimeMillis()
         // Titres JustWatch communs à toutes les listes : mémoire, puis disque, puis réseau.
-        val titles = justWatchCache[section]?.takeIf { now - it.first < JUSTWATCH_TTL_MS }?.second
-            ?: withContext(Dispatchers.IO) { loadJustWatchTitles(section, now) ?: fetchJustWatchTitles(section, now) }
+        val titles = justWatchCache[section]?.takeIf { !forceRefresh && now - it.first < JUSTWATCH_TTL_MS }?.second
+            ?: withContext(Dispatchers.IO) { loadJustWatchTitles(section, now).takeUnless { forceRefresh } ?: fetchJustWatchTitles(section, now) }
                 .also { justWatchCache[section] = it }.second
         val result = LinkedHashMap<String, MediaEntry>()
         for (title in titles) {

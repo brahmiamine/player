@@ -95,19 +95,19 @@ internal fun ProgrammeCardSkeleton() = SkeletonSurface(220.dp, 215.dp, padding =
 
 /** Carte match en direct (liveonsat) : voir LiveMatchesRow. */
 @Composable
-internal fun LiveMatchCardSkeleton() = SkeletonSurface(260.dp, 170.dp, padding = 10.dp) {
+internal fun LiveMatchCardSkeleton() = SkeletonSurface(320.dp, 176.dp, padding = 14.dp) {
     SkeletonBlock(Modifier.fillMaxWidth(0.55f).height(11.dp))
     Spacer(Modifier.height(10.dp))
     TeamLineSkeleton(logo = 24.dp)
     Spacer(Modifier.height(8.dp))
     TeamLineSkeleton(logo = 24.dp)
     Spacer(Modifier.weight(1f))
-    ChannelLineSkeleton(logo = 36.dp)
+    ChannelLineSkeleton(logo = 28.dp)
 }
 
 /** Carte score football : voir FootballMatchCard. */
 @Composable
-internal fun FootballCardSkeleton() = SkeletonSurface(260.dp, 150.dp, padding = 10.dp) {
+internal fun FootballCardSkeleton() = SkeletonSurface(268.dp, 160.dp, padding = 14.dp) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         SkeletonBlock(Modifier.size(22.dp), CircleShape)
         Spacer(Modifier.width(6.dp))

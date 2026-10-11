@@ -123,9 +123,9 @@ class HomeGuidesRepository internal constructor(
         // pas d'API et ne doit pas être sollicité plus souvent que nécessaire.
         const val LIVE_ONSAT_CACHE_MAX_AGE_MS = 2 * 60 * 60_000L
 
-        // Le programme du soir change beaucoup moins souvent que les matchs live. Deux heures
+        // Le programme du soir change beaucoup moins souvent que les matchs live. Quatre heures
         // limitent les requêtes vers tv-programme.com tout en renouvelant les données dans la soirée.
-        const val TV_PROGRAMME_CACHE_MAX_AGE_MS = 2 * 60 * 60_000L
+        const val TV_PROGRAMME_CACHE_MAX_AGE_MS = 4 * 60 * 60_000L
 
         // Le cache garde toute la grille (programme en cours recalculé localement) : pas besoin de
         // re-scraper souvent, et tv-programme.com bloque (403) les requêtes trop fréquentes.

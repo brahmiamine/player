@@ -58,6 +58,9 @@ internal class RecommendationsController(host: StreamiaStateHolder) : StreamiaCo
         val catalog = state.catalog ?: return
         val nowMillis = System.currentTimeMillis()
 
+        // Indépendant du calcul des recommandations : ne doit pas dépendre de ses sorties anticipées.
+        loadJustWatchRows(profileId, state.library.hiddenEntries, excludedVodCategoryIds(state, catalog), force)
+
         if (
             !force &&
             homeRecommendationLastBuiltProfileId == profileId &&
@@ -70,8 +73,6 @@ internal class RecommendationsController(host: StreamiaStateHolder) : StreamiaCo
 
         val library = state.library
         val excludedCategoryIds = excludedVodCategoryIds(state, catalog)
-
-        loadJustWatchRows(profileId, library.hiddenEntries, excludedCategoryIds)
 
         val sequence = ++homeRecommendationBuildSequence
         homeRecommendationJob?.cancel()
@@ -183,14 +184,16 @@ internal class RecommendationsController(host: StreamiaStateHolder) : StreamiaCo
      * Celles gardées sur disque s'affichent tout de suite ; les expirées sont recalculées (réseau +
      * rapprochement avec la playlist) en parallèle, l'ancienne rangée restant affichée en attendant.
      */
-    fun reloadJustWatchRows() {
+    fun reloadJustWatchRows(force: Boolean = false) {
         val state = _uiState.value
         val profileId = state.activeProfileId ?: return
         val catalog = state.catalog ?: return
-        loadJustWatchRows(profileId, state.library.hiddenEntries, excludedVodCategoryIds(state, catalog))
+        loadJustWatchRows(profileId, state.library.hiddenEntries, excludedVodCategoryIds(state, catalog), force)
     }
 
-    private fun loadJustWatchRows(profileId: String, hiddenEntries: Set<String>, excludedCategoryIds: Set<String>) {
+    private fun loadJustWatchRows(profileId: String, hiddenEntries: Set<String>, excludedCategoryIds: Set<String>, force: Boolean = false) {
+        // Appelé à chaque ouverture de l'accueil : un chargement déjà en cours pour cette liste n'est pas relancé.
+        if (!force && justWatchRowsProfileId == profileId && justWatchJob?.isActive == true) return
         justWatchJob?.cancel()
         // Autre liste : ses rangées ne doivent pas rester affichées sous les contenus de la nouvelle.
         if (justWatchRowsProfileId != profileId) _homeState.update { it.copy(homeJustWatchRows = emptyList()) }
@@ -202,9 +205,9 @@ internal class RecommendationsController(host: StreamiaStateHolder) : StreamiaCo
                     fun publish(entries: List<MediaEntry>) = publishJustWatchRow(profileId, section, entries, hiddenEntries, excludedCategoryIds)
                     val cached = runCatching { repository.trending.cachedJustWatch(profileId, section) }.getOrNull()
                     cached?.let { publish(it.entries) }
-                    if (cached?.fresh == true) return@launch
+                    if (!force && cached?.fresh == true) return@launch
                     // Échec réseau : la rangée gardée sur disque reste affichée.
-                    runCatching { repository.trending.justWatch(profileId, section, JUSTWATCH_ROW_LIMIT * 2) }.onSuccess(::publish)
+                    runCatching { repository.trending.justWatch(profileId, section, JUSTWATCH_ROW_LIMIT * 2, force) }.onSuccess(::publish)
                 }
             }
         }

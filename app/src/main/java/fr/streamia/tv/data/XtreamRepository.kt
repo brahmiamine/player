@@ -139,7 +139,7 @@ class XtreamRepository private constructor(context: Context) {
             )
         }
         guide("tvnow", "Programme TV FR en direct", "Lecture web, cache court", HomeGuidesRepository.TV_PROGRAMME_NOW_CACHE_MAX_AGE_MS, "30 min", stamps.tvNow)
-        guide("tvtonight", "Programme TV FR « ce soir »", "Cache de 2 h", HomeGuidesRepository.TV_PROGRAMME_CACHE_MAX_AGE_MS, "2 h", stamps.tvTonight)
+        guide("tvtonight", "Programme TV FR « ce soir »", "Cache de 4 h", HomeGuidesRepository.TV_PROGRAMME_CACHE_MAX_AGE_MS, "4 h", stamps.tvTonight)
         guide("bein", "beIN SPORTS", "Grille sur 24 h", HomeGuidesRepository.BEIN_SPORTS_GUIDE_CACHE_MAX_AGE_MS, "30 min", stamps.bein)
         guide("uk", "Guide UK", "Une quinzaine de petites requêtes", HomeGuidesRepository.UK_GUIDE_CACHE_MAX_AGE_MS, "30 min", stamps.uk)
         guide("matches", "Matchs du jour", "Rapprochés avec tes chaînes", HomeGuidesRepository.LIVE_ONSAT_CACHE_MAX_AGE_MS, "2 h", stamps.liveOnSat)
@@ -153,7 +153,18 @@ class XtreamRepository private constructor(context: Context) {
         }
         block("weather", "Météo et heures de prière", "Position par adresse IP", "30 min", true)
         block("scores", "Scores de football", "Plus fréquent pendant un match", "1 min en match · 15 min sinon", HomeBlock.FootballScores !in settings.disabledHomeBlocks)
-        block("justwatch", "Tendances JustWatch", "6 sections", "6 h", HomeBlock.entries.filter { it.name.startsWith("JustWatch") }.any { it !in settings.disabledHomeBlocks })
+        val justWatchBlocks = JustWatchSection.entries.filter { it.homeBlock !in settings.disabledHomeBlocks }
+        val justWatchLast = profileId?.let { trending.lastJustWatchRefresh(it, justWatchBlocks) }.takeIf { justWatchBlocks.isNotEmpty() }
+        rows += LoadingRow(
+            id = "justwatch", group = LoadingGroup.HomeBlocks, name = "Tendances JustWatch", subtitle = "${justWatchBlocks.size} sections sur 6", frequency = "6 h",
+            lastAtMillis = justWatchLast, nextAtMillis = justWatchLast?.plus(6 * hour),
+            state = when {
+                justWatchBlocks.isEmpty() -> LoadingState.Disabled
+                justWatchLast != null && now - justWatchLast < 6 * hour -> LoadingState.Fresh
+                else -> LoadingState.Stale
+            },
+            action = if (justWatchBlocks.isEmpty()) null else LoadingAction.Refresh,
+        )
         block("brief", "Résumé de l'assistant IA", "Activer l'assistant dans Paramètres", "5 min", settings.aiEnabled)
 
         // Tâches planifiées (WorkManager) : prochain passage approximatif, Android peut le décaler.

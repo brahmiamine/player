@@ -93,6 +93,7 @@ fun MobileSettingsScreen(
     onParentalControl: () -> Unit,
     onAbout: () -> Unit,
     onAdvanced: () -> Unit,
+    onLoadings: () -> Unit,
     onBack: () -> Unit,
 ) {
     BackHandler(onBack = onBack)
@@ -166,6 +167,7 @@ fun MobileSettingsScreen(
                 }
                 Group("Application") {
                     SettingsLink("Contrôle parental", "Code à 4 chiffres et catégories verrouillées", onParentalControl)
+                    SettingsLink("Chargements", "Fraîcheur des caches et relance des sources", onLoadings)
                     SettingsLink("Ville, assistant IA, sauvegarde, mises à jour", "Ville, IA, sauvegarde, mises à jour", onAdvanced)
                     SettingsLink("À propos", "Streamia v$currentVersion", onAbout)
                 }

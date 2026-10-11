@@ -34,6 +34,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
+import fr.streamia.tv.data.RecentSearchStore
 import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.ui.AiButtonLabel
@@ -95,6 +96,13 @@ fun MobileSearchScreen(
     var searching by remember { mutableStateOf(false) }
     var actions by remember { mutableStateOf<MediaEntry?>(null) }
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    val recentStore = RecentSearchStore(context)
+    var recents by remember { mutableStateOf(recentStore.load()) }
+    // Le clavier se ferme dès qu'on fait défiler les résultats : il ne masque plus la liste.
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    LaunchedEffect(listState) {
+        androidx.compose.runtime.snapshotFlow { listState.isScrollInProgress }.collect { if (it) focusManager.clearFocus() }
+    }
     // Clé gardée localement : le contexte de retour est consommé dès la liste replacée, le liseré doit rester.
     val targetKey = remember { restoreEntryKey }
     var restored by remember { mutableStateOf(false) }
@@ -104,7 +112,7 @@ fun MobileSearchScreen(
         if (targetKey == null || restored) return@LaunchedEffect
         val index = shown.indexOfFirst { it.key == targetKey }
         if (index >= 0) {
-            listState.scrollToItem(index + 1)
+            listState.scrollToItem(index)
             restored = true
             onRestoreConsumed()
         }
@@ -119,6 +127,7 @@ fun MobileSearchScreen(
         delay(220)
         entries = search(needle, type)
         searching = false
+        if (targetKey == null) listState.scrollToItem(0)
     }
 
     Box(Modifier.fillMaxSize()) {
@@ -129,7 +138,7 @@ fun MobileSearchScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 MobileIconButton(StreamiaIconGlyph.ChevronLeft, onClick = onBack)
-                TvTextField(query, onQueryChange, if (aiActive) "Chaîne, film, série… ou une phrase" else "Chaîne, film ou série", Modifier.weight(1f))
+                TvTextField(query, onQueryChange, if (aiActive) "Chaîne, film, série ou phrase" else "Chaîne, film ou série", Modifier.weight(1f))
                 if (aiActive && canSpeak) {
                     MobileIconButton(StreamiaIconGlyph.Mic, onClick = {
                         speech.launch(
@@ -140,11 +149,11 @@ fun MobileSearchScreen(
                     })
                 }
             }
-            if (aiActive && needle.length >= MIN_AI_QUERY_CHARS) {
+            if (aiActive) {
                 Spacer(Modifier.height(6.dp))
                 Row(Modifier.fillMaxWidth().padding(horizontal = MobileGutter), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Box(
-                        Modifier.clip(RoundedCornerShape(50)).background(AccentPink).clickable(enabled = aiForQuery?.loading != true) { onAiSearch(query.trim(), type) }
+                        Modifier.clip(RoundedCornerShape(50)).background(AccentPink).clickable(enabled = aiForQuery?.loading != true && needle.length >= MIN_AI_QUERY_CHARS) { onAiSearch(query.trim(), type) }
                             .padding(horizontal = 16.dp, vertical = 9.dp),
                     ) { AiButtonLabel("Chercher avec l'IA", aiForQuery?.loading == true) }
                     AiLoadingIndicator("L'assistant comprend…", aiForQuery?.loading == true)
@@ -163,29 +172,39 @@ fun MobileSearchScreen(
             }
             Spacer(Modifier.height(10.dp))
             when {
-                needle.isBlank() -> MobileEmptyState("Tapez quelques lettres pour rechercher dans tout le catalogue.")
+                needle.isBlank() -> Column(Modifier.fillMaxWidth()) {
+                    if (recents.isNotEmpty()) {
+                        Row(Modifier.fillMaxWidth().padding(horizontal = MobileGutter), verticalAlignment = Alignment.CenterVertically) {
+                            Text("Recherches récentes", color = MutedInk, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                            Text("Effacer", color = AccentPinkText, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { recentStore.clear(); recents = emptyList() }.padding(8.dp))
+                        }
+                        recents.forEach { recent ->
+                            Text(recent, color = Ink, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.fillMaxWidth().clickable { onQueryChange(recent) }.padding(horizontal = MobileGutter, vertical = 12.dp))
+                        }
+                    } else MobileEmptyState("Tapez quelques lettres pour rechercher dans tout le catalogue.")
+                }
                 shown.isEmpty() && (searching || aiForQuery?.loading == true) -> MobileEmptyState("Recherche…")
                 shown.isEmpty() -> MobileEmptyState("Aucun résultat pour « $query ».")
-                else -> LazyColumn(
+                else -> Column(Modifier.fillMaxSize()) {
+                    Text(
+                        if (showAi) "Sélection de l'assistant · ${shown.size}" else if (searching) "Recherche…" else if (shown.size == 1) "1 résultat" else "${shown.size} résultats",
+                        color = MutedInk,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(horizontal = MobileGutter + 4.dp, vertical = 2.dp),
+                    )
+                    LazyColumn(
                     Modifier.fillMaxSize(),
                     state = listState,
                     contentPadding = PaddingValues(start = MobileGutter, end = MobileGutter, bottom = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    item {
-                        Text(
-                            if (showAi) "Sélection de l'assistant · ${shown.size}" else if (searching) "Recherche…" else if (shown.size == 1) "1 résultat" else "${shown.size} résultats",
-                            color = MutedInk,
-                            fontSize = 12.sp,
-                            modifier = Modifier.padding(horizontal = 4.dp),
-                        )
-                    }
                     items(shown, key = { it.key }) { entry ->
                         MobileCard(
                             Modifier.fillMaxWidth().then(
                                 if (entry.key == targetKey) Modifier.border(2.dp, fr.streamia.tv.ui.theme.AccentPink, RoundedCornerShape(fr.streamia.tv.ui.theme.RadiusTile)) else Modifier,
                             ),
-                            onClick = { onOpenEntry(entry) }, onLongClick = { actions = entry },
+                            onClick = { recents = recentStore.add(query); focusManager.clearFocus(); onOpenEntry(entry) }, onLongClick = { actions = entry },
                         ) {
                             Row(
                                 Modifier.fillMaxWidth().padding(start = 10.dp, end = 14.dp, top = 10.dp, bottom = 10.dp),
@@ -202,7 +221,9 @@ fun MobileSearchScreen(
                                         maxLines = 1,
                                     )
                                 }
-                                if (entry.key in favoriteEntries) StreamiaIcon(StreamiaIconGlyph.Star, size = 16.dp)
+                                Box(Modifier.size(36.dp).clip(RoundedCornerShape(50)).clickable { onToggleEntryFavorite(entry) }, contentAlignment = Alignment.Center) {
+                                    StreamiaIcon(if (entry.key in favoriteEntries) StreamiaIconGlyph.Star else StreamiaIconGlyph.StarOutline, size = 20.dp)
+                                }
                                 Box(Modifier.clip(RoundedCornerShape(50)).background(Color.White.copy(alpha = 0.14f)).padding(horizontal = 9.dp, vertical = 3.dp)) {
                                     Text(
                                         when (entry.type) {
@@ -217,6 +238,7 @@ fun MobileSearchScreen(
                                 }
                             }
                         }
+                    }
                     }
                 }
             }

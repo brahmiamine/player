@@ -450,7 +450,7 @@ internal class CatalogDatabase(context: Context) :
         // trouve rien (fragment au milieu d'un mot) ou si FTS est indisponible sur l'appareil.
         val matchQuery = ftsMatchQuery(query)
         if (matchQuery != null) {
-            runCatching { searchIndexed(profileId, matchQuery, type, limit) }
+            runCatching { searchIndexed(profileId, matchQuery, query, type, limit) }
                 .getOrNull()
                 ?.takeIf { it.isNotEmpty() }
                 ?.let { return it }
@@ -491,7 +491,7 @@ internal class CatalogDatabase(context: Context) :
         ).use(::readEntries)
     }
 
-    private fun searchIndexed(profileId: String, matchQuery: String, type: MediaType?, limit: Int): List<MediaEntry> {
+    private fun searchIndexed(profileId: String, matchQuery: String, query: String, type: MediaType?, limit: Int): List<MediaEntry> {
         if (!hasSearchTable(readableDatabase)) return emptyList()
         val typeClause = if (type == null) "" else " AND media_type = ?"
         val args = buildList {
@@ -499,6 +499,7 @@ internal class CatalogDatabase(context: Context) :
             add(profileId)
             add(profileId)
             if (type != null) add(type.name)
+            addAll(relevanceArgs(query))
             add(limit.coerceIn(1, MAX_SEARCH_RESULTS).toString())
         }.toTypedArray()
         return readableDatabase.rawQuery(
@@ -506,7 +507,7 @@ internal class CatalogDatabase(context: Context) :
             SELECT ${LIST_COLUMNS.joinToString()} FROM catalog_entries
             WHERE rowid IN (SELECT docid FROM $SEARCH_TABLE WHERE $SEARCH_TABLE MATCH ? AND profile_id = ?)
               AND profile_id = ? AND navigable = 1$typeClause
-            ORDER BY number, media_id
+            ORDER BY $RELEVANCE_ORDER, number, media_id
             LIMIT ?
             """.trimIndent(),
             args,
@@ -523,6 +524,7 @@ internal class CatalogDatabase(context: Context) :
             add(needle)
             add(needle)
             add(needle)
+            addAll(relevanceArgs(query))
             add(limit.coerceIn(1, MAX_SEARCH_RESULTS).toString())
         }.toTypedArray()
         return readableDatabase.rawQuery(
@@ -530,7 +532,7 @@ internal class CatalogDatabase(context: Context) :
             SELECT ${LIST_COLUMNS.joinToString()} FROM catalog_entries
             WHERE profile_id = ? AND navigable = 1$typeClause
               AND (name LIKE ? COLLATE NOCASE OR display_name LIKE ? COLLATE NOCASE OR tvg_id LIKE ? COLLATE NOCASE)
-            ORDER BY number, media_id
+            ORDER BY $RELEVANCE_ORDER, number, media_id
             LIMIT ?
             """.trimIndent(),
             args,
@@ -750,6 +752,12 @@ internal class CatalogDatabase(context: Context) :
         val LIST_COLUMNS = ENTRY_COLUMNS.map { if (it == "plot") "NULL AS plot" else it }
     }
 }
+/** Pertinence : le nom commence par la saisie (0), un mot du nom commence par elle (1), sinon (2). */
+private const val RELEVANCE_ORDER =
+    "CASE WHEN display_name LIKE ? COLLATE NOCASE THEN 0 WHEN display_name LIKE ? COLLATE NOCASE THEN 1 ELSE 2 END"
+
+private fun relevanceArgs(query: String): List<String> = query.trim().let { listOf("$it%", "% $it%") }
+
 /**
  * Requête FTS « chaque mot commence par… » : `tf1 hd` → `tf1* hd*`. Ne garde que lettres et
  * chiffres (aucune syntaxe FTS injectable), `null` si rien d'exploitable.

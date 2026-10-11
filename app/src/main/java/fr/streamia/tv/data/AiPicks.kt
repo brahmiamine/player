@@ -95,6 +95,7 @@ internal fun briefSystemPrompt(languageName: String, nowLabel: String, lines: Li
         "Réponds uniquement par un objet JSON : {\"headline\":\"…\",\"items\":[{\"ref\":\"M2\",\"text\":\"…\"}]}\n" +
         "- headline : une phrase de 20 mots maximum, en $languageName.\n" +
         "- items : jusqu'à 7 éléments : tous ceux de la liste (7 au plus), dans l'ordre d'intérêt, sans en écarter (grands matchs, derbies, finales, événements, sinon programmes marquants). " +
+        "Privilégie, dans l'ordre d'intérêt, les éléments sur des chaînes françaises (FR) et arabes (AR). " +
         "ref est l'identifiant de la liste ; text : 14 mots maximum, en $languageName, avec la chaîne si la liste la donne.\n" +
         "Liste (identifiant|texte) :\n" + lines.asLines()
 

@@ -95,7 +95,8 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
     val mobile = deviceKind == DeviceKind.Mobile
     // « Réglages avancés » (ville, IA, sauvegarde, mises à jour) : sous-page des Paramètres mobiles.
     var advancedSettings by remember { mutableStateOf(false) }
-    LaunchedEffect(state.screen) { if (state.screen !is StreamiaScreen.Settings) advancedSettings = false }
+    var loadingsPage by remember { mutableStateOf(false) }
+    LaunchedEffect(state.screen) { if (state.screen !is StreamiaScreen.Settings) { advancedSettings = false; loadingsPage = false } }
     val mobileNative = mobile && state.screen.isMobileNative()
     val playerOpen = state.screen is StreamiaScreen.Player
     // Mobile : pas d'aperçu vidéo hors du lecteur, le flux Direct (lecteur partagé) s'arrête dès qu'on le quitte,
@@ -434,6 +435,13 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                 }
 
 
+                mobileNative && state.screen is StreamiaScreen.Settings && loadingsPage -> fr.streamia.tv.ui.mobile.MobileLoadingsScreen(
+                    catalogBusy = state.busy,
+                    onLoad = viewModel::loadingsOverview,
+                    onAction = viewModel::runLoadingAction,
+                    onBack = { loadingsPage = false },
+                )
+
                 mobileNative && state.screen is StreamiaScreen.Settings && advancedSettings -> MobileAdvancedSettingsScreen(
                     settings = state.appSettings,
                     detectedPlaceName = homeStateHolder.value.weatherPlace?.name,
@@ -497,6 +505,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onParentalControl = viewModel::showParentalControl,
                     onAbout = viewModel::showAbout,
                     onAdvanced = { advancedSettings = true },
+                    onLoadings = { loadingsPage = true },
                     onBack = viewModel::backFromMenu,
                 )
 

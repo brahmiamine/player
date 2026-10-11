@@ -21,6 +21,7 @@ import fr.streamia.tv.data.mergeSearchResults
 import fr.streamia.tv.data.pickTitleMatches
 import fr.streamia.tv.data.poolOf
 import fr.streamia.tv.domain.MediaCategory
+import fr.streamia.tv.domain.LiveChannelPrefix
 import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.liveonsat.ResolvedLiveOnSatMatch
@@ -303,6 +304,8 @@ internal class AiController(
             .filter { it.match.startEpochSeconds in (nowSeconds - MATCH_PAST_SECONDS)..(nowSeconds + MATCH_AHEAD_SECONDS) }
             .sortedBy { it.match.startEpochSeconds }
             .mapNotNull { resolved -> matchLine(resolved, nowSeconds, allowed)?.let { resolved to it } }
+            // Chaînes FR/AR d'abord (tri stable : l'ordre par heure est gardé dans chaque groupe).
+            .sortedBy { (resolved, _) -> if (firstChannel(resolved, allowed)?.isFrOrAr() == true) 0 else 1 }
             .take(BRIEF_MATCHES)
             .forEach { (resolved, text) -> add("M", text, firstChannel(resolved, allowed)) }
         home.homeBeinSportsNow.filter { allowed(it.channel) }.take(BRIEF_BEIN).forEach {
@@ -330,8 +333,14 @@ internal class AiController(
         return "${match.competition} : ${match.participantA} - ${match.participantB}, $status, sur ${channel.displayName}"
     }
 
-    private fun firstChannel(resolved: ResolvedLiveOnSatMatch, allowed: (MediaEntry) -> Boolean): MediaEntry? =
-        resolved.matchedChannels.values.asSequence().flatten().firstOrNull { it.type == MediaType.Live && allowed(it) }
+    private fun MediaEntry.isFrOrAr() =
+        listOf(LiveChannelPrefix.FR, LiveChannelPrefix.AR).any { it.strip(displayName) != displayName || it.strip(name) != name }
+
+    /** Première chaîne autorisée du match, une chaîne FR ou AR de préférence. */
+    private fun firstChannel(resolved: ResolvedLiveOnSatMatch, allowed: (MediaEntry) -> Boolean): MediaEntry? {
+        val live = resolved.matchedChannels.values.asSequence().flatten().filter { it.type == MediaType.Live && allowed(it) }
+        return live.firstOrNull { it.isFrOrAr() } ?: live.firstOrNull()
+    }
 
     // ---------- Télécommande téléphone ----------
 

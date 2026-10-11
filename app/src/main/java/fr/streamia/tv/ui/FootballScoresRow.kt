@@ -1,7 +1,12 @@
 package fr.streamia.tv.ui
 
 import fr.streamia.tv.net.HttpClients
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -31,7 +36,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.tv.material3.Text
-import fr.streamia.tv.ui.theme.FocusBlueBright
+import fr.streamia.tv.ui.theme.Danger
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
 import kotlinx.coroutines.Dispatchers
@@ -294,41 +299,56 @@ internal fun FootballScoresRow(modifier: Modifier = Modifier) {
 }
 
 private val kickoffFormat = DateTimeFormatter.ofPattern("HH:mm").withZone(ZoneId.systemDefault())
+private val minuteRegex = Regex("""\d+""")
+
 @Composable
 private fun FootballMatchCard(match: FootballMatch) {
-    FocusableSurface(onClick = {}, modifier = Modifier.width(260.dp).height(150.dp)) {
-        Column(Modifier.fillMaxSize().padding(10.dp)) {
+    val played = match.state != "pre"
+    val home = match.homeScore.toIntOrNull()
+    val away = match.awayScore.toIntOrNull()
+    val homeBehind = played && home != null && away != null && home < away
+    val awayBehind = played && home != null && away != null && away < home
+    FocusableSurface(onClick = {}, modifier = Modifier.width(268.dp).height(160.dp)) {
+        Column(Modifier.fillMaxSize().padding(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 ChannelLogo(match.competitionLogo, match.competition, Modifier.size(22.dp), imagePadding = 1)
-                Spacer(Modifier.width(6.dp))
-                Text(match.competition, color = MutedInk, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                Spacer(Modifier.width(8.dp))
+                Text(match.competition, color = MutedInk, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 if (match.state == "in") LiveBadge()
             }
-            Spacer(Modifier.height(8.dp))
-            TeamLine(match.home, match.homeLogo, match.homeScore.takeIf { match.state != "pre" })
+            Spacer(Modifier.height(10.dp))
+            TeamLine(match.home, match.homeLogo, match.homeScore.takeIf { played }, dimmed = homeBehind)
             Spacer(Modifier.height(6.dp))
-            TeamLine(match.away, match.awayLogo, match.awayScore.takeIf { match.state != "pre" })
+            TeamLine(match.away, match.awayLogo, match.awayScore.takeIf { played }, dimmed = awayBehind)
             Spacer(Modifier.weight(1f))
-            Text(
-                when (match.state) {
-                    "pre" -> kickoffFormat.format(match.kickoff)
-                    "post" -> "Terminé"
-                    else -> match.status
-                },
-                color = if (match.state == "in") FocusBlueBright else MutedInk,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold,
-            )
+            when (match.state) {
+                "in" -> {
+                    val minute = minuteRegex.find(match.status)?.value?.toIntOrNull()
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(match.status, color = Danger, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                        if (minute != null) {
+                            Spacer(Modifier.width(10.dp))
+                            Box(Modifier.weight(1f).height(4.dp).clip(RoundedCornerShape(2.dp)).background(Color(0x1CFFFFFF))) {
+                                Box(Modifier.fillMaxWidth((minute / 90f).coerceIn(0.03f, 1f)).height(4.dp).background(Danger))
+                            }
+                        }
+                    }
+                }
+                "post" -> Text("Terminé", color = MutedInk, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                else -> Text(kickoffFormat.format(match.kickoff), color = Ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            }
         }
     }
 }
 
+/** [dimmed] : l'équipe qui perd, grisée pour que le leader se lise d'un coup d'œil. */
 @Composable
-private fun TeamLine(name: String, logo: String?, score: String?) {
+private fun TeamLine(name: String, logo: String?, score: String?, dimmed: Boolean) {
+    val ink = if (dimmed) MutedInk else Ink
     Row(verticalAlignment = Alignment.CenterVertically) {
         ChannelLogo(logo, name, Modifier.size(28.dp), imagePadding = 1)
-        Spacer(Modifier.width(8.dp))
-        Text(name, color = Ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-        if (score != null) Text(score, color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.width(10.dp))
+        Text(name, color = ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        if (score != null) Text(score, color = ink, fontSize = 22.sp, fontWeight = FontWeight.Bold)
     }
 }

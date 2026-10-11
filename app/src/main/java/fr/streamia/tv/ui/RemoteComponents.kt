@@ -286,7 +286,7 @@ fun TvTextField(
             .padding(horizontal = 18.dp, vertical = 10.dp),
         decorationBox = { input ->
             androidx.compose.foundation.layout.Column(verticalArrangement = Arrangement.Center) {
-                Text(label, color = labelColor, fontSize = 14.sp)
+                Text(label, color = labelColor, fontSize = 14.sp, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                 Spacer(Modifier.height(3.dp))
                 input()
                 if (supportingText != null) {

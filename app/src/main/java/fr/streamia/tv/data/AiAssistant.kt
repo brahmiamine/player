@@ -164,8 +164,8 @@ class AiAssistant(context: Context, private val keyStore: AiKeyStore, val usage:
         val refs = lines.mapTo(HashSet(), AiCandidate::id)
         return askParsed(
             cfg, AiFeature.Brief,
-            cacheKey = "b|${cfg.language}|${System.currentTimeMillis() / BRIEF_TTL_MS}|${lines.joinToString("|") { it.label }.hashCode()}",
-            system = briefSystemPrompt(languageLabel(cfg), nowLabel, lines),
+            cacheKey = "b|fr|${System.currentTimeMillis() / BRIEF_TTL_MS}|${lines.joinToString("|") { it.label }.hashCode()}",
+            system = briefSystemPrompt("français", nowLabel, lines),
             user = BRIEF_USER_PROMPT,
             maxTokens = 800,
         ) { parseBrief(it, refs) }

@@ -847,6 +847,7 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             "bein" -> homeGuides.beinSportsGuide.load(forceRefresh = true)
             "uk" -> homeGuides.ukGuide.load(forceRefresh = true)
             "matches" -> liveOnSat.loadLiveOnSatMatches(forceRefresh = true)
+            "justwatch" -> recommendations.reloadJustWatchRows(force = true)
         }
     }
     suspend fun epgCacheSizeBytes(): Long = repository.epgCacheSizeBytes()
