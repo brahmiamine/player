@@ -39,6 +39,7 @@ import fr.streamia.tv.data.HomePlace
 import fr.streamia.tv.data.PrayerMethod
 import fr.streamia.tv.data.UserLibrarySnapshot
 import fr.streamia.tv.data.isResumable
+import fr.streamia.tv.data.CatalogLoadProgress
 import fr.streamia.tv.domain.Catalog
 import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.MediaType
@@ -66,6 +67,10 @@ fun HomeScreen(
     parentalControlEnabled: Boolean = false,
     parentalUnlocked: Boolean = false,
     catalogLoading: Boolean = false,
+    /** Avancement du premier chargement du catalogue : notification en bas à droite. */
+    catalogProgress: CatalogLoadProgress? = null,
+    /** Sections dont la tuile affiche un chargeur (Direct / Films / Séries) tant que leur catalogue n'est pas écrit. */
+    loadingSections: Set<MediaType> = emptySet(),
     resumeRowEnabled: Boolean = true,
     favoritesRowEnabled: Boolean = true,
     footballScoresEnabled: Boolean = true,
@@ -374,6 +379,7 @@ fun HomeScreen(
             MainActionGrid(
                 catalog = catalog,
                 catalogLoading = catalogLoading,
+                loadingSections = loadingSections,
                 busy = busy,
                 firstFocus = if (!preferGridFocus) firstFocus else null,
                 focusTarget = focusTarget,
@@ -712,6 +718,12 @@ fun HomeScreen(
             }
         }
 
+    }
+    if (catalogProgress != null) {
+        CatalogLoadNotification(
+            progress = catalogProgress,
+            modifier = Modifier.align(Alignment.BottomEnd).padding(end = 46.dp, bottom = 30.dp),
+        )
     }
     if (exitArmed) {
         GlassSurface(

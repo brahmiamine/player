@@ -86,6 +86,15 @@ class HomeGuidesRepository internal constructor(
     suspend fun cachedBeinSportsGuide() = beinSportsGuideRepository.cached()
     suspend fun cachedUkGuide() = ukGuideRepository.cached()
 
+    /** Dates des derniers téléchargements gardés sur disque (null = rien en cache), pour la page Chargements. */
+    suspend fun cacheTimestamps(): GuideCacheTimestamps = GuideCacheTimestamps(
+        liveOnSat = cachedLiveOnSatMatches()?.fetchedAtEpochMillis,
+        tvTonight = cachedTvProgrammeTonight()?.fetchedAtEpochMillis,
+        tvNow = cachedTvProgrammeNow()?.fetchedAtEpochMillis,
+        bein = cachedBeinSportsGuide()?.fetchedAtEpochMillis,
+        uk = cachedUkGuide()?.fetchedAtEpochMillis,
+    )
+
     /** Réseau revenu : les guides en attente après un échec peuvent réessayer tout de suite. */
     fun clearGuideFailureBackoffs() = tvProgrammeNowRepository.clearFailureBackoff()
 
@@ -116,18 +125,20 @@ class HomeGuidesRepository internal constructor(
 
         // Le programme du soir change beaucoup moins souvent que les matchs live. Deux heures
         // limitent les requêtes vers tv-programme.com tout en renouvelant les données dans la soirée.
-        private const val TV_PROGRAMME_CACHE_MAX_AGE_MS = 2 * 60 * 60_000L
+        const val TV_PROGRAMME_CACHE_MAX_AGE_MS = 2 * 60 * 60_000L
 
         // Le cache garde toute la grille (programme en cours recalculé localement) : pas besoin de
         // re-scraper souvent, et tv-programme.com bloque (403) les requêtes trop fréquentes.
-        private const val TV_PROGRAMME_NOW_CACHE_MAX_AGE_MS = 30 * 60_000L
+        const val TV_PROGRAMME_NOW_CACHE_MAX_AGE_MS = 30 * 60_000L
 
         // La grille couvre 24 h et "maintenant"/"suivant" est recalculé localement depuis le cache
         // (boucle de 2 min de l'accueil) : re-télécharger plus souvent ne changerait rien.
-        private const val BEIN_SPORTS_GUIDE_CACHE_MAX_AGE_MS = 30 * 60_000L
+        const val BEIN_SPORTS_GUIDE_CACHE_MAX_AGE_MS = 30 * 60_000L
 
         // Grille complète en cache, créneau courant recalculé localement : ~16 requêtes par
         // téléchargement, donc pas plus d'une fois par demi-heure vers tvguideuk.com.
-        private const val UK_GUIDE_CACHE_MAX_AGE_MS = 30 * 60_000L
+        const val UK_GUIDE_CACHE_MAX_AGE_MS = 30 * 60_000L
     }
 }
+
+data class GuideCacheTimestamps(val liveOnSat: Long?, val tvTonight: Long?, val tvNow: Long?, val bein: Long?, val uk: Long?)

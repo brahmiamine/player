@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
@@ -46,6 +47,7 @@ private val SideColumnWidth = 300.dp
 internal fun MainActionGrid(
     catalog: Catalog,
     catalogLoading: Boolean,
+    loadingSections: Set<MediaType>,
     busy: Boolean,
     firstFocus: FocusRequester?,
     focusTarget: HomeFocusTarget?,
@@ -65,9 +67,12 @@ internal fun MainActionGrid(
         horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         val liveCount = catalog.count(MediaType.Live)
-        val liveTileEnabled = !catalogLoading && liveCount > 0
+        val liveLoading = MediaType.Live in loadingSections
+        val moviesLoading = MediaType.Movie in loadingSections
+        val seriesLoading = MediaType.Series in loadingSections
+        val liveTileEnabled = !liveLoading && liveCount > 0
         LiveTile(
-            count = if (catalogLoading) null else liveCount,
+            count = if (liveLoading) null else liveCount,
             modifier = Modifier
                 .then(if (firstFocus != null && liveTileEnabled) Modifier.focusRequester(firstFocus) else Modifier)
                 .gridFocus(gridFocusRequester, focusTarget == HomeFocusTarget.Live)
@@ -79,20 +84,22 @@ internal fun MainActionGrid(
         HomeTile(
             title = "Films",
             icon = StreamiaIconGlyph.Movie,
-            subtitle = if (catalogLoading) "Chargement…" else "${catalog.count(MediaType.Movie).grouped()} contenus",
+            subtitle = if (moviesLoading) "Chargement…" else "${catalog.count(MediaType.Movie).grouped()} contenus",
+            loading = moviesLoading,
             modifier = Modifier.weight(1f).fillMaxHeight()
                 .gridFocus(gridFocusRequester, focusTarget == HomeFocusTarget.Movies),
             onClick = { onOpenSection(MediaType.Movie) },
-            enabled = !catalogLoading && catalog.count(MediaType.Movie) > 0,
+            enabled = !moviesLoading && catalog.count(MediaType.Movie) > 0,
         )
         HomeTile(
             title = "Séries",
             icon = StreamiaIconGlyph.Series,
-            subtitle = if (catalogLoading) "Chargement…" else "${catalog.count(MediaType.Series).grouped()} contenus",
+            subtitle = if (seriesLoading) "Chargement…" else "${catalog.count(MediaType.Series).grouped()} contenus",
+            loading = seriesLoading,
             modifier = Modifier.weight(1f).fillMaxHeight()
                 .gridFocus(gridFocusRequester, focusTarget == HomeFocusTarget.Series),
             onClick = { onOpenSection(MediaType.Series) },
-            enabled = !catalogLoading && catalog.count(MediaType.Series) > 0,
+            enabled = !seriesLoading && catalog.count(MediaType.Series) > 0,
         )
         HomeTile(
             title = "Recherche",
@@ -110,7 +117,7 @@ internal fun MainActionGrid(
             modifier = Modifier.weight(1f).fillMaxHeight()
                 .gridFocus(gridFocusRequester, focusTarget == HomeFocusTarget.Guide),
             onClick = onEpg,
-            enabled = !catalogLoading && liveCount > 0,
+            enabled = !liveLoading && liveCount > 0,
         )
 
         Column(
@@ -162,14 +169,22 @@ private fun LiveTile(count: Int?, modifier: Modifier, onClick: () -> Unit, enabl
     FocusableSurface(onClick = onClick, enabled = enabled, accent = true, modifier = modifier) {
         Column(Modifier.fillMaxSize().padding(18.dp), verticalArrangement = Arrangement.Bottom) {
             Text("TV en direct", color = Ink.copy(alpha = 0.9f), fontSize = 15.sp, fontWeight = FontWeight.Bold)
-            Text(
-                count?.grouped() ?: "…",
-                color = Ink,
-                fontSize = 34.sp,
-                lineHeight = 37.sp,
-                fontWeight = HeroWeight,
-            )
-            Text(if (count == null) "Chargement…" else "chaînes", color = Ink.copy(alpha = 0.9f), fontSize = 15.sp)
+            if (count == null) {
+                Spacer(Modifier.height(6.dp))
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    ButtonSpinner(size = 26.dp, color = Ink)
+                    Text("Chargement…", color = Ink.copy(alpha = 0.9f), fontSize = 15.sp)
+                }
+            } else {
+                Text(
+                    count.grouped(),
+                    color = Ink,
+                    fontSize = 34.sp,
+                    lineHeight = 37.sp,
+                    fontWeight = HeroWeight,
+                )
+                Text("chaînes", color = Ink.copy(alpha = 0.9f), fontSize = 15.sp)
+            }
         }
     }
 }
@@ -182,13 +197,17 @@ private fun HomeTile(
     modifier: Modifier,
     onClick: () -> Unit,
     enabled: Boolean = true,
+    loading: Boolean = false,
 ) {
     FocusableSurface(onClick = onClick, enabled = enabled, modifier = modifier) {
         Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.Bottom) {
             StreamiaIcon(icon, tint = AccentPinkText, size = 32.dp)
             Spacer(Modifier.weight(1f))
             Text(title, color = Ink, fontSize = 20.sp, fontWeight = HeadingWeight, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(subtitle, color = MutedInk, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (loading) ButtonSpinner(size = 16.dp, color = AccentPinkText)
+                Text(subtitle, color = MutedInk, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
         }
     }
 }

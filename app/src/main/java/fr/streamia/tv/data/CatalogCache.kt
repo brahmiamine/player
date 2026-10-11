@@ -51,6 +51,16 @@ class CatalogCache(context: Context) {
      */
     internal fun beginReplaceOnIo(profileId: String): CatalogDatabase.ReplaceSession = database.beginReplace(profileId)
 
+    /** Session d'une seule section ([MediaType]) : voir [CatalogDatabase.beginSectionReplace]. */
+    internal fun beginSectionReplaceOnIo(profileId: String, type: MediaType, dropIndexes: Boolean): CatalogDatabase.ReplaceSession =
+        database.beginSectionReplace(profileId, type, dropIndexes)
+
+    /** Version synchrone de [load], pour l'appel entre deux sections d'un chargement déjà sur le thread IO. */
+    internal fun loadOnIo(profileId: String): Catalog? {
+        ensureMigrated(profileId)
+        return database.loadLightweight(profileId, persistedContextKeys(profileId))
+    }
+
     /** Valide la session : le nouveau catalogue devient visible et l'ancien cache JSON éventuel est purgé. */
     internal fun commitReplaceOnIo(session: CatalogDatabase.ReplaceSession, account: AccountInfo?) {
         session.commit(account)

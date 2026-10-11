@@ -589,7 +589,9 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     library = state.library,
                     parentalControlEnabled = state.appSettings.parentalControlEnabled,
                     parentalUnlocked = state.parentalUnlocked,
-                    catalogLoading = state.catalogHydrating,
+                    catalogLoading = state.catalogHydrating || state.catalogProgress?.loading == true,
+                    catalogProgress = state.catalogProgress,
+                    loadingSections = state.catalogProgress?.pendingSections.orEmpty() + (if (state.catalogHydrating) setOf(MediaType.Live, MediaType.Movie, MediaType.Series) else emptySet()),
                     resumeRowEnabled = HomeBlock.Resume !in state.appSettings.disabledHomeBlocks,
                     favoritesRowEnabled = HomeBlock.Favorites !in state.appSettings.disabledHomeBlocks,
                     footballScoresEnabled = HomeBlock.FootballScores !in state.appSettings.disabledHomeBlocks,
@@ -732,6 +734,8 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     hasAiKey = viewModel::hasAiKey,
                     onSaveAiKey = viewModel::saveAiKey,
                     onLoadAiModels = viewModel::loadAiModels,
+                    onLoadLoadings = viewModel::loadingsOverview,
+                    onLoadingAction = viewModel::runLoadingAction,
                     onBack = viewModel::backFromMenu,
                 )
 

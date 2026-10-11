@@ -37,7 +37,7 @@ class AiNightlyWorker(context: Context, params: WorkerParameters) : CoroutineWor
     private fun isBusy(): Boolean = PlaybackActivity.isPlaying || UserActivity.isRecentlyActive()
 
     companion object {
-        private const val WORK_NAME = "ai-nightly"
+        const val WORK_NAME = "ai-nightly"
         private const val INTERVAL_HOURS = 24L
 
         /** Idempotent. Le travail lit les réglages à chaque passage : désactiver l'assistant ou le pré-calcul suffit à l'arrêter. */

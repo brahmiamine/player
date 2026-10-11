@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -29,12 +31,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
 import fr.streamia.tv.data.HomeBlock
 import fr.streamia.tv.data.HomePlace
+import fr.streamia.tv.ui.theme.AccentPink
 import fr.streamia.tv.ui.theme.FocusBlueBright
 import fr.streamia.tv.ui.theme.HeadingWeight
 import fr.streamia.tv.ui.theme.Ink
@@ -130,11 +134,12 @@ internal fun FocusTrap(content: @Composable () -> Unit) {
 @Composable
 internal fun SettingsSectionTitle(title: String) {
     Text(
-        title,
-        color = FocusBlueBright,
-        fontSize = 14.sp,
+        title.uppercase(),
+        color = MutedInk,
+        fontSize = 12.sp,
         fontWeight = HeadingWeight,
-        modifier = Modifier.padding(top = 4.dp, bottom = 2.dp),
+        letterSpacing = 1.1.sp,
+        modifier = Modifier.padding(top = 10.dp, bottom = 0.dp, start = 4.dp),
     )
 }
 
@@ -272,35 +277,69 @@ internal class SettingsFocusTracker {
 
 internal val LocalSettingsFocusTracker = androidx.compose.runtime.staticCompositionLocalOf<SettingsFocusTracker?> { null }
 
+/** Groupe de lignes de réglage : colonne serrée sous un éventuel titre de section. */
+@Composable
+internal fun SettingsGroup(content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp), content = content)
+}
+
+/**
+ * Ligne de réglage : titre et description à gauche, à droite la valeur courante et une flèche, ou un
+ * interrupteur quand [toggle] est renseigné (le clic bascule alors directement). [glyph] et
+ * [modifier] sont conservés pour les appelants historiques (grille de tuiles) mais ne servent plus.
+ */
 @Composable
 internal fun SettingsTile(
-    glyph: StreamiaIconGlyph,
+    @Suppress("UNUSED_PARAMETER") glyph: StreamiaIconGlyph,
     title: String,
     subtitle: String,
     onClick: () -> Unit,
-    modifier: Modifier,
+    @Suppress("UNUSED_PARAMETER") modifier: Modifier,
     enabled: Boolean = true,
     selected: Boolean = false,
+    toggle: Boolean? = null,
+    description: String? = settingsRowDescription(title),
 ) {
     val tracker = LocalSettingsFocusTracker.current
     val requester = remember { FocusRequester() }
     FocusableSurface(
         onClick = onClick,
         enabled = enabled,
-        selected = selected,
-        accent = selected,
+        selected = selected && toggle == null,
         onFocused = { tracker?.last = requester },
-        modifier = modifier.fillMaxSize().focusRequester(requester),
+        focusScale = 1.02f,
+        modifier = Modifier.fillMaxWidth().heightIn(min = 72.dp).focusRequester(requester),
     ) {
-        Column(
-            Modifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.Center,
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            StreamiaIcon(glyph, size = 22.dp)
-            Spacer(Modifier.height(5.dp))
-            Text(title, color = Ink, fontSize = 16.sp, fontWeight = HeadingWeight, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Spacer(Modifier.height(3.dp))
-            Text(subtitle, color = MutedInk, fontSize = 12.sp, lineHeight = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(title, color = if (enabled) Ink else MutedInk, fontSize = 17.sp, fontWeight = HeadingWeight, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (description != null) {
+                    Text(description, color = MutedInk, fontSize = 12.sp, lineHeight = 16.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+            }
+            if (toggle != null) {
+                SettingsSwitch(on = toggle, enabled = enabled)
+            } else {
+                Text(subtitle, color = if (enabled) Ink.copy(alpha = 0.85f) else MutedInk, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 360.dp))
+                StreamiaIcon(StreamiaIconGlyph.ArrowForward, tint = MutedInk, size = 18.dp)
+            }
         }
+    }
+}
+
+@Composable
+private fun SettingsSwitch(on: Boolean, enabled: Boolean) {
+    Box(
+        Modifier
+            .width(54.dp).height(30.dp)
+            .background(if (on && enabled) AccentPink else Color.White.copy(alpha = 0.22f), androidx.compose.foundation.shape.RoundedCornerShape(15.dp))
+            .padding(3.dp),
+        contentAlignment = if (on) Alignment.CenterEnd else Alignment.CenterStart,
+    ) {
+        Box(Modifier.size(24.dp).background(Color.White, androidx.compose.foundation.shape.CircleShape))
     }
 }

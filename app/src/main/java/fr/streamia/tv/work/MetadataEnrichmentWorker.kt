@@ -119,7 +119,7 @@ class MetadataEnrichmentWorker(context: Context, params: WorkerParameters) : Cor
 
     companion object {
         private val running = java.util.concurrent.atomic.AtomicBoolean(false)
-        private const val WORK_NAME = "metadata-enrichment"
+        const val WORK_NAME = "metadata-enrichment"
         private const val TAG = "MetadataEnrichment"
         private const val MAX_PER_RUN = 150
         /** Fiches enrichies au plus hors favoris/historique (index de recommandations borné). */

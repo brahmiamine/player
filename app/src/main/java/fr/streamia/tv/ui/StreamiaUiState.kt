@@ -2,6 +2,7 @@ package fr.streamia.tv.ui
 
 import fr.streamia.tv.beinsports.ResolvedBeinProgrammeItem
 import fr.streamia.tv.data.AiReview
+import fr.streamia.tv.data.CatalogLoadProgress
 import fr.streamia.tv.data.AppSettings
 import fr.streamia.tv.data.CurrentWeather
 import fr.streamia.tv.data.HomeBlock
@@ -32,6 +33,8 @@ data class StreamiaUiState(
     val testingConnection: Boolean = false,
     val testSucceeded: Boolean = false,
     val catalogHydrating: Boolean = false,
+    /** Premier chargement du catalogue, accueil déjà ouvert : alimente la notification et les chargeurs des tuiles. */
+    val catalogProgress: CatalogLoadProgress? = null,
     val screen: StreamiaScreen = StreamiaScreen.Login,
     val rawCatalog: Catalog? = null,
     val catalog: Catalog? = null,

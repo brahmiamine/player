@@ -90,6 +90,47 @@ internal class CatalogDatabase(context: Context) :
     }
 
     /**
+     * Remplacement transactionnel d'une seule section ([type]) du catalogue d'un profil : les autres
+     * sections ne sont pas touchées et chaque commit rend la section écrite visible tout de suite
+     * (Direct avant Films et Séries au premier chargement). [dropIndexes] : à réserver à la grosse
+     * section (index retirés puis recréés au commit) ; les autres écrivent index en place.
+     */
+    fun beginSectionReplace(profileId: String, type: MediaType, dropIndexes: Boolean): ReplaceSession {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            if (dropIndexes) {
+                CatalogSchema.dropSecondaryIndexes(db)
+                runCatching { db.execSQL("PRAGMA cache_size = $BULK_CACHE_SIZE") }
+            }
+            val search = hasSearchTable(db)
+            val args = arrayOf(profileId, type.name)
+            if (search) {
+                runCatching {
+                    db.execSQL(
+                        "DELETE FROM $SEARCH_TABLE WHERE docid IN (SELECT rowid FROM catalog_entries WHERE profile_id = ? AND media_type = ?)",
+                        args,
+                    )
+                }
+            }
+            db.delete("catalog_entries", "profile_id = ? AND media_type = ?", args)
+            db.delete("catalog_categories", "profile_id = ? AND media_type = ?", args)
+            db.delete("catalog_counts", "profile_id = ? AND media_type = ?", args)
+            // Les positions de catégories continuent après celles des sections déjà écrites :
+            // l'ordre de lecture (`ORDER BY position`) garde Direct, Films, Séries.
+            val firstPosition = db.rawQuery(
+                "SELECT COALESCE(MAX(position) + 1, 0) FROM catalog_categories WHERE profile_id = ?",
+                arrayOf(profileId),
+            ).use { if (it.moveToFirst()) it.getInt(0) else 0 }
+            return ReplaceSession(db, profileId, search, type, dropIndexes, firstPosition)
+        } catch (error: Throwable) {
+            db.endTransaction()
+            restoreCacheSize(db)
+            throw error
+        }
+    }
+
+    /**
      * Comme [deleteProfileRows], mais sans rien supprimer ligne par ligne quand aucun autre profil
      * n'a de catalogue (le cas courant) : table vidée d'un coup, index plein texte recréé vide.
      * Retirer 200 000 lignes d'un index FTS une par une coûtait autant que de les y écrire.
@@ -131,11 +172,15 @@ internal class CatalogDatabase(context: Context) :
         private val db: SQLiteDatabase,
         val profileId: String,
         private val indexSearch: Boolean,
+        /** Non nul : session d'une seule section (voir [beginSectionReplace]) ; nul : tout le profil. */
+        private val section: MediaType? = null,
+        private val droppedIndexes: Boolean = false,
+        firstCategoryPosition: Int = 0,
     ) : CatalogWriteSink {
         private var categoryStatement: android.database.sqlite.SQLiteStatement? = null
         private var entryStatement: android.database.sqlite.SQLiteStatement? = null
         private val categoryPositions = HashMap<String, Int>()
-        private var nextCategoryPosition = 0
+        private var nextCategoryPosition = firstCategoryPosition
         private var finished = false
 
         /**
@@ -221,8 +266,9 @@ internal class CatalogDatabase(context: Context) :
             runCatching {
                 db.execSQL(
                     "INSERT INTO $SEARCH_TABLE(docid, name, display_name, tvg_id, profile_id) " +
-                        "SELECT rowid, name, display_name, tvg_id, profile_id FROM catalog_entries WHERE profile_id = ?",
-                    arrayOf(profileId),
+                        "SELECT rowid, name, display_name, tvg_id, profile_id FROM catalog_entries WHERE profile_id = ?" +
+                        (if (section != null) " AND media_type = ?" else ""),
+                    if (section != null) arrayOf(profileId, section.name) else arrayOf(profileId),
                 )
             }
         }
@@ -243,16 +289,21 @@ internal class CatalogDatabase(context: Context) :
                         putNullable("account_maximum_connections", it.maximumConnections)
                     }
                 }
-                check(db.insertOrThrow("catalog_profiles", null, profileValues) != -1L)
+                if (section == null) {
+                    check(db.insertOrThrow("catalog_profiles", null, profileValues) != -1L)
+                } else {
+                    // Section suivante d'un profil déjà présent : la ligne est réécrite (compte inclus).
+                    check(db.insertWithOnConflict("catalog_profiles", null, profileValues, SQLiteDatabase.CONFLICT_REPLACE) != -1L)
+                }
                 // Index reconstruits d'abord : le calcul des comptes qui suit s'appuie dessus.
-                CatalogSchema.createSecondaryIndexes(db)
+                if (section == null || droppedIndexes) CatalogSchema.createSecondaryIndexes(db)
                 db.execSQL(
                     """
                     INSERT INTO catalog_counts(profile_id, media_type, category_id, entry_count)
                     SELECT profile_id, media_type, category_id, COUNT(*) FROM catalog_entries
-                    WHERE profile_id = ? AND navigable = 1 GROUP BY media_type, category_id
+                    WHERE profile_id = ?${if (section != null) " AND media_type = ?" else ""} AND navigable = 1 GROUP BY media_type, category_id
                     """.trimIndent(),
-                    arrayOf(profileId),
+                    if (section != null) arrayOf(profileId, section.name) else arrayOf(profileId),
                 )
                 if (indexSearch) indexForSearch()
                 db.setTransactionSuccessful()

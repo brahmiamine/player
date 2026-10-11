@@ -136,4 +136,39 @@ class CatalogCacheIntegrationTest {
 
         assertEquals(listOf("Ananas", "Banane", "Mangue", "Zèbre"), page.entries.map(MediaEntry::name))
     }
+
+    @Test
+    fun sectionsCommitIndependentlyAndKeepCategoryOrder() = runBlocking {
+        val account = fr.streamia.tv.domain.AccountInfo("user", "Active", null, null, null)
+        val live = MediaEntry(id = 1, name = "Chaîne 1", categoryId = "tv", iconUrl = null, number = 1, type = MediaType.Live)
+        val liveCategory = MediaCategory("tv", "TV", MediaType.Live)
+
+        val liveSession = cache.beginSectionReplaceOnIo(profileId, MediaType.Live, dropIndexes = false)
+        liveSession.writeCategories(listOf(liveCategory))
+        liveSession.writeEntries(listOf(live))
+        cache.commitReplaceOnIo(liveSession, account)
+
+        // Direct visible alors que Films n'est pas encore écrit.
+        val afterLive = cache.load(profileId)!!
+        assertEquals(1, afterLive.count(MediaType.Live))
+        assertEquals(0, afterLive.count(MediaType.Movie))
+
+        val movieSession = cache.beginSectionReplaceOnIo(profileId, MediaType.Movie, dropIndexes = true)
+        movieSession.writeCategories(listOf(category))
+        movieSession.writeEntries(listOf(movie(10, "Film 10"), movie(11, "Film 11")))
+        cache.commitReplaceOnIo(movieSession, account)
+
+        val loaded = cache.load(profileId)!!
+        assertEquals(1, loaded.count(MediaType.Live))
+        assertEquals(2, loaded.count(MediaType.Movie))
+        assertEquals(listOf(liveCategory, category), loaded.categories)
+        assertEquals(1, cache.search(profileId, "Chaîne", null).size)
+        assertEquals(2, cache.search(profileId, "Film", null).size)
+
+        // Une section annulée ne touche pas les autres.
+        val aborted = cache.beginSectionReplaceOnIo(profileId, MediaType.Movie, dropIndexes = true)
+        aborted.writeEntries(listOf(movie(99, "Autre")))
+        cache.abortReplaceOnIo(aborted)
+        assertEquals(2, cache.load(profileId)!!.count(MediaType.Movie))
+    }
 }

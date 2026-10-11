@@ -11,7 +11,10 @@ import fr.streamia.tv.data.AiProvider
 import fr.streamia.tv.data.FicheInfo
 import fr.streamia.tv.data.AiUsage
 import fr.streamia.tv.data.AppSettings
+import fr.streamia.tv.data.CatalogLoadProgress
 import fr.streamia.tv.data.CatalogSource
+import fr.streamia.tv.data.CatalogStepStatus
+import fr.streamia.tv.data.PlaylistKind
 import fr.streamia.tv.data.HomeBlock
 import fr.streamia.tv.data.HomePlace
 import fr.streamia.tv.data.PrayerMethod
@@ -19,6 +22,7 @@ import fr.streamia.tv.data.JustWatchSection
 import fr.streamia.tv.data.VodSortOrder
 import fr.streamia.tv.data.homeBlock
 import fr.streamia.tv.data.LoadedCatalog
+import fr.streamia.tv.data.LoadingRow
 import fr.streamia.tv.data.PlaylistProfile
 import fr.streamia.tv.data.hasSameCatalogLayoutAs
 import fr.streamia.tv.data.XtreamRepository
@@ -35,6 +39,7 @@ import fr.streamia.tv.domain.ServerCredentials
 import fr.streamia.tv.liveonsat.ResolvedLiveOnSatMatch
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.StateFlow
@@ -338,7 +343,13 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         _uiState.update { it.copy(busy = true, message = null, testSucceeded = false) }
         viewModelScope.launch {
             try {
-                showCatalog(repository.signIn(credentials, profileId, profileName))
+                // Connexion rapide (compte « Active » + enregistrement), puis accueil : le catalogue
+                // se charge ensuite en arrière-plan, avec sa notification.
+                val id = repository.registerXtreamAccount(credentials, profileId, profileName)
+                val cached = repository.cachedCatalog(id)
+                beginCatalogLoad(id, credentials, cached, staged = cached == null)
+            } catch (cancellation: CancellationException) {
+                throw cancellation
             } catch (error: Throwable) {
                 showError(error)
             }
@@ -401,7 +412,9 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
             val profile = repository.profile(profileId)
             val credentials = profile?.credentialsOrNull()
             val cachedCatalog = if (credentials != null) repository.cachedCatalog(profileId) else null
-            if (credentials != null && cachedCatalog != null) {
+            // Premier chargement interrompu (liste Xtream jamais complétée) : on le reprend section par section.
+            val incomplete = profile?.kind == PlaylistKind.Xtream && profile.lastRefreshAt <= 0L
+            if (credentials != null && cachedCatalog != null && !incomplete) {
                 resetUiState(StreamiaUiState(
                     booting = false,
                     busy = false,
@@ -434,6 +447,11 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
                         else state
                     }
                 }
+                return@launch
+            }
+            if (credentials != null && profile?.kind == PlaylistKind.Xtream) {
+                // Liste Xtream sans catalogue local : accueil tout de suite, chargement en arrière-plan.
+                beginCatalogLoad(profileId, credentials, cachedCatalog, staged = true)
                 return@launch
             }
             _uiState.update { it.copy(busy = true, message = "Ouverture de la liste…") }
@@ -550,6 +568,14 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     fun refresh() {
         val profileId = _uiState.value.activeProfileId ?: return
         if (_uiState.value.busy) return
+        // Premier chargement échoué : « Actualiser » le relance avec la même notification.
+        if (_uiState.value.catalogProgress?.failure != null) {
+            val credentials = _uiState.value.credentials ?: return
+            val pending = pendingSectionsOf(_uiState.value.catalog)
+            _uiState.update { it.copy(catalogProgress = CatalogLoadProgress(pendingSections = pending)) }
+            runCatalogLoad(profileId, credentials, staged = true)
+            return
+        }
         _uiState.update { it.copy(busy = true, message = null) }
         viewModelScope.launch {
             try {
@@ -807,6 +833,22 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
     fun showAbout() = navigateToMenu(StreamiaScreen.About)
 
     suspend fun cacheSizeBytes(): Long = repository.cacheSizeBytes()
+
+    /** Paramètres › Chargements : sources, fraîcheur des caches et prochaines échéances. */
+    suspend fun loadingsOverview(): List<LoadingRow> = repository.loadingsOverview(_uiState.value.activeProfileId)
+
+    /** Actualisation demandée depuis Paramètres › Chargements ; [id] est celui d'un [LoadingRow]. */
+    fun runLoadingAction(id: String) {
+        when (id) {
+            "catalog" -> refresh()
+            "epg" -> epg.startEpgBackgroundSync(force = true)
+            "tvnow" -> homeGuides.tvProgrammeNowGuide.load(forceRefresh = true)
+            "tvtonight" -> homeGuides.tvProgrammeTonightGuide.load(forceRefresh = true)
+            "bein" -> homeGuides.beinSportsGuide.load(forceRefresh = true)
+            "uk" -> homeGuides.ukGuide.load(forceRefresh = true)
+            "matches" -> liveOnSat.loadLiveOnSatMatches(forceRefresh = true)
+        }
+    }
     suspend fun epgCacheSizeBytes(): Long = repository.epgCacheSizeBytes()
     fun showParentalControl() = navigateToMenu(StreamiaScreen.ParentalControl)
     fun showSearch() = navigateToMenu(StreamiaScreen.Search, HomeFocusTarget.Search)
@@ -1383,6 +1425,98 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         epg.startEpgBackgroundSync()
     }
 
+    /**
+     * Ouvre l'accueil sans attendre le catalogue : [initial] (cache existant) ou un catalogue vide
+     * dont les tuiles concernées affichent un chargeur, puis lance le chargement complet avec sa
+     * notification d'avancement. [staged] : section par section, chaque tuile s'active dès que sa
+     * section est écrite ; sinon une seule transaction (l'ancien catalogue reste affiché et intact).
+     */
+    private suspend fun beginCatalogLoad(profileId: String, credentials: ServerCredentials, initial: Catalog?, staged: Boolean) {
+        val catalog = initial ?: Catalog(emptyList(), emptyList())
+        val presentation = repository.prepareCatalogPresentation(profileId, catalog)
+        resetUiState(StreamiaUiState(
+            booting = false,
+            busy = false,
+            screen = StreamiaScreen.Home,
+            rawCatalog = catalog,
+            catalog = presentation.catalog,
+            credentials = credentials,
+            activeProfileId = profileId,
+            profiles = presentation.profiles,
+            library = presentation.library,
+            appSettings = repository.appSettings(),
+            catalogProgress = CatalogLoadProgress(pendingSections = if (staged) pendingSectionsOf(catalog) else emptySet()),
+        ))
+        runCatalogLoad(profileId, credentials, staged)
+    }
+
+    /** Sections encore vides, dont la tuile doit afficher un chargeur. */
+    private fun pendingSectionsOf(catalog: Catalog?): Set<MediaType> =
+        setOf(MediaType.Live, MediaType.Movie, MediaType.Series).filterTo(mutableSetOf()) { catalog == null || catalog.count(it) == 0 }
+
+    private fun runCatalogLoad(profileId: String, credentials: ServerCredentials, staged: Boolean) {
+        profileLoadJob?.cancel()
+        profileLoadJob = viewModelScope.launch {
+            // Sections validées une à une : fusionnées dans l'ordre, la tuile n'est activée qu'après.
+            val sections = Channel<Pair<MediaType, LoadedCatalog>>(Channel.UNLIMITED)
+            val merger = launch {
+                for ((type, partial) in sections) {
+                    mergeCatalog(partial)
+                    _uiState.update { state ->
+                        if (state.activeProfileId != profileId) state
+                        else state.copy(catalogProgress = state.catalogProgress?.let { it.copy(pendingSections = it.pendingSections - type) })
+                    }
+                }
+            }
+            try {
+                var lastCountAt = 0L
+                val loaded = repository.loadXtreamCatalog(
+                    profileId, credentials,
+                    listener = { step, status, count ->
+                        // Les compteurs montent par lots de plusieurs milliers : un affichage toutes les 300 ms suffit.
+                        val now = android.os.SystemClock.elapsedRealtime()
+                        if (!(status == CatalogStepStatus.Running && count > 0 && now - lastCountAt < 300)) {
+                            lastCountAt = now
+                            _uiState.update { state ->
+                                if (state.activeProfileId != profileId) state
+                                else state.copy(catalogProgress = state.catalogProgress?.with(step, status, count))
+                            }
+                        }
+                    },
+                    staged = staged,
+                    onSectionLoaded = { type, partial ->
+                        sections.trySend(type to LoadedCatalog(partial, credentials, CatalogSource.Network, profileId))
+                    },
+                )
+                sections.close()
+                merger.join()
+                mergeCatalog(loaded)
+                _uiState.update { state ->
+                    if (state.activeProfileId != profileId) state
+                    else state.copy(catalogProgress = state.catalogProgress?.copy(finished = true, pendingSections = emptySet()))
+                }
+                // Guides tiers après le catalogue, pas pendant : l'écriture en base occupe déjà le processeur.
+                scheduleSecondaryLoads()
+                delay(CATALOG_DONE_NOTICE_MS)
+                _uiState.update { state ->
+                    if (state.activeProfileId == profileId && state.catalogProgress?.finished == true) state.copy(catalogProgress = null) else state
+                }
+            } catch (cancellation: CancellationException) {
+                sections.close()
+                throw cancellation
+            } catch (error: Throwable) {
+                sections.close()
+                merger.join()
+                _uiState.update { state ->
+                    if (state.activeProfileId != profileId) state
+                    else state.copy(
+                        catalogProgress = (state.catalogProgress ?: CatalogLoadProgress()).copy(failure = error.safeMessage(), pendingSections = emptySet()),
+                    )
+                }
+            }
+        }
+    }
+
     private suspend fun mergeCatalog(loaded: LoadedCatalog) {
         if (_uiState.value.activeProfileId != loaded.profileId) return
         var presentation = repository.prepareCatalogPresentation(loaded.profileId, loaded.catalog)
@@ -1558,6 +1692,9 @@ private const val STARTUP_SECONDARY_LOADS_PLAYER_DELAY_MS = 8_000L
 private const val SECONDARY_LOADS_GAP_MS = 600L
 
 private const val CATALOG_BACKGROUND_REFRESH_DELAY_MS = 20_000L
+
+/** La notification « Catalogue à jour » reste affichée ce temps avant de disparaître. */
+private const val CATALOG_DONE_NOTICE_MS = 2_500L
 
 class StreamiaViewModelFactory(private val repository: XtreamRepository) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")

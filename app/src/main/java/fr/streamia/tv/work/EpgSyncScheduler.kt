@@ -16,8 +16,8 @@ import java.util.concurrent.TimeUnit
  * exécutions ne font qu'une vérification bon marché qui ne télécharge rien.
  */
 object EpgSyncScheduler {
-    private const val WORK_NAME = "epg-background-sync"
-    private const val INTERVAL_HOURS = 1L
+    const val WORK_NAME = "epg-background-sync"
+    const val INTERVAL_HOURS = 1L
     private const val BACKOFF_DELAY_MINUTES = 15L
 
     /**

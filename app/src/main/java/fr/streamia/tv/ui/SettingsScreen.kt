@@ -120,6 +120,8 @@ fun SettingsScreen(
     hasAiKey: (AiProvider) -> Boolean = { false },
     onSaveAiKey: (AiProvider, String) -> Unit = { _, _ -> },
     onLoadAiModels: suspend (AiProvider) -> Result<List<String>> = { Result.success(emptyList()) },
+    onLoadLoadings: suspend () -> List<fr.streamia.tv.data.LoadingRow> = { emptyList() },
+    onLoadingAction: (String) -> Unit = {},
     onBack: () -> Unit,
 ) {
     BackHandler(onBack = onBack)
@@ -146,6 +148,7 @@ fun SettingsScreen(
     var category by remember { mutableStateOf(0) }
     val categories = remember {
         listOf(
+            StreamiaIconGlyph.Refresh to "Chargements",
             StreamiaIconGlyph.Swap to "Compte & accueil",
             StreamiaIconGlyph.Live to "Lecture",
             StreamiaIconGlyph.Reorder to "Catalogue & sous-titres",
@@ -153,6 +156,24 @@ fun SettingsScreen(
             StreamiaIconGlyph.Settings to "Données & application",
             StreamiaIconGlyph.Guide to "Assistant IA",
         )
+    }
+    fun categoryHint(index: Int): String = when (index) {
+        0 -> "Caches et mises à jour planifiées"
+        1 -> playlistName?.takeIf(String::isNotBlank) ?: "Liste active, ville, accueil"
+        2 -> "Aperçu, flux, image"
+        3 -> "Tris, guide, sous-titres"
+        4 -> "Recherche, guide, organiser"
+        5 -> "Historique, mises à jour, sauvegarde"
+        else -> if (settings.aiEnabled) "Activé · " + settings.aiProvider.label else "Désactivé"
+    }
+    fun categoryLead(index: Int): String = when (index) {
+        0 -> "Tout ce que l'appli charge, la fraîcheur de chaque cache et les prochaines mises à jour."
+        1 -> "Ta liste, la météo de l'accueil et ce qui s'y affiche."
+        2 -> "Aperçu des chaînes, flux vidéo et affichage."
+        3 -> "Ordre des contenus, décalage du guide et sous-titres."
+        4 -> "Raccourcis vers les écrans de l'appli."
+        5 -> "Historique, sauvegarde et version de l'appli."
+        else -> "Traductions, recommandations et résumés par un modèle externe."
     }
     var citySearchOpen by remember { mutableStateOf(false) }
     var aiKeyDialog by remember { mutableStateOf(false) }
@@ -252,7 +273,7 @@ fun SettingsScreen(
         Spacer(Modifier.height(14.dp))
 
         Row(Modifier.weight(1f).fillMaxWidth()) {
-            GlassSurface(Modifier.width(270.dp).fillMaxHeight(), shape = RoundedCornerShape(RadiusPanel)) {
+            GlassSurface(Modifier.width(330.dp).fillMaxHeight(), shape = RoundedCornerShape(RadiusPanel)) {
               Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 categories.forEachIndexed { index, (glyph, label) ->
                     FocusableSurface(
@@ -261,12 +282,15 @@ fun SettingsScreen(
                         onFocused = { if (!restoringFocus) category = index },
                         focusScale = 1.02f,
                         idleBackground = Color.Transparent,
-                        modifier = (if (index == 0) Modifier.focusRequester(firstFocus) else Modifier).fillMaxWidth().height(56.dp),
+                        modifier = (if (index == 0) Modifier.focusRequester(firstFocus) else Modifier).fillMaxWidth().height(72.dp),
                     ) {
                         Row(Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                            StreamiaIcon(glyph, size = 22.dp)
-                            Spacer(Modifier.width(12.dp))
-                            Text(label, color = Ink, fontSize = 16.sp, fontWeight = HeadingWeight, maxLines = 1)
+                            StreamiaIcon(glyph, size = 24.dp)
+                            Spacer(Modifier.width(14.dp))
+                            Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                                Text(label, color = Ink, fontSize = 17.sp, fontWeight = HeadingWeight, maxLines = 1)
+                                Text(categoryHint(index), color = MutedInk, fontSize = 12.sp, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                            }
                         }
                     }
                 }
@@ -282,10 +306,14 @@ fun SettingsScreen(
                 Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(22.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-            Text(categories[category].second, color = Ink, fontSize = 22.sp, fontWeight = HeadingWeight)
-            Spacer(Modifier.height(4.dp))
+            Text(categories[category].second, color = Ink, fontSize = 28.sp, fontWeight = HeadingWeight)
+            Text(categoryLead(category), color = MutedInk, fontSize = 14.sp)
+            Spacer(Modifier.height(6.dp))
             if (category == 0) {
-                Row(Modifier.fillMaxWidth().height(88.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                SettingsLoadingsPage(catalogBusy = busy, onLoad = onLoadLoadings, onAction = onLoadingAction)
+            }
+            if (category == 1) {
+                SettingsGroup {
                     SettingsTile(
                         StreamiaIconGlyph.Swap,
                         playlistName?.takeIf(String::isNotBlank) ?: "Liste active",
@@ -327,9 +355,8 @@ fun SettingsScreen(
                         },
                         Modifier.weight(1f),
                     )
-                    Spacer(Modifier.weight(1f))
                 }
-                Row(Modifier.fillMaxWidth().height(88.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                SettingsGroup {
                     val enabledBlocks = homeBlockRows.count { (block, _) -> block !in settings.disabledHomeBlocks }
                     SettingsTile(
                         glyph = StreamiaIconGlyph.CheckboxOn,
@@ -342,12 +369,10 @@ fun SettingsScreen(
                         onClick = { homeBlocksModalOpen = true },
                         modifier = Modifier.weight(1f),
                     )
-                    Spacer(Modifier.weight(1f))
-                    Spacer(Modifier.weight(1f))
-                    Spacer(Modifier.weight(1f))
                 }
                 // « Changer de liste » : une seule tuile, celle de la liste active (section « Liste & accueil »).
-                Row(Modifier.fillMaxWidth().height(88.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                SettingsSectionTitle("Sécurité")
+                SettingsGroup {
                     SettingsTile(
                         StreamiaIconGlyph.Lock,
                         "Contrôle parental",
@@ -356,32 +381,18 @@ fun SettingsScreen(
                         Modifier.weight(1f),
                         selected = settings.parentalControlEnabled,
                     )
-                    Spacer(Modifier.weight(1f))
-                    Spacer(Modifier.weight(1f))
-                    Spacer(Modifier.weight(1f))
                 }
             }
-            if (category == 1) {
-                Row(Modifier.fillMaxWidth().height(88.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            if (category == 2) {
+                SettingsSectionTitle("Aperçu et image")
+                SettingsGroup {
                     SettingsTile(
-                        glyph = StreamiaIconGlyph.Live,
+                        glyph = StreamiaIconGlyph.Settings,
                         title = "Aperçu TV en direct",
                         subtitle = if (settings.livePreviewEnabled) "Activé" else "Désactivé",
-                        onClick = {
-                            openChoices(
-                                "Aperçu TV en direct",
-                                "Choisissez si un aperçu doit démarrer lorsque vous parcourez les chaînes.",
-                                listOf(
-                                    "Activé" to settings.livePreviewEnabled,
-                                    "Désactivé" to !settings.livePreviewEnabled,
-                                ),
-                            ) { index ->
-                                val targetEnabled = index == 0
-                                if (targetEnabled != settings.livePreviewEnabled) onToggleLivePreview()
-                            }
-                        },
-                        modifier = Modifier.weight(1f),
-                        selected = settings.livePreviewEnabled,
+                        onClick = onToggleLivePreview,
+                        modifier = Modifier,
+                        toggle = settings.livePreviewEnabled,
                     )
                     SettingsTile(
                         glyph = StreamiaIconGlyph.Refresh,
@@ -428,7 +439,8 @@ fun SettingsScreen(
                     )
                 }
 
-                Row(Modifier.fillMaxWidth().height(88.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                SettingsSectionTitle("Flux et affichage")
+                SettingsGroup {
                     SettingsTile(
                         glyph = StreamiaIconGlyph.Live,
                         title = "Format du flux Live",
@@ -476,43 +488,25 @@ fun SettingsScreen(
                         glyph = StreamiaIconGlyph.Settings,
                         title = "Mode tunnel (4K HDR)",
                         subtitle = if (settings.tunnelingEnabled) "Activé" else "Désactivé",
-                        onClick = {
-                            openChoices(
-                                "Mode tunnel",
-                                "Le boîtier synchronise lui-même image et son : lecture 4K HDR plus fluide sur les TV compatibles. " +
-                                    "Désactivez-le en cas d'écran noir ou de son décalé. S'applique à la prochaine lecture.",
-                                listOf("Activé" to settings.tunnelingEnabled, "Désactivé" to !settings.tunnelingEnabled),
-                            ) { index -> if ((index == 0) != settings.tunnelingEnabled) onToggleTunneling() }
-                        },
-                        modifier = Modifier.weight(1f),
-                        selected = settings.tunnelingEnabled,
+                        onClick = onToggleTunneling,
+                        modifier = Modifier,
+                        toggle = settings.tunnelingEnabled,
                     )
                 }
-                Row(Modifier.fillMaxWidth().height(88.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                SettingsGroup {
                     SettingsTile(
-                        glyph = StreamiaIconGlyph.Swap,
+                        glyph = StreamiaIconGlyph.Settings,
                         title = "Secours automatique",
                         subtitle = if (settings.liveVersionFailover) "Activé" else "Désactivé",
-                        onClick = {
-                            openChoices(
-                                "Secours automatique",
-                                "En direct, passe sur une autre version de la chaîne (HD, FHD…) si l'image est coupée " +
-                                    "6 secondes, ou après 3 coupures d'au moins 5 secondes en 5 minutes. " +
-                                    "Sans effet sur les chaînes qui n'ont qu'une version.",
-                                listOf("Activé" to settings.liveVersionFailover, "Désactivé" to !settings.liveVersionFailover),
-                            ) { index -> if ((index == 0) != settings.liveVersionFailover) onToggleLiveVersionFailover() }
-                        },
-                        modifier = Modifier.weight(1f),
-                        selected = settings.liveVersionFailover,
+                        onClick = onToggleLiveVersionFailover,
+                        modifier = Modifier,
+                        toggle = settings.liveVersionFailover,
                     )
-                    Spacer(Modifier.weight(1f))
-                    Spacer(Modifier.weight(1f))
-                    Spacer(Modifier.weight(1f))
                 }
             }
-            if (category == 2) {
+            if (category == 3) {
                 SettingsSectionTitle("Catalogue")
-                Row(Modifier.fillMaxWidth().height(88.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                SettingsGroup {
                     SettingsTile(
                         glyph = StreamiaIconGlyph.Reorder,
                         title = "Tri des chaînes",
@@ -556,29 +550,17 @@ fun SettingsScreen(
                         modifier = Modifier.weight(1f),
                     )
                     SettingsTile(
-                        glyph = StreamiaIconGlyph.Series,
+                        glyph = StreamiaIconGlyph.Settings,
                         title = "Épisode suivant auto.",
                         subtitle = if (settings.autoPlayNextEpisode) "Activé" else "Désactivé",
-                        onClick = {
-                            openChoices(
-                                "Épisode suivant automatique",
-                                "Lance automatiquement l'épisode suivant lorsqu'il est disponible.",
-                                listOf(
-                                    "Activé" to settings.autoPlayNextEpisode,
-                                    "Désactivé" to !settings.autoPlayNextEpisode,
-                                ),
-                            ) { index ->
-                                val targetEnabled = index == 0
-                                if (targetEnabled != settings.autoPlayNextEpisode) onToggleAutoPlayNextEpisode()
-                            }
-                        },
-                        modifier = Modifier.weight(1f),
-                        selected = settings.autoPlayNextEpisode,
+                        onClick = onToggleAutoPlayNextEpisode,
+                        modifier = Modifier,
+                        toggle = settings.autoPlayNextEpisode,
                     )
                 }
 
                 SettingsSectionTitle("Sous-titres")
-                Row(Modifier.fillMaxWidth().height(88.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                SettingsGroup {
                     SettingsTile(
                         glyph = StreamiaIconGlyph.Reorder,
                         title = "Taille des sous-titres",
@@ -597,28 +579,14 @@ fun SettingsScreen(
                         glyph = StreamiaIconGlyph.Settings,
                         title = "Fond des sous-titres",
                         subtitle = if (settings.subtitleBackgroundEnabled) "Activé" else "Désactivé",
-                        onClick = {
-                            openChoices(
-                                "Fond des sous-titres",
-                                "Le fond améliore la lisibilité sur les scènes claires.",
-                                listOf(
-                                    "Activé" to settings.subtitleBackgroundEnabled,
-                                    "Désactivé" to !settings.subtitleBackgroundEnabled,
-                                ),
-                            ) { index ->
-                                val targetEnabled = index == 0
-                                if (targetEnabled != settings.subtitleBackgroundEnabled) onToggleSubtitleBackground()
-                            }
-                        },
-                        modifier = Modifier.weight(1f),
-                        selected = settings.subtitleBackgroundEnabled,
+                        onClick = onToggleSubtitleBackground,
+                        modifier = Modifier,
+                        toggle = settings.subtitleBackgroundEnabled,
                     )
-                    Spacer(Modifier.weight(1f))
-                    Spacer(Modifier.weight(1f))
                 }
             }
-            if (category == 3) {
-                Row(Modifier.fillMaxWidth().height(88.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            if (category == 4) {
+                SettingsGroup {
                     SettingsTile(StreamiaIconGlyph.Search, "Recherche", "Chaînes, films et séries", onSearch, Modifier.weight(1f))
                     SettingsTile(StreamiaIconGlyph.Guide, "Guide TV", "EPG et grille des chaînes", onEpg, Modifier.weight(1f))
                     SettingsTile(StreamiaIconGlyph.Reorder, "Organiser", "Catégories et contenus", onOrganizer, Modifier.weight(1f))
@@ -632,8 +600,9 @@ fun SettingsScreen(
                     )
                 }
             }
-            if (category == 4) {
-                Row(Modifier.fillMaxWidth().height(88.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            if (category == 5) {
+                SettingsSectionTitle("Historique")
+                SettingsGroup {
                     val allHistoryCount = liveHistoryCount + movieHistoryCount + seriesHistoryCount
                     SettingsTile(
                         StreamiaIconGlyph.Delete,
@@ -693,7 +662,8 @@ fun SettingsScreen(
                     )
                 }
 
-                Row(Modifier.fillMaxWidth().height(88.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                SettingsSectionTitle("Application")
+                SettingsGroup {
                     SettingsTile(
                         StreamiaIconGlyph.Refresh,
                         "Mises à jour",
@@ -732,21 +702,15 @@ fun SettingsScreen(
                     )
                 }
             }
-            if (category == 5) {
-                Row(Modifier.fillMaxWidth().height(88.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            if (category == 6) {
+                SettingsGroup {
                     SettingsTile(
-                        StreamiaIconGlyph.Guide,
-                        "Assistant IA",
-                        if (settings.aiEnabled) "Activé" else "Désactivé",
-                        {
-                            openChoices(
-                                "Assistant IA",
-                                "Désactivé : toutes les fonctions IA (traduction, similaires) sont coupées sur tous les écrans, et rien n'est envoyé au fournisseur.",
-                                listOf("Activé" to settings.aiEnabled, "Désactivé" to !settings.aiEnabled),
-                            ) { if ((it == 0) != settings.aiEnabled) onToggleAi() }
-                        },
-                        Modifier.weight(1f),
-                        selected = settings.aiEnabled,
+                        glyph = StreamiaIconGlyph.Guide,
+                        title = "Assistant IA",
+                        subtitle = if (settings.aiEnabled) "Activé" else "Désactivé",
+                        onClick = onToggleAi,
+                        modifier = Modifier,
+                        toggle = settings.aiEnabled,
                     )
                     SettingsTile(
                         StreamiaIconGlyph.Swap,
@@ -789,7 +753,7 @@ fun SettingsScreen(
                     )
                     Text(settings.aiProvider.label, color = MutedInk, fontSize = 13.sp)
                 }
-                Row(Modifier.fillMaxWidth().height(88.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                SettingsGroup {
                     SettingsTile(
                         StreamiaIconGlyph.Guide,
                         "Langue des descriptions",
@@ -811,28 +775,26 @@ fun SettingsScreen(
                         { aiUsageDialog = true },
                         Modifier.weight(1f),
                     )
-                    Spacer(Modifier.weight(2f))
                 }
-                Row(Modifier.fillMaxWidth().height(88.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                SettingsGroup {
                     SettingsTile(
-                        StreamiaIconGlyph.Guide,
-                        "Sous-titres bilingues",
-                        if (settings.aiBilingualSubtitles) "Original sous la traduction" else "Traduction seule",
-                        onToggleAiBilingual,
-                        Modifier.weight(1f),
+                        glyph = StreamiaIconGlyph.Guide,
+                        title = "Sous-titres bilingues",
+                        subtitle = if (settings.aiBilingualSubtitles) "Activé" else "Désactivé",
+                        onClick = onToggleAiBilingual,
+                        modifier = Modifier,
                         enabled = settings.aiEnabled,
-                        selected = settings.aiBilingualSubtitles,
+                        toggle = settings.aiBilingualSubtitles,
                     )
                     SettingsTile(
-                        StreamiaIconGlyph.Refresh,
-                        "Pré-calcul de nuit",
-                        if (settings.aiNightly) "Activé · traductions et collections" else "Désactivé",
-                        onToggleAiNightly,
-                        Modifier.weight(1f),
+                        glyph = StreamiaIconGlyph.Guide,
+                        title = "Pré-calcul de nuit",
+                        subtitle = if (settings.aiNightly) "Activé" else "Désactivé",
+                        onClick = onToggleAiNightly,
+                        modifier = Modifier,
                         enabled = settings.aiEnabled,
-                        selected = settings.aiNightly,
+                        toggle = settings.aiNightly,
                     )
-                    Spacer(Modifier.weight(2f))
                 }
                 if (settings.aiEnabled && !aiKeySet) {
                     Text("Ajoutez la clé d'API de ${settings.aiProvider.label} pour pouvoir lister ses modèles.", color = MutedInk, fontSize = 13.sp)

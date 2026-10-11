@@ -41,6 +41,13 @@ enum class UpdateInstallStart { Started, PermissionRequested, PermissionStillMis
 /** Rangée JustWatch lue sur disque ; [fresh] faux quand elle doit être recalculée. */
 data class CachedJustWatchRow(val entries: List<MediaEntry>, val fresh: Boolean)
 
+/** « 128 Mo » : taille lisible pour la page Chargements. */
+internal fun formatByteSize(bytes: Long): String = when {
+    bytes >= 1_048_576L -> "%.0f Mo".format(java.util.Locale.FRENCH, bytes / 1_048_576.0)
+    bytes >= 1_024L -> "%.0f Ko".format(java.util.Locale.FRENCH, bytes / 1_024.0)
+    else -> "$bytes o"
+}
+
 class XtreamRepository private constructor(context: Context) {
     private val appContext = context.applicationContext
     private val client = XtreamClient()
@@ -87,6 +94,99 @@ class XtreamRepository private constructor(context: Context) {
     fun updateAppSettings(transform: (AppSettings) -> AppSettings): AppSettings =
         appSettingsStore.update(transform).also { syncAi(it) }
     fun customizedCatalog(profileId: String, catalog: Catalog): Catalog = libraryStore.applyToCatalog(profileId, catalog)
+
+    /**
+     * Tout ce que l'appli charge, avec la fraîcheur de chaque cache et la prochaine échéance connue :
+     * alimente Paramètres › Chargements. Lecture seule, sans réseau.
+     */
+    suspend fun loadingsOverview(profileId: String?): List<LoadingRow> = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
+        val settings = appSettingsStore.load()
+        val profile = profileId?.let(playlistStore::find)
+        val rows = mutableListOf<LoadingRow>()
+        val hour = 3_600_000L
+
+        // Catalogue : relu au plus une fois par jour pour un compte Xtream.
+        if (profile != null) {
+            val last = profile.lastRefreshAt.takeIf { it > 0L }
+            val every = maxOf(profile.autoRefreshHours.coerceIn(1, 168), if (profile.kind == PlaylistKind.Xtream) 24 else 1)
+            val due = profile.isCatalogRefreshDue(now)
+            rows += LoadingRow(
+                id = "catalog", group = LoadingGroup.Catalog, name = "Catalogue",
+                subtitle = if (last == null) "Chargement incomplet ou jamais terminé" else "Direct · Films · Séries",
+                frequency = "$every h minimum", lastAtMillis = last, nextAtMillis = last?.plus(every * hour),
+                state = if (due) LoadingState.Stale else LoadingState.Fresh, action = LoadingAction.Refresh,
+            )
+            val epg = epgCache.metadata(profile.id)
+            val epgMaxAge = profile.autoRefreshHours.coerceIn(1, 168) * hour
+            rows += LoadingRow(
+                id = "epg", group = LoadingGroup.Epg, name = "Guide TV (XMLTV)",
+                subtitle = "Retéléchargé seulement s'il est périmé", frequency = "${profile.autoRefreshHours.coerceIn(1, 168)} h",
+                lastAtMillis = epg?.syncedAtMillis, nextAtMillis = epg?.syncedAtMillis?.plus(epgMaxAge),
+                state = if (epg?.isFreshAt(now, epgMaxAge) == true) LoadingState.Fresh else LoadingState.Stale,
+                action = LoadingAction.Refresh,
+            )
+        }
+
+        // Guides tiers : un cache disque par source.
+        val stamps = guides.cacheTimestamps()
+        fun guide(id: String, name: String, sub: String, every: Long, label: String, last: Long?) {
+            val fresh = last != null && now - last < every
+            rows += LoadingRow(
+                id = id, group = LoadingGroup.Guides, name = name, subtitle = sub, frequency = label,
+                lastAtMillis = last, nextAtMillis = last?.plus(every),
+                state = if (fresh) LoadingState.Fresh else LoadingState.Stale, action = LoadingAction.Refresh,
+            )
+        }
+        guide("tvnow", "Programme TV FR en direct", "Lecture web, cache court", HomeGuidesRepository.TV_PROGRAMME_NOW_CACHE_MAX_AGE_MS, "30 min", stamps.tvNow)
+        guide("tvtonight", "Programme TV FR « ce soir »", "Cache de 2 h", HomeGuidesRepository.TV_PROGRAMME_CACHE_MAX_AGE_MS, "2 h", stamps.tvTonight)
+        guide("bein", "beIN SPORTS", "Grille sur 24 h", HomeGuidesRepository.BEIN_SPORTS_GUIDE_CACHE_MAX_AGE_MS, "30 min", stamps.bein)
+        guide("uk", "Guide UK", "Une quinzaine de petites requêtes", HomeGuidesRepository.UK_GUIDE_CACHE_MAX_AGE_MS, "30 min", stamps.uk)
+        guide("matches", "Matchs du jour", "Rapprochés avec tes chaînes", HomeGuidesRepository.LIVE_ONSAT_CACHE_MAX_AGE_MS, "2 h", stamps.liveOnSat)
+
+        // Blocs rafraîchis tant qu'on reste sur l'accueil : pas de date de dernier passage gardée.
+        fun block(id: String, name: String, sub: String, freq: String, enabled: Boolean) {
+            rows += LoadingRow(
+                id = id, group = LoadingGroup.HomeBlocks, name = name, subtitle = sub, frequency = freq,
+                state = if (enabled) LoadingState.Active else LoadingState.Disabled,
+            )
+        }
+        block("weather", "Météo et heures de prière", "Position par adresse IP", "30 min", true)
+        block("scores", "Scores de football", "Plus fréquent pendant un match", "1 min en match · 15 min sinon", HomeBlock.FootballScores !in settings.disabledHomeBlocks)
+        block("justwatch", "Tendances JustWatch", "6 sections", "6 h", HomeBlock.entries.filter { it.name.startsWith("JustWatch") }.any { it !in settings.disabledHomeBlocks })
+        block("brief", "Résumé de l'assistant IA", "Activer l'assistant dans Paramètres", "5 min", settings.aiEnabled)
+
+        // Tâches planifiées (WorkManager) : prochain passage approximatif, Android peut le décaler.
+        fun worker(id: String, name: String, sub: String, freq: String, uniqueName: String, enabled: Boolean) {
+            val info = runCatching {
+                androidx.work.WorkManager.getInstance(appContext).getWorkInfosForUniqueWork(uniqueName).get().firstOrNull()
+            }.getOrNull()
+            val state = when {
+                !enabled || info == null -> LoadingState.Disabled
+                info.state == androidx.work.WorkInfo.State.RUNNING -> LoadingState.Running
+                else -> LoadingState.Scheduled
+            }
+            val next = info?.takeIf { enabled }?.nextScheduleTimeMillis?.takeIf { it != Long.MAX_VALUE }
+            rows += LoadingRow(
+                id = id, group = LoadingGroup.Scheduled, name = name, subtitle = sub, frequency = freq,
+                nextAtMillis = next, state = state,
+            )
+        }
+        worker("w-epg", "Mise à jour du guide", "Très légère si le guide est frais", "toutes les heures", fr.streamia.tv.work.EpgSyncScheduler.WORK_NAME, true)
+        worker("w-meta", "Enrichissement des fiches", "TMDB, Wikidata · attend la fin des lectures", "24 h", fr.streamia.tv.work.MetadataEnrichmentWorker.WORK_NAME, true)
+        worker("w-ai", "Calcul IA", "Si activé · batterie non faible", "24 h", fr.streamia.tv.work.AiNightlyWorker.WORK_NAME, settings.aiEnabled && settings.aiNightly)
+
+        // Caches sur l'appareil.
+        rows += LoadingRow(
+            id = "db-catalog", group = LoadingGroup.Caches, name = "Base du catalogue", subtitle = "Chaînes, films, séries",
+            frequency = "avec le catalogue", detail = formatByteSize(cache.databaseFileSizeBytes()), state = LoadingState.OnDisk,
+        )
+        rows += LoadingRow(
+            id = "db-epg", group = LoadingGroup.Caches, name = "Base du guide TV", subtitle = "Programmes téléchargés",
+            frequency = "avec le guide", detail = formatByteSize(epgCache.databaseFileSizeBytes()), state = LoadingState.OnDisk,
+        )
+        rows
+    }
 
     suspend fun cacheSizeBytes(): Long = withContext(Dispatchers.IO) { cache.databaseFileSizeBytes() }
     suspend fun epgCacheSizeBytes(): Long = withContext(Dispatchers.IO) { epgCache.databaseFileSizeBytes() }
@@ -483,6 +583,112 @@ class XtreamRepository private constructor(context: Context) {
         libraryStore.moveEntries(profileId, entryKeys, targetCategoryId)
     fun resetEntryMoves(profileId: String, entryKeys: Set<String>) = libraryStore.resetEntryMoves(profileId, entryKeys)
 
+    /**
+     * Première étape d'une connexion Xtream, sans catalogue : vérifie que le compte est « Active »
+     * puis enregistre la liste (profil + identifiants). Rapide : l'accueil s'ouvre ensuite et le
+     * catalogue se charge en arrière-plan via [loadXtreamCatalog]. `lastRefreshAt = 0` tant que le
+     * catalogue n'est pas écrit, pour qu'une relance interrompue le recharge.
+     */
+    suspend fun registerXtreamAccount(
+        credentials: ServerCredentials,
+        profileId: String? = null,
+        profileName: String? = null,
+    ): String {
+        XtreamUrlBuilder(credentials)
+        val account = client.testConnection(credentials)
+        if (!account.status.equals("Active", ignoreCase = true)) {
+            throw XtreamException("Ce compte n'est pas actif (${account.status}).")
+        }
+        val id = profileId ?: UUID.randomUUID().toString()
+        val previous = profileId?.let(playlistStore::find)
+        playlistStore.upsert(
+            PlaylistProfile(
+                id = id,
+                name = profileName.cleanName(defaultValue = credentials.serverUrl),
+                kind = PlaylistKind.Xtream,
+                serverUrl = credentials.serverUrl,
+                username = credentials.username,
+                password = credentials.password,
+                xmlTvUrl = previous?.xmlTvUrl,
+                autoRefreshHours = previous?.autoRefreshHours ?: 6,
+                lastRefreshAt = 0L,
+            ),
+        )
+        credentialsStore.save(credentials)
+        return id
+    }
+
+    /**
+     * Charge tout le catalogue d'une liste Xtream enregistrée (Direct, Films, Séries, secours M3U,
+     * validation) en signalant l'avancement à [listener]. Contrairement à [openProfile], n'a pas de
+     * repli sur le cache : l'appelant affiche déjà l'accueil et gère l'échec.
+     *
+     * [staged] : une transaction par section, chacune visible dès son commit ([onSectionLoaded]
+     * reçoit alors le catalogue allégé relu). À réserver au premier chargement : un échec laisse les
+     * sections déjà validées, alors que le mode normal garde l'ancien catalogue tout entier.
+     */
+    suspend fun loadXtreamCatalog(
+        profileId: String,
+        credentials: ServerCredentials,
+        listener: CatalogProgressListener,
+        staged: Boolean = false,
+        onSectionLoaded: (MediaType, Catalog) -> Unit = { _, _ -> },
+    ): LoadedCatalog {
+        val catalog = if (staged) {
+            fetchAndStoreXtreamCatalogStaged(profileId, credentials, listener, onSectionLoaded)
+        } else {
+            fetchAndStoreXtreamCatalog(profileId, credentials, listener = listener)
+        }
+        playlistStore.markRefreshed(profileId)
+        return LoadedCatalog(catalog, credentials, CatalogSource.Network, profileId)
+    }
+
+    /** Comme [fetchAndStoreXtreamCatalog], mais section par section (voir [StagedCatalogWriter]). */
+    private suspend fun fetchAndStoreXtreamCatalogStaged(
+        profileId: String,
+        credentials: ServerCredentials,
+        listener: CatalogProgressListener,
+        onSectionLoaded: (MediaType, Catalog) -> Unit,
+    ): Catalog = withContext(Dispatchers.IO) {
+        val job = coroutineContext.job
+        var session: CatalogDatabase.ReplaceSession? = null
+        val writer = object : StagedCatalogWriter {
+            override fun begin(type: MediaType): CatalogWriteSink {
+                // Seuls les films (la plus grosse section) justifient de retirer puis refaire les index.
+                val opened = cache.beginSectionReplaceOnIo(profileId, type, dropIndexes = type == MediaType.Movie)
+                session = opened
+                return opened.cancellableBy(job)
+            }
+
+            override fun commit(account: AccountInfo) {
+                val opened = session ?: return
+                session = null
+                cache.commitReplaceOnIo(opened, account)
+            }
+
+            override fun abort() {
+                val opened = session ?: return
+                session = null
+                cache.abortReplaceOnIo(opened)
+            }
+        }
+        val result = try {
+            client.loadCatalogOnIo(credentials, null, listener, writer) { type ->
+                cache.loadOnIo(profileId)?.let { onSectionLoaded(type, it) }
+            }.also { job.ensureActive() }
+        } catch (error: Throwable) {
+            writer.abort()
+            throw error
+        }
+        if (result.counts.values.none { it > 0 }) {
+            throw XtreamException("Le fournisseur a renvoyé un catalogue vide.")
+        }
+        listener.onStep(CatalogStep.Finalize, CatalogStepStatus.Running, 0)
+        val loaded = cache.loadOnIo(profileId) ?: throw XtreamException("Le catalogue vient d'être enregistré mais ne peut pas être relu.")
+        listener.onStep(CatalogStep.Finalize, CatalogStepStatus.Done, 0)
+        loaded
+    }
+
     suspend fun logout() { credentialsStore.clear() }
 
     private suspend fun openXtreamProfile(profile: PlaylistProfile): LoadedCatalog {
@@ -526,12 +732,13 @@ class XtreamRepository private constructor(context: Context) {
         profileId: String,
         credentials: ServerCredentials,
         dispatcher: CoroutineDispatcher = Dispatchers.IO,
+        listener: CatalogProgressListener? = null,
     ): Catalog =
         withContext(dispatcher) {
             val job = coroutineContext.job
             val session = cache.beginReplaceOnIo(profileId)
             val result = try {
-                client.loadCatalogOnIo(credentials, session.cancellableBy(job)).also {
+                client.loadCatalogOnIo(credentials, session.cancellableBy(job), listener).also {
                     // Les sections Films/Séries avalent leurs erreurs (runCatching) : une annulation
                     // survenue pendant leur lecture doit tout de même empêcher de valider un
                     // catalogue partiel.
@@ -545,8 +752,11 @@ class XtreamRepository private constructor(context: Context) {
                 cache.abortReplaceOnIo(session)
                 throw XtreamException("Le fournisseur a renvoyé un catalogue vide. Le cache existant est conservé.")
             }
+            listener?.onStep(CatalogStep.Finalize, CatalogStepStatus.Running, 0)
             cache.commitReplaceOnIo(session, result.account)
-            cache.load(profileId) ?: throw XtreamException("Le catalogue vient d'être enregistré mais ne peut pas être relu.")
+            val loaded = cache.load(profileId) ?: throw XtreamException("Le catalogue vient d'être enregistré mais ne peut pas être relu.")
+            listener?.onStep(CatalogStep.Finalize, CatalogStepStatus.Done, 0)
+            loaded
         }
 
     private suspend fun openM3uProfile(profile: PlaylistProfile): LoadedCatalog {

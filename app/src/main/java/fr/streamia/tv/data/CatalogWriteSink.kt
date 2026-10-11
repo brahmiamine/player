@@ -15,3 +15,19 @@ interface CatalogWriteSink {
     fun writeCategories(categories: List<MediaCategory>)
     fun writeEntries(entries: List<MediaEntry>)
 }
+
+/**
+ * Écriture d'un catalogue section par section (Direct, puis Films, puis Séries) : chaque section a
+ * sa propre transaction, validée dès qu'elle est complète pour que l'accueil puisse l'afficher
+ * avant la suite. Une section sans entrée est annulée, rien n'est écrit.
+ */
+internal interface StagedCatalogWriter {
+    /** Ouvre la transaction de [type] ; les catégories puis les entrées s'écrivent dans le sink renvoyé. */
+    fun begin(type: fr.streamia.tv.domain.MediaType): CatalogWriteSink
+
+    /** Valide la section ouverte : elle devient visible. [account] est réécrit avec le profil. */
+    fun commit(account: fr.streamia.tv.domain.AccountInfo)
+
+    /** Annule la section ouverte, s'il y en a une. */
+    fun abort()
+}

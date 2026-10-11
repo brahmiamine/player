@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -23,6 +24,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.font.FontWeight
@@ -35,10 +38,12 @@ import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.ukguide.ResolvedUkProgrammeItem
 import fr.streamia.tv.tvprogramme.ResolvedTvProgrammeItem
 import fr.streamia.tv.tvprogramme.ResolvedTvProgrammeNowItem
+import fr.streamia.tv.ui.theme.AccentPinkText
 import fr.streamia.tv.ui.theme.FocusBlueBright
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
 import fr.streamia.tv.ui.theme.Night
+import fr.streamia.tv.ui.theme.RadiusPill
 import java.time.LocalTime
 import java.time.ZoneId
 
@@ -64,6 +69,7 @@ internal fun TvProgrammeNowRow(
         imageUrl = item.programme.imageUrl,
         badge = ProgrammeBadge.Live,
         progress = item.programme.progressAt(nowEpochMillis()),
+        remaining = "reste " + formatRemaining(item.programme.endEpochMillis - nowEpochMillis()),
         channel = item.channel,
         onClick = { onOpenProgramme(item) },
         modifier = modifier,
@@ -105,6 +111,8 @@ internal fun BeinSportsProgrammeRow(
         category = item.programme.category,
         badge = if (showLive) ProgrammeBadge.Live else ProgrammeBadge.Next,
         progress = if (showLive) item.programme.progressAt(nowEpochMillis()) else null,
+        remaining = if (showLive) "reste " + formatRemaining(item.programme.endEpochMillis - nowEpochMillis())
+        else "dans " + formatRemaining(item.programme.startEpochMillis - nowEpochMillis()),
         channel = item.channel,
         onClick = { onOpenProgramme(item) },
         modifier = modifier,
@@ -165,7 +173,20 @@ private fun <T> ProgrammeRow(
 
 private enum class ProgrammeBadge { None, Live, Next }
 
-/** Carte commune aux programmes (en direct, ce soir, beIN, UK). */
+/** « 1 h 30 » ou « 25 min » (arrondi à la minute supérieure). */
+private fun formatRemaining(millis: Long): String {
+    val minutes = ((millis.coerceAtLeast(0L) + 59_999L) / 60_000L).toInt()
+    return if (minutes >= 60) "${minutes / 60} h ${"%02d".format(minutes % 60)}" else "$minutes min"
+}
+
+/** Nom de chaîne lisible : sans préfixe de playlist (« SS: ») ni ballon à la place du O. */
+private fun cleanChannelName(name: String): String =
+    name.replace("\u26BD", "O").replace(Regex("^[A-Za-z]{1,4}:\\s*"), "").trim()
+
+/**
+ * Carte commune aux programmes (en direct, ce soir, beIN, UK) : image pleine carte, logo en haut à
+ * gauche, titre et horaire sur un voile en bas, progression collée au bord (direct).
+ */
 @Composable
 private fun ProgrammeCard(
     title: String,
@@ -177,86 +198,72 @@ private fun ProgrammeCard(
     modifier: Modifier = Modifier,
     category: String? = null,
     progress: Float? = null,
+    remaining: String? = null,
 ) {
     FocusableSurface(
         onClick = onClick,
-        modifier = modifier.width(220.dp).height(215.dp),
+        modifier = modifier.width(220.dp).height(142.dp),
     ) {
-        Column(Modifier.fillMaxSize().padding(9.dp)) {
-            Box(Modifier.fillMaxWidth().height(92.dp)) {
-                if (!imageUrl.isNullOrBlank()) {
-                    MediaArtwork(imageUrl, title, Modifier.fillMaxSize())
-                } else {
-                    Box(
-                        Modifier
-                            .fillMaxSize()
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(MutedInk.copy(alpha = 0.10f)),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        StreamiaIcon(StreamiaIconGlyph.Live, tint = MutedInk.copy(alpha = 0.55f), size = 32.dp)
-                    }
+        Box(Modifier.fillMaxSize().padding(6.dp).clip(RoundedCornerShape(14.dp))) {
+            if (!imageUrl.isNullOrBlank()) {
+                MediaArtwork(imageUrl, title, Modifier.fillMaxSize())
+            } else {
+                Box(Modifier.fillMaxSize().background(MutedInk.copy(alpha = 0.10f)), contentAlignment = Alignment.Center) {
+                    StreamiaIcon(StreamiaIconGlyph.Live, tint = MutedInk.copy(alpha = 0.55f), size = 32.dp)
                 }
+            }
+            ChannelLogo(
+                channel.iconUrl,
+                channel.displayName,
+                Modifier
+                    .align(Alignment.TopStart)
+                    .padding(6.dp)
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Night.copy(alpha = 0.82f)),
+                imagePadding = 3,
+            )
+            if (badge == ProgrammeBadge.Live) {
+                LiveBadge(Modifier.align(Alignment.TopEnd).padding(7.dp))
+            } else {
                 Text(
-                    timeLabel,
+                    if (badge == ProgrammeBadge.Next) remaining ?: "À SUIVRE" else timeLabel,
                     color = Ink,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
+                    maxLines = 1,
                     modifier = Modifier
-                        .align(Alignment.TopStart)
+                        .align(Alignment.TopEnd)
                         .padding(7.dp)
-                        .clip(RoundedCornerShape(5.dp))
-                        .background(Night.copy(alpha = 0.9f))
-                        .padding(horizontal = 7.dp, vertical = 4.dp),
+                        .clip(RoundedCornerShape(RadiusPill))
+                        .background(Night.copy(alpha = 0.82f))
+                        .padding(horizontal = 9.dp, vertical = 3.dp),
                 )
-                when (badge) {
-                    ProgrammeBadge.Live -> LiveBadge(Modifier.align(Alignment.TopEnd).padding(7.dp))
-                    ProgrammeBadge.Next -> Text(
-                        "À SUIVRE",
-                        color = Night,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(7.dp)
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(FocusBlueBright)
-                            .padding(horizontal = 7.dp, vertical = 3.dp),
-                    )
-                    ProgrammeBadge.None -> Unit
-                }
             }
-            Spacer(Modifier.height(7.dp))
-            Text(
-                title,
-                color = Ink,
-                fontSize = 14.sp,
-                lineHeight = 17.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            category?.takeIf(String::isNotBlank)?.let {
-                Spacer(Modifier.height(3.dp))
-                Text(it, color = MutedInk, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Column(
+                Modifier
+                    .align(Alignment.BottomStart)
+                    .fillMaxWidth()
+                    .background(Brush.verticalGradient(listOf(Color.Transparent, Night.copy(alpha = 0.9f))))
+                    .padding(start = 8.dp, end = 8.dp, top = 28.dp, bottom = if (progress != null) 9.dp else 7.dp),
+            ) {
+                Text(title, color = Ink, fontSize = 14.sp, lineHeight = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Spacer(Modifier.height(2.dp))
+                Row {
+                    val meta = when (badge) {
+                        ProgrammeBadge.None -> cleanChannelName(channel.displayName)
+                        else -> timeLabel
+                    }
+                    Text(meta, color = MutedInk, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                    if (badge == ProgrammeBadge.Live && remaining != null) {
+                        Text(" · $remaining", color = AccentPinkText, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                    }
+                }
             }
             if (progress != null) {
-                Spacer(Modifier.height(7.dp))
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .height(5.dp)
-                        .clip(RoundedCornerShape(3.dp))
-                        .background(MutedInk.copy(alpha = 0.24f)),
-                ) {
-                    Box(Modifier.fillMaxWidth(progress).height(5.dp).background(FocusBlueBright))
+                Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(4.dp).background(Night.copy(alpha = 0.6f))) {
+                    Box(Modifier.fillMaxWidth(progress).height(4.dp).background(FocusBlueBright))
                 }
-            }
-            Spacer(Modifier.weight(1f))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                ChannelLogo(channel.iconUrl, channel.displayName, Modifier.width(44.dp).height(44.dp), imagePadding = 2)
-                Spacer(Modifier.width(7.dp))
-                Text(channel.displayName, color = MutedInk, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
     }
