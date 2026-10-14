@@ -37,6 +37,7 @@ import fr.streamia.tv.data.HomeBlock
 import fr.streamia.tv.ui.StreamiaIcon
 import fr.streamia.tv.ui.StreamiaIconGlyph
 import fr.streamia.tv.ui.bufferModeLabel
+import fr.streamia.tv.ui.playerNetworkLabel
 import fr.streamia.tv.ui.displayModeSwitchLabel
 import fr.streamia.tv.ui.epgOffsetLabel
 import fr.streamia.tv.ui.formatExpiry
@@ -72,6 +73,7 @@ fun MobileSettingsScreen(
     onCycleVodSeekStep: () -> Unit,
     onCycleVideoAspect: () -> Unit,
     onCycleBufferMode: () -> Unit,
+    onCyclePlayerNetwork: () -> Unit = {},
     onCycleDisplayModeSwitch: () -> Unit,
     onToggleTunneling: () -> Unit,
     onCycleLiveStreamFormat: () -> Unit,
@@ -144,6 +146,7 @@ fun MobileSettingsScreen(
                     SettingsToggle("Secours automatique", "Autre version si l'image coupe pendant 6 s", settings.liveVersionFailover, onToggleLiveVersionFailover)
                     SettingsValue("Format du flux Live", liveStreamFormatLabel(settings.liveStreamFormat), onCycleLiveStreamFormat)
                     SettingsValue("Stabilité du flux", bufferModeLabel(settings.bufferMode), onCycleBufferMode)
+                    SettingsValue("Réseau du lecteur", playerNetworkLabel(settings.playerNetwork), onCyclePlayerNetwork)
                     SettingsValue("Format d'image", videoAspectLabel(settings.videoAspect), onCycleVideoAspect)
                     SettingsValue("Pas d'avance / retour", "${settings.vodSeekStepSeconds} s", onCycleVodSeekStep)
                     SettingsValue("Changement de fréquence", displayModeSwitchLabel(settings.displayModeSwitch), onCycleDisplayModeSwitch)

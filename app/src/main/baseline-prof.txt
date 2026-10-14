@@ -1,0 +1,6 @@
+# Règles génériques : tout le code de l'app est précompilé à l'installation.
+# Le profil généré (generated/baselineProfiles) ne couvre que l'écran de connexion quand il est
+# produit sans liste ouverte sur l'appareil ; sans ces règles, le Direct, l'accueil, les films et
+# les séries tournent en interprété/JIT jusqu'à la compilation d'arrière-plan du système.
+HSPLfr/streamia/tv/**;->**(**)**
+Lfr/streamia/tv/**;

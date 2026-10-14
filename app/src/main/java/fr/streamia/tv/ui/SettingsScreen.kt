@@ -39,6 +39,7 @@ import fr.streamia.tv.data.AiProvider
 import fr.streamia.tv.data.AiUsage
 import fr.streamia.tv.data.AppSettings
 import fr.streamia.tv.data.BufferMode
+import fr.streamia.tv.data.PlayerNetworkMode
 import fr.streamia.tv.data.DisplayModeSwitch
 import fr.streamia.tv.data.HomeBlock
 import fr.streamia.tv.data.JustWatchSection
@@ -78,6 +79,7 @@ fun SettingsScreen(
     onCycleVodSeekStep: () -> Unit,
     onCycleVideoAspect: () -> Unit,
     onCycleBufferMode: () -> Unit,
+    onCyclePlayerNetwork: () -> Unit = {},
     onCycleDisplayModeSwitch: () -> Unit = {},
     onToggleTunneling: () -> Unit = {},
     onCycleLiveStreamFormat: () -> Unit,
@@ -466,6 +468,21 @@ fun SettingsScreen(
                                 "Choisissez le compromis entre réactivité et stabilité de lecture.",
                                 values.map { bufferModeLabel(it) to (it == settings.bufferMode) },
                             ) { target -> cycleTo(values, settings.bufferMode, target, onCycleBufferMode) }
+                        },
+                        modifier = Modifier.weight(1f),
+                    )
+                    SettingsTile(
+                        glyph = StreamiaIconGlyph.Refresh,
+                        title = "Réseau du lecteur",
+                        subtitle = playerNetworkLabel(settings.playerNetwork),
+                        onClick = {
+                            val values = PlayerNetworkMode.entries.toList()
+                            openChoices(
+                                "Réseau du lecteur",
+                                "Automatique utilise la pile réseau de Chrome (Cronet) quand le boîtier l'offre : connexions " +
+                                    "plus stables en 4K. Choisissez Classique si une chaîne ne démarre plus.",
+                                values.map { playerNetworkLabel(it) to (it == settings.playerNetwork) },
+                            ) { target -> cycleTo(values, settings.playerNetwork, target, onCyclePlayerNetwork) }
                         },
                         modifier = Modifier.weight(1f),
                     )

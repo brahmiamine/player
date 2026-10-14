@@ -1,6 +1,7 @@
 package fr.streamia.tv.ui
 
 import fr.streamia.tv.data.BufferMode
+import fr.streamia.tv.data.PlayerNetworkMode
 import fr.streamia.tv.data.DisplayModeSwitch
 import fr.streamia.tv.data.LiveChannelSortOrder
 import fr.streamia.tv.data.LiveStreamFormat
@@ -58,6 +59,11 @@ internal fun displayModeSwitchLabel(value: DisplayModeSwitch): String = when (va
     DisplayModeSwitch.Off -> "Désactivé"
     DisplayModeSwitch.Vod -> "Films et séries"
     DisplayModeSwitch.All -> "Films, séries et direct"
+}
+
+internal fun playerNetworkLabel(value: PlayerNetworkMode): String = when (value) {
+    PlayerNetworkMode.Auto -> "Automatique (Cronet)"
+    PlayerNetworkMode.Classic -> "Classique (OkHttp)"
 }
 
 internal fun bufferModeLabel(value: BufferMode): String = when (value) {

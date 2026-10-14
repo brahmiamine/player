@@ -42,5 +42,6 @@ internal fun diagnosticsText(value: PlaybackDiagnostics): String {
     } else {
         "${value.rebufferCount} rebuffer · ${value.totalRebufferTimeMs} ms"
     }
-    return "$startup · $rebuffer"
+    val network = fr.streamia.tv.net.PlayerNetwork.lastUsed?.let { " · $it" }.orEmpty()
+    return "$startup · $rebuffer$network"
 }

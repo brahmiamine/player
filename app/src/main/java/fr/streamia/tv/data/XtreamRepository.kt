@@ -440,8 +440,11 @@ class XtreamRepository private constructor(context: Context) {
 
     fun renameProfile(profileId: String, name: String): PlaylistProfile? = playlistStore.rename(profileId, name)
 
-    suspend fun deleteProfile(profileId: String) {
-        playlistStore.delete(profileId)
+    /** Retire la liste tout de suite (l'écran n'attend pas) ; le nettoyage des données suit dans [purgeProfileData]. */
+    fun forgetProfile(profileId: String) = playlistStore.delete(profileId)
+
+    /** Catalogue, guide et caches de la liste supprimée : long sur un gros catalogue, donc hors de l'interface. */
+    suspend fun purgeProfileData(profileId: String) {
         cache.clear(profileId)
         epgCache.clear(profileId)
         guides.clearLiveOnSatResolution(profileId)

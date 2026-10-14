@@ -188,6 +188,8 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:$media3Version")
     implementation("androidx.media3:media3-exoplayer-hls:$media3Version")
     implementation("androidx.media3:media3-datasource-okhttp:$media3Version")
+    // Cronet (via Google Play Services) pour le lecteur ; repli sur OkHttp quand le boîtier n'en a pas.
+    implementation("androidx.media3:media3-datasource-cronet:$media3Version")
     implementation("androidx.media3:media3-ui:$media3Version")
     implementation("androidx.media3:media3-session:$media3Version")
     // Décodeur audio logiciel (AC3, E-AC3, DTS, MP2…) : beaucoup de boîtiers et flux IPTV n'ont pas

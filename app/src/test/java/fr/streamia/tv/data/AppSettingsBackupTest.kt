@@ -12,6 +12,7 @@ class AppSettingsBackupTest {
             vodSeekStepSeconds = 30,
             videoAspect = VideoAspectSetting.Zoom,
             bufferMode = BufferMode.Stable,
+            playerNetwork = PlayerNetworkMode.Classic,
             liveStreamFormat = LiveStreamFormat.Hls,
             liveChannelSortOrder = LiveChannelSortOrder.Alphabetical,
             vodSortOrder = VodSortOrder.Rating,

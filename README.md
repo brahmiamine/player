@@ -46,6 +46,8 @@ Streamia TV est un lecteur Android TV natif, rapide et entièrement pilotable à
 - Media3 ExoPlayer (TS, HLS et formats VOD usuels) avec décodeur FFmpeg pour les pistes audio non prises en charge par la TV ;
 - choix de la piste audio et des sous-titres (préférences mémorisées), sous-titres externes `.srt` / `.vtt` depuis un fichier ou une URL, taille et fond des sous-titres réglables ;
 - format d'image (adapter, remplir, zoom), format du flux Live (automatique, MPEG-TS, HLS), stabilité du flux (faible latence, automatique, stable) ;
+- **Réseau du lecteur** (Paramètres › Lecture & direct) : Automatique ouvre les flux avec Cronet, la pile réseau de Chrome fournie par Google Play Services (HTTP/2, connexions mieux réutilisées), avec repli sur OkHttp si le boîtier n'en a pas ; Classique force OkHttp. Le diagnostic du lecteur (touche Info) indique la pile utilisée ;
+- tampon adapté à la 4K : dès qu'un flux fait 3840 × 2160, le lecteur attend 1 s de tampon au démarrage et au moins 4 s après une coupure (doublé à chaque coupure rapprochée), pour éviter les séries de micro-coupures à fort débit ;
 - bascule automatique de la résolution et de la fréquence d'affichage (24/25/50 Hz), mode tunnel pour la 4K HDR, prise en charge Dolby ;
 - reprise automatique après une coupure réseau et messages d'erreur expliquant quoi faire ;
 - pas d'avance/retour VOD réglable (10, 30 ou 60 s).
@@ -127,6 +129,16 @@ Les données détaillées absentes du M3U (épisodes, saisons, EPG) sont demand�
 La bande-annonce est lue dans le champ `youtube_trailer` (ou `trailer`) renvoyé par `get_vod_info` / `get_series_info`. Un identifiant YouTube seul, un lien `youtube.com`, `youtu.be`, `embed` ou `shorts` ouvre l'appli YouTube ; un autre lien `http(s)` est ouvert tel quel. Si le champ est vide ou invalide, le bouton n'est pas affiché.
 
 Pour protéger les accès, l'import n'enregistre pas les URL complètes de la playlist dans le cache. Le serveur, l'identifiant et le mot de passe communs sont extraits une seule fois puis chiffrés avec Android Keystore. Les entrées provenant d'un second compte dans le même fichier sont ignorées.
+
+## Performances de l'interface
+
+L'APK embarque un profil de compilation (`app/src/main/baseline-prof.txt`) qui précompile tout le code de l'application à l'installation. Sans lui, le Direct, l'accueil, les films et les séries tournent en mode interprété jusqu'à la compilation d'arrière-plan d'Android, qui tarde sur une TV. Après une installation par `adb`, la compilation peut être forcée :
+
+```bash
+adb shell cmd package compile -m speed-profile -f fr.streamia.tv
+```
+
+Mesures utiles sur la TV : `adb shell am start -W -n fr.streamia.tv/.MainActivity` (temps de démarrage) et `adb shell dumpsys gfxinfo fr.streamia.tv` (part d'images saccadées).
 
 ## Installation sur Android TV
 

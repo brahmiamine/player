@@ -335,7 +335,9 @@ internal class CatalogDatabase(context: Context) :
         val db = writableDatabase
         db.beginTransaction()
         try {
-            deleteProfileRows(db, profileId)
+            // Chemin rapide quand aucun autre profil n'a de catalogue : supprimer des centaines de
+            // milliers de lignes de l'index plein texte une par une bloquait l'écran de longues minutes.
+            replaceProfileRows(db, profileId)
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()
