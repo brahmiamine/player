@@ -547,22 +547,21 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
 
     fun deleteProfile(profileId: String) {
         if (_uiState.value.busy) return
-        _uiState.update { it.copy(busy = true, message = null) }
-        viewModelScope.launch {
-            runCatching { repository.deleteProfile(profileId) }
-                .onSuccess {
-                    epg.clearProfileMemory(profileId)
-                    _uiState.update {
-                        it.copy(
-                            busy = false,
-                            profiles = repository.profiles(),
-                            message = "Liste supprimée.",
-                            returnProfileId = it.returnProfileId?.takeUnless { id -> id == profileId },
-                        )
-                    }
+        // La liste disparaît tout de suite ; la suppression du catalogue (gros) se fait ensuite en
+        // arrière-plan, sans désactiver les boutons ni figer l'écran.
+        runCatching { repository.forgetProfile(profileId) }
+            .onSuccess {
+                epg.clearProfileMemory(profileId)
+                _uiState.update {
+                    it.copy(
+                        profiles = repository.profiles(),
+                        message = "Liste supprimée.",
+                        returnProfileId = it.returnProfileId?.takeUnless { id -> id == profileId },
+                    )
                 }
-                .onFailure(::showError)
-        }
+                viewModelScope.launch { runCatching { repository.purgeProfileData(profileId) } }
+            }
+            .onFailure(::showError)
     }
 
     fun refresh() {
