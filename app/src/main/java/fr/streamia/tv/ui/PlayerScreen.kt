@@ -996,7 +996,10 @@ fun PlayerScreen(
             } else {
                 stored
             }
+            // Classement pour repérer la meilleure ; affichage dans l'ordre fixe de la liste (aucune ligne ne bouge).
+            val position = liveVersions.withIndex().associate { it.value.key to it.index }
             rankLiveVersions(entry, liveVersions, merged, System.currentTimeMillis(), maxDisplayHeight)
+                .sortedBy { position[it.entry.key] ?: Int.MAX_VALUE }
         }
     }
     // Contrôle réel du Direct, un relevé par seconde et seulement en plein écran Direct : images

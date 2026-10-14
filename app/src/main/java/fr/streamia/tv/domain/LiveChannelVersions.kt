@@ -184,6 +184,7 @@ object LiveVersionNames {
  */
 class LiveVersionIndex(channels: List<MediaEntry>, val fingerprint: Long = fingerprintOf(channels)) {
     private val parsed = HashMap<String, LiveVersionNames.Parsed>(channels.size * 2)
+    private val position = HashMap<String, Int>(channels.size * 2)
     private val byGroupKey = HashMap<String, MutableList<MediaEntry>>()
     private val byGuideId = HashMap<String, MutableList<MediaEntry>>()
 
@@ -192,6 +193,7 @@ class LiveVersionIndex(channels: List<MediaEntry>, val fingerprint: Long = finge
             if (channel.type != MediaType.Live) continue
             val info = LiveVersionNames.parse(channel.displayName)
             parsed[channel.key] = info
+            position[channel.key] = position.size
             if (info.groupKey.isNotEmpty()) byGroupKey.getOrPut(info.groupKey) { ArrayList(2) } += channel
             guideId(channel)?.let { byGuideId.getOrPut(it) { ArrayList(2) } += channel }
         }
@@ -203,7 +205,8 @@ class LiveVersionIndex(channels: List<MediaEntry>, val fingerprint: Long = finge
 
     /**
      * Versions de [entry], elle comprise : d'abord celles de la même langue, puis les autres pays,
-     * chacune dans l'ordre du fournisseur.
+     * chacune dans l'ordre du fournisseur (la version demandée n'est pas remontée en tête : passer
+     * d'une version à l'autre ne fait pas bouger les lignes du panneau).
      */
     fun versionsOf(entry: MediaEntry): List<MediaEntry> {
         val info = parsed[entry.key] ?: LiveVersionNames.parse(entry.displayName)
@@ -217,8 +220,9 @@ class LiveVersionIndex(channels: List<MediaEntry>, val fingerprint: Long = finge
             }
         }
         if (candidates.size == 1) return listOf(entry)
+        val ordered = candidates.values.sortedBy { position[it.key] ?: Int.MAX_VALUE }
         val language = info.language
-        val (same, others) = candidates.values.partition { other ->
+        val (same, others) = ordered.partition { other ->
             val otherLanguage = parsed[other.key]?.language
             language == null || otherLanguage == null || otherLanguage == language
         }

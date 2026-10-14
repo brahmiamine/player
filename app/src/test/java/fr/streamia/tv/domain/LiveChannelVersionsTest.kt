@@ -38,6 +38,13 @@ class LiveChannelVersionsTest {
     }
 
     @Test
+    fun versionOrderDoesNotDependOnTheCurrentVersion() {
+        val versions = listOf(live(1, "FR| TF1 HD"), live(2, "FR| TF1 FHD"), live(3, "FR| TF1 4K"))
+        val index = LiveVersionIndex(versions)
+        versions.forEach { assertEquals(listOf(1, 2, 3), index.versionsOf(it).map { v -> v.id }) }
+    }
+
+    @Test
     fun keepsDifferentChannelsApart() {
         assertNotEquals(LiveVersionNames.groupKey("TF1"), LiveVersionNames.groupKey("TF1 +1"))
         assertNotEquals(LiveVersionNames.groupKey("beIN SPORTS 1 HD"), LiveVersionNames.groupKey("beIN SPORTS 2 HD"))
