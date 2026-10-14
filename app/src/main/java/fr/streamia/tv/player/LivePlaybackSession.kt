@@ -9,6 +9,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.Tracks
 import androidx.media3.exoplayer.ExoPlayer
 import fr.streamia.tv.data.BufferMode
+import fr.streamia.tv.data.PlayerNetworkMode
 import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.domain.ServerCredentials
@@ -17,8 +18,13 @@ import fr.streamia.tv.domain.XtreamUrlBuilder
 fun shouldPrepareLivePlayback(playbackState: Int): Boolean = playbackState == Player.STATE_IDLE
 
 /** Un seul lecteur Live, partagé entre l'aperçu et le plein écran. */
-class LivePlaybackSession(context: Context, bufferMode: BufferMode = BufferMode.Auto, tunneling: Boolean = false) {
-    val player: ExoPlayer = StreamiaPlayerFactory.create(context.applicationContext, MediaType.Live, bufferMode, tunneling)
+class LivePlaybackSession(
+    context: Context,
+    bufferMode: BufferMode = BufferMode.Auto,
+    tunneling: Boolean = false,
+    network: PlayerNetworkMode = PlayerNetworkMode.Auto,
+) {
+    val player: ExoPlayer = StreamiaPlayerFactory.create(context.applicationContext, MediaType.Live, bufferMode, tunneling, network)
     var entryKey: String? = null
         private set
     var activeUrl: String = ""

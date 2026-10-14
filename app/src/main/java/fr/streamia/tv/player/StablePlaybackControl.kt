@@ -28,6 +28,25 @@ internal fun requiredRebufferMarginMs(baseMs: Int, recentRebuffers: Int, capMs: 
     return doubled.coerceAtMost(capMs.toLong()).coerceAtLeast(baseMs.toLong())
 }
 
+/** Image décodée en vraie 4K : démarrage et reprise exigent une marge plus large (voir [uhdAdjustedMarginMs]). */
+internal const val UHD_START_MARGIN_MS = 1_000
+internal const val UHD_REBUFFER_MARGIN_MS = 4_000
+
+/**
+ * Marge de base relevée à [uhdMinMs] pour un flux 4K : à 40-60 Mbit/s, 350 ms ou 1,5 s de tampon
+ * se vident au moindre fléchissement du serveur et donnent une série de micro-coupures.
+ */
+internal fun uhdAdjustedMarginMs(baseMs: Int, uhd: Boolean, uhdMinMs: Int): Int =
+    if (uhd) maxOf(baseMs, uhdMinMs) else baseMs
+
+/** Vrai si une des pistes vidéo choisies fait au moins 3840 × 2160. */
+@UnstableApi
+private fun hasUhdVideo(selections: Array<out ExoTrackSelection?>): Boolean =
+    selections.any { selection ->
+        val format = selection?.selectedFormat ?: return@any false
+        androidx.media3.common.MimeTypes.isVideo(format.sampleMimeType) && isTrueUhd(format.width, format.height)
+    }
+
 /**
  * [DefaultLoadControl] dont la reprise après coupure s'adapte aux coupures récentes (voir
  * [requiredRebufferMarginMs]). Le premier démarrage (zap, ouverture d'un film) n'est pas touché.
@@ -42,9 +61,17 @@ internal class AdaptiveRebufferLoadControl(
     private val rebufferTimes = ArrayDeque<Long>()
     private var lastRebufferSeen = C.TIME_UNSET
 
+    /** Flux en vraie 4K : renseigné à la sélection des pistes, puis par la taille d'image décodée. */
+    @Volatile var uhd: Boolean = false
+
     override fun shouldStartPlayback(parameters: LoadControl.Parameters): Boolean {
         val allowed = delegate.shouldStartPlayback(parameters)
-        if (!allowed || !parameters.rebuffering) return allowed
+        if (!allowed) return false
+        if (!parameters.rebuffering) {
+            if (!uhd) return true
+            val memoryFull = delegate.getAllocator(parameters.playerId).totalBytesAllocated >= targetBufferBytes
+            return parameters.bufferedDurationUs >= UHD_START_MARGIN_MS * 1000L || memoryFull
+        }
         val now = android.os.SystemClock.elapsedRealtime()
         synchronized(rebufferTimes) {
             val rebufferAt = parameters.lastRebufferRealtimeMs
@@ -53,7 +80,11 @@ internal class AdaptiveRebufferLoadControl(
                 rebufferTimes.addLast(rebufferAt)
             }
             while (rebufferTimes.isNotEmpty() && now - rebufferTimes.first() > REBUFFER_WINDOW_MS) rebufferTimes.removeFirst()
-            val requiredUs = requiredRebufferMarginMs(baseRebufferMarginMs, rebufferTimes.size, maxRebufferMarginMs) * 1000
+            val requiredUs = requiredRebufferMarginMs(
+                uhdAdjustedMarginMs(baseRebufferMarginMs, uhd, UHD_REBUFFER_MARGIN_MS.coerceAtMost(maxRebufferMarginMs)),
+                rebufferTimes.size,
+                maxRebufferMarginMs,
+            ) * 1000
             // Mémoire tampon pleine (4K à fort débit) : impossible d'aller plus loin, on repart.
             val memoryFull = delegate.getAllocator(parameters.playerId).totalBytesAllocated >= targetBufferBytes
             return parameters.bufferedDurationUs >= requiredUs || memoryFull
@@ -70,8 +101,10 @@ internal class AdaptiveRebufferLoadControl(
         delegate.onPrepared(playerId)
     }
 
-    override fun onTracksSelected(parameters: LoadControl.Parameters, trackGroups: TrackGroupArray, trackSelections: Array<out ExoTrackSelection?>) =
+    override fun onTracksSelected(parameters: LoadControl.Parameters, trackGroups: TrackGroupArray, trackSelections: Array<out ExoTrackSelection?>) {
+        uhd = hasUhdVideo(trackSelections)
         delegate.onTracksSelected(parameters, trackGroups, trackSelections)
+    }
 
     @Deprecated("Remplacée par la variante à Parameters")
     override fun onTracksSelected(
@@ -85,6 +118,7 @@ internal class AdaptiveRebufferLoadControl(
 
     override fun onStopped(playerId: PlayerId) {
         resetRebuffers()
+        uhd = false
         delegate.onStopped(playerId)
     }
 

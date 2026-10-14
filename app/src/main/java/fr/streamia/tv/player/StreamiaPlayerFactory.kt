@@ -7,7 +7,6 @@ import androidx.media3.common.C
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.datasource.DefaultDataSource
-import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
@@ -18,9 +17,10 @@ import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.extractor.DefaultExtractorsFactory
 import androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory
 import fr.streamia.tv.data.BufferMode
+import fr.streamia.tv.data.PlayerNetworkMode
+import fr.streamia.tv.net.PlayerNetwork
 import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.logging.CrashReporter
-import okhttp3.OkHttpClient
 
 /** ~35 % de la mémoire Java de l'app (tampon ExoPlayer alloué sur le tas), entre 32 et 200 Mo. */
 internal fun bufferBytesForHeap(heapMb: Int): Int =
@@ -39,15 +39,12 @@ private const val VOD_BACK_BUFFER_MS = 10_000
 private const val MAX_REBUFFER_MARGIN_MS = 12_000
 
 object StreamiaPlayerFactory {
-    // Client partagé avec l'API et les images : la connexion au serveur du fournisseur (TCP, TLS)
-    // est souvent déjà ouverte au moment du zap.
-    private val httpClient: OkHttpClient get() = fr.streamia.tv.net.HttpClients.player
-
     fun create(
         context: Context,
         mediaType: MediaType,
         bufferMode: BufferMode = BufferMode.Auto,
         tunneling: Boolean = false,
+        network: PlayerNetworkMode = PlayerNetworkMode.Auto,
     ): ExoPlayer {
         val profile = PlaybackTuning.forType(mediaType, bufferMode)
         val bufferBytes = targetBufferBytes(context)
@@ -89,8 +86,9 @@ object StreamiaPlayerFactory {
         val trackSelector = DefaultTrackSelector(context).apply {
             setParameters(buildUponParameters().setTunnelingEnabled(tunneling))
         }
-        val httpDataSourceFactory = OkHttpDataSource.Factory(httpClient)
-            .setUserAgent(fr.streamia.tv.net.HttpClients.USER_AGENT)
+        // Cronet si disponible (mode Auto), sinon OkHttp ; le pool OkHttp reste partagé avec l'API
+        // et les images (voir HttpClients), donc la connexion au serveur est souvent déjà ouverte au zap.
+        val httpDataSourceFactory = PlayerNetwork.factory(network)
         // DefaultMediaSourceFactory reuses this exact factory for every source it builds, including
         // externally loaded subtitle files (SingleSampleMediaSource). An OkHttpDataSource.Factory alone
         // only understands http(s) — a local subtitle picked via SAF (content://) would fail to load.
@@ -133,6 +131,15 @@ object StreamiaPlayerFactory {
                 playWhenReady = true
                 setHandleAudioBecomingNoisy(true)
             }
+
+        // Vraie 4K : démarrage et reprise exigent une marge plus large (voir AdaptiveRebufferLoadControl).
+        player.addListener(
+            object : Player.Listener {
+                override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
+                    if (videoSize.width > 0) loadControl.uhd = isTrueUhd(videoSize.width, videoSize.height)
+                }
+            },
+        )
 
         if (liveErrorPolicy != null) {
             player.addListener(

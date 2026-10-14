@@ -914,6 +914,10 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         updateAppSettings { it.copy(videoAspect = it.nextVideoAspect()) }
     }
 
+    fun cyclePlayerNetwork() {
+        updateAppSettings { it.copy(playerNetwork = it.nextPlayerNetwork()) }
+    }
+
     fun cycleBufferMode() {
         updateAppSettings { it.copy(bufferMode = it.nextBufferMode()) }
     }

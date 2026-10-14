@@ -10,6 +10,8 @@ import java.security.SecureRandom
 
 enum class VideoAspectSetting { Fit, Fill, Zoom }
 enum class BufferMode { LowLatency, Auto, Stable }
+/** Pile réseau du lecteur : Auto = Cronet (HTTP/2) si le boîtier l'offre, sinon OkHttp ; Classic = toujours OkHttp. */
+enum class PlayerNetworkMode { Auto, Classic }
 /** Bascule résolution/fréquence de l'écran selon la vidéo. Films & séries par défaut : au zapping, chaque bascule noircit l'écran 1 à 3 s. */
 enum class DisplayModeSwitch { Off, Vod, All }
 enum class LiveStreamFormat { Auto, Ts, Hls }
@@ -62,6 +64,7 @@ data class AppSettings(
     val vodSeekStepSeconds: Int = DEFAULT_VOD_SEEK_STEP_SECONDS,
     val videoAspect: VideoAspectSetting = VideoAspectSetting.Fit,
     val bufferMode: BufferMode = BufferMode.Auto,
+    val playerNetwork: PlayerNetworkMode = PlayerNetworkMode.Auto,
     val displayModeSwitch: DisplayModeSwitch = DisplayModeSwitch.Vod,
     /** Mode tunnel vidéo (voir StreamiaPlayerFactory) : désactivé par défaut, mal géré par certains boîtiers. */
     val tunnelingEnabled: Boolean = false,
@@ -107,6 +110,9 @@ data class AppSettings(
 
     fun nextBufferMode(): BufferMode =
         BufferMode.entries[(bufferMode.ordinal + 1) % BufferMode.entries.size]
+
+    fun nextPlayerNetwork(): PlayerNetworkMode =
+        PlayerNetworkMode.entries[(playerNetwork.ordinal + 1) % PlayerNetworkMode.entries.size]
 
     fun nextDisplayModeSwitch(): DisplayModeSwitch =
         DisplayModeSwitch.entries[(displayModeSwitch.ordinal + 1) % DisplayModeSwitch.entries.size]
@@ -169,6 +175,9 @@ class AppSettingsStore(context: Context) {
                 preferences.getString(KEY_BUFFER_MODE, BufferMode.Auto.name) ?: BufferMode.Auto.name,
             )
         }.getOrDefault(BufferMode.Auto),
+        playerNetwork = runCatching {
+            PlayerNetworkMode.valueOf(preferences.getString(KEY_PLAYER_NETWORK, null)!!)
+        }.getOrDefault(PlayerNetworkMode.Auto),
         displayModeSwitch = runCatching {
             DisplayModeSwitch.valueOf(preferences.getString(KEY_DISPLAY_MODE_SWITCH, null)!!)
         }.getOrDefault(DisplayModeSwitch.Vod),
@@ -235,6 +244,7 @@ class AppSettingsStore(context: Context) {
             .putInt(KEY_VOD_SEEK_STEP_SECONDS, settings.vodSeekStepSeconds)
             .putString(KEY_VIDEO_ASPECT, settings.videoAspect.name)
             .putString(KEY_BUFFER_MODE, settings.bufferMode.name)
+            .putString(KEY_PLAYER_NETWORK, settings.playerNetwork.name)
             .putString(KEY_DISPLAY_MODE_SWITCH, settings.displayModeSwitch.name)
             .putBoolean(KEY_TUNNELING_ENABLED, settings.tunnelingEnabled)
             .putString(KEY_LIVE_STREAM_FORMAT, settings.liveStreamFormat.name)
@@ -341,6 +351,7 @@ class AppSettingsStore(context: Context) {
         const val KEY_VOD_SEEK_STEP_SECONDS = "vod_seek_step_seconds"
         const val KEY_VIDEO_ASPECT = "video_aspect"
         const val KEY_BUFFER_MODE = "buffer_mode"
+        const val KEY_PLAYER_NETWORK = "player_network"
         const val KEY_DISPLAY_MODE_SWITCH = "display_mode_switch"
         const val KEY_TUNNELING_ENABLED = "tunneling_enabled"
         const val KEY_LIVE_STREAM_FORMAT = "live_stream_format"
@@ -423,6 +434,7 @@ fun AppSettings.toBackupJson(): JSONObject = JSONObject().apply {
     put("vodSeekStepSeconds", vodSeekStepSeconds)
     put("videoAspect", videoAspect.name)
     put("bufferMode", bufferMode.name)
+    put("playerNetwork", playerNetwork.name)
     put("displayModeSwitch", displayModeSwitch.name)
     put("tunnelingEnabled", tunnelingEnabled)
     put("liveStreamFormat", liveStreamFormat.name)
@@ -445,6 +457,7 @@ fun appSettingsFromBackupJson(json: JSONObject, fallback: AppSettings): AppSetti
         .takeIf { it in AppSettings.VOD_SEEK_STEPS_SECONDS } ?: fallback.vodSeekStepSeconds,
     videoAspect = runCatching { VideoAspectSetting.valueOf(json.getString("videoAspect")) }.getOrDefault(fallback.videoAspect),
     bufferMode = runCatching { BufferMode.valueOf(json.getString("bufferMode")) }.getOrDefault(fallback.bufferMode),
+    playerNetwork = runCatching { PlayerNetworkMode.valueOf(json.getString("playerNetwork")) }.getOrDefault(fallback.playerNetwork),
     displayModeSwitch = runCatching { DisplayModeSwitch.valueOf(json.getString("displayModeSwitch")) }.getOrDefault(fallback.displayModeSwitch),
     tunnelingEnabled = json.optBoolean("tunnelingEnabled", fallback.tunnelingEnabled),
     liveStreamFormat = runCatching { LiveStreamFormat.valueOf(json.getString("liveStreamFormat")) }.getOrDefault(fallback.liveStreamFormat),

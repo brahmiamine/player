@@ -51,6 +51,16 @@ class AppSettingsTest {
     }
 
     @Test
+    fun `player network cycles and wraps`() {
+        var settings = AppSettings()
+        assertEquals(PlayerNetworkMode.Auto, settings.playerNetwork)
+        settings = settings.copy(playerNetwork = settings.nextPlayerNetwork())
+        assertEquals(PlayerNetworkMode.Classic, settings.playerNetwork)
+        settings = settings.copy(playerNetwork = settings.nextPlayerNetwork())
+        assertEquals(PlayerNetworkMode.Auto, settings.playerNetwork)
+    }
+
+    @Test
     fun `live stream format cycles and wraps`() {
         var settings = AppSettings(liveStreamFormat = LiveStreamFormat.Auto)
         val observed = buildList {

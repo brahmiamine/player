@@ -46,6 +46,8 @@ Streamia TV est un lecteur Android TV natif, rapide et entièrement pilotable à
 - Media3 ExoPlayer (TS, HLS et formats VOD usuels) avec décodeur FFmpeg pour les pistes audio non prises en charge par la TV ;
 - choix de la piste audio et des sous-titres (préférences mémorisées), sous-titres externes `.srt` / `.vtt` depuis un fichier ou une URL, taille et fond des sous-titres réglables ;
 - format d'image (adapter, remplir, zoom), format du flux Live (automatique, MPEG-TS, HLS), stabilité du flux (faible latence, automatique, stable) ;
+- **Réseau du lecteur** (Paramètres › Lecture & direct) : Automatique ouvre les flux avec Cronet, la pile réseau de Chrome fournie par Google Play Services (HTTP/2, connexions mieux réutilisées), avec repli sur OkHttp si le boîtier n'en a pas ; Classique force OkHttp. Le diagnostic du lecteur (touche Info) indique la pile utilisée ;
+- tampon adapté à la 4K : dès qu'un flux fait 3840 × 2160, le lecteur attend 1 s de tampon au démarrage et au moins 4 s après une coupure (doublé à chaque coupure rapprochée), pour éviter les séries de micro-coupures à fort débit ;
 - bascule automatique de la résolution et de la fréquence d'affichage (24/25/50 Hz), mode tunnel pour la 4K HDR, prise en charge Dolby ;
 - reprise automatique après une coupure réseau et messages d'erreur expliquant quoi faire ;
 - pas d'avance/retour VOD réglable (10, 30 ou 60 s).

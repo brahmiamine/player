@@ -58,6 +58,8 @@ class MainActivity : ComponentActivity() {
             EpgSyncScheduler.schedule(applicationContext)
             MetadataEnrichmentWorker.schedule(applicationContext)
             AiNightlyWorker.schedule(applicationContext)
+            // Cronet pour le lecteur : chargé hors du thread principal, utilisé dès qu'il est prêt.
+            fr.streamia.tv.net.PlayerNetwork.warmUp(applicationContext)
         }
 
         WindowCompat.setDecorFitsSystemWindows(window, false)
