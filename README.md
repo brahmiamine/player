@@ -130,6 +130,16 @@ La bande-annonce est lue dans le champ `youtube_trailer` (ou `trailer`) renvoyé
 
 Pour protéger les accès, l'import n'enregistre pas les URL complètes de la playlist dans le cache. Le serveur, l'identifiant et le mot de passe communs sont extraits une seule fois puis chiffrés avec Android Keystore. Les entrées provenant d'un second compte dans le même fichier sont ignorées.
 
+## Performances de l'interface
+
+L'APK embarque un profil de compilation (`app/src/main/baseline-prof.txt`) qui précompile tout le code de l'application à l'installation. Sans lui, le Direct, l'accueil, les films et les séries tournent en mode interprété jusqu'à la compilation d'arrière-plan d'Android, qui tarde sur une TV. Après une installation par `adb`, la compilation peut être forcée :
+
+```bash
+adb shell cmd package compile -m speed-profile -f fr.streamia.tv
+```
+
+Mesures utiles sur la TV : `adb shell am start -W -n fr.streamia.tv/.MainActivity` (temps de démarrage) et `adb shell dumpsys gfxinfo fr.streamia.tv` (part d'images saccadées).
+
 ## Installation sur Android TV
 
 Téléchargez `streamia-tv.apk` depuis la Release `latest`, ou activez les options développeur et le débogage réseau de la TV, puis :
