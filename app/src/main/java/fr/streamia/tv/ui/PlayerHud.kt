@@ -75,7 +75,7 @@ internal fun NextEpisodePrompt(
     if (episode == null) return
     val playNowFocus = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { playNowFocus.requestFocus() } }
-    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.72f)), contentAlignment = Alignment.BottomEnd) {
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.72f)).modalFocusTrap(), contentAlignment = Alignment.BottomEnd) {
         Column(
             Modifier
                 .padding(34.dp)

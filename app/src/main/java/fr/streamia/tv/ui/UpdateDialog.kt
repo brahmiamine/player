@@ -192,7 +192,7 @@ internal fun UpdateDialog(
         runCatching { if (content.primary != null) primaryFocus.requestFocus() else secondaryFocus.requestFocus() }
     }
 
-    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.72f)), contentAlignment = Alignment.Center) {
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.72f)).modalFocusTrap(), contentAlignment = Alignment.Center) {
         Column(
             Modifier
                 .widthIn(max = 820.dp)

@@ -74,7 +74,7 @@ internal fun CitySearchModal(
     var results by remember { mutableStateOf<List<HomePlace>?>(null) }
 
     Box(
-        Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.76f)),
+        Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.76f)).modalFocusTrap(),
         contentAlignment = Alignment.Center,
     ) {
         GlassSurface(modifier = Modifier.width(580.dp)) {
@@ -128,8 +128,12 @@ internal fun CitySearchModal(
 @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
 @Composable
 internal fun FocusTrap(content: @Composable () -> Unit) {
-    Box(Modifier.fillMaxSize().focusProperties { exit = { FocusRequester.Cancel } }.focusGroup()) { content() }
+    Box(Modifier.fillMaxSize().modalFocusTrap()) { content() }
 }
+
+/** Piège de focus commun à tous les modals : le focus ne quitte jamais la couche tant qu'elle est ouverte. */
+internal fun Modifier.modalFocusTrap(): Modifier =
+    focusProperties { exit = { FocusRequester.Cancel } }.focusGroup()
 
 @Composable
 internal fun SettingsSectionTitle(title: String) {
@@ -154,7 +158,7 @@ internal fun SettingsChoiceModal(
     LaunchedEffect(state.title) { runCatching { firstFocus.requestFocus() } }
 
     Box(
-        Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.76f)),
+        Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.76f)).modalFocusTrap(),
         contentAlignment = Alignment.Center,
     ) {
         GlassSurface(modifier = Modifier.width(580.dp)) {
@@ -214,7 +218,7 @@ internal fun HomeBlocksModal(
     LaunchedEffect(Unit) { runCatching { firstFocus.requestFocus() } }
 
     Box(
-        Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.76f)),
+        Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.76f)).modalFocusTrap(),
         contentAlignment = Alignment.Center,
     ) {
         GlassSurface(modifier = Modifier.width(640.dp)) {

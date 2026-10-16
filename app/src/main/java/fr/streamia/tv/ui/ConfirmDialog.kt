@@ -24,9 +24,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.foundation.focusGroup
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -52,8 +50,7 @@ fun ConfirmDialog(
     LaunchedEffect(Unit) { runCatching { cancelFocus.requestFocus() } }
     Box(
         Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.76f))
-            .focusProperties { exit = { FocusRequester.Cancel } }
-            .focusGroup(),
+            .modalFocusTrap(),
         contentAlignment = Alignment.Center,
     ) {
         GlassSurface(modifier = Modifier.width(560.dp)) {
@@ -105,8 +102,7 @@ fun ChoiceDialog(
     // Surcouche et non fenêtre : sans piège, le D-pad sort de la liste vers l'écran masqué derrière.
     Box(
         Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.76f))
-            .focusProperties { exit = { FocusRequester.Cancel } }
-            .focusGroup(),
+            .modalFocusTrap(),
         contentAlignment = Alignment.Center,
     ) {
         GlassSurface(modifier = Modifier.width(560.dp)) {

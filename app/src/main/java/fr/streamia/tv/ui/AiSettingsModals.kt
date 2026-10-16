@@ -57,7 +57,7 @@ internal fun AiKeyModal(provider: AiProvider, hasKey: Boolean, onSave: (String) 
     val fieldFocus = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { fieldFocus.requestFocus() } }
     var key by remember { mutableStateOf("") }
-    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.76f)), contentAlignment = Alignment.Center) {
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.76f)).modalFocusTrap(), contentAlignment = Alignment.Center) {
         GlassSurface(modifier = Modifier.width(640.dp)) {
             Column(Modifier.padding(26.dp)) {
                 AiProviderTitle("Clé d'API · ${provider.label}", provider)
@@ -124,7 +124,7 @@ internal fun AiModelPickerModal(
             else -> runCatching { closeFocus.requestFocus() }
         }
     }
-    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.76f)), contentAlignment = Alignment.Center) {
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.76f)).modalFocusTrap(), contentAlignment = Alignment.Center) {
         GlassSurface(modifier = Modifier.width(700.dp)) {
             // Le focus ne sort pas de la fenêtre vers les Paramètres affichés derrière.
             Column(Modifier.padding(26.dp).focusProperties { onExit = { cancelFocusChange() } }.focusGroup()) {
@@ -193,7 +193,7 @@ internal fun AiUsageModal(load: suspend () -> List<AiUsage>, onReset: () -> Unit
         }
     }
     val numbers = remember { NumberFormat.getIntegerInstance() }
-    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.76f)), contentAlignment = Alignment.Center) {
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.76f)).modalFocusTrap(), contentAlignment = Alignment.Center) {
         GlassSurface(modifier = Modifier.width(820.dp)) {
             Column(Modifier.padding(26.dp).focusProperties { onExit = { cancelFocusChange() } }.focusGroup()) {
                 Text("Consommation de l'assistant IA", color = Ink, fontSize = 22.sp, fontWeight = HeadingWeight)

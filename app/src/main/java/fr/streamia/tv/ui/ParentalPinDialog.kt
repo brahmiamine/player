@@ -59,7 +59,7 @@ fun ParentalPinDialog(
     var checking by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
-    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.78f)), contentAlignment = Alignment.Center) {
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.78f)).modalFocusTrap(), contentAlignment = Alignment.Center) {
         GlassSurface(modifier = Modifier.width(420.dp)) {
         Column(
             Modifier.padding(28.dp),
