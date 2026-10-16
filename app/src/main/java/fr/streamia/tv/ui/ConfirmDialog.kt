@@ -24,7 +24,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.foundation.focusGroup
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -48,7 +50,12 @@ fun ConfirmDialog(
     BackHandler(onBack = onDismiss)
     val cancelFocus = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { cancelFocus.requestFocus() } }
-    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.76f)), contentAlignment = Alignment.Center) {
+    Box(
+        Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.76f))
+            .focusProperties { exit = { FocusRequester.Cancel } }
+            .focusGroup(),
+        contentAlignment = Alignment.Center,
+    ) {
         GlassSurface(modifier = Modifier.width(560.dp)) {
             Column(Modifier.padding(26.dp)) {
                 Text(title, color = Ink, fontSize = TypeSectionTitle, fontWeight = HeadingWeight)
@@ -95,7 +102,13 @@ fun ChoiceDialog(
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialIndex)
     val selectedFocus = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { selectedFocus.requestFocus() } }
-    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.76f)), contentAlignment = Alignment.Center) {
+    // Surcouche et non fenêtre : sans piège, le D-pad sort de la liste vers l'écran masqué derrière.
+    Box(
+        Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.76f))
+            .focusProperties { exit = { FocusRequester.Cancel } }
+            .focusGroup(),
+        contentAlignment = Alignment.Center,
+    ) {
         GlassSurface(modifier = Modifier.width(560.dp)) {
             Column(Modifier.padding(26.dp)) {
                 Text(title, color = Ink, fontSize = TypeSectionTitle, fontWeight = HeadingWeight)
