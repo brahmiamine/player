@@ -132,6 +132,7 @@ internal fun FocusTrap(content: @Composable () -> Unit) {
 }
 
 /** Piège de focus commun à tous les modals : le focus ne quitte jamais la couche tant qu'elle est ouverte. */
+@OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
 internal fun Modifier.modalFocusTrap(): Modifier =
     focusProperties { exit = { FocusRequester.Cancel } }.focusGroup()
 
