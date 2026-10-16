@@ -584,6 +584,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                   }
                   HomeScreen(
                     catalog = state.catalog!!,
+                    accountName = state.profiles.firstOrNull { it.id == state.activeProfileId }?.name,
                     aiActive = aiActive,
                     aiReasons = aiStateHolder.value.reasons,
                     aiBrief = aiStateHolder.value.brief,

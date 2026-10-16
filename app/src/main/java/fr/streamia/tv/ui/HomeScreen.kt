@@ -27,6 +27,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -89,6 +91,7 @@ fun HomeScreen(
     liveMatchesResolving: Boolean = false,
     /** Assistant IA actif : la rangée d'accès à ses écrans apparaît, et les raisons des recommandations avec elle. */
     aiActive: Boolean = false,
+    accountName: String? = null,
     aiReasons: Map<String, String> = emptyMap(),
     aiBrief: BriefUiState = BriefUiState(),
     aiRemote: RemoteUiState = RemoteUiState(),
@@ -355,7 +358,12 @@ fun HomeScreen(
                         Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
                             StreamiaLogo()
                         }
-                        LocalClockText()
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            LocalClockText()
+                            if (!accountName.isNullOrBlank()) {
+                                Text(accountName, color = MutedInk, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
                         Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
                             Column(horizontalAlignment = Alignment.End) {
                                 WeatherAndPrayers(weatherPlace, weather, prayerMethod)

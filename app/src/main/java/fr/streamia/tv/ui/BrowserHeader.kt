@@ -82,7 +82,7 @@ internal fun BrowserHeader(
                     Text("Accueil", color = Ink, fontSize = TypeBody, fontWeight = FontWeight.Bold)
                 }
             }
-            Spacer(Modifier.width(6.dp))
+            Spacer(Modifier.width(20.dp))
 
             for (type in MediaType.entries) {
                 FocusableSurface(
@@ -91,29 +91,21 @@ internal fun BrowserHeader(
                     enabled = catalog.count(type) > 0,
                     accent = selectedType == type,
                     idleBackground = idleBackground,
-                    modifier = Modifier.width(116.dp).height(ButtonHeight),
+                    modifier = Modifier.width(150.dp).height(ButtonHeight),
                 ) {
-                    Column(
+                    Row(
                         Modifier.fillMaxSize().padding(horizontal = 10.dp),
-                        verticalArrangement = Arrangement.Center,
-                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
                     ) {
-                        Text(
-                            type.displayName,
-                            color = Ink,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            textAlign = TextAlign.Center,
-                        )
-                        Text(
-                            catalog.count(type).toString(),
-                            color = MutedInk,
-                            fontSize = 12.sp,
-                            textAlign = TextAlign.Center,
-                        )
+                        StreamiaIcon(type.glyph(), tint = Ink, size = 22.dp)
+                        Column(verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(type.displayName, color = Ink, fontSize = 14.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                            Text(catalog.count(type).toString(), color = MutedInk, fontSize = 12.sp, textAlign = TextAlign.Center)
+                        }
                     }
                 }
-                Spacer(Modifier.width(6.dp))
+                Spacer(Modifier.width(14.dp))
             }
 
             Spacer(Modifier.weight(1f))
@@ -169,4 +161,10 @@ private fun HeaderAction(
             }
         }
     }
+}
+
+private fun MediaType.glyph() = when (this) {
+    MediaType.Live -> StreamiaIconGlyph.Live
+    MediaType.Movie -> StreamiaIconGlyph.Movie
+    MediaType.Series -> StreamiaIconGlyph.Series
 }

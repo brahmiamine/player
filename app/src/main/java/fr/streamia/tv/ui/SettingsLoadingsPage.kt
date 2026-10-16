@@ -128,10 +128,10 @@ internal fun SettingsLoadingsPage(
             accent = true,
             modifier = Modifier.width(210.dp).height(ButtonHeightPx),
         ) {
-            Text(
-                if (running) "Actualisation…" else "Tout actualiser",
-                color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 18.dp),
-            )
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(horizontal = 18.dp)) {
+                if (running) ButtonSpinner(size = 18.dp) else StreamiaIcon(StreamiaIconGlyph.Refresh, tint = Ink, size = 20.dp)
+                Text(if (running) "Actualisation…" else "Tout actualiser", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            }
         }
     }
 
@@ -175,7 +175,7 @@ private fun SummaryTile(label: String, value: String, valueColor: Color, hint: S
 @Composable
 private fun ColumnHeader() {
     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        listOf("SOURCE" to 2.6f, "FRÉQUENCE" to 1.3f, "DERNIER" to 1f, "PROCHAIN" to 1f, "ÉTAT" to 1.1f).forEach { (title, weight) ->
+        listOf("SOURCE" to 2.2f, "FRÉQUENCE" to 1.2f, "DERNIER" to 1f, "PROCHAIN" to 1f, "ÉTAT" to 1.6f).forEach { (title, weight) ->
             Text(title, color = MutedInk.copy(alpha = 0.7f), fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(weight))
         }
         Spacer(Modifier.width(ActionWidth))
@@ -206,31 +206,34 @@ private fun LoadingRowView(row: LoadingRow, running: Boolean, now: Long, onActio
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(Modifier.weight(2.6f)) {
+        Column(Modifier.weight(2.2f)) {
             Text(row.name, color = if (state == LoadingState.Disabled) MutedInk else Ink, fontSize = 15.sp, fontWeight = HeadingWeight, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(row.subtitle, color = MutedInk, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        Text(row.frequency, color = Ink.copy(alpha = 0.85f), fontSize = 13.sp, maxLines = 2, modifier = Modifier.weight(1.3f))
+        Text(row.frequency, color = Ink.copy(alpha = 0.85f), fontSize = 13.sp, maxLines = 2, modifier = Modifier.weight(1.2f))
         Text(row.detail ?: relative(row.lastAtMillis, now), color = Ink.copy(alpha = 0.85f), fontSize = 13.sp, maxLines = 1, modifier = Modifier.weight(1f))
         Text(next, color = Ink.copy(alpha = 0.85f), fontSize = 13.sp, maxLines = 1, modifier = Modifier.weight(1f))
-        Box(Modifier.weight(1.1f), contentAlignment = Alignment.CenterStart) {
+        Box(Modifier.weight(1.6f), contentAlignment = Alignment.CenterStart) {
             Row(
                 Modifier.background(stateBg, RoundedCornerShape(999.dp)).padding(horizontal = 12.dp, vertical = 5.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 if (state == LoadingState.Running) ButtonSpinner(size = 12.dp, color = AccentPinkText)
-                Text(state.label, color = stateInk, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                Text(state.label, color = stateInk, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
             }
         }
         Box(Modifier.width(ActionWidth), contentAlignment = Alignment.CenterEnd) {
             if (row.action != null) {
                 FocusableSurface(onClick = onAction, enabled = !running, focusScale = 1.03f, modifier = Modifier.width(ActionWidth).height(44.dp)) {
-                    Text(
-                        if (running) "…" else row.action.label,
-                        color = if (running) MutedInk else Ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.padding(horizontal = 8.dp),
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(horizontal = 8.dp)) {
+                        if (running) ButtonSpinner(size = 16.dp, color = MutedInk)
+                        else StreamiaIcon(StreamiaIconGlyph.Refresh, tint = Ink, size = 18.dp)
+                        Text(
+                            if (running) "…" else row.action.label,
+                            color = if (running) MutedInk else Ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                        )
+                    }
                 }
             }
         }
