@@ -127,6 +127,7 @@ internal fun MainActionGrid(
             Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 HomeAction(
                     "Paramètres",
+                    StreamiaIconGlyph.Settings,
                     onSettings,
                     Modifier.weight(1f)
                         .then(if (firstFocus != null && !liveTileEnabled) Modifier.focusRequester(firstFocus) else Modifier)
@@ -134,6 +135,7 @@ internal fun MainActionGrid(
                 )
                 HomeAction(
                     if (busy || catalogLoading) "Chargement…" else "Actualiser",
+                    StreamiaIconGlyph.Refresh,
                     onRefresh,
                     Modifier.weight(1f).gridFocus(gridFocusRequester, focusTarget == HomeFocusTarget.Refresh),
                     enabled = !busy && !catalogLoading,
@@ -142,11 +144,13 @@ internal fun MainActionGrid(
             Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 HomeAction(
                     "Matchs du jour",
+                    StreamiaIconGlyph.Trophy,
                     onOpenLiveMatches,
                     Modifier.weight(1f).gridFocus(gridFocusRequester, focusTarget == HomeFocusTarget.LiveMatches),
                 )
                 HomeAction(
                     "Changer de liste",
+                    StreamiaIconGlyph.Swap,
                     onChangePlaylist,
                     Modifier.weight(1f)
                         .focusRequester(changePlaylistFocusRequester)
@@ -215,13 +219,15 @@ private fun HomeTile(
 @Composable
 private fun HomeAction(
     title: String,
+    glyph: StreamiaIconGlyph,
     onClick: () -> Unit,
     modifier: Modifier,
     enabled: Boolean = true,
 ) {
     FocusableSurface(onClick = onClick, enabled = enabled, idleBackground = Color.White.copy(alpha = 0.07f), modifier = modifier.fillMaxHeight()) {
-        Box(Modifier.fillMaxSize().padding(horizontal = 8.dp), contentAlignment = Alignment.Center) {
-            Text(title, color = Ink, fontSize = 15.sp, lineHeight = 18.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, maxLines = 2)
+        Row(Modifier.fillMaxSize().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)) {
+            StreamiaIcon(glyph, tint = Ink, size = 22.dp)
+            Text(title, color = Ink, fontSize = 15.sp, lineHeight = 18.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, maxLines = 2, modifier = Modifier.weight(1f, fill = false))
         }
     }
 }
