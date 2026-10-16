@@ -10,7 +10,7 @@ import java.security.SecureRandom
 
 enum class VideoAspectSetting { Fit, Fill, Zoom }
 enum class BufferMode { LowLatency, Auto, Stable }
-/** Pile réseau du lecteur : Auto = Cronet (HTTP/2) si le boîtier l'offre, sinon OkHttp ; Classic = toujours OkHttp. */
+/** Pile réseau du lecteur (Classic par défaut : Cronet ralentissait l'ouverture des flux) : Auto = Cronet (HTTP/2) si le boîtier l'offre, sinon OkHttp ; Classic = toujours OkHttp. */
 enum class PlayerNetworkMode { Auto, Classic }
 /** Bascule résolution/fréquence de l'écran selon la vidéo. Films & séries par défaut : au zapping, chaque bascule noircit l'écran 1 à 3 s. */
 enum class DisplayModeSwitch { Off, Vod, All }
@@ -64,7 +64,7 @@ data class AppSettings(
     val vodSeekStepSeconds: Int = DEFAULT_VOD_SEEK_STEP_SECONDS,
     val videoAspect: VideoAspectSetting = VideoAspectSetting.Fit,
     val bufferMode: BufferMode = BufferMode.Auto,
-    val playerNetwork: PlayerNetworkMode = PlayerNetworkMode.Auto,
+    val playerNetwork: PlayerNetworkMode = PlayerNetworkMode.Classic,
     val displayModeSwitch: DisplayModeSwitch = DisplayModeSwitch.Vod,
     /** Mode tunnel vidéo (voir StreamiaPlayerFactory) : désactivé par défaut, mal géré par certains boîtiers. */
     val tunnelingEnabled: Boolean = false,
@@ -177,7 +177,7 @@ class AppSettingsStore(context: Context) {
         }.getOrDefault(BufferMode.Auto),
         playerNetwork = runCatching {
             PlayerNetworkMode.valueOf(preferences.getString(KEY_PLAYER_NETWORK, null)!!)
-        }.getOrDefault(PlayerNetworkMode.Auto),
+        }.getOrDefault(PlayerNetworkMode.Classic),
         displayModeSwitch = runCatching {
             DisplayModeSwitch.valueOf(preferences.getString(KEY_DISPLAY_MODE_SWITCH, null)!!)
         }.getOrDefault(DisplayModeSwitch.Vod),

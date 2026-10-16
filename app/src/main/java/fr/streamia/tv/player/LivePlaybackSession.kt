@@ -22,7 +22,7 @@ class LivePlaybackSession(
     context: Context,
     bufferMode: BufferMode = BufferMode.Auto,
     tunneling: Boolean = false,
-    network: PlayerNetworkMode = PlayerNetworkMode.Auto,
+    network: PlayerNetworkMode = PlayerNetworkMode.Classic,
 ) {
     val player: ExoPlayer = StreamiaPlayerFactory.create(context.applicationContext, MediaType.Live, bufferMode, tunneling, network)
     var entryKey: String? = null

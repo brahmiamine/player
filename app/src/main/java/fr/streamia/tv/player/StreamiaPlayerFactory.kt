@@ -44,7 +44,7 @@ object StreamiaPlayerFactory {
         mediaType: MediaType,
         bufferMode: BufferMode = BufferMode.Auto,
         tunneling: Boolean = false,
-        network: PlayerNetworkMode = PlayerNetworkMode.Auto,
+        network: PlayerNetworkMode = PlayerNetworkMode.Classic,
     ): ExoPlayer {
         val profile = PlaybackTuning.forType(mediaType, bufferMode)
         val bufferBytes = targetBufferBytes(context)
