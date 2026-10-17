@@ -4,6 +4,7 @@ import fr.streamia.tv.ui.theme.ButtonHeight
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Column
@@ -27,7 +28,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
@@ -304,8 +307,15 @@ fun SettingsScreen(
                 shape = RoundedCornerShape(RadiusPanel),
                 tintColor = Color.Black.copy(alpha = 0.28f),
             ) {
+            // Haut, bas et droite restent dans la page : seule la gauche rend la main à la sidebar,
+            // dont c'est à l'utilisateur de choisir la catégorie.
             Column(
-                Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(22.dp),
+                Modifier
+                    .fillMaxSize()
+                    .focusProperties { exit = { if (it == FocusDirection.Left) FocusRequester.Default else FocusRequester.Cancel } }
+                    .focusGroup()
+                    .verticalScroll(rememberScrollState())
+                    .padding(22.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
             Text(categories[category].second, color = Ink, fontSize = 28.sp, fontWeight = HeadingWeight)
