@@ -7,6 +7,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -408,6 +409,8 @@ private fun LiveChannelList(
         } else {
             LazyColumn(
                 state = listState,
+                // Marge pour que la bordure et la lueur de la ligne focalisée (agrandie) ne soient pas coupées.
+                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 items(entries, key = MediaEntry::key) { entry ->
