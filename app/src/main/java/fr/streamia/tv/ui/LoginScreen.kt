@@ -11,6 +11,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -279,9 +280,15 @@ private fun PlaylistManager(
             }
         }
 
-        LazyColumn(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        // Marge de contenu : la liste découpe ses éléments, donc la bordure et la lueur de la ligne
+        // focalisée (agrandie) seraient coupées en haut et à droite, et chevaucheraient « Modifier ».
+        LazyColumn(
+            Modifier.weight(1f).fillMaxWidth(),
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
             items(profiles, key = PlaylistProfile::id) { profile ->
-                Row(Modifier.fillMaxWidth().height(72.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(Modifier.fillMaxWidth().height(72.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                     FocusableSurface(onClick = { onOpenProfile(profile.id) }, enabled = !busy, modifier = Modifier.weight(1f).fillMaxHeight()) {
                         Column(Modifier.padding(horizontal = 17.dp)) {
                             Text(profile.name, color = Ink, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
