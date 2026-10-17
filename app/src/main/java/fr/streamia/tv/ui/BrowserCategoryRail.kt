@@ -6,6 +6,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -140,6 +141,9 @@ internal fun CategoryRail(
         }
         LazyColumn(
             state = listState,
+            // La liste découpe son contenu : sans marge, la bordure et la lueur de l'élément
+            // focalisé (agrandi) sont coupées en haut (« Tout ») et sur les côtés.
+            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             items(categories, key = MediaCategory::key) { category ->
