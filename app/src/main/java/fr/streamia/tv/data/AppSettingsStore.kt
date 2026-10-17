@@ -67,14 +67,14 @@ data class AppSettings(
     val playerNetwork: PlayerNetworkMode = PlayerNetworkMode.Classic,
     val displayModeSwitch: DisplayModeSwitch = DisplayModeSwitch.Vod,
     /** Mode tunnel vidéo (voir StreamiaPlayerFactory) : désactivé par défaut, mal géré par certains boîtiers. */
-    val tunnelingEnabled: Boolean = false,
+    val tunnelingEnabled: Boolean = true,
     val liveStreamFormat: LiveStreamFormat = LiveStreamFormat.Auto,
     val liveChannelSortOrder: LiveChannelSortOrder = LiveChannelSortOrder.Provider,
     val vodSortOrder: VodSortOrder = VodSortOrder.Provider,
     val epgTimeOffsetHours: Int = 0,
     val autoPlayNextEpisode: Boolean = true,
     /** Direct : bascule automatique sur une autre version de la chaîne quand elle coupe. */
-    val liveVersionFailover: Boolean = true,
+    val liveVersionFailover: Boolean = false,
     val subtitleSizeScale: Float = 1.0f,
     val subtitleBackgroundEnabled: Boolean = true,
     /** Un code est enregistré (voir [AppSettingsStore.setParentalPin]) et le verrouillage est actif. */
@@ -139,7 +139,7 @@ data class AppSettings(
         val VOD_SEEK_STEPS_SECONDS = listOf(10, 30, 60)
         val EPG_TIME_OFFSETS_HOURS = listOf(-3, -2, -1, 0, 1, 2, 3)
         val SUBTITLE_SIZE_SCALES = listOf(0.75f, 1.0f, 1.25f, 1.5f)
-        const val DEFAULT_LIVE_PREVIEW_DELAY_MS = 250
+        const val DEFAULT_LIVE_PREVIEW_DELAY_MS = 0
         const val DEFAULT_VOD_SEEK_STEP_SECONDS = 10
 
         private fun nextValue(values: List<Int>, current: Int): Int {
@@ -181,7 +181,7 @@ class AppSettingsStore(context: Context) {
         displayModeSwitch = runCatching {
             DisplayModeSwitch.valueOf(preferences.getString(KEY_DISPLAY_MODE_SWITCH, null)!!)
         }.getOrDefault(DisplayModeSwitch.Vod),
-        tunnelingEnabled = preferences.getBoolean(KEY_TUNNELING_ENABLED, false),
+        tunnelingEnabled = preferences.getBoolean(KEY_TUNNELING_ENABLED, true),
         liveStreamFormat = runCatching {
             LiveStreamFormat.valueOf(
                 preferences.getString(KEY_LIVE_STREAM_FORMAT, LiveStreamFormat.Auto.name)
@@ -202,7 +202,7 @@ class AppSettingsStore(context: Context) {
         epgTimeOffsetHours = preferences.getInt(KEY_EPG_TIME_OFFSET_HOURS, 0)
             .takeIf { it in AppSettings.EPG_TIME_OFFSETS_HOURS } ?: 0,
         autoPlayNextEpisode = preferences.getBoolean(KEY_AUTO_PLAY_NEXT_EPISODE, true),
-        liveVersionFailover = preferences.getBoolean(KEY_LIVE_VERSION_FAILOVER, true),
+        liveVersionFailover = preferences.getBoolean(KEY_LIVE_VERSION_FAILOVER, false),
         subtitleSizeScale = preferences.getFloat(KEY_SUBTITLE_SIZE_SCALE, 1.0f)
             .takeIf { it in AppSettings.SUBTITLE_SIZE_SCALES } ?: 1.0f,
         subtitleBackgroundEnabled = preferences.getBoolean(KEY_SUBTITLE_BACKGROUND_ENABLED, true),
