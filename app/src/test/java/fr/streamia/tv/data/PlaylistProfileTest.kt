@@ -24,7 +24,7 @@ class PlaylistProfileTest {
 
     @Test
     fun `catalog refresh follows the chosen interval`() {
-        val now = 100_000_000L
+        val now = 100L * 24L * 60L * 60L * 1000L
         val profile = PlaylistProfile(
             id = "xtream",
             name = "TV",

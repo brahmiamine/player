@@ -487,7 +487,6 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onCyclePlayerNetwork = viewModel::cyclePlayerNetwork,
                     onCycleDisplayModeSwitch = viewModel::cycleDisplayModeSwitch,
                     onToggleTunneling = viewModel::toggleTunneling,
-                    onToggleLaunchOnBoot = viewModel::toggleLaunchOnBoot,
                     onCycleCatalogRefresh = viewModel::cycleCatalogRefresh,
                     onCycleLiveStreamFormat = viewModel::cycleLiveStreamFormat,
                     onCycleLiveChannelSortOrder = viewModel::cycleLiveChannelSortOrder,
