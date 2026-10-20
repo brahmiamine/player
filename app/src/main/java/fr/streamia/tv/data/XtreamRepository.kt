@@ -106,15 +106,15 @@ class XtreamRepository private constructor(context: Context) {
         val rows = mutableListOf<LoadingRow>()
         val hour = 3_600_000L
 
-        // Catalogue : relu au plus une fois par jour pour un compte Xtream.
+        // Catalogue : fréquence choisie dans Paramètres.
         if (profile != null) {
             val last = profile.lastRefreshAt.takeIf { it > 0L }
-            val every = maxOf(profile.autoRefreshHours.coerceIn(1, 168), if (profile.kind == PlaylistKind.Xtream) 24 else 1)
-            val due = profile.isCatalogRefreshDue(now)
+            val every = settings.catalogRefresh.hours
+            val due = profile.isCatalogRefreshDue(settings.catalogRefresh, now)
             rows += LoadingRow(
                 id = "catalog", group = LoadingGroup.Catalog, name = "Catalogue",
                 subtitle = if (last == null) "Chargement incomplet ou jamais terminé" else "Direct · Films · Séries",
-                frequency = "$every h minimum", lastAtMillis = last, nextAtMillis = last?.plus(every * hour),
+                frequency = "toutes les $every h", lastAtMillis = last, nextAtMillis = last?.plus(every * hour),
                 state = if (due) LoadingState.Stale else LoadingState.Fresh, action = LoadingAction.Refresh,
             )
             val epg = epgCache.metadata(profile.id)
@@ -318,7 +318,7 @@ class XtreamRepository private constructor(context: Context) {
         if (credentials != null && cached != null) {
             credentialsStore.save(credentials)
             // Catalogue expiré : servi tout de suite depuis le cache, puis actualisé en arrière-plan.
-            val source = if (profile.shouldAutoRefresh()) {
+            val source = if (profile.shouldAutoRefresh(appSettingsStore.load().catalogRefresh)) {
                 CatalogSource.Cache
             } else {
                 CatalogSource.Local
@@ -775,7 +775,7 @@ class XtreamRepository private constructor(context: Context) {
 
     private suspend fun openM3uProfile(profile: PlaylistProfile): LoadedCatalog {
         if (profile.isRemoteM3u) {
-            if (profile.shouldAutoRefresh() || cache.load(profile.id) == null) {
+            if (profile.shouldAutoRefresh(appSettingsStore.load().catalogRefresh) || cache.load(profile.id) == null) {
                 return try {
                     importM3uUrl(
                         url = profile.m3uUrl!!,

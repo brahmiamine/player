@@ -42,6 +42,7 @@ import fr.streamia.tv.data.AiProvider
 import fr.streamia.tv.data.AiUsage
 import fr.streamia.tv.data.AppSettings
 import fr.streamia.tv.data.BufferMode
+import fr.streamia.tv.data.CatalogRefreshInterval
 import fr.streamia.tv.data.PlayerNetworkMode
 import fr.streamia.tv.data.DisplayModeSwitch
 import fr.streamia.tv.data.HomeBlock
@@ -87,6 +88,7 @@ fun SettingsScreen(
     onCycleDisplayModeSwitch: () -> Unit = {},
     onToggleTunneling: () -> Unit = {},
     onToggleLaunchOnBoot: () -> Unit = {},
+    onCycleCatalogRefresh: () -> Unit = {},
     onCycleLiveStreamFormat: () -> Unit,
     onCycleLiveChannelSortOrder: () -> Unit,
     onCycleVodSortOrder: () -> Unit,
@@ -569,6 +571,20 @@ fun SettingsScreen(
                                 "Choisissez l'ordre des contenus VOD.",
                                 values.map { vodSortLabel(it) to (it == settings.vodSortOrder) },
                             ) { target -> cycleTo(values, settings.vodSortOrder, target, onCycleVodSortOrder) }
+                        },
+                        modifier = Modifier.weight(1f),
+                    )
+                    SettingsTile(
+                        glyph = StreamiaIconGlyph.Settings,
+                        title = "Actualisation du catalogue",
+                        subtitle = catalogRefreshLabel(settings.catalogRefresh),
+                        onClick = {
+                            val values = CatalogRefreshInterval.entries.toList()
+                            openChoices(
+                                "Actualisation du catalogue",
+                                "Fréquence de mise à jour des chaînes, films et séries. Une liste plus rare charge plus vite au lancement.",
+                                values.map { catalogRefreshLabel(it) to (it == settings.catalogRefresh) },
+                            ) { target -> cycleTo(values, settings.catalogRefresh, target, onCycleCatalogRefresh) }
                         },
                         modifier = Modifier.weight(1f),
                     )

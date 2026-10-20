@@ -1,6 +1,7 @@
 package fr.streamia.tv.ui
 
 import fr.streamia.tv.data.BufferMode
+import fr.streamia.tv.data.CatalogRefreshInterval
 import fr.streamia.tv.data.PlayerNetworkMode
 import fr.streamia.tv.data.DisplayModeSwitch
 import fr.streamia.tv.data.LiveChannelSortOrder
@@ -76,6 +77,12 @@ internal fun liveSortLabel(value: LiveChannelSortOrder): String = when (value) {
     LiveChannelSortOrder.Provider -> "Ordre du fournisseur"
     LiveChannelSortOrder.Number -> "Par numéro"
     LiveChannelSortOrder.Alphabetical -> "Alphabétique"
+}
+
+internal fun catalogRefreshLabel(value: CatalogRefreshInterval): String = when (value) {
+    CatalogRefreshInterval.Daily -> "Chaque jour (24 h)"
+    CatalogRefreshInterval.Weekly -> "Chaque semaine (7 j)"
+    CatalogRefreshInterval.Monthly -> "Chaque mois (30 j)"
 }
 
 internal fun vodSortLabel(value: VodSortOrder): String = when (value) {

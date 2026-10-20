@@ -962,6 +962,10 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
 
     suspend fun loadAiModels(provider: AiProvider): Result<List<String>> = repository.aiModels(provider)
 
+    fun cycleCatalogRefresh() {
+        updateAppSettings { it.copy(catalogRefresh = it.nextCatalogRefresh()) }
+    }
+
     fun toggleLaunchOnBoot() {
         updateAppSettings { it.copy(launchOnBoot = !it.launchOnBoot) }
     }

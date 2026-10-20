@@ -19,11 +19,11 @@ class PlaylistProfileTest {
             lastRefreshAt = now - 5L * 60L * 60L * 1000L,
         )
 
-        assertFalse(profile.shouldAutoRefresh(now))
+        assertFalse(profile.shouldAutoRefresh(CatalogRefreshInterval.Daily, now))
     }
 
     @Test
-    fun `Xtream catalog refreshes at most once a day even with a shorter interval`() {
+    fun `catalog refresh follows the chosen interval`() {
         val now = 100_000_000L
         val profile = PlaylistProfile(
             id = "xtream",
@@ -33,8 +33,11 @@ class PlaylistProfileTest {
             lastRefreshAt = now - 6L * 60L * 60L * 1000L,
         )
 
-        assertFalse(profile.shouldAutoRefresh(now))
-        assertTrue(profile.copy(lastRefreshAt = now - 24L * 60L * 60L * 1000L).shouldAutoRefresh(now))
+        assertFalse(profile.shouldAutoRefresh(CatalogRefreshInterval.Daily, now))
+        assertTrue(profile.copy(lastRefreshAt = now - 24L * 60L * 60L * 1000L).shouldAutoRefresh(CatalogRefreshInterval.Daily, now))
+        assertFalse(profile.copy(lastRefreshAt = now - 6L * 24L * 60L * 60L * 1000L).shouldAutoRefresh(CatalogRefreshInterval.Weekly, now))
+        assertTrue(profile.copy(lastRefreshAt = now - 7L * 24L * 60L * 60L * 1000L).shouldAutoRefresh(CatalogRefreshInterval.Weekly, now))
+        assertFalse(profile.copy(lastRefreshAt = now - 29L * 24L * 60L * 60L * 1000L).shouldAutoRefresh(CatalogRefreshInterval.Monthly, now))
     }
 
     @Test
@@ -47,7 +50,7 @@ class PlaylistProfileTest {
             lastRefreshAt = 0L,
         )
 
-        assertTrue(profile.shouldAutoRefresh(1_000L))
+        assertTrue(profile.shouldAutoRefresh(CatalogRefreshInterval.Daily, 1_000L))
     }
 
     @Test
@@ -61,6 +64,6 @@ class PlaylistProfileTest {
             lastRefreshAt = 1L,
         )
 
-        assertFalse(profile.shouldAutoRefresh(10_000_000L))
+        assertFalse(profile.shouldAutoRefresh(CatalogRefreshInterval.Daily, 10_000_000L))
     }
 }
