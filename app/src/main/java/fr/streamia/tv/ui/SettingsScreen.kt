@@ -86,6 +86,7 @@ fun SettingsScreen(
     onCyclePlayerNetwork: () -> Unit = {},
     onCycleDisplayModeSwitch: () -> Unit = {},
     onToggleTunneling: () -> Unit = {},
+    onToggleLaunchOnBoot: () -> Unit = {},
     onCycleLiveStreamFormat: () -> Unit,
     onCycleLiveChannelSortOrder: () -> Unit,
     onCycleVodSortOrder: () -> Unit,
@@ -529,6 +530,14 @@ fun SettingsScreen(
                         onClick = onToggleLiveVersionFailover,
                         modifier = Modifier,
                         toggle = settings.liveVersionFailover,
+                    )
+                    SettingsTile(
+                        glyph = StreamiaIconGlyph.Settings,
+                        title = "Lancer au démarrage de la TV",
+                        subtitle = if (settings.launchOnBoot) "Activé" else "Désactivé",
+                        onClick = onToggleLaunchOnBoot,
+                        modifier = Modifier,
+                        toggle = settings.launchOnBoot,
                     )
                 }
             }

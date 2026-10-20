@@ -75,6 +75,8 @@ data class AppSettings(
     val autoPlayNextEpisode: Boolean = true,
     /** Direct : bascule automatique sur une autre version de la chaîne quand elle coupe. */
     val liveVersionFailover: Boolean = false,
+    /** Ouvre l'app au démarrage de l'appareil (voir BootReceiver). */
+    val launchOnBoot: Boolean = false,
     val subtitleSizeScale: Float = 1.0f,
     val subtitleBackgroundEnabled: Boolean = true,
     /** Un code est enregistré (voir [AppSettingsStore.setParentalPin]) et le verrouillage est actif. */
@@ -203,6 +205,7 @@ class AppSettingsStore(context: Context) {
             .takeIf { it in AppSettings.EPG_TIME_OFFSETS_HOURS } ?: 0,
         autoPlayNextEpisode = preferences.getBoolean(KEY_AUTO_PLAY_NEXT_EPISODE, true),
         liveVersionFailover = preferences.getBoolean(KEY_LIVE_VERSION_FAILOVER, false),
+        launchOnBoot = preferences.getBoolean(KEY_LAUNCH_ON_BOOT, false),
         subtitleSizeScale = preferences.getFloat(KEY_SUBTITLE_SIZE_SCALE, 1.0f)
             .takeIf { it in AppSettings.SUBTITLE_SIZE_SCALES } ?: 1.0f,
         subtitleBackgroundEnabled = preferences.getBoolean(KEY_SUBTITLE_BACKGROUND_ENABLED, true),
@@ -253,6 +256,7 @@ class AppSettingsStore(context: Context) {
             .putInt(KEY_EPG_TIME_OFFSET_HOURS, settings.epgTimeOffsetHours)
             .putBoolean(KEY_AUTO_PLAY_NEXT_EPISODE, settings.autoPlayNextEpisode)
             .putBoolean(KEY_LIVE_VERSION_FAILOVER, settings.liveVersionFailover)
+            .putBoolean(KEY_LAUNCH_ON_BOOT, settings.launchOnBoot)
             .putFloat(KEY_SUBTITLE_SIZE_SCALE, settings.subtitleSizeScale)
             .putBoolean(KEY_SUBTITLE_BACKGROUND_ENABLED, settings.subtitleBackgroundEnabled)
             .putBoolean(KEY_PARENTAL_ENABLED, settings.parentalControlEnabled)
@@ -360,6 +364,7 @@ class AppSettingsStore(context: Context) {
         const val KEY_EPG_TIME_OFFSET_HOURS = "epg_time_offset_hours"
         const val KEY_AUTO_PLAY_NEXT_EPISODE = "auto_play_next_episode"
         const val KEY_LIVE_VERSION_FAILOVER = "live_version_failover"
+        const val KEY_LAUNCH_ON_BOOT = "launch_on_boot"
         const val KEY_SUBTITLE_SIZE_SCALE = "subtitle_size_scale"
         const val KEY_SUBTITLE_BACKGROUND_ENABLED = "subtitle_background_enabled"
         const val KEY_PARENTAL_ENABLED = "parental_control_enabled"

@@ -15,6 +15,10 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- Lancement au démarrage de la TV (Paramètres). SYSTEM_ALERT_WINDOW : exigé dès Android 10 pour ouvrir une activité depuis l'arrière-plan. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
     <!-- Android TV et téléphones/tablettes : l'interface (télécommande ou tactile) est choisie au lancement. -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
@@ -64,6 +68,14 @@
             android:name=".player.PlaybackForegroundService"
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
+
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
 
         <!-- Résultat de l'installation de mise à jour (session PackageInstaller, voir UpdateInstaller). -->
         <receiver

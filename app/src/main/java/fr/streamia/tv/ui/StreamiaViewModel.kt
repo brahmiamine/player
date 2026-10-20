@@ -962,6 +962,10 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
 
     suspend fun loadAiModels(provider: AiProvider): Result<List<String>> = repository.aiModels(provider)
 
+    fun toggleLaunchOnBoot() {
+        updateAppSettings { it.copy(launchOnBoot = !it.launchOnBoot) }
+    }
+
     fun toggleTunneling() {
         updateAppSettings { it.copy(tunnelingEnabled = !it.tunnelingEnabled) }
     }
