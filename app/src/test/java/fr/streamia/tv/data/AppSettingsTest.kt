@@ -1,6 +1,8 @@
 package fr.streamia.tv.data
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AppSettingsTest {
@@ -149,5 +151,36 @@ class AppSettingsTest {
         assertEquals(listOf(10, 30, 60), observed)
         assertEquals(10, settings.vodSeekStepSeconds)
         assertEquals(10_000L, settings.vodSeekStepMs)
+    }
+
+    @Test
+    fun `live history is cleared daily by default and the choice cycles`() {
+        var settings = AppSettings()
+        val observed = buildList {
+            repeat(CatalogRefreshInterval.entries.size) {
+                add(settings.liveHistoryAutoClear)
+                settings = settings.copy(liveHistoryAutoClear = settings.nextLiveHistoryAutoClear())
+            }
+        }
+
+        assertEquals(
+            listOf(CatalogRefreshInterval.Daily, CatalogRefreshInterval.Weekly, CatalogRefreshInterval.Monthly),
+            observed,
+        )
+        assertEquals(CatalogRefreshInterval.Daily, settings.liveHistoryAutoClear)
+    }
+
+    @Test
+    fun `live history clear is due once the interval has elapsed`() {
+        val hour = 3_600_000L
+        val last = 1_000_000L
+
+        assertFalse(isLiveHistoryClearDue(0L, last + 100 * 24 * hour, CatalogRefreshInterval.Daily))
+        assertFalse(isLiveHistoryClearDue(last, last + 23 * hour, CatalogRefreshInterval.Daily))
+        assertTrue(isLiveHistoryClearDue(last, last + 24 * hour, CatalogRefreshInterval.Daily))
+        assertFalse(isLiveHistoryClearDue(last, last + 6 * 24 * hour, CatalogRefreshInterval.Weekly))
+        assertTrue(isLiveHistoryClearDue(last, last + 7 * 24 * hour, CatalogRefreshInterval.Weekly))
+        assertFalse(isLiveHistoryClearDue(last, last + 29 * 24 * hour, CatalogRefreshInterval.Monthly))
+        assertTrue(isLiveHistoryClearDue(last, last + 30 * 24 * hour, CatalogRefreshInterval.Monthly))
     }
 }

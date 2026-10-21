@@ -591,6 +591,13 @@ class XtreamRepository private constructor(context: Context) {
 
     fun resumePosition(profileId: String, entryKey: String): Long = libraryStore.resumePosition(profileId, entryKey)
     fun clearHistory(profileId: String, type: MediaType? = null) = libraryStore.clearHistory(profileId, type)
+
+    /** Efface l'historique Direct de toutes les listes quand l'échéance du réglage est passée ; vrai si fait. */
+    fun clearLiveHistoryIfDue(): Boolean {
+        if (!appSettingsStore.consumeLiveHistoryClearDue()) return false
+        profiles().forEach { libraryStore.clearHistory(it.id, MediaType.Live) }
+        return true
+    }
     fun setCategoryOrder(profileId: String, type: MediaType, categoryKeys: List<String>) =
         libraryStore.setCategoryOrder(profileId, type, categoryKeys)
     fun moveEntries(profileId: String, entryKeys: Set<String>, targetCategoryId: String) =

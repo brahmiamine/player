@@ -120,7 +120,10 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         jankReporter?.setTracking(true)
         // Retour du réglage « Installer des applis inconnues » : l'installation de la mise à jour reprend.
-        if (::viewModel.isInitialized) viewModel.resumePendingUpdateInstall()
+        if (::viewModel.isInitialized) {
+            viewModel.resumePendingUpdateInstall()
+            viewModel.clearLiveHistoryIfDue()
+        }
     }
 
     override fun onTrimMemory(level: Int) {

@@ -177,6 +177,14 @@ internal class LibraryController(
         }
     }
 
+    /** Effacement automatique de l'historique Direct (réglage jour / semaine / mois), vérifié à chaque retour dans l'app. */
+    fun clearLiveHistoryIfDue() {
+        viewModelScope.launch {
+            val cleared = libraryMutation.withLock { withContext(Dispatchers.IO) { repository.clearLiveHistoryIfDue() } }
+            if (cleared) refreshLibraryPresentation()
+        }
+    }
+
     fun setCategoryOrder(type: MediaType, categoryKeys: List<String>) {
         val profileId = _uiState.value.activeProfileId ?: return
         viewModelScope.launch(Dispatchers.IO) {

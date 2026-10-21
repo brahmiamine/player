@@ -89,6 +89,7 @@ fun SettingsScreen(
     onToggleTunneling: () -> Unit = {},
     onToggleLaunchOnBoot: () -> Unit = {},
     onCycleCatalogRefresh: () -> Unit = {},
+    onCycleLiveHistoryAutoClear: () -> Unit = {},
     onCycleLiveStreamFormat: () -> Unit,
     onCycleLiveChannelSortOrder: () -> Unit,
     onCycleVodSortOrder: () -> Unit,
@@ -657,6 +658,20 @@ fun SettingsScreen(
                 SettingsSectionTitle("Historique")
                 SettingsGroup {
                     val allHistoryCount = liveHistoryCount + movieHistoryCount + seriesHistoryCount
+                    SettingsTile(
+                        StreamiaIconGlyph.Delete,
+                        "Effacement auto. de l'historique Direct",
+                        catalogRefreshLabel(settings.liveHistoryAutoClear),
+                        {
+                            val values = CatalogRefreshInterval.entries.toList()
+                            openChoices(
+                                "Effacement auto. de l'historique Direct",
+                                "Les chaînes regardées sont retirées de l'historique à cette fréquence.",
+                                values.map { catalogRefreshLabel(it) to (it == settings.liveHistoryAutoClear) },
+                            ) { target -> cycleTo(values, settings.liveHistoryAutoClear, target, onCycleLiveHistoryAutoClear) }
+                        },
+                        Modifier.weight(1f),
+                    )
                     SettingsTile(
                         StreamiaIconGlyph.Delete,
                         "Historique Direct",

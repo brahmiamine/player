@@ -17,7 +17,7 @@ enum class DisplayModeSwitch { Off, Vod, All }
 enum class LiveStreamFormat { Auto, Ts, Hls }
 enum class LiveChannelSortOrder { Provider, Number, Alphabetical }
 enum class VodSortOrder { Provider, Alphabetical, RecentlyAdded, Rating }
-/** Fréquence de relecture du catalogue (chaînes, films, séries) chez le fournisseur. */
+/** Fréquence jour / semaine / mois : relecture du catalogue chez le fournisseur, effacement automatique de l'historique Direct. */
 enum class CatalogRefreshInterval(val hours: Int) { Daily(24), Weekly(24 * 7), Monthly(24 * 30) }
 enum class PrayerMethod { MuslimWorldLeague, France, Tunisia, Egypt, UmmAlQura, Karachi, NorthAmerica }
 
@@ -80,6 +80,8 @@ data class AppSettings(
     /** Ouvre l'app au démarrage de l'appareil (voir BootReceiver). */
     val launchOnBoot: Boolean = false,
     val catalogRefresh: CatalogRefreshInterval = CatalogRefreshInterval.Weekly,
+    /** Historique des chaînes regardées (Direct) effacé tous les jours / semaines / mois. */
+    val liveHistoryAutoClear: CatalogRefreshInterval = CatalogRefreshInterval.Daily,
     val subtitleSizeScale: Float = 1.0f,
     val subtitleBackgroundEnabled: Boolean = true,
     /** Un code est enregistré (voir [AppSettingsStore.setParentalPin]) et le verrouillage est actif. */
@@ -115,6 +117,9 @@ data class AppSettings(
 
     fun nextCatalogRefresh(): CatalogRefreshInterval =
         CatalogRefreshInterval.entries[(catalogRefresh.ordinal + 1) % CatalogRefreshInterval.entries.size]
+
+    fun nextLiveHistoryAutoClear(): CatalogRefreshInterval =
+        CatalogRefreshInterval.entries[(liveHistoryAutoClear.ordinal + 1) % CatalogRefreshInterval.entries.size]
 
     fun nextBufferMode(): BufferMode =
         BufferMode.entries[(bufferMode.ordinal + 1) % BufferMode.entries.size]
@@ -215,6 +220,9 @@ class AppSettingsStore(context: Context) {
         catalogRefresh = runCatching {
             CatalogRefreshInterval.valueOf(preferences.getString(KEY_CATALOG_REFRESH, null)!!)
         }.getOrDefault(CatalogRefreshInterval.Weekly),
+        liveHistoryAutoClear = runCatching {
+            CatalogRefreshInterval.valueOf(preferences.getString(KEY_LIVE_HISTORY_AUTO_CLEAR, null)!!)
+        }.getOrDefault(CatalogRefreshInterval.Daily),
         subtitleSizeScale = preferences.getFloat(KEY_SUBTITLE_SIZE_SCALE, 1.0f)
             .takeIf { it in AppSettings.SUBTITLE_SIZE_SCALES } ?: 1.0f,
         subtitleBackgroundEnabled = preferences.getBoolean(KEY_SUBTITLE_BACKGROUND_ENABLED, true),
@@ -267,6 +275,7 @@ class AppSettingsStore(context: Context) {
             .putBoolean(KEY_LIVE_VERSION_FAILOVER, settings.liveVersionFailover)
             .putBoolean(KEY_LAUNCH_ON_BOOT, settings.launchOnBoot)
             .putString(KEY_CATALOG_REFRESH, settings.catalogRefresh.name)
+            .putString(KEY_LIVE_HISTORY_AUTO_CLEAR, settings.liveHistoryAutoClear.name)
             .putFloat(KEY_SUBTITLE_SIZE_SCALE, settings.subtitleSizeScale)
             .putBoolean(KEY_SUBTITLE_BACKGROUND_ENABLED, settings.subtitleBackgroundEnabled)
             .putBoolean(KEY_PARENTAL_ENABLED, settings.parentalControlEnabled)
@@ -354,6 +363,18 @@ class AppSettingsStore(context: Context) {
         return correct
     }
 
+    /**
+     * Vrai (et l'échéance repart d'aujourd'hui) quand l'historique Direct doit être effacé selon
+     * [AppSettings.liveHistoryAutoClear]. Le tout premier appel, ou une horloge revenue en arrière,
+     * ne fait que lancer le délai : rien n'est effacé d'emblée.
+     */
+    fun consumeLiveHistoryClearDue(nowMillis: Long = System.currentTimeMillis()): Boolean {
+        val last = preferences.getLong(KEY_LIVE_HISTORY_CLEARED_AT, 0L)
+        val due = isLiveHistoryClearDue(last, nowMillis, load().liveHistoryAutoClear)
+        if (due || last == 0L || nowMillis < last) preferences.edit().putLong(KEY_LIVE_HISTORY_CLEARED_AT, nowMillis).apply()
+        return due
+    }
+
     /** Temps restant avant de pouvoir retenter un code, 0 si aucun blocage. */
     fun parentalPinLockRemainingMillis(nowMillis: Long = System.currentTimeMillis()): Long =
         (preferences.getLong(KEY_PARENTAL_PIN_LOCKED_UNTIL, 0L) - nowMillis).coerceAtLeast(0L)
@@ -376,7 +397,9 @@ class AppSettingsStore(context: Context) {
         const val KEY_LIVE_VERSION_FAILOVER = "live_version_failover"
         const val KEY_LAUNCH_ON_BOOT = "launch_on_boot"
         const val KEY_CATALOG_REFRESH = "catalog_refresh"
-        const val KEY_SUBTITLE_SIZE_SCALE = "subtitle_size_scale"
+        const val KEY_LIVE_HISTORY_AUTO_CLEAR = "live_history_auto_clear"
+        const val KEY_LIVE_HISTORY_CLEARED_AT = "live_history_cleared_at"
+        const val KEY_SUBTITLE_SIZE_SCALE ="subtitle_size_scale"
         const val KEY_SUBTITLE_BACKGROUND_ENABLED = "subtitle_background_enabled"
         const val KEY_PARENTAL_ENABLED = "parental_control_enabled"
         const val KEY_DISABLED_HOME_BLOCKS = "disabled_home_blocks"
@@ -399,6 +422,10 @@ class AppSettingsStore(context: Context) {
         const val PIN_ALGORITHM_PBKDF2 = "pbkdf2-sha256"
     }
 }
+
+/** Dernier effacement connu ([lastClearedAt] > 0) plus ancien que l'intervalle choisi. */
+internal fun isLiveHistoryClearDue(lastClearedAt: Long, nowMillis: Long, interval: CatalogRefreshInterval): Boolean =
+    lastClearedAt > 0L && nowMillis - lastClearedAt >= interval.hours * 3_600_000L
 
 /**
  * Hachage salé d'un code parental, extrait en fonction pure (plutôt que méthode privée de
@@ -459,6 +486,7 @@ fun AppSettings.toBackupJson(): JSONObject = JSONObject().apply {
     put("epgTimeOffsetHours", epgTimeOffsetHours)
     put("autoPlayNextEpisode", autoPlayNextEpisode)
     put("liveVersionFailover", liveVersionFailover)
+    put("liveHistoryAutoClear", liveHistoryAutoClear.name)
     put("subtitleSizeScale", subtitleSizeScale.toDouble())
     put("subtitleBackgroundEnabled", subtitleBackgroundEnabled)
     put("disabledHomeBlocks", JSONArray(disabledHomeBlocks.map { it.name }))
@@ -483,6 +511,10 @@ fun appSettingsFromBackupJson(json: JSONObject, fallback: AppSettings): AppSetti
         .takeIf { it in AppSettings.EPG_TIME_OFFSETS_HOURS } ?: fallback.epgTimeOffsetHours,
     autoPlayNextEpisode = json.optBoolean("autoPlayNextEpisode", fallback.autoPlayNextEpisode),
     liveVersionFailover = json.optBoolean("liveVersionFailover", fallback.liveVersionFailover),
+    // Propres à l'appareil, non exportés : une restauration n'y touche pas (sinon retour aux valeurs par défaut).
+    catalogRefresh = fallback.catalogRefresh,
+    launchOnBoot = fallback.launchOnBoot,
+    liveHistoryAutoClear = runCatching { CatalogRefreshInterval.valueOf(json.getString("liveHistoryAutoClear")) }.getOrDefault(fallback.liveHistoryAutoClear),
     subtitleSizeScale = json.optDouble("subtitleSizeScale", fallback.subtitleSizeScale.toDouble()).toFloat()
         .takeIf { it in AppSettings.SUBTITLE_SIZE_SCALES } ?: fallback.subtitleSizeScale,
     subtitleBackgroundEnabled = json.optBoolean("subtitleBackgroundEnabled", fallback.subtitleBackgroundEnabled),

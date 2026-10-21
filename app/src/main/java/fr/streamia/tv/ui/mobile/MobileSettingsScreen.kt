@@ -37,6 +37,7 @@ import fr.streamia.tv.data.HomeBlock
 import fr.streamia.tv.ui.StreamiaIcon
 import fr.streamia.tv.ui.StreamiaIconGlyph
 import fr.streamia.tv.ui.bufferModeLabel
+import fr.streamia.tv.ui.catalogRefreshLabel
 import fr.streamia.tv.ui.playerNetworkLabel
 import fr.streamia.tv.ui.displayModeSwitchLabel
 import fr.streamia.tv.ui.epgOffsetLabel
@@ -76,6 +77,8 @@ fun MobileSettingsScreen(
     onCyclePlayerNetwork: () -> Unit = {},
     onCycleDisplayModeSwitch: () -> Unit,
     onToggleTunneling: () -> Unit,
+    onCycleCatalogRefresh: () -> Unit,
+    onCycleLiveHistoryAutoClear: () -> Unit,
     onCycleLiveStreamFormat: () -> Unit,
     onCycleLiveChannelSortOrder: () -> Unit,
     onCycleVodSortOrder: () -> Unit,
@@ -154,6 +157,7 @@ fun MobileSettingsScreen(
                     SettingsToggle("Mode tunnel 4K HDR", null, settings.tunnelingEnabled, onToggleTunneling)
                 }
                 Group("Catalogue") {
+                    SettingsValue("Actualisation du catalogue", catalogRefreshLabel(settings.catalogRefresh), onCycleCatalogRefresh)
                     SettingsValue("Tri des chaînes", liveSortLabel(settings.liveChannelSortOrder), onCycleLiveChannelSortOrder)
                     SettingsValue("Tri des films et séries", vodSortLabel(settings.vodSortOrder), onCycleVodSortOrder)
                     SettingsValue("Décalage horaire du guide", epgOffsetLabel(settings.epgTimeOffsetHours), onCycleEpgTimeOffset)
@@ -163,6 +167,7 @@ fun MobileSettingsScreen(
                     SettingsToggle("Fond des sous-titres", null, settings.subtitleBackgroundEnabled, onToggleSubtitleBackground)
                 }
                 Group("Historique") {
+                    SettingsValue("Effacement auto. de l'historique Direct", catalogRefreshLabel(settings.liveHistoryAutoClear), onCycleLiveHistoryAutoClear)
                     SettingsLink("Effacer l'historique Direct", "$liveHistoryCount élément(s)") { confirmClear = "l'historique Direct" to onClearLiveHistory }
                     SettingsLink("Effacer l'historique Films", "$movieHistoryCount élément(s)") { confirmClear = "l'historique Films" to onClearMovieHistory }
                     SettingsLink("Effacer l'historique Séries", "$seriesHistoryCount élément(s)") { confirmClear = "l'historique Séries" to onClearSeriesHistory }

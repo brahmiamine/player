@@ -966,6 +966,12 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         updateAppSettings { it.copy(catalogRefresh = it.nextCatalogRefresh()) }
     }
 
+    fun cycleLiveHistoryAutoClear() {
+        updateAppSettings { it.copy(liveHistoryAutoClear = it.nextLiveHistoryAutoClear()) }
+    }
+
+    fun clearLiveHistoryIfDue() = library.clearLiveHistoryIfDue()
+
     fun toggleLaunchOnBoot() {
         updateAppSettings { it.copy(launchOnBoot = !it.launchOnBoot) }
     }

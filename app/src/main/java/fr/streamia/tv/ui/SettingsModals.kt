@@ -30,6 +30,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -43,6 +44,7 @@ import fr.streamia.tv.ui.theme.FocusBlueBright
 import fr.streamia.tv.ui.theme.HeadingWeight
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 // Fenêtres de choix et tuiles des Paramètres.
@@ -131,10 +133,32 @@ internal fun FocusTrap(content: @Composable () -> Unit) {
     Box(Modifier.fillMaxSize().modalFocusTrap()) { content() }
 }
 
-/** Piège de focus commun à tous les modals : le focus ne quitte jamais la couche tant qu'elle est ouverte. */
+/**
+ * Piège de focus commun à tous les modals : le focus ne quitte jamais la couche tant qu'elle est
+ * ouverte. `exit` n'empêche que les sorties par les flèches : si le focus est tombé derrière quand
+ * même (ouverture avant que le bouton ne soit posé, bouton retiré, souris/pointeur), il est
+ * ramené dans le modal — sur son premier élément — au lieu de rester sur la page cachée.
+ */
 @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
-internal fun Modifier.modalFocusTrap(): Modifier =
-    focusProperties { exit = { FocusRequester.Cancel } }.focusGroup()
+@Composable
+internal fun Modifier.modalFocusTrap(): Modifier {
+    val trap = remember { FocusRequester() }
+    var inside by remember { mutableStateOf(false) }
+    LaunchedEffect(inside) {
+        // Annulé dès que le focus est (re)dans le modal ou que celui-ci quitte la composition.
+        repeat(FOCUS_RECLAIM_ATTEMPTS) {
+            delay(FOCUS_RECLAIM_DELAY_MS)
+            if (inside || runCatching { trap.requestFocus() }.getOrDefault(false)) return@LaunchedEffect
+        }
+    }
+    return focusProperties { exit = { FocusRequester.Cancel } }
+        .focusRequester(trap)
+        .onFocusChanged { inside = it.hasFocus }
+        .focusGroup()
+}
+
+private const val FOCUS_RECLAIM_ATTEMPTS = 10
+private const val FOCUS_RECLAIM_DELAY_MS = 80L
 
 @Composable
 internal fun SettingsSectionTitle(title: String) {
