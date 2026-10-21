@@ -42,7 +42,6 @@ import fr.streamia.tv.ui.playerNetworkLabel
 import fr.streamia.tv.ui.displayModeSwitchLabel
 import fr.streamia.tv.ui.epgOffsetLabel
 import fr.streamia.tv.ui.formatExpiry
-import fr.streamia.tv.ui.catalogRefreshLabel
 import fr.streamia.tv.ui.liveSortLabel
 import fr.streamia.tv.ui.liveStreamFormatLabel
 import fr.streamia.tv.ui.previewDelayLabel
@@ -84,7 +83,6 @@ fun MobileSettingsScreen(
     onCycleLiveChannelSortOrder: () -> Unit,
     onCycleVodSortOrder: () -> Unit,
     onCycleEpgTimeOffset: () -> Unit,
-    onCycleCatalogRefresh: () -> Unit,
     onToggleAutoPlayNextEpisode: () -> Unit,
     onToggleLiveVersionFailover: () -> Unit,
     onCycleSubtitleSizeScale: () -> Unit,
@@ -162,7 +160,6 @@ fun MobileSettingsScreen(
                     SettingsValue("Actualisation du catalogue", catalogRefreshLabel(settings.catalogRefresh), onCycleCatalogRefresh)
                     SettingsValue("Tri des chaînes", liveSortLabel(settings.liveChannelSortOrder), onCycleLiveChannelSortOrder)
                     SettingsValue("Tri des films et séries", vodSortLabel(settings.vodSortOrder), onCycleVodSortOrder)
-                    SettingsValue("Actualisation du catalogue", catalogRefreshLabel(settings.catalogRefresh), onCycleCatalogRefresh)
                     SettingsValue("Décalage horaire du guide", epgOffsetLabel(settings.epgTimeOffsetHours), onCycleEpgTimeOffset)
                 }
                 Group("Sous-titres") {
