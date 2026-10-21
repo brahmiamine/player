@@ -317,7 +317,14 @@ fun SettingsScreen(
             Column(
                 Modifier
                     .fillMaxSize()
-                    .focusProperties { exit = { if (it == FocusDirection.Left) FocusRequester.Default else FocusRequester.Cancel } }
+                    // Seules les flèches sont bloquées : un requestFocus() passe aussi par `exit` (direction
+                    // Enter), et l'annuler laissait le focus sur la tuile derrière un modal ouvert.
+                    .focusProperties {
+                        exit = {
+                            if (it == FocusDirection.Up || it == FocusDirection.Down || it == FocusDirection.Right) FocusRequester.Cancel
+                            else FocusRequester.Default
+                        }
+                    }
                     .focusGroup()
                     .verticalScroll(rememberScrollState())
                     .padding(22.dp),

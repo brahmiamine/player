@@ -18,8 +18,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.focusGroup
-import androidx.compose.ui.focus.focusProperties
 import kotlinx.coroutines.delay
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -126,8 +124,7 @@ internal fun AiModelPickerModal(
     }
     Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.76f)).modalFocusTrap(), contentAlignment = Alignment.Center) {
         GlassSurface(modifier = Modifier.width(700.dp)) {
-            // Le focus ne sort pas de la fenêtre vers les Paramètres affichés derrière.
-            Column(Modifier.padding(26.dp).focusProperties { onExit = { cancelFocusChange() } }.focusGroup()) {
+            Column(Modifier.padding(26.dp)) {
                 AiProviderTitle("Modèle · ${provider.label}", provider)
                 Spacer(Modifier.height(8.dp))
                 when {
@@ -195,7 +192,7 @@ internal fun AiUsageModal(load: suspend () -> List<AiUsage>, onReset: () -> Unit
     val numbers = remember { NumberFormat.getIntegerInstance() }
     Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.76f)).modalFocusTrap(), contentAlignment = Alignment.Center) {
         GlassSurface(modifier = Modifier.width(820.dp)) {
-            Column(Modifier.padding(26.dp).focusProperties { onExit = { cancelFocusChange() } }.focusGroup()) {
+            Column(Modifier.padding(26.dp)) {
                 Text("Consommation de l'assistant IA", color = Ink, fontSize = 22.sp, fontWeight = HeadingWeight)
                 Spacer(Modifier.height(8.dp))
                 val list = rows

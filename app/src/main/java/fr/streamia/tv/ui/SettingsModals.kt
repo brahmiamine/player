@@ -28,6 +28,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -151,7 +152,11 @@ internal fun Modifier.modalFocusTrap(): Modifier {
             if (inside || runCatching { trap.requestFocus() }.getOrDefault(false)) return@LaunchedEffect
         }
     }
-    return focusProperties { exit = { FocusRequester.Cancel } }
+    // Flèches bloquées ; un requestFocus() (Enter) ou clearFocus (Exit) passe, sinon le focus rendu
+    // à la page à la fermeture du modal était annulé.
+    return focusProperties {
+        exit = { if (it == FocusDirection.Enter || it == FocusDirection.Exit) FocusRequester.Default else FocusRequester.Cancel }
+    }
         .focusRequester(trap)
         .onFocusChanged { inside = it.hasFocus }
         .focusGroup()
