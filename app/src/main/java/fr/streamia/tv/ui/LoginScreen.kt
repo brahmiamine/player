@@ -48,7 +48,6 @@ import fr.streamia.tv.ui.theme.HeadingWeight
 import fr.streamia.tv.ui.theme.Ink
 import fr.streamia.tv.ui.theme.MutedInk
 import fr.streamia.tv.ui.theme.RadiusTile
-import fr.streamia.tv.ui.theme.WarmSignal
 import kotlinx.coroutines.delay
 
 private enum class LoginMode { Manager, Xtream, M3u }
@@ -166,15 +165,12 @@ fun LoginScreen(
                     profiles = profiles,
                     busy = busy,
                     message = message,
-                    deleteCandidate = deleteCandidate,
                     primaryFocus = primaryFocus,
                     onOpenProfile = onOpenProfile,
                     onAddXtream = { showXtream() },
                     onAddM3u = { showM3u() },
                     onEdit = { profile -> if (profile.kind == PlaylistKind.Xtream) showXtream(profile) else showM3u(profile) },
                     onAskDelete = { deleteCandidate = it; onDismissMessage() },
-                    onCancelDelete = { deleteCandidate = null },
-                    onConfirmDelete = { profile -> deleteCandidate = null; onDeleteProfile(profile.id) },
                 )
 
                 LoginMode.Xtream -> XtreamForm(
@@ -245,6 +241,24 @@ fun LoginScreen(
             }
         }
     }
+
+    deleteCandidate?.let { profile ->
+        ConfirmDialog(
+            title = "Supprimer la liste",
+            message = "« ${profile.name} » sera supprimée de cet appareil.",
+            confirmLabel = "Supprimer",
+            onConfirm = {
+                if (!busy) {
+                    deleteCandidate = null
+                    onDeleteProfile(profile.id)
+                }
+            },
+            onDismiss = {
+                deleteCandidate = null
+                runCatching { primaryFocus.requestFocus() }
+            },
+        )
+    }
 }
 
 @Composable
@@ -252,15 +266,12 @@ private fun PlaylistManager(
     profiles: List<PlaylistProfile>,
     busy: Boolean,
     message: String?,
-    deleteCandidate: PlaylistProfile?,
     primaryFocus: FocusRequester,
     onOpenProfile: (String) -> Unit,
     onAddXtream: () -> Unit,
     onAddM3u: () -> Unit,
     onEdit: (PlaylistProfile) -> Unit,
     onAskDelete: (PlaylistProfile) -> Unit,
-    onCancelDelete: () -> Unit,
-    onConfirmDelete: (PlaylistProfile) -> Unit,
 ) {
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(11.dp)) {
         Text("Mes listes", style = MaterialTheme.typography.headlineMedium, color = Ink, fontWeight = HeadingWeight)
@@ -271,14 +282,6 @@ private fun PlaylistManager(
             fontSize = 15.sp,
         )
         if (message != null) Text(message, color = if (message.contains("supprim", true)) FocusBlueBright else MaterialTheme.colorScheme.error, fontSize = 14.sp)
-
-        if (deleteCandidate != null) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Supprimer « ${deleteCandidate.name} » ?", color = WarmSignal, fontSize = 16.sp, modifier = Modifier.weight(1f))
-                SmallAction("Annuler", !busy, onCancelDelete, Modifier.width(110.dp).height(48.dp))
-                SmallAction("Supprimer", !busy, { onConfirmDelete(deleteCandidate) }, Modifier.width(120.dp).height(48.dp))
-            }
-        }
 
         // Marge de contenu : la liste découpe ses éléments, donc la bordure et la lueur de la ligne
         // focalisée (agrandie) seraient coupées en haut et à droite, et chevaucheraient « Modifier ».

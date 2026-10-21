@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -145,11 +146,17 @@ internal fun FocusTrap(content: @Composable () -> Unit) {
 internal fun Modifier.modalFocusTrap(): Modifier {
     val trap = remember { FocusRequester() }
     var inside by remember { mutableStateOf(false) }
+    DisposableEffect(trap) {
+        openModalTraps.add(trap)
+        onDispose { openModalTraps.remove(trap) }
+    }
     LaunchedEffect(inside) {
         // Annulé dès que le focus est (re)dans le modal ou que celui-ci quitte la composition.
         repeat(FOCUS_RECLAIM_ATTEMPTS) {
             delay(FOCUS_RECLAIM_DELAY_MS)
-            if (inside || runCatching { trap.requestFocus() }.getOrDefault(false)) return@LaunchedEffect
+            if (inside) return@LaunchedEffect
+            // Un modal ouvert par-dessus (choix de piste depuis le panneau du lecteur…) garde le focus.
+            if (openModalTraps.lastOrNull() === trap && runCatching { trap.requestFocus() }.getOrDefault(false)) return@LaunchedEffect
         }
     }
     // Flèches bloquées ; un requestFocus() (Enter) ou clearFocus (Exit) passe, sinon le focus rendu
@@ -161,6 +168,9 @@ internal fun Modifier.modalFocusTrap(): Modifier {
         .onFocusChanged { inside = it.hasFocus }
         .focusGroup()
 }
+
+/** Modals ouverts, du plus ancien au plus récent : seul le dernier rapatrie le focus. */
+private val openModalTraps = mutableListOf<FocusRequester>()
 
 private const val FOCUS_RECLAIM_ATTEMPTS = 10
 private const val FOCUS_RECLAIM_DELAY_MS = 80L

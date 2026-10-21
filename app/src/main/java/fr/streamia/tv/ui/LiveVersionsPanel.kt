@@ -99,7 +99,7 @@ internal fun BoxScope.LiveVersionsPanel(
     val firstOtherLanguage = options.indexOfFirst { !it.sameLanguage }
 
     Column(
-        Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(540.dp)
+        Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(540.dp).modalFocusTrap()
             .padding(vertical = 40.dp, horizontal = 24.dp)
             .clip(RoundedCornerShape(RadiusCard))
             .background(Night.copy(alpha = 0.84f))

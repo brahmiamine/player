@@ -136,7 +136,7 @@ class LoginScreenTest {
         )
 
         composeRule.onAllNodesWithText("Supprimer").onFirst().performClick()
-        composeRule.onNodeWithText("Supprimer « Ma liste » ?").assertIsDisplayed()
+        composeRule.onNodeWithText("« Ma liste » sera supprimée de cet appareil.").assertIsDisplayed()
 
         composeRule.onAllNodesWithText("Supprimer").onLast().performClick()
 

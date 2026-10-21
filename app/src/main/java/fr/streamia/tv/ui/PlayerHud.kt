@@ -382,6 +382,7 @@ internal fun PlayerGuide(
         Modifier
             .fillMaxHeight()
             .width(820.dp)
+            .modalFocusTrap()
             .background(Night.copy(alpha = 0.85f))
             .border(BorderStroke(1.dp, GlassBorder))
             .padding(24.dp),

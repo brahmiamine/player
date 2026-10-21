@@ -106,7 +106,7 @@ internal fun BoxScope.PlayerSettings(
     // Bouton IA présent : c'est lui qui reçoit le focus à l'ouverture du panneau.
     val audioFocus = if (aiButton) ownAudioFocus else firstFocus
     Column(
-        Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(430.dp)
+        Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(430.dp).modalFocusTrap()
             .padding(vertical = 40.dp, horizontal = 24.dp)
             .clip(RoundedCornerShape(RadiusCard))
             .background(Night.copy(alpha = 0.82f))
