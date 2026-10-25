@@ -79,6 +79,7 @@ import fr.streamia.tv.domain.MediaEntry
 import fr.streamia.tv.domain.MediaType
 import fr.streamia.tv.recommendation.RecommendedMedia
 import fr.streamia.tv.recommendation.RecommendationRowKind
+import fr.streamia.tv.data.AppFeature
 import fr.streamia.tv.data.AppSettings
 import fr.streamia.tv.data.HomeBlock
 import fr.streamia.tv.data.isResumable
@@ -203,7 +204,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                             aiActive = aiActive,
                             onStartTonight = { viewModel.startAssistant(AssistantMode.Tonight) },
                             library = state.library,
-                            weatherPlace = homeState.weatherPlace,
+                            weatherPlace = homeState.weatherPlace.takeIf { state.appSettings.isEnabled(AppFeature.Weather) },
                             weather = homeState.weather,
                             liveMatches = liveOnSatMatchesHolder.value.ifDisabled(HomeBlock.LiveMatches, settings),
                             liveMatchesResolving = homeState.liveOnSatResolving,
@@ -498,6 +499,8 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onCycleSubtitleSizeScale = viewModel::cycleSubtitleSizeScale,
                     onToggleSubtitleBackground = viewModel::toggleSubtitleBackground,
                     onToggleHomeBlock = viewModel::toggleHomeBlock,
+                    onToggleFeature = viewModel::toggleFeature,
+                    onToggleEconomyMode = viewModel::toggleEconomyMode,
                     onOrganizer = viewModel::showOrganizer,
                     onRefresh = viewModel::refresh,
                     onClearLiveHistory = { viewModel.clearHistory(MediaType.Live) },
@@ -594,7 +597,7 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     aiTonightAnswers = aiStateHolder.value.tonight.answers,
                     onOpenAssistant = viewModel::startAssistant,
                     onRefreshAiBrief = { viewModel.loadBrief(force = true) },
-                    weatherPlace = homeState.weatherPlace,
+                    weatherPlace = homeState.weatherPlace.takeIf { state.appSettings.isEnabled(AppFeature.Weather) },
                     weather = homeState.weather,
                     prayerMethod = state.appSettings.prayerMethod,
                     offline = state.offline,
@@ -720,6 +723,8 @@ fun StreamiaApp(viewModel: StreamiaViewModel, livePlaybackSession: LivePlaybackS
                     onCycleSubtitleSizeScale = viewModel::cycleSubtitleSizeScale,
                     onToggleSubtitleBackground = viewModel::toggleSubtitleBackground,
                     onToggleHomeBlock = viewModel::toggleHomeBlock,
+                    onToggleFeature = viewModel::toggleFeature,
+                    onToggleEconomyMode = viewModel::toggleEconomyMode,
                     onSearch = viewModel::showSearch,
                     onEpg = viewModel::showEpg,
                     onOrganizer = viewModel::showOrganizer,
@@ -1079,7 +1084,7 @@ private fun rememberOtherVersions(viewModel: StreamiaViewModel, entry: MediaEntr
     produceState<List<RecommendedMedia>?>(null, entry.key) {
         value = null
         val query = versionSearchQuery(entry)
-        value = if (query.isBlank()) emptyList() else otherVersionsOf(entry, viewModel.searchCatalog(query, entry.type))
+        value = if (query.isBlank() || !viewModel.isFeatureEnabled(AppFeature.OtherVersions)) emptyList() else otherVersionsOf(entry, viewModel.searchCatalog(query, entry.type))
     }.value
 
 private fun MediaType.mobileTab(): MobileTab = when (this) {

@@ -1,5 +1,6 @@
 package fr.streamia.tv.ui
 
+import fr.streamia.tv.data.AppFeature
 import fr.streamia.tv.data.BackgroundWork
 import androidx.lifecycle.viewModelScope
 import fr.streamia.tv.data.HomeBlock
@@ -253,6 +254,7 @@ internal class RecommendationsController(host: StreamiaStateHolder) : StreamiaCo
      */
     suspend fun loadSimilarMedia(profileId: String, entry: MediaEntry, details: MediaDetails?) {
         val initialState = _uiState.value
+        if (!initialState.appSettings.isEnabled(AppFeature.SimilarContent)) return
         val hiddenEntries = initialState.library.hiddenEntries
         val excludedCategoryKeys = if (
             initialState.appSettings.parentalControlEnabled && !initialState.parentalUnlocked

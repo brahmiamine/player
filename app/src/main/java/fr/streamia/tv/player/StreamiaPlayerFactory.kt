@@ -17,6 +17,7 @@ import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.extractor.DefaultExtractorsFactory
 import androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory
 import fr.streamia.tv.data.BufferMode
+import fr.streamia.tv.data.AppSettings
 import fr.streamia.tv.data.PlayerNetworkMode
 import fr.streamia.tv.net.PlayerNetwork
 import fr.streamia.tv.domain.MediaType
@@ -26,10 +27,11 @@ import fr.streamia.tv.logging.CrashReporter
 internal fun bufferBytesForHeap(heapMb: Int): Int =
     (heapMb * 0.35 * 1024 * 1024).toLong().coerceIn(32L * 1024 * 1024, 200L * 1024 * 1024).toInt()
 
-private fun targetBufferBytes(context: Context): Int {
+private fun targetBufferBytes(context: Context, economy: Boolean): Int {
     val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
     // largeHeap déclaré dans le manifeste : c'est largeMemoryClass qui s'applique.
-    return bufferBytesForHeap(activityManager.largeMemoryClass)
+    val bytes = bufferBytesForHeap(activityManager.largeMemoryClass)
+    return if (economy) minOf(bytes, AppSettings.ECONOMY_BUFFER_BYTES) else bytes
 }
 
 /** Lecture déjà passée gardée en mémoire (VOD), à partir de l'image clé qui la précède. */
@@ -45,9 +47,10 @@ object StreamiaPlayerFactory {
         bufferMode: BufferMode = BufferMode.Auto,
         tunneling: Boolean = false,
         network: PlayerNetworkMode = PlayerNetworkMode.Classic,
+        economy: Boolean = false,
     ): ExoPlayer {
         val profile = PlaybackTuning.forType(mediaType, bufferMode)
-        val bufferBytes = targetBufferBytes(context)
+        val bufferBytes = targetBufferBytes(context, economy)
         val defaultLoadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
                 // Minimum = maximum : chargement continu par petites touches. Avec un écart (25 s →

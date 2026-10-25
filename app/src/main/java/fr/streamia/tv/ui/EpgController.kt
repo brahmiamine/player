@@ -1,5 +1,6 @@
 package fr.streamia.tv.ui
 
+import fr.streamia.tv.data.AppFeature
 import android.content.ComponentCallbacks2
 import androidx.lifecycle.viewModelScope
 import fr.streamia.tv.data.EpgCacheMetadata
@@ -217,6 +218,8 @@ internal class EpgController(
 
     fun startEpgBackgroundSync(force: Boolean = false) {
         val state = _uiState.value
+        // Synchro automatique coupée (Paramètres › Performance ou mode économie) ; une demande explicite (force) passe.
+        if (!force && !state.appSettings.isEnabled(AppFeature.EpgBackgroundSync)) return
         val profileId = state.activeProfileId ?: return
         val credentials = state.credentials ?: return
         if (state.catalogHydrating) return

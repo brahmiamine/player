@@ -10,6 +10,7 @@ import androidx.lifecycle.viewModelScope
 import fr.streamia.tv.data.AiProvider
 import fr.streamia.tv.data.FicheInfo
 import fr.streamia.tv.data.AiUsage
+import fr.streamia.tv.data.AppFeature
 import fr.streamia.tv.data.AppSettings
 import fr.streamia.tv.data.CatalogLoadProgress
 import fr.streamia.tv.data.CatalogSource
@@ -1023,6 +1024,32 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
 
     fun toggleSubtitleBackground() {
         updateAppSettings { it.copy(subtitleBackgroundEnabled = !it.subtitleBackgroundEnabled) }
+    }
+
+    fun toggleEconomyMode() {
+        updateAppSettings { it.copy(economyMode = !it.economyMode) }
+        // Mode quitté : les blocs et la météo masqués n'ont rien chargé pendant ce temps.
+        if (!_uiState.value.appSettings.economyMode) {
+            weather.retryNow()
+            homeGuides.loadAll()
+            recommendations.refreshHomeRecommendations(force = true)
+        }
+    }
+
+    fun isFeatureEnabled(feature: AppFeature): Boolean = _uiState.value.appSettings.isEnabled(feature)
+
+    fun toggleFeature(feature: AppFeature) {
+        updateAppSettings {
+            it.copy(disabledFeatures = if (feature in it.disabledFeatures) it.disabledFeatures - feature else it.disabledFeatures + feature)
+        }
+        when (feature) {
+            AppFeature.Weather -> if (isFeatureEnabled(feature)) weather.retryNow()
+            // Coupé : retire les cartes déjà publiées ; réactivé : les republie.
+            AppFeature.WatchNext -> viewModelScope.launch(Dispatchers.IO) {
+                if (isFeatureEnabled(feature)) _uiState.value.activeProfileId?.let(repository::publishWatchNext) else repository.clearWatchNext()
+            }
+            else -> Unit
+        }
     }
 
     fun toggleHomeBlock(block: HomeBlock) {

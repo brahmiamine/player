@@ -33,11 +33,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
 import fr.streamia.tv.data.AppSettings
+import fr.streamia.tv.data.AppFeature
 import fr.streamia.tv.data.HomeBlock
 import fr.streamia.tv.ui.StreamiaIcon
 import fr.streamia.tv.ui.StreamiaIconGlyph
 import fr.streamia.tv.ui.bufferModeLabel
 import fr.streamia.tv.ui.catalogRefreshLabel
+import fr.streamia.tv.ui.economyModeSummary
 import fr.streamia.tv.ui.playerNetworkLabel
 import fr.streamia.tv.ui.displayModeSwitchLabel
 import fr.streamia.tv.ui.epgOffsetLabel
@@ -88,6 +90,8 @@ fun MobileSettingsScreen(
     onCycleSubtitleSizeScale: () -> Unit,
     onToggleSubtitleBackground: () -> Unit,
     onToggleHomeBlock: (HomeBlock) -> Unit,
+    onToggleFeature: (AppFeature) -> Unit = {},
+    onToggleEconomyMode: () -> Unit = {},
     onOrganizer: () -> Unit,
     onRefresh: () -> Unit,
     onClearLiveHistory: () -> Unit,
@@ -104,6 +108,7 @@ fun MobileSettingsScreen(
     BackHandler(onBack = onBack)
     var confirmClear by remember { mutableStateOf<Pair<String, () -> Unit>?>(null) }
     val disabled = settings.disabledHomeBlocks
+    var confirmEconomy by remember { mutableStateOf(false) }
 
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
@@ -166,6 +171,15 @@ fun MobileSettingsScreen(
                     SettingsValue("Taille", subtitleScaleLabel(settings.subtitleSizeScale), onCycleSubtitleSizeScale)
                     SettingsToggle("Fond des sous-titres", null, settings.subtitleBackgroundEnabled, onToggleSubtitleBackground)
                 }
+                Group("Performance") {
+                    SettingsToggle("Mode économie", "Pour les petites box : coupe les calculs de fond", settings.economyMode) {
+                        if (settings.economyMode) onToggleEconomyMode() else confirmEconomy = true
+                    }
+                    AppFeature.entries.forEach { feature ->
+                        val forced = settings.economyMode && feature in AppSettings.ECONOMY_OFF_FEATURES
+                        SettingsToggle(feature.label, if (forced) "Coupé par le mode économie" else feature.hint, settings.isEnabled(feature)) { onToggleFeature(feature) }
+                    }
+                }
                 Group("Historique") {
                     SettingsValue("Effacement auto. de l'historique Direct", catalogRefreshLabel(settings.liveHistoryAutoClear), onCycleLiveHistoryAutoClear)
                     SettingsLink("Effacer l'historique Direct", "$liveHistoryCount élément(s)") { confirmClear = "l'historique Direct" to onClearLiveHistory }
@@ -179,6 +193,16 @@ fun MobileSettingsScreen(
                     SettingsLink("Ville, assistant IA, sauvegarde, mises à jour", "Ville, IA, sauvegarde, mises à jour", onAdvanced)
                     SettingsLink("À propos", "Streamia v$currentVersion", onAbout)
                 }
+            }
+        }
+        if (confirmEconomy) {
+            MobileBottomSheet(
+                "Activer le mode économie ?",
+                subtitle = economyModeSummary.joinToString("\n") { "• $it" } + "\nVos réglages sont conservés et reviennent à la désactivation.",
+                onDismiss = { confirmEconomy = false },
+            ) {
+                MobileSheetAction("Activer", StreamiaIconGlyph.Settings, onClick = { confirmEconomy = false; onToggleEconomyMode() })
+                MobileSheetAction("Annuler", StreamiaIconGlyph.Close, tint = MutedInk, onClick = { confirmEconomy = false })
             }
         }
         confirmClear?.let { (what, action) ->

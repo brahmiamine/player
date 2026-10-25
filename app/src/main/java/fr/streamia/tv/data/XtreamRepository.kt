@@ -79,20 +79,20 @@ class XtreamRepository private constructor(context: Context) {
     fun profiles(): List<PlaylistProfile> = playlistStore.loadAll()
     fun profile(profileId: String): PlaylistProfile? = playlistStore.find(profileId)
     fun library(profileId: String): UserLibrarySnapshot = libraryStore.snapshot(profileId)
-    fun appSettings(): AppSettings = appSettingsStore.load()
+    fun appSettings(): AppSettings = appSettingsStore.loadEffective()
     /** Fonctions IA (traduction, similaires) : inactives tant que [syncAi] n'a pas validé les réglages. */
     val ai = AiAssistant(appContext, aiKeyStore, AiUsageStore(appContext))
     fun hasAiKey(provider: AiProvider): Boolean = aiKeyStore.has(provider)
     fun saveAiKey(provider: AiProvider, key: String) {
         aiKeyStore.set(provider, key)
-        ai.sync(appSettingsStore.load())
+        ai.sync(appSettingsStore.loadEffective())
     }
     /** Recalcule si l'assistant IA est actif (interrupteur, clé, modèle) ; à appeler après chaque changement. */
-    fun syncAi(settings: AppSettings = appSettingsStore.load()) = ai.sync(settings)
+    fun syncAi(settings: AppSettings = appSettingsStore.loadEffective()) = ai.sync(settings)
     suspend fun aiModels(provider: AiProvider): Result<List<String>> =
         AiModelsClient.list(provider, aiKeyStore.get(provider).orEmpty())
     fun updateAppSettings(transform: (AppSettings) -> AppSettings): AppSettings =
-        appSettingsStore.update(transform).also { syncAi(it) }
+        appSettingsStore.update(transform).effective().also { syncAi(it) }
     fun customizedCatalog(profileId: String, catalog: Catalog): Catalog = libraryStore.applyToCatalog(profileId, catalog)
 
     /**
@@ -101,7 +101,7 @@ class XtreamRepository private constructor(context: Context) {
      */
     suspend fun loadingsOverview(profileId: String?): List<LoadingRow> = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
-        val settings = appSettingsStore.load()
+        val settings = appSettingsStore.loadEffective()
         val profile = profileId?.let(playlistStore::find)
         val rows = mutableListOf<LoadingRow>()
         val hour = 3_600_000L
@@ -318,7 +318,7 @@ class XtreamRepository private constructor(context: Context) {
         if (credentials != null && cached != null) {
             credentialsStore.save(credentials)
             // Catalogue expiré : servi tout de suite depuis le cache, puis actualisé en arrière-plan.
-            val source = if (profile.shouldAutoRefresh(appSettingsStore.load().catalogRefresh)) {
+            val source = if (profile.shouldAutoRefresh(appSettingsStore.loadEffective().catalogRefresh)) {
                 CatalogSource.Cache
             } else {
                 CatalogSource.Local
@@ -586,8 +586,13 @@ class XtreamRepository private constructor(context: Context) {
         libraryStore.recordPlayback(profileId, entry, positionMs, durationMs)
     private val watchNextPublisher = WatchNextPublisher(appContext)
 
-    /** Met à jour la rangée « Continuer à regarder » de Google TV depuis l'historique (sur IO). */
-    fun publishWatchNext(profileId: String) = watchNextPublisher.publish(profileId, libraryStore.snapshot(profileId).history)
+    /** Met à jour la rangée « Continuer à regarder » de Google TV depuis l'historique (sur IO), sauf si coupée dans Paramètres. */
+    fun clearWatchNext() = watchNextPublisher.clearAll()
+
+    fun publishWatchNext(profileId: String) {
+        // Fonction coupée : rien n'est publié (les cartes existantes sont retirées par [clearWatchNext]).
+        if (appSettings().isEnabled(AppFeature.WatchNext)) watchNextPublisher.publish(profileId, libraryStore.snapshot(profileId).history)
+    }
 
     fun resumePosition(profileId: String, entryKey: String): Long = libraryStore.resumePosition(profileId, entryKey)
     fun clearHistory(profileId: String, type: MediaType? = null) = libraryStore.clearHistory(profileId, type)
@@ -782,7 +787,7 @@ class XtreamRepository private constructor(context: Context) {
 
     private suspend fun openM3uProfile(profile: PlaylistProfile): LoadedCatalog {
         if (profile.isRemoteM3u) {
-            if (profile.shouldAutoRefresh(appSettingsStore.load().catalogRefresh) || cache.load(profile.id) == null) {
+            if (profile.shouldAutoRefresh(appSettingsStore.loadEffective().catalogRefresh) || cache.load(profile.id) == null) {
                 return try {
                     importM3uUrl(
                         url = profile.m3uUrl!!,

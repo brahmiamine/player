@@ -154,3 +154,15 @@ internal fun settingsRowDescription(title: String): String? = when (title) {
     "Pré-calcul de nuit" -> "Prépare traductions et collections quand la TV est au repos"
     else -> null
 }
+
+/** Ce que coupe ou limite le mode économie (voir [fr.streamia.tv.data.AppSettings.effective]), montré avant son activation. */
+internal val economyModeSummary: List<String> = listOf(
+    "Enrichissement des fiches, contenus similaires, autres versions",
+    "Versions des chaînes du Direct (panneau Versions, secours automatique)",
+    "Guide TV en arrière-plan, météo et prières",
+    "Accueil : seulement Reprendre, Favoris et Dernières chaînes",
+    "Aperçu TV en direct, mode tunnel, adaptation de l'affichage",
+    "Réseau du lecteur en Classic, tampon vidéo limité à 32 Mo",
+    "Catalogue actualisé une fois par mois",
+    "Assistant IA et pré-calcul de nuit",
+)

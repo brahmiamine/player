@@ -1,5 +1,6 @@
 package fr.streamia.tv.work
 
+import fr.streamia.tv.data.AppFeature
 import fr.streamia.tv.data.BackgroundWork
 import kotlinx.coroutines.withContext
 import android.content.Context
@@ -24,6 +25,7 @@ class EpgSyncWorker(context: Context, params: WorkerParameters) : CoroutineWorke
         if (fr.streamia.tv.player.PlaybackActivity.isPlaying) return Result.success()
         val profileId = PlaybackSessionStore(applicationContext).loadActiveProfileId() ?: return Result.success()
         val repository = XtreamRepository.get(applicationContext)
+        if (!repository.appSettings().isEnabled(AppFeature.EpgBackgroundSync)) return Result.success()
         val profile = repository.profile(profileId) ?: return Result.success()
         val credentials = profile.credentialsOrNull() ?: return Result.success()
         // Cas le plus fréquent (toutes les heures) : EPG encore frais. On sort avant de charger toute

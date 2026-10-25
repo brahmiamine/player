@@ -3,6 +3,7 @@ package fr.streamia.tv.ui
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import fr.streamia.tv.data.AppFeature
 import fr.streamia.tv.data.BackgroundWork
 import fr.streamia.tv.domain.Catalog
 import fr.streamia.tv.domain.MediaEntry
@@ -26,9 +27,9 @@ internal class LiveVersionIndexController(
     fun start() {
         viewModelScope.launch {
             _uiState
-                .map { LiveVersionIndexSource(it.activeProfileId, it.catalog, it.catalogHydrating) }
+                .map { LiveVersionIndexSource(it.activeProfileId, it.catalog, it.catalogHydrating, it.appSettings.isEnabled(AppFeature.LiveVersionIndex)) }
                 .distinctUntilChanged { old, new ->
-                    old.profileId == new.profileId && old.catalog === new.catalog && old.hydrating == new.hydrating
+                    old.profileId == new.profileId && old.catalog === new.catalog && old.hydrating == new.hydrating && old.enabled == new.enabled
                 }
                 .collectLatest(::rebuildLiveVersionIndex)
         }
@@ -51,7 +52,8 @@ internal class LiveVersionIndexController(
     private suspend fun rebuildLiveVersionIndex(source: LiveVersionIndexSource) {
         val profileId = source.profileId
         val catalog = source.catalog
-        if (profileId == null || catalog == null) {
+        // Fonction coupée dans Paramètres : aucun index (ni panneau « Versions », ni secours automatique).
+        if (profileId == null || catalog == null || !source.enabled) {
             liveVersionIndexProfileId = null
             _liveVersionIndex.value = null
             return
@@ -88,6 +90,6 @@ internal class LiveVersionIndexController(
 }
 
 /** Ce dont dépend l'index des versions du Direct (voir [StreamiaViewModel.liveVersionIndex]). */
-private class LiveVersionIndexSource(val profileId: String?, val catalog: Catalog?, val hydrating: Boolean)
+private class LiveVersionIndexSource(val profileId: String?, val catalog: Catalog?, val hydrating: Boolean, val enabled: Boolean)
 
 private const val LIVE_VERSION_INDEX_SETTLE_MS = 1_500L

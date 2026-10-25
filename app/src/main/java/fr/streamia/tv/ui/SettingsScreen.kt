@@ -40,6 +40,7 @@ import androidx.tv.material3.Text
 import fr.streamia.tv.data.AiLanguages
 import fr.streamia.tv.data.AiProvider
 import fr.streamia.tv.data.AiUsage
+import fr.streamia.tv.data.AppFeature
 import fr.streamia.tv.data.AppSettings
 import fr.streamia.tv.data.BufferMode
 import fr.streamia.tv.data.CatalogRefreshInterval
@@ -99,6 +100,8 @@ fun SettingsScreen(
     onCycleSubtitleSizeScale: () -> Unit,
     onToggleSubtitleBackground: () -> Unit,
     onToggleHomeBlock: (HomeBlock) -> Unit,
+    onToggleFeature: (AppFeature) -> Unit = {},
+    onToggleEconomyMode: () -> Unit = {},
     onSearch: () -> Unit,
     onEpg: () -> Unit,
     onOrganizer: () -> Unit,
@@ -165,6 +168,7 @@ fun SettingsScreen(
             StreamiaIconGlyph.Search to "Outils",
             StreamiaIconGlyph.Settings to "Données & application",
             StreamiaIconGlyph.Guide to "Assistant IA",
+            StreamiaIconGlyph.Refresh to "Performance",
         )
     }
     fun categoryHint(index: Int): String = when (index) {
@@ -174,7 +178,11 @@ fun SettingsScreen(
         3 -> "Tris, guide, sous-titres"
         4 -> "Recherche, guide, organiser"
         5 -> "Historique, mises à jour, sauvegarde"
-        else -> if (settings.aiEnabled) "Activé · " + settings.aiProvider.label else "Désactivé"
+        6 -> if (settings.aiEnabled) "Activé · " + settings.aiProvider.label else "Désactivé"
+        else -> {
+            val off = settings.disabledFeatures.size
+            if (off == 0) "Tout est actif" else "$off fonction(s) coupée(s)"
+        }
     }
     fun categoryLead(index: Int): String = when (index) {
         0 -> "Tout ce que l'appli charge, la fraîcheur de chaque cache et les prochaines mises à jour."
@@ -183,7 +191,8 @@ fun SettingsScreen(
         3 -> "Ordre des contenus, décalage du guide et sous-titres."
         4 -> "Raccourcis vers les écrans de l'appli."
         5 -> "Historique, sauvegarde et version de l'appli."
-        else -> "Traductions, recommandations et résumés par un modèle externe."
+        6 -> "Traductions, recommandations et résumés par un modèle externe."
+        else -> "Coupe les calculs et les téléchargements de fond que tu n'utilises pas."
     }
     var citySearchOpen by remember { mutableStateOf(false) }
     var aiKeyDialog by remember { mutableStateOf(false) }
@@ -775,6 +784,46 @@ fun SettingsScreen(
                         { importLauncher.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) },
                         Modifier.weight(1f),
                     )
+                }
+            }
+            if (category == 7) {
+                SettingsSectionTitle("Mode économie")
+                SettingsGroup {
+                    SettingsTile(
+                        glyph = StreamiaIconGlyph.Settings,
+                        title = "Mode économie",
+                        subtitle = if (settings.economyMode) "Activé" else "Désactivé",
+                        onClick = {
+                            if (settings.economyMode) {
+                                onToggleEconomyMode()
+                            } else {
+                                openChoices(
+                                    "Activer le mode économie ?",
+                                    "Sera coupé ou limité :\n" + economyModeSummary.joinToString("\n") { "• $it" } +
+                                        "\nVos réglages sont conservés et reviennent à la désactivation.",
+                                    listOf("Annuler" to false, "Activer" to false),
+                                ) { if (it == 1) onToggleEconomyMode() }
+                            }
+                        },
+                        modifier = Modifier,
+                        toggle = settings.economyMode,
+                        description = "Pour les petites box : coupe les calculs et téléchargements de fond",
+                    )
+                }
+                SettingsSectionTitle("Fonctions de fond")
+                SettingsGroup {
+                    AppFeature.entries.forEach { feature ->
+                        val on = settings.isEnabled(feature)
+                        SettingsTile(
+                            glyph = StreamiaIconGlyph.Settings,
+                            title = feature.label,
+                            subtitle = if (settings.economyMode && feature in AppSettings.ECONOMY_OFF_FEATURES) "Coupé par le mode économie" else if (on) "Activé" else "Désactivé",
+                            onClick = { onToggleFeature(feature) },
+                            modifier = Modifier,
+                            toggle = on,
+                            description = feature.hint,
+                        )
+                    }
                 }
             }
             if (category == 6) {
