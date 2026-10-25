@@ -50,6 +50,18 @@ enum class HomeBlock {
     }
 }
 
+/** Fonctions de fond ou de calcul que l'utilisateur peut couper depuis Paramètres › Performance. Toutes actives par défaut. */
+enum class AppFeature(val label: String, val hint: String) {
+    MetadataEnrichment("Enrichissement des fiches", "TMDB et Wikidata en arrière-plan, 1 fois par jour"),
+    SimilarContent("Contenus similaires", "Rangée « similaires » des fiches Film et Série"),
+    OtherVersions("Autres versions", "Même film ou série sous un autre préfixe"),
+    LiveVersionIndex("Versions des chaînes", "Panneau « Versions » et secours automatique du Direct"),
+    EpgBackgroundSync("Guide TV en arrière-plan", "Mise à jour toutes les heures hors de l'écran du guide"),
+    Weather("Météo et prières", "Météo et heures de prière de l'accueil"),
+    OnlineSubtitles("Sous-titres en ligne", "Recherche de sous-titres sur internet"),
+    WatchNext("Continuer sur Google TV", "Carte « Continuer à regarder » de l'écran d'accueil Android TV"),
+}
+
 val JustWatchSection.homeBlock: HomeBlock
     get() = when (this) {
         JustWatchSection.TopMoviesWeek -> HomeBlock.JustWatchTopMoviesWeek
@@ -88,6 +100,8 @@ data class AppSettings(
     val parentalControlEnabled: Boolean = false,
     /** Blocs de l'accueil désactivés par l'utilisateur. Vide = tous les blocs actifs (défaut). */
     val disabledHomeBlocks: Set<HomeBlock> = HomeBlock.DEFAULT_DISABLED,
+    /** Fonctions de fond coupées par l'utilisateur ([AppFeature]). Vide = tout actif (défaut). */
+    val disabledFeatures: Set<AppFeature> = emptySet(),
     /** Ville de la météo et des prières de l'accueil ; null = détectée d'après la connexion. */
     val homePlace: HomePlace? = null,
     val prayerMethod: PrayerMethod = PrayerMethod.MuslimWorldLeague,
@@ -105,6 +119,8 @@ data class AppSettings(
 ) {
     val vodSeekStepMs: Long
         get() = vodSeekStepSeconds * 1_000L
+
+    fun isEnabled(feature: AppFeature): Boolean = feature !in disabledFeatures
 
     fun nextLivePreviewDelayMs(): Int =
         nextValue(LIVE_PREVIEW_DELAYS_MS, livePreviewDelayMs)
@@ -233,6 +249,9 @@ class AppSettingsStore(context: Context) {
             // Réglages enregistrés avant l'arrivée des blocs désactivés par défaut : appliqués une fois.
             ?.let { stored -> if (preferences.getBoolean(KEY_HOME_BLOCK_DEFAULTS_APPLIED, false)) stored else stored + HomeBlock.DEFAULT_DISABLED }
             ?: HomeBlock.DEFAULT_DISABLED,
+        disabledFeatures = preferences.getStringSet(KEY_DISABLED_FEATURES, null)
+            ?.mapNotNullTo(mutableSetOf()) { name -> runCatching { AppFeature.valueOf(name) }.getOrNull() }
+            ?: emptySet(),
         homePlace = runCatching {
             HomePlace(
                 preferences.getString(KEY_HOME_PLACE_NAME, null)!!,
@@ -280,6 +299,7 @@ class AppSettingsStore(context: Context) {
             .putBoolean(KEY_SUBTITLE_BACKGROUND_ENABLED, settings.subtitleBackgroundEnabled)
             .putBoolean(KEY_PARENTAL_ENABLED, settings.parentalControlEnabled)
             .putStringSet(KEY_DISABLED_HOME_BLOCKS, settings.disabledHomeBlocks.mapTo(mutableSetOf()) { it.name })
+            .putStringSet(KEY_DISABLED_FEATURES, settings.disabledFeatures.mapTo(mutableSetOf()) { it.name })
             .putBoolean(KEY_HOME_BLOCK_DEFAULTS_APPLIED, true)
             .putString(KEY_HOME_PLACE_NAME, settings.homePlace?.name)
             .putString(KEY_HOME_PLACE_LATITUDE, settings.homePlace?.latitude?.toString())
@@ -403,6 +423,7 @@ class AppSettingsStore(context: Context) {
         const val KEY_SUBTITLE_BACKGROUND_ENABLED = "subtitle_background_enabled"
         const val KEY_PARENTAL_ENABLED = "parental_control_enabled"
         const val KEY_DISABLED_HOME_BLOCKS = "disabled_home_blocks"
+        const val KEY_DISABLED_FEATURES = "disabled_features"
         const val KEY_HOME_BLOCK_DEFAULTS_APPLIED = "home_block_defaults_applied"
         const val KEY_HOME_PLACE_NAME = "home_place_name"
         const val KEY_HOME_PLACE_LATITUDE = "home_place_latitude"
@@ -491,6 +512,7 @@ fun AppSettings.toBackupJson(): JSONObject = JSONObject().apply {
     put("subtitleBackgroundEnabled", subtitleBackgroundEnabled)
     put("disabledHomeBlocks", JSONArray(disabledHomeBlocks.map { it.name }))
     put("prayerMethod", prayerMethod.name)
+    put("disabledFeatures", JSONArray(disabledFeatures.map { it.name }))
 }
 
 fun appSettingsFromBackupJson(json: JSONObject, fallback: AppSettings): AppSettings = AppSettings(
@@ -524,6 +546,11 @@ fun appSettingsFromBackupJson(json: JSONObject, fallback: AppSettings): AppSetti
             runCatching { HomeBlock.valueOf(array.getString(index)) }.getOrNull()
         }
     } ?: fallback.disabledHomeBlocks,
+    disabledFeatures = json.optJSONArray("disabledFeatures")?.let { array ->
+        (0 until array.length()).mapNotNullTo(mutableSetOf()) { index ->
+            runCatching { AppFeature.valueOf(array.getString(index)) }.getOrNull()
+        }
+    } ?: fallback.disabledFeatures,
     // La ville reste propre à l'appareil : une sauvegarde peut venir d'une TV installée ailleurs.
     homePlace = fallback.homePlace,
     prayerMethod = runCatching { PrayerMethod.valueOf(json.getString("prayerMethod")) }.getOrDefault(fallback.prayerMethod),

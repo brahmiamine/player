@@ -1,6 +1,7 @@
 package fr.streamia.tv.ui
 
 import androidx.lifecycle.viewModelScope
+import fr.streamia.tv.data.AppFeature
 import fr.streamia.tv.data.HomePlace
 import fr.streamia.tv.data.HomeWeatherClient
 import kotlinx.coroutines.Job
@@ -22,6 +23,7 @@ internal class WeatherController(host: StreamiaStateHolder) : StreamiaController
 
     /** Météo de l'en-tête : au plus une requête toutes les 30 min (5 min après un échec). */
     fun refreshWeatherIfStale() {
+        if (!_uiState.value.appSettings.isEnabled(AppFeature.Weather)) return
         if (System.currentTimeMillis() < weatherNextCheckAtMillis || weatherJob?.isActive == true) return
         weatherJob = viewModelScope.launch {
             val result = withContext(Dispatchers.IO) {

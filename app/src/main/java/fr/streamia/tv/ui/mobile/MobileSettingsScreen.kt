@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
 import fr.streamia.tv.data.AppSettings
+import fr.streamia.tv.data.AppFeature
 import fr.streamia.tv.data.HomeBlock
 import fr.streamia.tv.ui.StreamiaIcon
 import fr.streamia.tv.ui.StreamiaIconGlyph
@@ -88,6 +89,7 @@ fun MobileSettingsScreen(
     onCycleSubtitleSizeScale: () -> Unit,
     onToggleSubtitleBackground: () -> Unit,
     onToggleHomeBlock: (HomeBlock) -> Unit,
+    onToggleFeature: (AppFeature) -> Unit = {},
     onOrganizer: () -> Unit,
     onRefresh: () -> Unit,
     onClearLiveHistory: () -> Unit,
@@ -165,6 +167,11 @@ fun MobileSettingsScreen(
                 Group("Sous-titres") {
                     SettingsValue("Taille", subtitleScaleLabel(settings.subtitleSizeScale), onCycleSubtitleSizeScale)
                     SettingsToggle("Fond des sous-titres", null, settings.subtitleBackgroundEnabled, onToggleSubtitleBackground)
+                }
+                Group("Performance") {
+                    AppFeature.entries.forEach { feature ->
+                        SettingsToggle(feature.label, feature.hint, settings.isEnabled(feature)) { onToggleFeature(feature) }
+                    }
                 }
                 Group("Historique") {
                     SettingsValue("Effacement auto. de l'historique Direct", catalogRefreshLabel(settings.liveHistoryAutoClear), onCycleLiveHistoryAutoClear)

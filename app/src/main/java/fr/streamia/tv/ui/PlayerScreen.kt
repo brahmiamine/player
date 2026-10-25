@@ -65,6 +65,7 @@ import androidx.media3.session.MediaSession
 import androidx.media3.ui.PlayerView
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.media3.exoplayer.mediacodec.MediaCodecRenderer
+import fr.streamia.tv.data.AppFeature
 import fr.streamia.tv.data.DisplayModeSwitch
 import fr.streamia.tv.data.LiveVersionStatsStore
 import fr.streamia.tv.data.NetworkMonitor
@@ -1732,7 +1733,7 @@ fun PlayerScreen(
                 externalSubtitleAvailable = !sharedLivePlayer,
                 externalSubtitleLabel = externalSubtitle?.label,
                 externalSubtitleError = externalSubtitleError,
-                onSearchOnlineSubtitles = ::searchOnlineSubtitles,
+                onSearchOnlineSubtitles = if (appSettings.isEnabled(AppFeature.OnlineSubtitles)) ::searchOnlineSubtitles else null,
                 onlineSubtitleBusy = onlineSubtitleBusy,
                 onlineSubtitleStatus = onlineSubtitleStatus,
                 onlineSubtitleResultCount = onlineSubtitleResults.size,

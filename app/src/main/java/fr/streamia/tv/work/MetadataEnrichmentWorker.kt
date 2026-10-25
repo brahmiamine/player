@@ -1,5 +1,6 @@
 package fr.streamia.tv.work
 
+import fr.streamia.tv.data.AppFeature
 import fr.streamia.tv.data.BackgroundWork
 import kotlinx.coroutines.withContext
 import android.content.Context
@@ -47,6 +48,7 @@ class MetadataEnrichmentWorker(context: Context, params: WorkerParameters) : Cor
     private suspend fun enrich(): Result {
         val profileId = PlaybackSessionStore(applicationContext).loadActiveProfileId() ?: return Result.success()
         val repository = XtreamRepository.get(applicationContext)
+        if (!repository.appSettings().isEnabled(AppFeature.MetadataEnrichment)) return Result.success()
         val credentials = repository.profile(profileId)?.credentialsOrNull() ?: return Result.success()
         // Une vidéo joue : rien maintenant (bande passante et processeur pour la lecture) ;
         // WorkManager reprogramme le passage, avec une attente croissante.
