@@ -1045,7 +1045,9 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         when (feature) {
             AppFeature.Weather -> if (isFeatureEnabled(feature)) weather.retryNow()
             // Coupé : retire les cartes déjà publiées ; réactivé : les republie.
-            AppFeature.WatchNext -> _uiState.value.activeProfileId?.let { id -> viewModelScope.launch(Dispatchers.IO) { repository.publishWatchNext(id) } }
+            AppFeature.WatchNext -> viewModelScope.launch(Dispatchers.IO) {
+                if (isFeatureEnabled(feature)) _uiState.value.activeProfileId?.let(repository::publishWatchNext) else repository.clearWatchNext()
+            }
             else -> Unit
         }
     }

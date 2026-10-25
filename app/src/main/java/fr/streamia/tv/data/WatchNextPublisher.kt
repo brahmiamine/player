@@ -52,6 +52,18 @@ class WatchNextPublisher(context: Context) {
         }
     }
 
+    /** Retire les cartes publiées pour TOUS les profils (fonction coupée dans Paramètres). */
+    fun clearAll() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        runCatching {
+            val resolver = appContext.contentResolver
+            preferences.all.values.forEach { id ->
+                (id as? Long)?.takeIf { it >= 0 }?.let { runCatching { resolver.delete(TvContractCompat.buildWatchNextProgramUri(it), null, null) } }
+            }
+            preferences.edit().clear().apply()
+        }
+    }
+
     // Faux positif connu de tvprovider : ces setters publics sont hérités d'un builder de base
     // marqué @RestrictTo dans la bibliothèque (même suppression que les exemples officiels).
     @SuppressLint("RestrictedApi")

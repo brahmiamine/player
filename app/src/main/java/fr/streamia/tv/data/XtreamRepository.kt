@@ -587,10 +587,11 @@ class XtreamRepository private constructor(context: Context) {
     private val watchNextPublisher = WatchNextPublisher(appContext)
 
     /** Met à jour la rangée « Continuer à regarder » de Google TV depuis l'historique (sur IO), sauf si coupée dans Paramètres. */
+    fun clearWatchNext() = watchNextPublisher.clearAll()
+
     fun publishWatchNext(profileId: String) {
-        // Fonction coupée : liste vide, ce qui retire aussi les cartes déjà publiées.
-        val history = if (appSettings().isEnabled(AppFeature.WatchNext)) libraryStore.snapshot(profileId).history else emptyList()
-        watchNextPublisher.publish(profileId, history)
+        // Fonction coupée : rien n'est publié (les cartes existantes sont retirées par [clearWatchNext]).
+        if (appSettings().isEnabled(AppFeature.WatchNext)) watchNextPublisher.publish(profileId, libraryStore.snapshot(profileId).history)
     }
 
     fun resumePosition(profileId: String, entryKey: String): Long = libraryStore.resumePosition(profileId, entryKey)
