@@ -1026,6 +1026,16 @@ class StreamiaViewModel(private val repository: XtreamRepository) : ViewModel() 
         updateAppSettings { it.copy(subtitleBackgroundEnabled = !it.subtitleBackgroundEnabled) }
     }
 
+    fun toggleEconomyMode() {
+        updateAppSettings { it.copy(economyMode = !it.economyMode) }
+        // Mode quitté : les blocs et la météo masqués n'ont rien chargé pendant ce temps.
+        if (!_uiState.value.appSettings.economyMode) {
+            weather.retryNow()
+            homeGuides.loadAll()
+            recommendations.refreshHomeRecommendations(force = true)
+        }
+    }
+
     fun isFeatureEnabled(feature: AppFeature): Boolean = _uiState.value.appSettings.isEnabled(feature)
 
     fun toggleFeature(feature: AppFeature) {

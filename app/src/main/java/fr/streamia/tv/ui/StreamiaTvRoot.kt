@@ -56,8 +56,8 @@ fun StreamiaTvRoot(viewModel: StreamiaViewModel) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val sessionStore = remember { PlaybackSessionStore(context.applicationContext) }
-    val livePlaybackSession = remember(state.appSettings.bufferMode, state.appSettings.tunnelingEnabled, state.appSettings.playerNetwork) {
-        LivePlaybackSession(context.applicationContext, state.appSettings.bufferMode, state.appSettings.tunnelingEnabled, state.appSettings.playerNetwork)
+    val livePlaybackSession = remember(state.appSettings.bufferMode, state.appSettings.tunnelingEnabled, state.appSettings.playerNetwork, state.appSettings.economyMode) {
+        LivePlaybackSession(context.applicationContext, state.appSettings.bufferMode, state.appSettings.tunnelingEnabled, state.appSettings.playerNetwork, state.appSettings.economyMode)
     }
     val lifecycleOwner = LocalLifecycleOwner.current
     val mobileDevice = remember(context) { fr.streamia.tv.ui.mobile.detectDeviceKind(context) == fr.streamia.tv.ui.mobile.DeviceKind.Mobile }

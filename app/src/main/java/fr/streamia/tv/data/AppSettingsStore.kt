@@ -102,6 +102,8 @@ data class AppSettings(
     val disabledHomeBlocks: Set<HomeBlock> = HomeBlock.DEFAULT_DISABLED,
     /** Fonctions de fond coupées par l'utilisateur ([AppFeature]). Vide = tout actif (défaut). */
     val disabledFeatures: Set<AppFeature> = emptySet(),
+    /** Mode économie (petites box) : voir [effective]. Désactivé par défaut. */
+    val economyMode: Boolean = false,
     /** Ville de la météo et des prières de l'accueil ; null = détectée d'après la connexion. */
     val homePlace: HomePlace? = null,
     val prayerMethod: PrayerMethod = PrayerMethod.MuslimWorldLeague,
@@ -121,6 +123,22 @@ data class AppSettings(
         get() = vodSeekStepSeconds * 1_000L
 
     fun isEnabled(feature: AppFeature): Boolean = feature !in disabledFeatures
+
+    /**
+     * Réglages réellement appliqués : en mode économie, les valeurs de [ECONOMY_OFF_FEATURES] & co.
+     * sont forcées SANS toucher aux réglages enregistrés, qui reviennent à la désactivation du mode.
+     */
+    fun effective(): AppSettings = if (!economyMode) this else copy(
+        livePreviewEnabled = false,
+        tunnelingEnabled = false,
+        displayModeSwitch = DisplayModeSwitch.Off,
+        playerNetwork = PlayerNetworkMode.Classic,
+        catalogRefresh = CatalogRefreshInterval.Monthly,
+        aiEnabled = false,
+        aiNightly = false,
+        disabledFeatures = disabledFeatures + ECONOMY_OFF_FEATURES,
+        disabledHomeBlocks = disabledHomeBlocks + (HomeBlock.entries - ECONOMY_KEPT_HOME_BLOCKS),
+    )
 
     fun nextLivePreviewDelayMs(): Int =
         nextValue(LIVE_PREVIEW_DELAYS_MS, livePreviewDelayMs)
@@ -164,6 +182,15 @@ data class AppSettings(
     }
 
     companion object {
+        /** Fonctions de fond coupées par le mode économie (choix de l'utilisateur ; sous-titres en ligne et Watch Next restent actifs). */
+        val ECONOMY_OFF_FEATURES: Set<AppFeature> = setOf(
+            AppFeature.MetadataEnrichment, AppFeature.SimilarContent, AppFeature.OtherVersions,
+            AppFeature.LiveVersionIndex, AppFeature.EpgBackgroundSync, AppFeature.Weather,
+        )
+        /** Seuls blocs de l'accueil gardés en mode économie : ils ne demandent aucune requête web. */
+        val ECONOMY_KEPT_HOME_BLOCKS: Set<HomeBlock> = setOf(HomeBlock.Resume, HomeBlock.Favorites, HomeBlock.RecentChannels)
+        /** Plafond du tampon vidéo en mode économie. */
+        const val ECONOMY_BUFFER_BYTES = 32 * 1024 * 1024
         val LIVE_PREVIEW_DELAYS_MS = listOf(0, 250, 500, 1_000, 2_000)
         val VOD_SEEK_STEPS_SECONDS = listOf(10, 30, 60)
         val EPG_TIME_OFFSETS_HOURS = listOf(-3, -2, -1, 0, 1, 2, 3)
@@ -252,6 +279,7 @@ class AppSettingsStore(context: Context) {
         disabledFeatures = preferences.getStringSet(KEY_DISABLED_FEATURES, null)
             ?.mapNotNullTo(mutableSetOf()) { name -> runCatching { AppFeature.valueOf(name) }.getOrNull() }
             ?: emptySet(),
+        economyMode = preferences.getBoolean(KEY_ECONOMY_MODE, false),
         homePlace = runCatching {
             HomePlace(
                 preferences.getString(KEY_HOME_PLACE_NAME, null)!!,
@@ -275,6 +303,9 @@ class AppSettingsStore(context: Context) {
         aiBilingualSubtitles = preferences.getBoolean(KEY_AI_BILINGUAL, false),
         aiNightly = preferences.getBoolean(KEY_AI_NIGHTLY, true),
     )
+
+    /** Réglages appliqués (mode économie compris) : pour tout ce qui LIT les réglages ; [load] reste réservé à l'écriture. */
+    fun loadEffective(): AppSettings = load().effective()
 
     fun save(settings: AppSettings) {
         preferences.edit()
@@ -300,6 +331,7 @@ class AppSettingsStore(context: Context) {
             .putBoolean(KEY_PARENTAL_ENABLED, settings.parentalControlEnabled)
             .putStringSet(KEY_DISABLED_HOME_BLOCKS, settings.disabledHomeBlocks.mapTo(mutableSetOf()) { it.name })
             .putStringSet(KEY_DISABLED_FEATURES, settings.disabledFeatures.mapTo(mutableSetOf()) { it.name })
+            .putBoolean(KEY_ECONOMY_MODE, settings.economyMode)
             .putBoolean(KEY_HOME_BLOCK_DEFAULTS_APPLIED, true)
             .putString(KEY_HOME_PLACE_NAME, settings.homePlace?.name)
             .putString(KEY_HOME_PLACE_LATITUDE, settings.homePlace?.latitude?.toString())
@@ -423,6 +455,7 @@ class AppSettingsStore(context: Context) {
         const val KEY_SUBTITLE_BACKGROUND_ENABLED = "subtitle_background_enabled"
         const val KEY_PARENTAL_ENABLED = "parental_control_enabled"
         const val KEY_DISABLED_HOME_BLOCKS = "disabled_home_blocks"
+        const val KEY_ECONOMY_MODE = "economy_mode"
         const val KEY_DISABLED_FEATURES = "disabled_features"
         const val KEY_HOME_BLOCK_DEFAULTS_APPLIED = "home_block_defaults_applied"
         const val KEY_HOME_PLACE_NAME = "home_place_name"
@@ -551,6 +584,8 @@ fun appSettingsFromBackupJson(json: JSONObject, fallback: AppSettings): AppSetti
             runCatching { AppFeature.valueOf(array.getString(index)) }.getOrNull()
         }
     } ?: fallback.disabledFeatures,
+    // Propre à l'appareil (une petite box n'est pas la TV d'où vient la sauvegarde).
+    economyMode = fallback.economyMode,
     // La ville reste propre à l'appareil : une sauvegarde peut venir d'une TV installée ailleurs.
     homePlace = fallback.homePlace,
     prayerMethod = runCatching { PrayerMethod.valueOf(json.getString("prayerMethod")) }.getOrDefault(fallback.prayerMethod),

@@ -101,6 +101,7 @@ fun SettingsScreen(
     onToggleSubtitleBackground: () -> Unit,
     onToggleHomeBlock: (HomeBlock) -> Unit,
     onToggleFeature: (AppFeature) -> Unit = {},
+    onToggleEconomyMode: () -> Unit = {},
     onSearch: () -> Unit,
     onEpg: () -> Unit,
     onOrganizer: () -> Unit,
@@ -786,6 +787,29 @@ fun SettingsScreen(
                 }
             }
             if (category == 7) {
+                SettingsSectionTitle("Mode économie")
+                SettingsGroup {
+                    SettingsTile(
+                        glyph = StreamiaIconGlyph.Settings,
+                        title = "Mode économie",
+                        subtitle = if (settings.economyMode) "Activé" else "Désactivé",
+                        onClick = {
+                            if (settings.economyMode) {
+                                onToggleEconomyMode()
+                            } else {
+                                openChoices(
+                                    "Activer le mode économie ?",
+                                    "Sera coupé ou limité :\n" + economyModeSummary.joinToString("\n") { "• $it" } +
+                                        "\nVos réglages sont conservés et reviennent à la désactivation.",
+                                    listOf("Annuler" to false, "Activer" to false),
+                                ) { if (it == 1) onToggleEconomyMode() }
+                            }
+                        },
+                        modifier = Modifier,
+                        toggle = settings.economyMode,
+                        description = "Pour les petites box : coupe les calculs et téléchargements de fond",
+                    )
+                }
                 SettingsSectionTitle("Fonctions de fond")
                 SettingsGroup {
                     AppFeature.entries.forEach { feature ->
@@ -793,7 +817,7 @@ fun SettingsScreen(
                         SettingsTile(
                             glyph = StreamiaIconGlyph.Settings,
                             title = feature.label,
-                            subtitle = if (on) "Activé" else "Désactivé",
+                            subtitle = if (settings.economyMode && feature in AppSettings.ECONOMY_OFF_FEATURES) "Coupé par le mode économie" else if (on) "Activé" else "Désactivé",
                             onClick = { onToggleFeature(feature) },
                             modifier = Modifier,
                             toggle = on,
