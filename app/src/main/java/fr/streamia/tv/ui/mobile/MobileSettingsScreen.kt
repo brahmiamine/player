@@ -39,6 +39,7 @@ import fr.streamia.tv.ui.StreamiaIcon
 import fr.streamia.tv.ui.StreamiaIconGlyph
 import fr.streamia.tv.ui.bufferModeLabel
 import fr.streamia.tv.ui.catalogRefreshLabel
+import fr.streamia.tv.ui.economyModeSummary
 import fr.streamia.tv.ui.playerNetworkLabel
 import fr.streamia.tv.ui.displayModeSwitchLabel
 import fr.streamia.tv.ui.epgOffsetLabel
